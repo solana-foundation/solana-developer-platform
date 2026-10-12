@@ -6,6 +6,7 @@ import app from "@/index";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -26,6 +27,7 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
 
   beforeEach(async () => {
     await seedProjectApiKey(getDb(env), env, {
@@ -235,96 +237,84 @@ describe("Payments routes — list transfers", () => {
     it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
       const observedSig =
         "3o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3v";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000100,
-              slot: 101,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "10000000",
-                      decimals: 6,
-                      uiAmountString: "10",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                ],
-                postTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "10000000",
-                      decimals: 6,
-                      uiAmountString: "10",
-                    },
-                  },
-                ],
+      rpc.answer("getTransaction", {
+        blockTime: 1700000100,
+        slot: 101,
+        meta: {
+          err: null,
+          fee: 5000,
+          preTokenBalances: [
+            {
+              accountIndex: 0,
+              mint: DEVNET_USDC_MINT,
+              owner: TEST_SOLANA_ADDRESSES.wallet2,
+              uiTokenAmount: {
+                amount: "10000000",
+                decimals: 6,
+                uiAmountString: "10",
               },
-              transaction: {
-                message: {
-                  accountKeys: [
-                    "SrcTokenAcct111111111111111111111111111111",
-                    "DstTokenAcct111111111111111111111111111111",
-                  ],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "transferChecked",
-                        info: {
-                          source: "SrcTokenAcct111111111111111111111111111111",
-                          destination: "DstTokenAcct111111111111111111111111111111",
-                          mint: DEVNET_USDC_MINT,
-                          tokenAmount: {
-                            amount: "10000000",
-                            decimals: 6,
-                            uiAmountString: "10",
-                          },
-                        },
-                      },
+            },
+            {
+              accountIndex: 1,
+              mint: DEVNET_USDC_MINT,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              uiTokenAmount: {
+                amount: "0",
+                decimals: 6,
+                uiAmountString: "0",
+              },
+            },
+          ],
+          postTokenBalances: [
+            {
+              accountIndex: 0,
+              mint: DEVNET_USDC_MINT,
+              owner: TEST_SOLANA_ADDRESSES.wallet2,
+              uiTokenAmount: {
+                amount: "0",
+                decimals: 6,
+                uiAmountString: "0",
+              },
+            },
+            {
+              accountIndex: 1,
+              mint: DEVNET_USDC_MINT,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              uiTokenAmount: {
+                amount: "10000000",
+                decimals: 6,
+                uiAmountString: "10",
+              },
+            },
+          ],
+        },
+        transaction: {
+          message: {
+            accountKeys: [
+              "SrcTokenAcct111111111111111111111111111111",
+              "DstTokenAcct111111111111111111111111111111",
+            ],
+            instructions: [
+              {
+                program: "spl-token",
+                parsed: {
+                  type: "transferChecked",
+                  info: {
+                    source: "SrcTokenAcct111111111111111111111111111111",
+                    destination: "DstTokenAcct111111111111111111111111111111",
+                    mint: DEVNET_USDC_MINT,
+                    tokenAmount: {
+                      amount: "10000000",
+                      decimals: 6,
+                      uiAmountString: "10",
                     },
-                  ],
+                  },
                 },
               },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
-      );
+            ],
+          },
+        },
+      });
 
       getSignaturesForAddressMock.mockResolvedValueOnce([
         {
@@ -335,41 +325,37 @@ describe("Payments routes — list transfers", () => {
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: Array<{
-            id: string;
-            amount: string;
-            direction: string;
-            signature: string | null;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "10",
-          direction: "inbound",
-          signature: observedSig,
-          status: "confirmed",
-          token: DEVNET_USDC_MINT,
-        });
-        expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          id: string;
+          amount: string;
+          direction: string;
+          signature: string | null;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "10",
+        direction: "inbound",
+        signature: observedSig,
+        status: "confirmed",
+        token: DEVNET_USDC_MINT,
+      });
+      expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
     });
 
     it("discovers observed custom token deposits from owned token account history", async () => {
@@ -378,93 +364,81 @@ describe("Payments routes — list transfers", () => {
       const customMint = "CustomMint1111111111111111111111111111111";
       const destinationTokenAccount = "DstTokenAcct111111111111111111111111111111";
       const sourceTokenAccount = "SrcTokenAcct111111111111111111111111111111";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000200,
-              slot: 102,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "25000000",
-                      decimals: 6,
-                      uiAmountString: "25",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                ],
-                postTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "25000000",
-                      decimals: 6,
-                      uiAmountString: "25",
-                    },
-                  },
-                ],
+      rpc.answer("getTransaction", {
+        blockTime: 1700000200,
+        slot: 102,
+        meta: {
+          err: null,
+          fee: 5000,
+          preTokenBalances: [
+            {
+              accountIndex: 0,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet2,
+              uiTokenAmount: {
+                amount: "25000000",
+                decimals: 6,
+                uiAmountString: "25",
               },
-              transaction: {
-                message: {
-                  accountKeys: [sourceTokenAccount, destinationTokenAccount],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "transferChecked",
-                        info: {
-                          source: sourceTokenAccount,
-                          destination: destinationTokenAccount,
-                          mint: customMint,
-                          tokenAmount: {
-                            amount: "25000000",
-                            decimals: 6,
-                            uiAmountString: "25",
-                          },
-                        },
-                      },
+            },
+            {
+              accountIndex: 1,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              uiTokenAmount: {
+                amount: "0",
+                decimals: 6,
+                uiAmountString: "0",
+              },
+            },
+          ],
+          postTokenBalances: [
+            {
+              accountIndex: 0,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet2,
+              uiTokenAmount: {
+                amount: "0",
+                decimals: 6,
+                uiAmountString: "0",
+              },
+            },
+            {
+              accountIndex: 1,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              uiTokenAmount: {
+                amount: "25000000",
+                decimals: 6,
+                uiAmountString: "25",
+              },
+            },
+          ],
+        },
+        transaction: {
+          message: {
+            accountKeys: [sourceTokenAccount, destinationTokenAccount],
+            instructions: [
+              {
+                program: "spl-token",
+                parsed: {
+                  type: "transferChecked",
+                  info: {
+                    source: sourceTokenAccount,
+                    destination: destinationTokenAccount,
+                    mint: customMint,
+                    tokenAmount: {
+                      amount: "25000000",
+                      decimals: 6,
+                      uiAmountString: "25",
                     },
-                  ],
+                  },
                 },
               },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
-      );
+            ],
+          },
+        },
+      });
 
       getSplTokenAccountAddressesMock.mockResolvedValueOnce([
         destinationTokenAccount as unknown as Address,
@@ -478,52 +452,48 @@ describe("Payments routes — list transfers", () => {
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
-          1,
-          expect.anything(),
-          TEST_SOLANA_ADDRESSES.wallet1,
-          expect.objectContaining({ commitment: "confirmed" })
-        );
-        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
-          2,
-          expect.anything(),
-          destinationTokenAccount,
-          expect.objectContaining({ commitment: "confirmed" })
-        );
+      expect(res.status).toBe(200);
+      expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        TEST_SOLANA_ADDRESSES.wallet1,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
+      expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        destinationTokenAccount,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
 
-        const body = (await res.json()) as {
-          data: Array<{
-            amount: string;
-            direction: string;
-            signature: string | null;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "25",
-          direction: "inbound",
-          signature: observedSig,
-          status: "confirmed",
-          token: customMint,
-        });
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      const body = (await res.json()) as {
+        data: Array<{
+          amount: string;
+          direction: string;
+          signature: string | null;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "25",
+        direction: "inbound",
+        signature: observedSig,
+        status: "confirmed",
+        token: customMint,
+      });
     });
 
     it("surfaces observed token mints into owned token accounts", async () => {
@@ -532,58 +502,46 @@ describe("Payments routes — list transfers", () => {
       const customMint = "MintedToken111111111111111111111111111111";
       const destinationTokenAccount = "MintDstTokenAcct11111111111111111111111111";
       const mintAuthority = "MintAuthority11111111111111111111111111111";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000300,
-              slot: 103,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [],
-                postTokenBalances: [
-                  {
-                    accountIndex: 2,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "500000000",
-                      decimals: 6,
-                      uiAmountString: "500",
-                    },
-                  },
-                ],
+      rpc.answer("getTransaction", {
+        blockTime: 1700000300,
+        slot: 103,
+        meta: {
+          err: null,
+          fee: 5000,
+          preTokenBalances: [],
+          postTokenBalances: [
+            {
+              accountIndex: 2,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              uiTokenAmount: {
+                amount: "500000000",
+                decimals: 6,
+                uiAmountString: "500",
               },
-              transaction: {
-                message: {
-                  accountKeys: [mintAuthority, customMint, destinationTokenAccount],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "mintTo",
-                        info: {
-                          account: destinationTokenAccount,
-                          amount: "500000000",
-                          mint: customMint,
-                          mintAuthority,
-                        },
-                      },
-                    },
-                  ],
+            },
+          ],
+        },
+        transaction: {
+          message: {
+            accountKeys: [mintAuthority, customMint, destinationTokenAccount],
+            instructions: [
+              {
+                program: "spl-token",
+                parsed: {
+                  type: "mintTo",
+                  info: {
+                    account: destinationTokenAccount,
+                    amount: "500000000",
+                    mint: customMint,
+                    mintAuthority,
+                  },
                 },
               },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
-      );
+            ],
+          },
+        },
+      });
 
       getSplTokenAccountAddressesMock.mockResolvedValueOnce([
         destinationTokenAccount as unknown as Address,
@@ -597,43 +555,39 @@ describe("Payments routes — list transfers", () => {
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: Array<{
-            amount: string;
-            destination: string;
-            direction: string;
-            signature: string | null;
-            source: string;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "500",
-          destination: TEST_SOLANA_ADDRESSES.wallet1,
-          direction: "inbound",
-          signature: observedSig,
-          source: mintAuthority,
-          status: "confirmed",
-          token: customMint,
-        });
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          amount: string;
+          destination: string;
+          direction: string;
+          signature: string | null;
+          source: string;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "500",
+        destination: TEST_SOLANA_ADDRESSES.wallet1,
+        direction: "inbound",
+        signature: observedSig,
+        source: mintAuthority,
+        status: "confirmed",
+        token: customMint,
+      });
     });
 
     it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
