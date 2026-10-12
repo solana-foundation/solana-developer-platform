@@ -9,11 +9,12 @@
  */
 
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { CLUSTER_RPC_URLS, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
@@ -185,6 +186,18 @@ describe("observeDvpTradeIfStale", () => {
       details: { cluster: "devnet" },
     });
     expect(rpc.calls).toEqual([]);
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    expect(recordObservation).not.toHaveBeenCalled();
+  });
+
+  it("rejects instead of answering from the row when the devnet pool serves mainnet-beta", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+
+    await expect(observeIfStale(trade(), NOW)).rejects.toMatchObject({
+      code: "RPC_CLUSTER_MISMATCH",
+      details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+    });
+    expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toEqual([]);
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
     expect(recordObservation).not.toHaveBeenCalled();
   });
