@@ -250,7 +250,7 @@ start_cli_surfpool() {
   fi
 
   echo "Starting Surfpool CLI RPC at ${SURFPOOL_RPC_URL}."
-  NO_DNA=1 surfpool start --ci --host "${surfpool_host}" --port "${surfpool_port}" --no-deploy >"${SURFPOOL_LOG}" 2>&1 &
+  NO_DNA=1 surfpool start --ci --host "${surfpool_host}" --port "${surfpool_port}" --rpc-url "${SURFPOOL_REMOTE_RPC_URL}" --no-deploy >"${SURFPOOL_LOG}" 2>&1 &
   echo "$!" >"${SURFPOOL_PID_FILE}"
   wait_for_json_rpc "Surfpool" "${SURFPOOL_RPC_URL}" 90
 }
@@ -310,6 +310,7 @@ case "${KORA_SURFPOOL_RUNTIME}" in
     start_embedded_surfpool_with_retry
     ;;
   cli)
+    configure_embedded_remote_rpc
     start_cli_surfpool
     ;;
   external)
