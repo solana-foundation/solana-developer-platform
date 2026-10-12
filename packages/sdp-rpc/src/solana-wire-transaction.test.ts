@@ -35,8 +35,8 @@ const wire = new Uint8Array(
 );
 const wireBase64 = Buffer.from(wire).toString("base64");
 
-function viewIntoLargerBuffer(): Uint8Array {
-  const backing = new Uint8Array(65536);
+function bufferViewIntoLargerBuffer(): Buffer {
+  const backing = Buffer.alloc(65536);
   backing.set(wire);
   return backing.subarray(0, wire.length);
 }
@@ -56,16 +56,16 @@ function recordingRpc(): { rpc: SolanaRpc; encoded: () => string[] } {
   return { rpc, encoded: () => encoded };
 }
 
-test("sends only the transaction's own bytes when it sits at the start of a larger buffer", async () => {
+test("sends only the transaction's own bytes when it is a Buffer view at the start of a larger buffer", async () => {
   const { rpc, encoded } = recordingRpc();
 
-  assert.equal(await sendTransaction(rpc, viewIntoLargerBuffer()), SIGNATURE);
+  assert.equal(await sendTransaction(rpc, bufferViewIntoLargerBuffer()), SIGNATURE);
   assert.deepEqual(encoded(), [wireBase64]);
 });
 
-test("simulates only the transaction's own bytes when it sits at the start of a larger buffer", async () => {
+test("simulates only the transaction's own bytes when it is a Buffer view at the start of a larger buffer", async () => {
   const { rpc, encoded } = recordingRpc();
 
-  await simulateTransaction(rpc, viewIntoLargerBuffer());
+  await simulateTransaction(rpc, bufferViewIntoLargerBuffer());
   assert.deepEqual(encoded(), [wireBase64]);
 });
