@@ -15,7 +15,7 @@ For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optio
 
 To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The update rechecks the authority before signing. This read changes neither the stored token nor its deployment wallet.
 
-SDP checks every on-chain metadata update and authority change against the signing wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; a change held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. Database-only edits sign nothing and skip this check. See [Wallet policies](/docs/wallet-operations/policies).
+If the API key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), `PATCH /v1/issuance/tokens/{tokenId}` needs `issuance` or `issuance_metadata_update_execute` in the list, including for edits that sign nothing, and an authority change needs `issuance` or `issuance_update_authority_execute`. Otherwise the request returns `403 OPERATION_NOT_ALLOWED`. The authority prepare route doesn't check the list.
 
 ## Prerequisites
 

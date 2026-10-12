@@ -102,7 +102,7 @@ The canonical SDP API URL is `https://api.solana.com`. Sandbox and production re
 
 ### 6. Wire up your client and verify
 
-Wire two HTTP clients (one per API key) using a thin wrapper around `fetch`. The wrapper throws on any response that carries an `error` object. That includes 202 `SIGNING_PENDING`, which is a 2xx status (see Section 4):
+Wire two HTTP clients (one per API key) using a thin wrapper around `fetch`. The wrapper throws on any response that carries an `error` object:
 
 ```javascript title="sdp-client.js"
 const BASE = "https://api.solana.com";
@@ -342,7 +342,7 @@ A successful response carries the deployed token record with `status: "active"` 
 The `mintAuthority` and `freezeAuthority` resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. The metadata authority isn't on the token record; read it with `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true`. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
 
 <Callout type="info">
-Every issuance action a custody wallet signs (deploy, mint, burn, freeze, unfreeze, seize, force-burn, pause, unpause, and authority changes) is checked against the wallet's policies, and any restrictions on the API key, before SDP signs it. Payment transfers are checked the same way. A deny returns 403 `FORBIDDEN`. An operation held for approval returns 202 `SIGNING_PENDING` with the approval request ID in `error.details.approvalRequestId`, and nothing is signed. See [Wallet policies](/docs/wallet-operations/policies).
+If an API key carries allowed operations, every issuance execute call (deploy, mint, burn, freeze, unfreeze, seize, force-burn, pause, unpause, and authority changes) must be in its list, and payment transfers must be too. A call outside the list returns 403 `OPERATION_NOT_ALLOWED`, and nothing is signed. The `issuance` and `payment` families cover them. See [Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
 </Callout>
 
 <Callout type="warn">
@@ -765,8 +765,8 @@ You have a deployed regulated stablecoin, the compliance controls configured, an
   <Card title="Freeze and Compliance" href="/docs/tokens/freeze-and-compliance">
     Screen addresses, freeze and unfreeze accounts, pause the token, and seize tokens, from the dashboard or the API.
   </Card>
-  <Card title="Wallet policies" href="/docs/wallet-operations/policies">
-    Deny custody-signed operations, or hold them for approval, before SDP signs them.
+  <Card title="Allowed operations" href="/docs/developing-with-sdp/manage-api-keys#allowed-operations">
+    Limit each API key to the operation families and types it may perform.
   </Card>
   <Card title="Basic payment" href="/docs/payments/send-basic-payment">
     Send the stablecoin between wallets with `POST /v1/payments/transfers`.

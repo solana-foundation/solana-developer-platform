@@ -15,7 +15,7 @@ SDP provides two categories of compliance tooling:
 
 Token-control actions require `tokens:admin` permission on the API key. Address screening requires `payments:read`.
 
-When SDP signs a freeze, unfreeze, pause, unpause, or seize with a custody wallet, it first checks the action against that wallet's policy. A `deny` returns `403 FORBIDDEN`; an action held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. See [Wallet policies](/docs/wallet-operations/policies).
+If the API key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), each token-control action must be in the list. The `issuance` family covers them all; the single types are `issuance_freeze_execute`, `issuance_unfreeze_execute`, `issuance_pause_execute`, `issuance_unpause_execute`, and `issuance_seize_execute`. An action outside the list returns `403 OPERATION_NOT_ALLOWED`, and nothing is signed. The seize prepare route doesn't check the list.
 
 ## How it works
 
@@ -29,7 +29,7 @@ Check a Solana address against your compliance providers before onboarding a wal
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The dashboard screens addresses automatically when you add a destination to a wallet's destination allowlist and when you add a crypto account to a counterparty.
+The dashboard screens addresses automatically when you add a crypto account to a counterparty.
 
 To screen a token holder, use the API.
 

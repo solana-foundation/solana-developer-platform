@@ -21,6 +21,8 @@ SDP's model differs from response-cache designs: the idempotency key is claimed 
 2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt. Freeze and unfreeze differ in one case: replaying one whose original attempt failed returns **400** with the original error.
 3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). For transfers and batches, a different source wallet also counts as a different payload. The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
 
+A replay still goes through the route's permission and [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) checks first. If the key no longer has them, the retry gets the `403`, not the stored record.
+
 Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists. If a mint fails before anything is submitted on-chain, though, SDP releases the key, so a retry with the same key runs as a new request.
 
 The header is optional. Every `/v1` route validates it when present (1–255 printable ASCII characters, otherwise `400 BAD_REQUEST`) and echoes it back on the response, but among the public endpoints only the operations below consume it. Elsewhere it is accepted and ignored.

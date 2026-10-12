@@ -134,7 +134,7 @@ The example is trimmed; see the [Payments API reference](/docs/reference/api/pay
 
 Create doesn't use the `Idempotency-Key` header, so retrying a create that timed out can leave you with two schedules. Before you retry, check with `GET /v1/payments/recurring-payments?counterpartyId=…`.
 
-SDP evaluates the create against the source wallet's policy. See [Wallet policy](#wallet-policy).
+If your key carries allowed operations, they must include the create. See [Allowed operations](#allowed-operations).
 
 ## Activate
 
@@ -162,6 +162,8 @@ SDP's background job collects every `active` schedule whose `nextCollectionDueAt
 Once SDP confirms the payment on-chain, `nextCollectionDueAt` moves forward by `periodHours` from the previous due date, not from the time of collection, so the schedule doesn't drift.
 
 If an automatic collection fails, the job tries that due date again on a later run, no sooner than 30 minutes after the failure.
+
+If SDP won't start new payments for the organization when a collection falls due, because the organization is suspended or deleted or production isn't enabled for a production project, the job records a `skipped` attempt with the reason in `error` and moves `nextCollectionDueAt` to the next due date after the current time. A skipped due date isn't collected later.
 
 ### Collect manually
 
@@ -211,7 +213,7 @@ curl "https://api.solana.com/v1/payments/subscriptions/psub_abc123/collection-at
 
 The response lists `collectionAttempts` with `total`, `page` and `pageSize`. Each attempt has:
 
-- `status`: `processing`, `confirmed` or `failed` (the enum also has `pending` and `skipped`).
+- `status`: `processing`, `confirmed`, `failed` or `skipped` (the enum also has `pending`).
 - `dueAt`: the due date it collects.
 - `transferId` and `signature`: the linked transfer and on-chain transaction.
 - `error`: the reason a failed attempt failed.
@@ -226,11 +228,9 @@ The transfers also appear in `GET /v1/payments/transfers`, for example filtered 
 - **Pending schedules** are updated directly. `firstCollectionAt` can only be changed here; send `null` to clear it.
 - **Active schedules**: `metadataUri` and `nextCollectionDueAt` are updated in place. Changing `amount`, `periodHours`, `token`, `sourceCustodyWalletId`, `counterpartyId` or `counterpartyAccountId` makes SDP create and authorize a replacement on-chain subscription, cancel the old one, and switch the schedule over.
 - `nextCollectionDueAt` can only be changed after activation. It can't be earlier than the next eligible collection (`400`); send `null` to reset it to the earliest eligible time.
-- To change the source wallet, your key needs `payments:write` on both the old and the new wallet. It returns `409` while a collection approval for the current due date is pending.
+- To change the source wallet, your key needs `payments:write` on both the old and the new wallet.
 
 While the update runs, the schedule is `updating` and isn't collected, and another `PATCH` returns `409`. If an update is interrupted, the schedule stays `updating`. After 15 minutes, send the same `PATCH` again to finish it; a different body returns `409`.
-
-SDP evaluates every update against the wallet's policy, using the token, amount and destination the schedule will have afterwards.
 
 ## Cancel and resume
 
@@ -264,33 +264,26 @@ Both calls take no body. Calling either on a schedule already in the target stat
 
 Only `active` schedules are collected.
 
-## Wallet policy
+## Allowed operations
 
-SDP evaluates three recurring operation types against the source wallet's policy:
+If your key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), three routes check them before SDP validates the request body:
 
-| Operation type | Evaluated on | Values checked |
-| --- | --- | --- |
-| `recurring_payment_create` | `POST /v1/payments/recurring-payments` | Token, amount per payment, and the counterparty wallet as destination. |
-| `recurring_payment_update` | `PATCH /v1/payments/recurring-payments/{id}` | The token, amount and destination after the update. |
-| `recurring_payment_collection` | Every collection, automatic or manual | Token, amount and destination of the payment. |
+| Operation type | Route |
+| --- | --- |
+| `recurring_payment_create` | `POST /v1/payments/recurring-payments` |
+| `recurring_payment_update` | `PATCH /v1/payments/recurring-payments/{id}` |
+| `recurring_payment_collection` | `POST /v1/payments/recurring-payments/{id}/collect` |
 
-Activation, cancellation and resume aren't evaluated separately.
+The `payment` family covers all three. If the key's list includes neither the family nor the route's operation type, the request returns `403` with `error.code: "OPERATION_NOT_ALLOWED"`: create stores no schedule, update changes nothing, and `collect` starts no collection. Activate, cancel and resume don't check the list.
 
-If the decision isn't `allow`, the operation doesn't go ahead: create stores no schedule, update changes nothing, and a collection attempt is recorded as `failed`. A request you made returns `403` with `error.code: "FORBIDDEN"` for a denial, or `202` with `error.code: "SIGNING_PENDING"` when approval is required. Both carry `error.details`, including `walletOperationId`, `decision`, `reason` and `approvalRequestId`.
-
-While a collection's approval is outstanding, retrying the same due date returns that same approval instead of filing a new one. A later due date gets its own approval.
-
-SDP doesn't run a held recurring-payment operation when its approval request is approved. For the `recurring_payment_create`, `recurring_payment_update` and `recurring_payment_collection` operation types, write `allow` or `deny` rules rather than approval rules.
-
-Use rules on these operation types to cap or block schedules. See [Wallet policies](/docs/wallet-operations/policies#exact-operation-types).
+Automatic collections run in SDP's background job, not under an API key, so allowed operations don't apply to them. Narrowing the list on the key that created a schedule doesn't stop its collections. Cancel the schedule to stop them.
 
 ## Errors
 
 | Status | Typical causes |
 | --- | --- |
 | `400` | Invalid body: unknown field, unsupported token, `firstCollectionAt` not in the future, `periodHours` out of range. Counterparty or account not `active`, or account not `crypto_wallet`. `collect` before the due date. `nextCollectionDueAt` too early, `firstCollectionAt` after activation, or `nextCollectionDueAt` before activation. |
-| `202` | `SIGNING_PENDING`: the wallet policy requires approval. |
-| `403` | The key lacks a permission or wallet scope, or the wallet policy denied the operation. |
+| `403` | The key lacks a permission or wallet scope, or (`OPERATION_NOT_ALLOWED`) its allowed operations don't include the operation. |
 | `404` | Schedule, counterparty or counterparty account not found. |
 | `409` | The operation isn't allowed from the current status, another operation on the schedule is in progress, or a collection for this due date is already processing. |
 
@@ -308,5 +301,5 @@ Every write also needs the key's `payments:write` wallet scope to include the so
 ## Related
 
 - [Payouts and disbursements](/docs/payments/send-payouts): one-off payments to many counterparties.
-- [Wallet policies](/docs/wallet-operations/policies): rules and approvals for wallet operations.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys#allowed-operations): limit a key to the operations it may perform.
 - [Wallet balances](/docs/wallet-operations/balances): keep the source wallet funded.

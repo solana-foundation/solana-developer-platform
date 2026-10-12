@@ -47,7 +47,7 @@ The `amount` field is a decimal string in **UI units** (human-readable token amo
 
 `signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
-SDP checks each mint, burn, and force-burn against the signing wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; an operation held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. See [Wallet policies](/docs/wallet-operations/policies).
+If the API key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), each operation must be in the list: `issuance` covers all three, or list `issuance_mint_execute`, `issuance_burn_execute`, or `issuance_force_burn_execute`. An operation outside the list returns `403 OPERATION_NOT_ALLOWED`, and nothing is signed. The prepare routes don't check the list.
 
 </Tab>
 </Tabs>

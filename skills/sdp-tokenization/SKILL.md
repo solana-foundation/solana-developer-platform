@@ -23,7 +23,7 @@ Do not rely on hidden or internal route families.
 3. Recommend the right SDP template or custom configuration.
 4. Explain the implementation sequence in order:
    - organization and wallet setup
-   - API key scope and permissions
+   - API key scope, permissions, and allowed operations
    - token creation
    - deployment
    - minting, transfers, and redemptions
