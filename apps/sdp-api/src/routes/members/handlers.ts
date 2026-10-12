@@ -649,6 +649,17 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
   // without granting anything.
   const claimInvitationAndGrantMembership = () =>
     getDb(c.env).transaction(async (tx) => {
+      // Fills a gap only — acceptance is not the place to rename an account.
+      // First statement so locks follow admission's order (user, invitation,
+      // member); claiming first and writing the user after can deadlock a
+      // concurrent Clerk sign-in.
+      if (name) {
+        await tx
+          .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
+          .bind(name, actorUserId)
+          .run();
+      }
+
       const claimed = await tx
         .prepare(
           `UPDATE invitations
@@ -660,14 +671,6 @@ export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSche
 
       if (claimed === 0) {
         throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-      }
-
-      // Fills a gap only — acceptance is not the place to rename an account.
-      if (name) {
-        await tx
-          .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
-          .bind(name, actorUserId)
-          .run();
       }
 
       // Scoped to the invitation's organization, not the caller's current one,
