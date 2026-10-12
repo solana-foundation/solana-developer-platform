@@ -103,6 +103,22 @@ describe("balance read bounds", () => {
     ]);
   });
 
+  it("refuses a bounded lamports read whose answer carries no context slot", async () => {
+    rpc.answer("getBalance", { context: {}, value: 5 });
+
+    await expect(
+      readOnDevnet((clusterRpc) => getLamportsBalance(clusterRpc, owner, { minContextSlot: 100n }))
+    ).rejects.toThrow("RPC balance read is behind the confirmed transaction slot");
+  });
+
+  it("refuses a bounded token balance read whose answer carries no context slot", async () => {
+    rpc.answer("getTokenAccountsByOwner", { context: {}, value: [] });
+
+    await expect(
+      readOnDevnet((clusterRpc) => getSplTokenBalances(clusterRpc, owner, { minContextSlot: 100n }))
+    ).rejects.toThrow("RPC balance read is behind the confirmed transaction slot");
+  });
+
   it("sends minContextSlot on both token program reads and refuses an answer from an older bank", async () => {
     rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(99, []));
 

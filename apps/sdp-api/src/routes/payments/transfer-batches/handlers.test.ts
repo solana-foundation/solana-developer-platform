@@ -5,6 +5,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
+  createDefaultRpcTransport,
   createNoopSigner,
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
@@ -30,7 +31,11 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  CLUSTER_RPC_URLS,
+  installClusterRpcStub,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -428,7 +433,10 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    createRpcMock.mockReturnValue(
+      solanaRpc.createRpcFromTransport(createDefaultRpcTransport({ url: CLUSTER_RPC_URLS.devnet }))
+    );
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -466,8 +474,6 @@ describe("payment transfer batches", () => {
   });
 
   it("estimates a SOL transfer batch", async () => {
-    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
-
     const counterpartyId = await seedCounterparty("batch_estimate_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,
@@ -535,8 +541,6 @@ describe("payment transfer batches", () => {
   });
 
   it("estimates a batch when counterpartyId is omitted (derived from account)", async () => {
-    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
-
     const counterpartyId = await seedCounterparty("batch_derive_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
       counterpartyId,
