@@ -1,33 +1,58 @@
 ---
 title: Overview
-description: Build payments on Solana with SDP — concepts, send, accept, and ramps.
+description: What SDP Payments covers today — counterparties, transfers, transfer batches, recurring payments, on-ramp quotes, inbound payments, and transaction history.
 ---
 
-SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP Payments sends tokens from the custody wallets in your project and tracks the payments that arrive in them. Every outbound payment names the wallet that pays: you pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`. There is no default wallet. SDP signs with that wallet, submits the transaction, and records the result.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/tokens/tokenize-an-asset).
+If you don't have a custody wallet yet, start with [Set Up Wallets](/docs/guides/setup-wallets). [How payments work on SDP](/docs/payments/concepts) explains custody wallets, tokens, fees, and the transfer record.
 
-## What's in this section
+## What Payments covers
 
-- **[How payments work on SDP](/docs/payments/concepts)** — wallets, tokens, signing modes, fees, and the transfer data model.
-- **Send payments** — outbound flows.
-  - [Basic payment](/docs/payments/send-basic-payment) — a single transfer in either signing mode.
-  - [Payment with memo](/docs/payments/send-payment-with-memo) — attach order or customer references to a transfer.
-  - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound transfers and reconciliation.
-- **Accept payments** — inbound flows.
-  - [Accept overview](/docs/payments/accept-overview) — receiving-address convention and integration options.
-  - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
-  - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
-- **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
-  - [Ramp providers](/docs/payments/ramps-providers) — capability matrix and configuration for all seven ramp providers.
+### Counterparties
 
-Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
+A counterparty is the record for a customer or beneficiary you pay. Its accounts hold the Solana wallet addresses you pay to. Transfer batches and recurring payments pay counterparty accounts, and on-ramp quotes require a counterparty. See [Counterparties](/docs/payments/counterparties).
+
+### Single transfers
+
+`POST /v1/payments/transfers` sends one amount of one token from a custody wallet to any Solana wallet address, with an optional `memo`. See [Basic payment](/docs/payments/send-basic-payment) and [Payment with memo](/docs/payments/send-payment-with-memo).
+
+### Transfer batches
+
+`POST /v1/payments/transfer-batches` pays up to 500 counterparty accounts in one request, from one wallet and in one token. SDP packs the recipients into Solana transactions and reports a status for each recipient. `POST /v1/payments/transfer-batches/estimate` returns the transaction count and fees before you send. See [Payouts and disbursements](/docs/payments/send-payouts).
+
+### Recurring payments
+
+`POST /v1/payments/recurring-payments` creates a schedule that pays one counterparty account a fixed amount every period. Once you activate it, SDP collects each payment from the source wallet when it falls due. See [Recurring payments](/docs/payments/recurring-payments).
+
+### On-ramp quotes
+
+`POST /v1/payments/ramps/onramp/quote` asks the ramp provider you name for a fiat-to-crypto quote, delivered to one of your custody wallets. The response tells you how the customer pays the provider, and SDP records the ramp as a transfer you can track. For off-ramps, the public API offers currency discovery only. See [Ramps](/docs/payments/ramps) and [Ramp providers](/docs/payments/ramps-providers).
+
+### Accepting payments
+
+SDP has no hosted checkout. You publish the address of a custody wallet, the sender transfers to it, and SDP lists the inbound transfer in `GET /v1/payments/transfers` with `direction=inbound`. See [Accept payments](/docs/payments/accept-overview) for the receiving-address pattern, [Verifying a payment](/docs/payments/accept-verification) for statuses and finality, and [Indexing and reconciliation](/docs/payments/accept-indexing) for listing and deduplicating inbound transfers.
+
+### Transaction history
+
+`GET /v1/transactions` lists your project's payment and issuance transactions in one feed, newest first, with filters, cursor pagination, and search by ID or signature. See [Transaction history](/docs/payments/transactions).
+
+## How payments are signed
+
+Transfers, transfer batches, and recurring payments are execute operations: SDP signs with the source custody wallet and submits the transaction itself. They have no prepare route. Transfers and transfer batches accept an `Idempotency-Key` header, so a retried request returns the original record instead of paying twice. See [Signing modes](/docs/developing-with-sdp/signing-modes) and [Idempotency](/docs/developing-with-sdp/idempotency).
+
+## API key access
+
+Each call checks the API key's permissions: `payments:read` for reads, `payments:write` plus `wallets:read` for transfers, batches, and quotes, and `counterparties:read` or `counterparties:write` for counterparties. Each guide lists the exact set for its endpoints.
+
+A key limited to selected wallets can only pay from those wallets. A key with a non-empty list of [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) must include the `payment` family, or the specific operation type, for transfers, transfer batches, and recurring payment creation, updates, and collections, and the `ramp` family or type for quotes. An operation the list doesn't include is refused with `403 OPERATION_NOT_ALLOWED` before anything executes.
 
 ## Underlying API
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into three areas: `transfers`, `ramps`, and `wallets/.../balances`.
+Payments endpoints live under `/v1/payments`, counterparties under `/v1/counterparties`, and the transaction feed at `/v1/transactions`. See the [Payments API reference](/docs/reference/api/payments) and the [Counterparties API reference](/docs/reference/api/counterparties) for every field.
 
 ## Related
 
-- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow): create counterparties, pay them with a transfer batch, and find the payments in the transaction history.
+- [Wallet balances](/docs/wallet-operations/balances): check that the source wallet holds enough of the token.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys): roles, wallet bindings, and allowed operations.
