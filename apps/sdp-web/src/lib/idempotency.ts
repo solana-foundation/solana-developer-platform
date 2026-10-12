@@ -13,7 +13,8 @@ export function forwardedIdempotencyHeaders(request: Request): Record<string, st
   return idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : undefined;
 }
 
-const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7e]{1,255}$/;
+/** The key sdp-api accepts: 1-255 printable ASCII characters (`idempotency-key.ts` in sdp-api). */
+export const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7e]{1,255}$/;
 
 /**
  * The headers a server action sends upstream for the Idempotency-Key the

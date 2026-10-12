@@ -289,6 +289,12 @@ function buildFetchSnippet(
     // biome-ignore lint/suspicious/noTemplateCurlyInString: Generated code intentionally contains a template placeholder.
     "    Authorization: `Bearer ${API_KEY}`,",
     '    "Content-Type": "application/json",',
+    ...(hasRequestBody(endpoint.method)
+      ? [
+          // A new key per call: reuse one only to retry the same call.
+          '    "Idempotency-Key": crypto.randomUUID(),',
+        ]
+      : []),
     "  },",
   ];
 
@@ -456,6 +462,10 @@ async function executePlaygroundRequest({
   const startedAt = Date.now();
   setIsExecuting(true);
 
+  // Each Send is a new call, so it gets a new key. The proxy forwards it as Idempotency-Key,
+  // which the money routes require.
+  const idempotencyKey = hasRequestBody(activeEndpoint.method) ? crypto.randomUUID() : undefined;
+
   try {
     const proxyResponse = await dashboardRequest("/api/playground/execute", {
       method: "POST",
@@ -467,6 +477,7 @@ async function executePlaygroundRequest({
         path: resolvedPath,
         body: requestBody,
         apiKey: normalizedApiKey,
+        idempotencyKey,
       }),
     });
 
