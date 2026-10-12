@@ -12,7 +12,9 @@ import {
  * answers 403 by design, which must not fail the smoke.
  */
 export async function fetchApiReleaseChannel(apiBaseUrl: string): Promise<SdpReleaseChannel> {
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`);
+  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/health`, {
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!response.ok) {
     throw new Error(`GET /health failed (${response.status})`);
   }
