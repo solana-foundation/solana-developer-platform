@@ -50,7 +50,6 @@ export type ErrorCode =
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
-  | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "ESTIMATE_NOT_AVAILABLE"
@@ -117,7 +116,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
-  SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   ESTIMATE_NOT_AVAILABLE: 503,
@@ -176,7 +174,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
-  SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   ESTIMATE_NOT_AVAILABLE:

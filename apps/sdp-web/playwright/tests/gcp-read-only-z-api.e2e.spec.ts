@@ -28,7 +28,6 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
     query: FIRST_PAGE,
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
-  { domain: "policies", path: "/v1/policies", scope: "project" },
   // Earn answers 403 wherever EARN_ENABLED is off (stage and prod today); the smoke pins the
   // flag off in smoke-flags.json, so the row is only meaningful when the posture turns it on.
   ...(process.env.EARN_ENABLED === "true"

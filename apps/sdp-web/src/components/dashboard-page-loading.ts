@@ -6,10 +6,6 @@ import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
 import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
 import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
 import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
-import {
-  ApprovalDetailSkeleton,
-  ApprovalInboxSkeleton,
-} from "@/app/dashboard/[projectId]/approvals/approval-page-skeletons";
 import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
@@ -60,14 +56,10 @@ import {
 import PaymentRequestsLoading, {
   PreviousPaymentRequestsLoading as LegacyPaymentRequestsLoading,
 } from "@/app/dashboard/[projectId]/payments/requests/loading";
-import { PoliciesOverviewSkeleton } from "@/app/dashboard/[projectId]/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
   WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
-  WalletPolicyAuditDetailSkeleton,
-  WalletPolicyAuditListSkeleton,
-  WalletPolicySkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
 } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
@@ -99,25 +91,11 @@ const LEGACY_DESIGN_PAGE_LOADING: Partial<
   "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
 };
 
-// Requests and Schedules are still the previous design's pages, so they load as them with
-// new-design-activity on too.
-const HELD_ON_PREVIOUS_DESIGN: ReadonlySet<DashboardLoadingRoute> = new Set([
-  "payment-requests",
-  "payment-request-create",
-  "payment-request-detail",
-  "recurring-payments",
-  "recurring-payment-create",
-  "recurring-payment-detail",
-]);
-
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute,
   newDesign = true
 ): ComponentType<PageLoadingProps> {
-  const legacy =
-    newDesign && !HELD_ON_PREVIOUS_DESIGN.has(route)
-      ? undefined
-      : LEGACY_DESIGN_PAGE_LOADING[route];
+  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
   return legacy ?? resolveCurrentPageLoadingComponent(route);
 }
 
@@ -143,12 +121,6 @@ function resolveCurrentPageLoadingComponent(
       return WalletConnectionsListSkeleton;
     case "wallet-detail":
       return WalletDetailSkeleton;
-    case "wallet-policy":
-      return WalletPolicySkeleton;
-    case "wallet-policy-audit-list":
-      return WalletPolicyAuditListSkeleton;
-    case "wallet-policy-audit-detail":
-      return WalletPolicyAuditDetailSkeleton;
     case "issuance-overview":
       return IssuancePageSkeleton;
     case "issuance-create":
@@ -205,12 +177,6 @@ function resolveCurrentPageLoadingComponent(
       return ApiKeyNewLoading;
     case "api-key-edit":
       return ApiKeyEditLoading;
-    case "policies":
-      return PoliciesOverviewSkeleton;
-    case "approvals-list":
-      return ApprovalInboxSkeleton;
-    case "approval-detail":
-      return ApprovalDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "helius-rings":

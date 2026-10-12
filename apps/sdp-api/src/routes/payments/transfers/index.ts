@@ -2,14 +2,14 @@ import { Hono } from "hono";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { idempotent } from "@/middleware/idempotency";
-import { policyGate } from "@/middleware/policy-gate";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { authorizeSourceWalletReplay } from "../wallets";
 import {
-  admitTransferRuntimeExecution,
+  admitTransferExecution,
   createTransfer,
-  extractTransferPolicyCandidate,
+  extractTransferRequest,
   findTransferIdempotentKeyReplay,
   getTransfer,
   listTransfers,
@@ -27,14 +27,13 @@ transfers.post(
   idempotent({
     key: "required",
     serverErrors: "rerun",
-    honorsDryRun: true,
     replayAccess: authorizeSourceWalletReplay,
   }),
   validateBody(createTransferSchema),
-  policyGate({
-    extract: extractTransferPolicyCandidate,
+  requestGate({
+    extract: extractTransferRequest,
     findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
-    beforeEnforce: admitTransferRuntimeExecution,
+    admit: admitTransferExecution,
   }),
   createTransfer
 );

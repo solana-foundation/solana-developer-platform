@@ -24,7 +24,7 @@ export function getHeliusRingsService(
   c: AppContext,
   tenant: { organizationId: string; projectId: string }
 ) {
-  return createHeliusRingsService(c.env, tenant);
+  return createHeliusRingsService(c.env, tenant, { initiatedByKeyId: getAuth(c).apiKeyId });
 }
 
 export function getHeliusRingsWalletRepository(c: AppContext) {

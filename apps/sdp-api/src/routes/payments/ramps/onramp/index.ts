@@ -2,13 +2,13 @@ import { Hono } from "hono";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
-import { policyGate } from "@/middleware/policy-gate";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   createOnrampQuote,
   estimateOnramp,
-  extractOnrampQuotePolicyCandidate,
+  extractOnrampQuoteRequest,
   listOnrampCurrencies,
 } from "./handlers";
 import { createOnrampQuoteSchema, estimateOnrampSchema } from "./schemas";
@@ -29,7 +29,7 @@ onramp.post(
   requireAllowedOperation("ramp_onramp_quote"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
-  policyGate({ extract: extractOnrampQuotePolicyCandidate }),
+  requestGate({ extract: extractOnrampQuoteRequest }),
   createOnrampQuote
 );
 

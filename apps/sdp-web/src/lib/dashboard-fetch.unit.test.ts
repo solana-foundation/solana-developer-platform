@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
-import { dashboardFetch, dashboardRequest } from "./dashboard-fetch";
+import { dashboardFetch, dashboardRequest, setTabShowsDemo } from "./dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "./idempotency-key-store";
+import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 
 function noContentFetchMock() {
   return vi.fn(
@@ -167,6 +168,38 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
   });
 
+  // Greptile (#2252): an expired session's 401 settles nothing about the
+  // unanswered attempt before it, so signing in and retrying reuses its key.
+  it("keeps an unanswered attempt's key through a later refusal", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = vi
+      .fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response("{}", { status: 201 })
+      )
+      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow("network down");
+    expect((await submit()).status).toBe(401);
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    expect(keyOfCall(fetchMock, 2)).toBe(keyOfCall(fetchMock, 0));
+  });
+
+  it("retires a fresh key on a first-attempt refusal", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(400, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit();
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
+  });
+
   it("keeps the key when a success's body fails to download", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const brokenBody = () =>
@@ -258,6 +291,27 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await first.text()).toBe("{}");
     expect(await second.text()).toBe("{}");
+  });
+
+  // Greptile (#2252): a live submit must never join a demo request of the same
+  // body, or it would receive the demo's canned answer.
+  it("keeps demo and live submits of the same body apart", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(201, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    setTabShowsDemo(true);
+    const demo = submit();
+    setTabShowsDemo(false);
+    const live = submit();
+    await Promise.all([demo, live]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const demoHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const liveHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(demoHeaders.get(TAB_DEMO_HEADER_NAME)).toBe("1");
+    expect(liveHeaders.get(TAB_DEMO_HEADER_NAME)).toBeNull();
+    expect(keyOfCall(fetchMock, 0)).not.toBe(keyOfCall(fetchMock, 1));
   });
 
   it("gives a different action its own key", async () => {

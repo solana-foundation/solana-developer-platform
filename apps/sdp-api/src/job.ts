@@ -47,7 +47,6 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
@@ -79,8 +78,7 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *
  * The reconciliation sequence:
  *
- * 1. **Pending transfers** + approved-wallet-operation replay + sponsorship
- *    budget reconciliation. The transfer legs settle before their tick reports
+ * 1. **Pending transfers** + sponsorship budget reconciliation. The transfer legs settle before their tick reports
  *    failure. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
@@ -199,7 +197,6 @@ export async function runCronJob(): Promise<void> {
                 // Keep revocation recovery ahead of payment reconciliation.
                 await reconcileRevokedApiKeyCache(env);
                 await trackPendingTransfers(env);
-                await recoverApprovedWalletOperations(env);
               })(),
               reconcileSponsorshipBudgets(env),
             ]);

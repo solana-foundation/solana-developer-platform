@@ -42,7 +42,6 @@ COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-ui/package.json ./packages/sdp-ui/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
-COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 # The Sentry scrubbing hooks in all three sentry.*.config.ts files.
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
@@ -67,7 +66,6 @@ COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
-COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-payments ./packages/sdp-payments

@@ -2,6 +2,7 @@ import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
 import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
+import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -14,6 +15,18 @@ export interface DashboardFetchOptions {
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+let tabShowsDemo = false;
+
+/**
+ * Set by the dashboard shell: whether this tab is showing Payments demo mode, so the calls it
+ * makes say so (see {@link TAB_DEMO_HEADER_NAME}).
+ *
+ * @param on - True while the tab shows demo mode.
+ */
+export function setTabShowsDemo(on: boolean): void {
+  tabShowsDemo = on;
 }
 
 /**
@@ -29,7 +42,6 @@ const STABLE_MUTATION_PREFIXES = [
   "/api/dashboard/payments/subscriptions",
   "/api/dashboard/counterparty",
   "/api/dashboard/compliance/",
-  "/api/dashboard/approval-requests/",
 ] as const;
 
 function isStableMutationPath(path: string): boolean {
@@ -56,32 +68,53 @@ function mutationKeys(): IdempotencyKeyStore {
 const inFlightMutations = new Map<string, Promise<Response>>();
 
 /**
- * Whether an answer retires the key, so the next submit is a new action.
+ * Whether an answer retires the key, so the next submit is a new action. The
+ * vault flows' rule (`applyIdempotencyKeyOutcome`):
  *
- * - A success or a refusal other than a conflict or a rate limit is definitive.
- * - A replayed answer is definitive: sdp-api stored it, so the same key would
- *   only replay it again.
- * - A first 5xx is not: on a route that re-runs after a 5xx the same key is
- *   what makes the retry safe, and on one that stores it the retry comes back
- *   as a replay, which then retires the key.
+ * - A success, or a replay, is definitive: sdp-api ran or stored the request.
+ * - A refusal (4xx other than a conflict or a rate limit) retires a fresh key.
+ *   Once an earlier attempt went unanswered it does not: a refusal sdp-api
+ *   never stores, or a local 401 from an expired session, settles nothing about
+ *   that attempt, which may have written. Only a success or a replay does.
+ * - A 5xx is not definitive: on a route that re-runs after a 5xx the same key
+ *   is what makes the retry safe, and on one that stores it the retry comes
+ *   back as a replay, which then retires the key.
  */
-function retiresKey(response: Response): boolean {
+function retiresKey(response: Response, earlierAttemptUnanswered: boolean): boolean {
   if (response.headers.get("Idempotent-Replayed") === "true") return true;
-  return response.status < 500 && response.status !== 409 && response.status !== 429;
+  if (response.status < 400) return true;
+  return (
+    !earlierAttemptUnanswered &&
+    response.status < 500 &&
+    response.status !== 409 &&
+    response.status !== 429
+  );
 }
 
-function sendWithProject(path: string, init: RequestInit, headers: Headers): Promise<Response> {
+function sendWithProject(
+  path: string,
+  init: RequestInit,
+  headers: Headers,
+  demo: boolean = tabShowsDemo
+): Promise<Response> {
   const { projectId } = parseDashboardPathname(window.location.pathname);
   if (projectId !== null) {
     headers.set(PROJECT_HEADER_NAME, projectId);
   }
+  if (demo) {
+    headers.set(TAB_DEMO_HEADER_NAME, "1");
+  }
   return fetch(path, { ...init, headers });
 }
 
-/** The action a submit stands for: Project, method, path and body. */
-function actionMaterial(path: string, init: RequestInit): string {
+/**
+ * The action a submit stands for: Project, demo or live mode, method, path and
+ * body. The mode is part of it, so a live submit never joins a demo request of
+ * the same body, or reuses its key.
+ */
+function actionMaterial(path: string, init: RequestInit, demo: boolean): string {
   const { projectId } = parseDashboardPathname(window.location.pathname);
-  return JSON.stringify([projectId, init.method, path, init.body ?? ""]);
+  return JSON.stringify([projectId, demo, init.method, path, init.body ?? ""]);
 }
 
 /**
@@ -130,12 +163,17 @@ async function sendUnderActionKey(
   if (init.signal?.aborted) {
     throw init.signal.reason;
   }
-  const material = actionMaterial(path, init);
+  // The mode is fixed at submit, and the request is sent in that mode.
+  const demo = tabShowsDemo;
+  const material = actionMaterial(path, init, demo);
   let sent = inFlightMutations.get(material);
   if (!sent) {
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
     const keys = mutationKeys();
+    // Read before this attempt pins the key: an earlier attempt that never got
+    // a definitive answer leaves it uncertain.
+    const earlierAttemptUnanswered = keys.isUncertain(fingerprint) || keys.isHeld(fingerprint);
     headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
     // Pinned before the request goes out: a reload mid-flight must not let
     // an unanswered write's key expire or be evicted. When browser storage
@@ -145,11 +183,11 @@ async function sendUnderActionKey(
     if (!keys.markUncertain(fingerprint)) {
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
     }
-    sent = sendWithProject(path, shared, headers).then(async (response) => {
+    sent = sendWithProject(path, shared, headers, demo).then(async (response) => {
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response)) {
+      if (retiresKey(response, earlierAttemptUnanswered)) {
         keys.release(fingerprint);
       }
       return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {

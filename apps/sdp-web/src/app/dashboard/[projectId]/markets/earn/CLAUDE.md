@@ -271,7 +271,7 @@ nothing else; the program create still sends the body `requestId` form.
     the USER'S tolerance, never the quote-derived floor, because the
     fingerprint must be reproducible from what the user can re-enter after a
     reload or the cross-reload replay is fiction. "Raise the tolerance and
-    retry" still mints a fresh key. The floor a HELD key was minted with is
+    retry" still mints a fresh key. The floor a reused key was minted with is
     remembered separately and replayed verbatim (the API's own fingerprint
     includes `minSharesOut` and refuses a replay whose floor changed); see
     `rememberVaultDepositFloor` in earn-vault-deposit-tracking.ts. The PROJECT is in
@@ -284,51 +284,15 @@ nothing else; the program create still sends the body `requestId` form.
     (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
   - **The value-moving POST takes no abort signal.** The server processes the
     request whether or not the component survives it. The key is already pinned
-    before posting, and the store still needs the parsed response to distinguish
-    recorded intent from a policy approval hold. Aborting on unmount would hide
-    that acknowledgment. The controller gates state updates and the outcome
+    before posting, and the store still needs the parsed response to know the
+    intent was recorded. Aborting on unmount would hide that acknowledgment. The controller gates state updates and the outcome
     screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
     unconditionally, before the abort check.
-  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire on a parsed recorded result or a first-attempt 4xx. A later 4xx cannot resolve an earlier uncertain attempt or approval hold; only explicit same-key terminal policy denial can.** A 5xx is the dangerous one — a gateway timing
+  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire on a parsed recorded result or a first-attempt 4xx. A later 4xx cannot resolve an earlier uncertain attempt.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly
     like a provider being unavailable before it did. A key released too early is
     a double deposit; a key held too long is a replay the API reports honestly.
-  - `vaultDepositIdempotencyKeyStore.hold` SUSPENDS expiry while a policy approval is
-    pending. The 15-minute TTL applies only to drafts that never submitted. `beginSubmission` must durably pin the key before every Earn POST; a storage failure blocks submission. Unknown outcomes have no TTL. A parsed acknowledgment releases the key so the same amount can intentionally be submitted again.
-  - Suspending expiry needs its own way OUT, or the key outlives the approval and
-    a later legitimate deposit of the same amount from the same wallet silently
-    replays the approved one. So before reusing a HELD key the modal asks the
-    server whether a movement exists for it
-    (`vaultDepositIdempotencyKeyStore.isHeld` -> `fetchEarnVaultDepositByRequestId`): a
-    movement means the write happened and the key is spent. That lookup returns
-    THREE outcomes — `found` / `absent` / `unavailable` — and an unavailable read
-    REFUSES the submit rather than picking a key, because both guesses are wrong
-    in a different direction: reusing a possibly-spent key moves no money when
-    the customer asked it to, and minting a fresh one opens a second approval
-    request. Same rule as an unavailable balance, which must never read as zero.
-  - The pre-flight and the POST are two operations, so the approval can execute
-    BETWEEN them — a TOCTOU no further client read can close. Detection lives on
-    the RESPONSE instead: the key is client-minted and the approval executor
-    replaying it is the only other writer, so `replayed: true` on a key that was
-    HELD at check time is necessarily the approval's execution.
-    `resolveDepositSubmission` marks that outcome `absorbedByApproval` and the
-    modal announces "your approval completed this; this submission moved
-    nothing" — never the plain success screen, and never an auto-retry with a
-    fresh key, because auto-resubmitting money after a race IS the
-    double-deposit hazard. A second deposit stays a human decision. A REJECTED approval
-    produces no movement, so its key survives until the next submit reuses it
-    and the API answers 403 "denied by policy" — visible, and an explicit same-key terminal denial retires the
-    key, so the attempt after that mints a fresh one.
-  - The entry cap governs EXPIRING entries only; a held entry is **never
-    evicted**. The two are not comparable in either direction that matters: an
-    expiring entry is minted by typing a new amount so it accumulates freely and
-    costs at most a replay if dropped, while a held entry exists only because a
-    real POST was parked by policy — single digits in practice — and dropping it
-    mints a fresh key that opens a SECOND approval request for one intent. A
-    shared cap traded the catastrophic failure for a storage one, and the storage
-    one is not real at these sizes (~260 bytes an entry, so even a thousand held
-    keys is a couple of hundred KB against a multi-megabyte quota); a refused
-    write already fails soft into the in-memory tier.
+  - The 15-minute TTL applies only to drafts that never submitted. `beginSubmission` must durably pin the key before every Earn POST; a storage failure blocks submission. Unknown outcomes have no TTL. A parsed acknowledgment releases the key so the same amount can intentionally be submitted again.
   - The cap has a floor of ONE expiring entry, because callers write the entry
     they just claimed as the last element — a budget of zero would evict the key
     `claim` is about to return, and a key handed out but never stored is one the
@@ -344,9 +308,7 @@ nothing else; the program create still sends the body `requestId` form.
     serving the stale previous state — is the trap in that design. Every write
     lands in memory unconditionally, so memory is always the newest complete
     snapshot and a readable storage can only be equal or OLDER; serving it after
-    a failed write un-writes the just-claimed key (fresh mint → second approval)
-    and loses hold markers (an executed approval presents as a fresh
-    submission). A failed write therefore flips that store key to
+    a failed write un-writes the just-claimed key (fresh mint → a second deposit for one intent). A failed write therefore flips that store key to
     memory-preferred (`storageDivergedKeys`); the next successful write syncs
     the full snapshot back and returns authority to storage, so an external
     clear only ever means something when storage is actually keeping up.
@@ -363,9 +325,7 @@ nothing else; the program create still sends the body `requestId` form.
   redeem a position's shares back into the custody wallet that holds them,
   shares-denominated with a Max fill from the live position read (soft warning
   over the last observed balance — the network stays the authority). Mirrors
-  the deposit modal's key lifecycle exactly, including the held-key pre-flight
-  (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
-  outcome. The result screen links the withdrawal transaction in Explorer.
+  the deposit modal's key lifecycle exactly. The result screen links the withdrawal transaction in Explorer.
   It re-exports `EarnVaultWithdrawalOutcomeTracker` from the lightweight
   tracker module, mounted once per withdrawal.
   Its five-second detail poll reports the terminal movement back to Treasury;
@@ -406,7 +366,7 @@ nothing else; the program create still sends the body `requestId` form.
   `floorSafeToSubmit` additionally refuses to SUBMIT a floor whose quote aged
   past the TTL without re-quoting first: still satisfiable proceeds with the
   floor the user reviewed, a rate beyond it stops client-side through the
-  blown-floor copy and control. Held floors bypass the check — a replay must
+  blown-floor copy and control. Replayed floors bypass the check — a replay must
   carry the floor its key was minted with, verbatim. The floor POLICY (whether
   the control renders at all, and its default tolerance) is the catalogue row's
   `depositSlippage`, which the API answers per environment and per row cluster
@@ -420,12 +380,12 @@ nothing else; the program create still sends the body `requestId` form.
 - `earn-vault-movement.ts`: the submit-outcome rules BOTH vault modals share:
   when a submission counts as money moved (`observableVaultMovement`), how a
   watcher's fresher record folds into it, the stepper position and focus-panel
-  key per state, and the 202 approval-pending shape. One copy on purpose, same
+  key per state. One copy on purpose, same
   reasoning as the slippage machinery; the deposit and withdrawal modals
   resolving "did my submission move anything" differently is how a double-count
   ships.
 - `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
-  modules (storage tiers, quota divergence, approval holds, entry bounds), plus
+  modules (storage tiers, quota divergence, entry bounds), plus
   `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
   when the withdrawal flow arrived; two copies of a double-spend guard is how
   one drifts.
@@ -468,13 +428,9 @@ unreferenced from inside this one.
 `createEarnVaultDeposit` rebuilds its request body field-by-field rather than
 spreading the caller's input, so even an untyped caller cannot smuggle
 `requestId` (the legacy custodial-program contract) or arbitrary fields into a
-value-moving request. The RESPONSE is parsed at the boundary — a zod union over
-the success envelope and the `SIGNING_PENDING` one, with the outcome type
-derived via `z.infer` — so the deposit record itself is checked rather than
-asserted. An approval hold is decoded into an explicit `approval_pending`
-outcome (an approval is not a failure, and not a submitted deposit either) and
-is accepted ONLY on a 202: created-and-held is a contradiction, and this must
-not resolve it in the customer's favour.
+value-moving request. The RESPONSE is parsed at the boundary — a zod schema
+over the success envelope, with the outcome type derived via `z.infer` — so the
+deposit record itself is checked rather than asserted.
 
 `useEarnVaultDepositOutcome` keeps the deposit half of the polling pattern
 `useEarnWithdrawalOutcomeToast` established, but owns no toast. It polls at 1s
@@ -555,8 +511,7 @@ freshness remains an external dependency.
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
-a deposit signed before a reload, in another tab, or unblocked by an approval
-minutes later becomes visible again. `useEarnVaultDepositOutcome` is the
+a deposit signed before a reload, or in another tab becomes visible again. `useEarnVaultDepositOutcome` is the
 adaptive **outcome** tier per watched deposit, self-stopping on terminal. Each
 detail read is a scoped, fail-soft chain observation that advances the guarded
 ledger row immediately; the scheduled reconciler remains the recovery path.

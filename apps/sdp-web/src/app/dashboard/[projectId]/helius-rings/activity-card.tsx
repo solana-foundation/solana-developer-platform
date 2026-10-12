@@ -28,6 +28,7 @@ import {
 import {
   formatAssetAmount,
   formatWhen,
+  isKnownOperationState,
   isSettling,
   ringNameByProgramId,
   shortenOperationId,
@@ -37,7 +38,6 @@ import {
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
   draft: "default",
   preparing: "default",
-  approval_required: "warning",
   proving: "default",
   ready_to_sign: "default",
   submitted: "default",
@@ -47,11 +47,7 @@ const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning"
   voided: "default",
 };
 
-type RowAction =
-  | { kind: "execute" }
-  | { kind: "recheck" }
-  | { kind: "void"; signature: string }
-  | { kind: "retry" };
+type RowAction = { kind: "recheck" } | { kind: "void"; signature: string } | { kind: "retry" };
 
 /**
  * What this operation offers an operator, in the order worth trying.
@@ -67,8 +63,6 @@ type RowAction =
  * live and file a sibling every time it was pressed.
  */
 function rowActions(operation: RingsOperationSummary, retriedBy: string | undefined): RowAction[] {
-  if (operation.state === "approval_required") return [{ kind: "execute" }];
-
   // An operation waiting on the indexer offers a manual recheck so the
   // operator isn't watching a spinner with no recourse.
   if (operation.state === "indexing") return [{ kind: "recheck" }];
@@ -107,8 +101,6 @@ function runAction(
   state: RingsOperationState
 ): Promise<OperationResult> {
   switch (action.kind) {
-    case "execute":
-      return executeRingsOperation(operationId);
     case "recheck":
       // `indexing` rows are advanced through the execute path (which polls
       // Photon). The dedicated recheck route only handles `failed` rows.
@@ -123,10 +115,6 @@ function runAction(
 }
 
 const ACTION_LABELS = {
-  execute: {
-    idle: "DashboardHeliusRings.recovery.execute",
-    busy: "DashboardHeliusRings.recovery.executing",
-  },
   recheck: {
     idle: "DashboardHeliusRings.recovery.recheck",
     busy: "DashboardHeliusRings.recovery.rechecking",
@@ -277,8 +265,10 @@ export function ActivityCard({
                     </TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
-                        <Badge variant={STATE_BADGE[operation.state]}>
-                          {t(`DashboardHeliusRings.activity.state_${operation.state}`)}
+                        <Badge variant={STATE_BADGE[operation.state] ?? "default"}>
+                          {isKnownOperationState(operation.state)
+                            ? t(`DashboardHeliusRings.activity.state_${operation.state}`)
+                            : operation.state}
                         </Badge>
                         {isSettling(operation.state) ? (
                           <Loader2Icon

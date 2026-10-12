@@ -4,8 +4,6 @@ import {
   type PrivateOperationInput,
   RINGS_IDENTITY_MISMATCH,
 } from "@sdp/helius-rings";
-import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { PolicyDecision } from "@sdp/types";
 import {
   AccountRole,
   type Address,
@@ -69,23 +67,6 @@ const WALLET_SHIELDED_IDENTITY = getBase58Decoder().decode(
   Uint8Array.from([...SHIELDED_OWNER_HASH, ...new Uint8Array(33).fill(5)])
 );
 
-function policyStub(
-  decision: PolicyDecision,
-  overrides: { requiresApproval?: boolean; approvalRequestId?: string | null } = {}
-): HeliusRingsServiceDependencies["enforcePolicy"] {
-  return async () =>
-    ({
-      operation: { id: "wop_1" },
-      evaluation: {
-        id: "pev_1",
-        decision,
-        reason: decision === "deny" ? "denied by wallet policy" : null,
-        requiresApproval: overrides.requiresApproval ?? false,
-        approvalRequestId: overrides.approvalRequestId ?? null,
-      },
-    }) as unknown as WalletOperationPolicyEnforcement;
-}
-
 function operationInput(overrides: Partial<PrivateOperationInput> = {}): PrivateOperationInput {
   const opType = overrides.opType ?? "shield";
   return {
@@ -98,7 +79,7 @@ function operationInput(overrides: Partial<PrivateOperationInput> = {}): Private
   };
 }
 
-const actorContext = { apiKeyId: "key_1", actor: null, custodyWalletId: "cw_1" };
+const actorContext = { apiKeyId: "key_1", actor: null };
 
 /** Fails an operation that has already signed, leaving its bytes in place. */
 async function failSigned(id: string, state: string): Promise<void> {
@@ -114,7 +95,6 @@ async function failSigned(id: string, state: string): Promise<void> {
 
 function service(deps: HeliusRingsServiceDependencies = {}) {
   return createHeliusRingsService(env, tenant, {
-    enforcePolicy: policyStub("allow"),
     gateway: new UnconfiguredRingsGateway(),
     resolveConnectionId: async () => TEST_CONNECTION_ID,
     ...deps,
@@ -602,10 +582,7 @@ describe("HeliusRingsService", () => {
       });
 
       await expect(
-        service({ gateway }).prepareOperation(
-          operationInput({ clientNonce: "nonce-paused" }),
-          actorContext
-        )
+        service({ gateway }).prepareOperation(operationInput({ clientNonce: "nonce-paused" }))
       ).rejects.toMatchObject({ code: "conflict" });
     });
 
@@ -711,8 +688,7 @@ describe("HeliusRingsService", () => {
       // keys' history. The signed bytes can also still land against the
       // abandoned identity.
       const inFlight = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-rekey-inflight" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-rekey-inflight" })
       );
       expect(inFlight.state).toBe("indexing");
       await pause();
@@ -733,8 +709,7 @@ describe("HeliusRingsService", () => {
       });
       const svc = liveishService({ gateway });
       const inFlight = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-rekey-settled" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-rekey-settled" })
       );
       gateway.recordSubmission(OUTER_TX.signature);
       expect((await svc.executeOperation(inFlight.id)).state).toBe("completed");
@@ -1006,8 +981,8 @@ describe("HeliusRingsService", () => {
   describe("prepareOperation", () => {
     it("is idempotent: the same client nonce returns the same operation", async () => {
       const svc = service();
-      const first = await svc.prepareOperation(operationInput(), actorContext);
-      const replay = await svc.prepareOperation(operationInput(), actorContext);
+      const first = await svc.prepareOperation(operationInput());
+      const replay = await svc.prepareOperation(operationInput());
 
       expect(replay.id).toBe(first.id);
       expect(replay.intentKey).toBe(computeIntentKey(operationInput(), null));
@@ -1021,8 +996,7 @@ describe("HeliusRingsService", () => {
         operationInput({
           clientNonce: "nonce-transfer-unknown-recipient",
           opType: "transfer_registered",
-        }),
-        actorContext
+        })
       );
 
       expect(operation.state).toBe("failed");
@@ -1030,33 +1004,9 @@ describe("HeliusRingsService", () => {
       expect(operation.failure?.message).toMatch(/private transfer recipient/);
     });
 
-    it("ends in failed:policy_denied when the policy denies", async () => {
-      const operation = await service({ enforcePolicy: policyStub("deny") }).prepareOperation(
-        operationInput({ clientNonce: "nonce-deny" }),
-        actorContext
-      );
-
-      expect(operation.state).toBe("failed");
-      expect(operation.failure).toMatchObject({ code: "policy_denied", retryable: false });
-    });
-
-    it("pauses at approval_required and records the approval request", async () => {
-      const operation = await service({
-        enforcePolicy: policyStub("approval_required", {
-          requiresApproval: true,
-          approvalRequestId: "apr_1",
-        }),
-      }).prepareOperation(operationInput({ clientNonce: "nonce-approval" }), actorContext);
-
-      expect(operation.state).toBe("approval_required");
-      expect(operation.approvalRequestId).toBe("apr_1");
-      expect(operation.policyEvaluationId).toBe("pev_1");
-    });
-
     it("fails honestly at the port when the gateway is not implemented", async () => {
       const operation = await service().prepareOperation(
-        operationInput({ clientNonce: "nonce-notimpl" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-notimpl" })
       );
 
       expect(operation.state).toBe("failed");
@@ -1069,8 +1019,7 @@ describe("HeliusRingsService", () => {
         Promise.reject(new HeliusRingsError("config_error", "Helius Rings setup is required"));
 
       const operation = await service({ gateway }).prepareOperation(
-        operationInput({ clientNonce: "nonce-misconfigured" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-misconfigured" })
       );
 
       // No amount of retrying supplies an environment variable, so the retry
@@ -1094,8 +1043,7 @@ describe("HeliusRingsService", () => {
         Promise.reject(new HeliusRingsError("provider_unsupported", reason));
 
       const operation = await service({ gateway }).prepareOperation(
-        operationInput({ clientNonce: "nonce-provider-unsupported" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-provider-unsupported" })
       );
 
       expect(operation.failure).toMatchObject({
@@ -1120,8 +1068,7 @@ describe("HeliusRingsService", () => {
         });
 
       const operation = await svc().prepareOperation(
-        operationInput({ clientNonce: "nonce-resubmit" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-resubmit" })
       );
 
       // Exactly what a process that died between the RPC call and the
@@ -1152,8 +1099,7 @@ describe("HeliusRingsService", () => {
         );
 
       const operation = await service({ gateway }).prepareOperation(
-        operationInput({ clientNonce: "nonce-mrr" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-mrr" })
       );
 
       // The notes are gone most likely because the attempt this was recovering
@@ -1167,8 +1113,7 @@ describe("HeliusRingsService", () => {
 
     it("refuses a fresh spend while an earlier signed one is unaccounted for", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-unresolved-1", opType: "withdraw" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-unresolved-1", opType: "withdraw" })
       );
       // The precondition the whole test rests on: it got far enough to sign.
       expect(operation.state).toBe("indexing");
@@ -1182,16 +1127,14 @@ describe("HeliusRingsService", () => {
       // transaction may already have settled, so a second one pays twice.
       await expect(
         liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-unresolved-2", opType: "withdraw" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-unresolved-2", opType: "withdraw" })
         )
       ).rejects.toMatchObject({ code: "conflict" });
     });
 
     it("still allows a shield while a spend is unresolved", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-shield-ok-1", opType: "withdraw" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-shield-ok-1", opType: "withdraw" })
       );
       await failSigned(operation.id, operation.state);
 
@@ -1200,16 +1143,14 @@ describe("HeliusRingsService", () => {
       // hazard justifies.
       await expect(
         liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" })
         )
       ).resolves.toBeDefined();
     });
 
     it("refuses a second shield while an earlier signed one is unaccounted for", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-shield-dup-1", opType: "shield" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-shield-dup-1", opType: "shield" })
       );
       expect(operation.state).toBe("indexing");
       await failSigned(operation.id, operation.state);
@@ -1219,16 +1160,14 @@ describe("HeliusRingsService", () => {
       // amount and would have moved two out of their public balance.
       await expect(
         liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-shield-dup-2", opType: "shield" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-shield-dup-2", opType: "shield" })
         )
       ).rejects.toMatchObject({ code: "conflict" });
     });
 
     it("finds the blocking operation however far back it is", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-far-back", opType: "shield" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-far-back", opType: "shield" })
       );
       expect(operation.state).toBe("indexing");
       await failSigned(operation.id, operation.state);
@@ -1257,8 +1196,7 @@ describe("HeliusRingsService", () => {
 
       await expect(
         liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-far-back-2", opType: "shield" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-far-back-2", opType: "shield" })
         )
       ).rejects.toMatchObject({ code: "conflict" });
     });
@@ -1268,8 +1206,7 @@ describe("HeliusRingsService", () => {
         nonce: string
       ): Promise<{ id: string; signature: string }> {
         const operation = await liveishService().prepareOperation(
-          operationInput({ clientNonce: nonce, opType: "withdraw" }),
-          actorContext
+          operationInput({ clientNonce: nonce, opType: "withdraw" })
         );
         expect(operation.state).toBe("indexing");
         const signature = operation.outerTxSignature;
@@ -1300,8 +1237,7 @@ describe("HeliusRingsService", () => {
 
         await expect(
           liveishService().prepareOperation(
-            operationInput({ clientNonce: "nonce-void-ok-2", opType: "withdraw" }),
-            actorContext
+            operationInput({ clientNonce: "nonce-void-ok-2", opType: "withdraw" })
           )
         ).resolves.toBeDefined();
       });
@@ -1316,8 +1252,7 @@ describe("HeliusRingsService", () => {
 
       it("refuses to void a retryable failure", async () => {
         const operation = await liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-void-retry", opType: "withdraw" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-void-retry", opType: "withdraw" })
         );
         const signature = operation.outerTxSignature;
         if (!signature) throw new Error("retryable fixture has no signature");
@@ -1330,8 +1265,7 @@ describe("HeliusRingsService", () => {
 
       it("refuses an unsigned failure, which belongs to retry", async () => {
         const operation = await service({ gateway: new InMemoryRingsGateway() }).prepareOperation(
-          operationInput({ clientNonce: "nonce-void-unsigned" }),
-          actorContext
+          operationInput({ clientNonce: "nonce-void-unsigned" })
         );
         expect(operation.state).toBe("failed");
 
@@ -1373,8 +1307,7 @@ describe("HeliusRingsService", () => {
 
     it("refuses to retry an operation that was already signed", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-signed-retry" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-signed-retry" })
       );
 
       // It reached submission, so bytes exist. Fail it from there and ask for a
@@ -1390,7 +1323,7 @@ describe("HeliusRingsService", () => {
       });
 
       await expect(
-        liveishService().retryOperation(operation.id, "nonce-retry-attempt", actorContext)
+        liveishService().retryOperation(operation.id, "nonce-retry-attempt")
       ).rejects.toMatchObject({ code: "CONFLICT" });
     });
 
@@ -1405,8 +1338,7 @@ describe("HeliusRingsService", () => {
       if (!fresh) throw new Error("wallet fixture was not created");
 
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-unprovisioned", walletId: fresh.id }),
-        actorContext
+        operationInput({ clientNonce: "nonce-unprovisioned", walletId: fresh.id })
       );
 
       // The wallet has no identity to spend from. Blaming the gateway would
@@ -1418,8 +1350,7 @@ describe("HeliusRingsService", () => {
 
     it("drives an allowed operation through sign and submit to indexing", async () => {
       const operation = await liveishService().prepareOperation(
-        operationInput({ clientNonce: "nonce-live" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-live" })
       );
 
       expect(operation.state).toBe("indexing");
@@ -1439,7 +1370,7 @@ describe("HeliusRingsService", () => {
         gateway,
         signOuterTransaction: sign,
         submitOuterTransaction: async () => OUTER_TX.signature,
-      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-valid" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-valid" }));
 
       expect(operation.state).toBe("indexing");
       expect(sign).toHaveBeenCalledOnce();
@@ -1456,7 +1387,7 @@ describe("HeliusRingsService", () => {
         gateway,
         signOuterTransaction: sign,
         submitOuterTransaction: submit,
-      }).prepareOperation(operationInput({ clientNonce: "nonce-signer-modified" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-signer-modified" }));
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: false });
@@ -1483,7 +1414,7 @@ describe("HeliusRingsService", () => {
         gateway,
         signOuterTransaction: sign,
         submitOuterTransaction: async () => OUTER_TX.signature,
-      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-tampered" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-wire-tampered" }));
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "invalid_input", retryable: false });
@@ -1502,8 +1433,7 @@ describe("HeliusRingsService", () => {
           opType: "merge",
           asset: { mint: "So11111111111111111111111111111111111111112" },
           clientNonce: "nonce-merge",
-        }),
-        actorContext
+        })
       );
 
       expect(operation.state).toBe("indexing");
@@ -1526,8 +1456,7 @@ describe("HeliusRingsService", () => {
           opType: "merge",
           asset: { mint: "So11111111111111111111111111111111111111112" },
           clientNonce: "nonce-merge-gate",
-        }),
-        actorContext
+        })
       );
 
       // Registration cannot set the flag, so a wallet provisioned before merge
@@ -1541,8 +1470,7 @@ describe("HeliusRingsService", () => {
           opType: "shield",
           asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
           clientNonce: "nonce-shield-gate",
-        }),
-        actorContext
+        })
       );
 
       // A shield writes a note rather than consuming several, so it is not
@@ -1555,7 +1483,7 @@ describe("HeliusRingsService", () => {
         submitOuterTransaction: async () => {
           throw new RingsAdapterError("submit_failed", "rpc down", { retryable: true });
         },
-      }).prepareOperation(operationInput({ clientNonce: "nonce-submit" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-submit" }));
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "submit_failed", retryable: true });
@@ -1567,7 +1495,7 @@ describe("HeliusRingsService", () => {
     it("fails as signer_failed when the signer returns undecodable bytes", async () => {
       const operation = await liveishService({
         signOuterTransaction: async () => "c2lnbmVk",
-      }).prepareOperation(operationInput({ clientNonce: "nonce-garbage" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-garbage" }));
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: false });
@@ -1578,7 +1506,7 @@ describe("HeliusRingsService", () => {
         signOuterTransaction: async () => {
           throw new RingsAdapterError("signer_failed", "signer down", { retryable: true });
         },
-      }).prepareOperation(operationInput({ clientNonce: "nonce-signer" }), actorContext);
+      }).prepareOperation(operationInput({ clientNonce: "nonce-signer" }));
 
       expect(operation.state).toBe("failed");
       expect(operation.failure).toMatchObject({ code: "signer_failed", retryable: true });
@@ -1599,8 +1527,7 @@ describe("HeliusRingsService", () => {
       });
 
       const original = svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-sign-race-failure-wins" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-sign-race-failure-wins" })
       );
       await signerEntered.promise;
 
@@ -1667,8 +1594,7 @@ describe("HeliusRingsService", () => {
       });
 
       const original = svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-sign-race-signed-wins" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-sign-race-signed-wins" })
       );
       await signerEntered.promise;
       const [ready] = await actual.listOperationsByWallet({ ...tenant, walletId });
@@ -1738,49 +1664,6 @@ describe("HeliusRingsService", () => {
       expect(resumed.state).toBe("indexing");
     });
 
-    it("advances only once the stored approval reads approved", async () => {
-      let approvalStatus: "pending" | "approved" = "pending";
-      const svc = liveishService({
-        enforcePolicy: policyStub("approval_required", {
-          requiresApproval: true,
-          approvalRequestId: "apr_1",
-        }),
-        getApprovalStatus: async () => approvalStatus,
-      });
-      const paused = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-exec" }),
-        actorContext
-      );
-      expect(paused.state).toBe("approval_required");
-
-      // The verdict comes from the approval request, never the caller: while
-      // it reads pending, execute is inert no matter how often it is called.
-      const stillPaused = await svc.executeOperation(paused.id);
-      expect(stillPaused.state).toBe("approval_required");
-
-      approvalStatus = "approved";
-      const advanced = await svc.executeOperation(paused.id);
-      expect(advanced.state).toBe("indexing");
-    });
-
-    it("fails a rejected approval as non-retryable", async () => {
-      const svc = liveishService({
-        enforcePolicy: policyStub("approval_required", {
-          requiresApproval: true,
-          approvalRequestId: "apr_1",
-        }),
-        getApprovalStatus: async () => "rejected",
-      });
-      const paused = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-reject" }),
-        actorContext
-      );
-
-      const rejected = await svc.executeOperation(paused.id);
-      expect(rejected.state).toBe("failed");
-      expect(rejected.failure).toMatchObject({ code: "approval_rejected", retryable: false });
-    });
-
     it("polls indexing idempotently and completes on the Photon hit", async () => {
       let now = "2026-08-18T00:00:00.000Z";
       const gateway = new InMemoryRingsGateway({
@@ -1789,10 +1672,7 @@ describe("HeliusRingsService", () => {
         buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
       });
       const svc = liveishService({ gateway });
-      const operation = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-index" }),
-        actorContext
-      );
+      const operation = await svc.prepareOperation(operationInput({ clientNonce: "nonce-index" }));
       expect(operation.state).toBe("indexing");
 
       gateway.recordSubmission(OUTER_TX.signature);
@@ -1816,8 +1696,7 @@ describe("HeliusRingsService", () => {
       });
       const svc = liveishService({ gateway });
       const operation = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-stranded" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-stranded" })
       );
       expect(operation.state).toBe("indexing");
 
@@ -1840,13 +1719,10 @@ describe("HeliusRingsService", () => {
   describe("retryOperation", () => {
     it("files a linked retry and leaves the failed original untouched", async () => {
       const svc = retryableFailureService();
-      const failed = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-retry" }),
-        actorContext
-      );
+      const failed = await svc.prepareOperation(operationInput({ clientNonce: "nonce-retry" }));
       expect(failed.state).toBe("failed");
 
-      const retry = await svc.retryOperation(failed.id, "nonce-retry-2", actorContext);
+      const retry = await svc.retryOperation(failed.id, "nonce-retry-2");
 
       expect(retry.id).not.toBe(failed.id);
       expect(retry.intentKey).not.toBe(failed.intentKey);
@@ -1885,11 +1761,7 @@ describe("HeliusRingsService", () => {
       });
       if (!failed) throw new Error("failed merge fixture was not created");
 
-      const retry = await liveishService().retryOperation(
-        failed.id,
-        "nonce-merge-retry",
-        actorContext
-      );
+      const retry = await liveishService().retryOperation(failed.id, "nonce-merge-retry");
 
       expect(retry.opType).toBe("merge");
       expect(retry.retryOfOperationId).toBe(failed.id);
@@ -1897,36 +1769,27 @@ describe("HeliusRingsService", () => {
     });
 
     it("refuses to retry a non-retryable failure", async () => {
-      const svc = service({ enforcePolicy: policyStub("deny") });
-      const denied = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-noretry" }),
-        actorContext
-      );
+      const svc = service();
+      const denied = await svc.prepareOperation(operationInput({ clientNonce: "nonce-noretry" }));
+      expect(denied.failure).toMatchObject({ code: "config_error", retryable: false });
 
-      await expect(
-        svc.retryOperation(denied.id, "nonce-noretry-2", actorContext)
-      ).rejects.toMatchObject({
+      await expect(svc.retryOperation(denied.id, "nonce-noretry-2")).rejects.toMatchObject({
         code: "CONFLICT",
       });
     });
 
     it("caps the retry lineage depth", async () => {
       const svc = retryableFailureService();
-      let current = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-depth-0" }),
-        actorContext
-      );
+      let current = await svc.prepareOperation(operationInput({ clientNonce: "nonce-depth-0" }));
       expect(current.state).toBe("failed");
 
       // Depth 1 is the original; four retries reach the cap of five.
       for (let attempt = 1; attempt < 5; attempt++) {
-        current = await svc.retryOperation(current.id, `nonce-depth-${attempt}`, actorContext);
+        current = await svc.retryOperation(current.id, `nonce-depth-${attempt}`);
         expect(current.state).toBe("failed");
       }
 
-      await expect(
-        svc.retryOperation(current.id, "nonce-depth-5", actorContext)
-      ).rejects.toMatchObject({
+      await expect(svc.retryOperation(current.id, "nonce-depth-5")).rejects.toMatchObject({
         code: "CONFLICT",
         message: expect.stringContaining("retry limit"),
       });
@@ -1935,12 +1798,11 @@ describe("HeliusRingsService", () => {
     it("refuses to retry an operation that has not failed", async () => {
       const svc = liveishService();
       const inFlight = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-inflight" }),
-        actorContext
+        operationInput({ clientNonce: "nonce-inflight" })
       );
       expect(inFlight.state).toBe("indexing");
 
-      await expect(svc.retryOperation(inFlight.id, "again", actorContext)).rejects.toMatchObject({
+      await expect(svc.retryOperation(inFlight.id, "again")).rejects.toMatchObject({
         code: "CONFLICT",
       });
     });
@@ -2006,15 +1868,12 @@ describe("HeliusRingsService", () => {
   describe("event feed", () => {
     it("records the full lifecycle on the timeline", async () => {
       const svc = liveishService();
-      const operation = await svc.prepareOperation(
-        operationInput({ clientNonce: "nonce-events" }),
-        actorContext
-      );
+      const operation = await svc.prepareOperation(operationInput({ clientNonce: "nonce-events" }));
 
       const detail = await svc.getOperationWithEvents(operation.id);
       const kinds = detail.events.map((event) => event.kind);
       expect(kinds).toContain("operation.created");
-      expect(kinds).toContain("policy.evaluated");
+      expect(kinds).not.toContain("policy.evaluated");
       expect(kinds).toContain("proof.received");
       expect(kinds).toContain("transaction.submitted");
     });
@@ -2230,7 +2089,7 @@ describe("HeliusRingsService", () => {
       await seedActiveRing();
 
       const input = operationInput({ ring: "treasury", clientNonce: "nonce-ring-pin" });
-      const operation = await liveishService().prepareOperation(input, actorContext);
+      const operation = await liveishService().prepareOperation(input);
 
       expect(operation.state).toBe("indexing");
       expect(operation.ringProgramId).toBe(RING_PROGRAM);
@@ -2260,8 +2119,7 @@ describe("HeliusRingsService", () => {
           policyInputs.push(input);
         },
       }).prepareOperation(
-        operationInput({ opType: "withdraw", ring: "treasury", clientNonce: "nonce-ring-spend" }),
-        actorContext
+        operationInput({ opType: "withdraw", ring: "treasury", clientNonce: "nonce-ring-spend" })
       );
 
       expect(operation.state).toBe("indexing");
@@ -2282,7 +2140,7 @@ describe("HeliusRingsService", () => {
         ring: "treasury",
         clientNonce: "nonce-ring-withdraw-key",
       });
-      const operation = await liveishService().prepareOperation(input, actorContext);
+      const operation = await liveishService().prepareOperation(input);
       expect(operation.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
     });
 
@@ -2300,8 +2158,7 @@ describe("HeliusRingsService", () => {
             ring: "treasury",
             asset: { mint: USDC_MINT, amountRaw: "1000000" },
             clientNonce: `nonce-ring-usdc-${opType}`,
-          }),
-          actorContext
+          })
         );
 
         expect(operation.ringProgramId).toBe(RING_PROGRAM);
@@ -2313,8 +2170,7 @@ describe("HeliusRingsService", () => {
       // The request names a ring the project does not have: the caller's to fix.
       await expect(
         liveishService().prepareOperation(
-          operationInput({ ring: "treasury", clientNonce: "nonce-ring-none" }),
-          actorContext
+          operationInput({ ring: "treasury", clientNonce: "nonce-ring-none" })
         )
       ).rejects.toMatchObject({ code: "invalid_input" });
       expect(
@@ -2335,8 +2191,7 @@ describe("HeliusRingsService", () => {
       // An operator action (completing bring-up) makes the same request succeed.
       await expect(
         liveishService().prepareOperation(
-          operationInput({ ring: "treasury", clientNonce: "nonce-ring-pending" }),
-          actorContext
+          operationInput({ ring: "treasury", clientNonce: "nonce-ring-pending" })
         )
       ).rejects.toMatchObject({ code: "config_error" });
     });
@@ -2345,8 +2200,7 @@ describe("HeliusRingsService", () => {
       await seedActiveRing();
 
       const failed = await retryableFailureService().prepareOperation(
-        operationInput({ ring: "treasury", clientNonce: "nonce-ring-retry" }),
-        actorContext
+        operationInput({ ring: "treasury", clientNonce: "nonce-ring-retry" })
       );
       expect(failed.state).toBe("failed");
       expect(failed.ringProgramId).toBe(RING_PROGRAM);
@@ -2359,11 +2213,7 @@ describe("HeliusRingsService", () => {
         .bind(TEST_PROJECT_ID)
         .run();
 
-      const retried = await liveishService().retryOperation(
-        failed.id,
-        "nonce-ring-retry-2",
-        actorContext
-      );
+      const retried = await liveishService().retryOperation(failed.id, "nonce-ring-retry-2");
       expect(retried.state).toBe("indexing");
       expect(retried.ringProgramId).toBe(RING_PROGRAM);
     });
@@ -2376,8 +2226,7 @@ describe("HeliusRingsService", () => {
           opType: "withdraw",
           ring: "treasury",
           clientNonce: "nonce-ring-spend-cfg",
-        }),
-        actorContext
+        })
       );
       expect(failed.state).toBe("failed");
 
@@ -2388,11 +2237,7 @@ describe("HeliusRingsService", () => {
         .bind(TEST_PROJECT_ID)
         .run();
 
-      const retried = await liveishService().retryOperation(
-        failed.id,
-        "nonce-ring-spend-cfg-2",
-        actorContext
-      );
+      const retried = await liveishService().retryOperation(failed.id, "nonce-ring-spend-cfg-2");
       expect(retried.state).toBe("failed");
       expect(retried.failure?.code).toBe("config_error");
     });
@@ -2417,8 +2262,7 @@ describe("HeliusRingsService", () => {
           policyInputs.push(input);
         },
       }).prepareOperation(
-        operationInput({ opType: "ring_exit", ring: "treasury", clientNonce: "nonce-ring-exit" }),
-        actorContext
+        operationInput({ opType: "ring_exit", ring: "treasury", clientNonce: "nonce-ring-exit" })
       );
 
       expect(operation.state).toBe("indexing");
@@ -2442,8 +2286,7 @@ describe("HeliusRingsService", () => {
               opType: "ring_entry",
               ...(ring ? { ring } : {}),
               clientNonce: `nonce-ring-move-default-${ring ?? "none"}`,
-            }),
-            actorContext
+            })
           )
         ).rejects.toMatchObject({ code: "invalid_input" });
       }
@@ -2453,8 +2296,7 @@ describe("HeliusRingsService", () => {
       await seedActiveRing();
 
       const operation = await liveishService().prepareOperation(
-        operationInput({ opType: "withdraw", clientNonce: "nonce-ring-move-guard-1" }),
-        actorContext
+        operationInput({ opType: "withdraw", clientNonce: "nonce-ring-move-guard-1" })
       );
       expect(operation.state).toBe("indexing");
       await failSigned(operation.id, operation.state);
@@ -2467,8 +2309,7 @@ describe("HeliusRingsService", () => {
             opType: "ring_entry",
             ring: "treasury",
             clientNonce: "nonce-ring-move-guard-2",
-          }),
-          actorContext
+          })
         )
       ).rejects.toMatchObject({ code: "conflict" });
     });
@@ -2483,8 +2324,8 @@ describe("HeliusRingsService", () => {
         ring: "treasury",
         clientNonce: "nonce-ring-move-idem",
       });
-      const first = await retryableFailureService().prepareOperation(input, actorContext);
-      const replay = await retryableFailureService().prepareOperation(input, actorContext);
+      const first = await retryableFailureService().prepareOperation(input);
+      const replay = await retryableFailureService().prepareOperation(input);
 
       expect(replay.id).toBe(first.id);
       expect(first.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));

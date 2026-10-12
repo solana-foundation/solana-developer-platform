@@ -17,6 +17,8 @@ import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
@@ -437,9 +439,13 @@ export function RampPairProviderSelector({
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
+  const demo = usePaymentsDemo();
   const refresh = useThemeScope() === "refresh";
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
+  const pairs = demoRampPairs(
+    pairsForDirection(direction, sdpEnvironment, enabledRampProviders),
+    demo
+  );
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]

@@ -23,12 +23,10 @@ import {
   internalError,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import {
   completePendingBvnkOfframpTransfer,
@@ -48,7 +46,7 @@ import {
   filterProviders,
   persistRampQuoteTransfer,
   providersFromPairs,
-  type RampQuotePolicyResolved,
+  type RampQuoteResolved,
   rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
@@ -67,14 +65,14 @@ type OfframpCurrencyPair = {
 };
 
 /**
- * Parse and resolve an off-ramp quote into its wallet-operation policy candidate.
+ * Parse and resolve an off-ramp quote for the request gate.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resolved resources, and raw payload.
+ * @returns The validated body and resolved resources.
  */
-export async function extractOfframpQuotePolicyCandidate(
+export async function extractOfframpQuoteRequest(
   c: ValidatedBodyContext<typeof createOfframpQuoteSchema>
-): Promise<PolicyGateExtraction> {
+): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
   const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
     c,
@@ -83,35 +81,7 @@ export async function extractOfframpQuotePolicyCandidate(
     input.sourceCustodyWalletId
   );
 
-  return {
-    candidate: {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(scope.auth),
-      source: "api",
-      operationFamily: "ramp",
-      operationType: "ramp_offramp_quote",
-      asset: rampTransferTokenMint(input.assetRail, c.env),
-      amount: input.cryptoAmount,
-      destination: null,
-      context: {},
-      providerExtensions: { provider: input.provider },
-    },
-    legs: [],
-    body: input,
-    resolved: { scope, projectId, counterparty, wallet, walletAddress },
-    rawPayload: {
-      provider: input.provider,
-      counterpartyId: input.counterpartyId,
-      fiatCurrency: input.fiatCurrency,
-      cryptoAmount: input.cryptoAmount,
-      assetRail: input.assetRail,
-    },
-    idempotencyKey: null,
-  };
+  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
 }
 
 export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOfframpSchema>) {
@@ -143,12 +113,10 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       wallet: sourceWallet,
       walletAddress: sourceWalletAddress,
     },
-  } = getPolicyGateContext<CreateOfframpQuoteBody, RampQuotePolicyResolved>(c);
+  } = getRequestGateContext<CreateOfframpQuoteBody, RampQuoteResolved>(c);
 
-  await beginApprovedWalletOperationEffect(c);
-
-  // Requirements/policy have succeeded. Reserve the ID now so the provider
-  // quote and the eventual ledger row share the same internal transfer ID.
+  // Requirements have succeeded. Reserve the ID now so the provider
+  // quote and the eventual transfer row share the same internal transfer ID.
   const reservedTransferId = generatePaymentTransferId();
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;

@@ -1,16 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
+import RedesignPaymentRequestsPage from "./page.redesign";
 import { fetchPaymentRequests } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestsPage() {
+async function PaymentRequestsPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -48,3 +50,5 @@ export default async function PaymentRequestsPage() {
     );
   });
 }
+
+export default withLegacyDesign(RedesignPaymentRequestsPage, PaymentRequestsPage, "activity");

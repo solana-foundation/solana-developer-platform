@@ -98,21 +98,11 @@ describe("Integrations dashboard headers", () => {
   });
 });
 
-describe("Policies dashboard headers", () => {
-  it("keeps only API key policies when Custody is disabled", () => {
-    const config = getDashboardPageConfig("/dashboard/policies", t, false, false, [], false);
-
-    expect(config.headerTabs?.tabs.map((tab) => tab.id)).toEqual(["api_keys"]);
-  });
-});
-
 describe("dashboard route headers", () => {
   it.each([
     ["/dashboard/api-keys", "Shared.dashboardShell.apiKeys"],
     ["/dashboard/api-keys/new", "Shared.dashboardShell.newApiKey"],
     ["/dashboard/api-keys/key_1/edit", "Shared.dashboardShell.editApiKey"],
-    ["/dashboard/approvals", "Shared.dashboardShell.approvals"],
-    ["/dashboard/approvals/request_1", "Shared.dashboardShell.approvals"],
     ["/dashboard/wallets", "Shared.dashboardShell.wallets"],
     ["/dashboard/custody", "Shared.dashboardShell.wallets"],
     ["/dashboard/wallets/setup", "Shared.dashboardShell.createWallet"],
@@ -121,11 +111,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/custody/connections", "Shared.dashboardShell.connections"],
     ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallets"],
     ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallets"],
-    ["/dashboard/wallets/wallet_1/policy", "Shared.dashboardShell.walletControls"],
-    [
-      "/dashboard/wallets/wallet_1/policy/audit/evaluation_1",
-      "Shared.dashboardShell.walletControls",
-    ],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "Shared.dashboardShell.newAsset"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
@@ -134,10 +119,10 @@ describe("dashboard route headers", () => {
     ["/dashboard/payments", "Shared.dashboardShell.payments"],
     ["/dashboard/payments/transactions", "Shared.dashboardShell.transactions"],
     ["/dashboard/payments/requests", "Shared.dashboardShell.requests"],
-    ["/dashboard/payments/requests/new", "Shared.dashboardShell.requests"],
-    ["/dashboard/payments/recurring", "Shared.dashboardShell.recurringPayments"],
-    ["/dashboard/payments/recurring/create", "Shared.dashboardShell.recurringPayment"],
-    ["/dashboard/payments/recurring/rp_1", "Shared.dashboardShell.recurringPayment"],
+    ["/dashboard/payments/requests/new", "DashboardPayments.requests.newRequest"],
+    ["/dashboard/payments/recurring", "Shared.dashboardShell.newDesign.recurringPayments"],
+    ["/dashboard/payments/recurring/create", "DashboardPayments.recurring.newSchedule"],
+    ["/dashboard/payments/recurring/rp_1", "Shared.dashboardShell.newDesign.recurringPayment"],
     ["/dashboard/payments/pay", "Shared.dashboardShell.pay"],
     ["/dashboard/payments/receive", "Shared.dashboardShell.receive"],
     ["/dashboard/integrations", "Shared.dashboardShell.integrations"],

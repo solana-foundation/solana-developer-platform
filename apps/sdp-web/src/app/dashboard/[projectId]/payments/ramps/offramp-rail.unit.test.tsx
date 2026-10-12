@@ -125,7 +125,6 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     canSendOnchain: true,
     onchainSendLoading: false,
     onchainSendResult: null,
-    heldApprovalRequestId: null,
     sendCryptoToDeposit: asyncNoop,
     quoteExpired: false,
     ...overrides,
@@ -174,52 +173,5 @@ describe("OfframpRail final step", () => {
     expect(screen.queryByText(/before the quote expires/)).not.toBeNull();
     expect(screen.getByRole("button", { name: "Send 250 USDC" })).toHaveProperty("disabled", false);
     expect(container.querySelector(".animate-spin")).not.toBeNull();
-  });
-
-  it("says a send held for approval is waiting, once, and links the request", () => {
-    renderRail(
-      offrampWizard({
-        onchainSendResult: { kind: "approval_pending", approvalRequestId: "apr_offramp" },
-        heldApprovalRequestId: "apr_offramp",
-      })
-    );
-
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Waiting for approval");
-    expect(screen.getAllByText("Waiting for approval")).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/approvals/apr_offramp"
-    );
-    expect(screen.queryByText(/Once approved, 250 USDC is sent/)).not.toBeNull();
-    expect(screen.queryByText(/If the quote expires first/)).not.toBeNull();
-  });
-
-  it("drops the pill and the send prompt while a send is held", () => {
-    const { container } = renderRail(
-      offrampWizard({
-        onchainSendResult: { kind: "approval_pending", approvalRequestId: "apr_offramp" },
-        heldApprovalRequestId: "apr_offramp",
-        transferStatus: undefined,
-      })
-    );
-
-    expect(screen.queryByText("Preparing transfer status")).toBeNull();
-    expect(screen.queryByText("Waiting to send")).toBeNull();
-    expect(container.querySelector(".animate-spin")).toBeNull();
-    expect(screen.queryByText(/before the quote expires/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /Send 250 USDC/ })).toBeNull();
-  });
-
-  it("returns to the polled status once the approved send lands", () => {
-    renderRail(
-      offrampWizard({
-        onchainSendResult: { kind: "approval_pending", approvalRequestId: "apr_offramp" },
-        heldApprovalRequestId: null,
-        transferStatus: transfer("settling"),
-      })
-    );
-
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Complete your payout");
-    expect(screen.queryByText("Sending payout")).not.toBeNull();
-    expect(screen.queryByRole("link", { name: "View approval request" })).toBeNull();
   });
 });

@@ -8,12 +8,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
-import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  recoverApprovedWalletOperations,
-  runApprovedWalletOperationEffectTransaction,
-} from "@/services/policy/approved-operation-replay";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -506,7 +500,7 @@ describe("depositIntoVault — signed persistence boundary", () => {
     ["minSharesOut", { accepted: { amount: "10", minSharesOut: "0.9" } }, { minSharesOut: "1" }],
     ["unexpected minSharesOut", { accepted: { amount: "10", minSharesOut: "1" } }, {}],
   ])(
-    "fails closed when the builder changes the policy-approved %s",
+    "fails closed when the builder changes the requested %s",
     async (_name, planOverrides, inputOverrides) => {
       buildVaultDeposit.mockResolvedValue(plan(planOverrides));
 
@@ -1006,93 +1000,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
       expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     }
   );
-});
-
-describe("depositIntoVault — approved-operation effect fencing", () => {
-  it("makes an interrupted signed intent recover as ambiguous, never completed", async () => {
-    const repository = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: ORG, projectId: PROJECT })
-    );
-    const operation = await repository.createWalletOperation({
-      organizationId: ORG,
-      projectId: PROJECT,
-      custodyWalletId: WALLET_ROW_ID,
-      walletId: wallet.walletId,
-      source: "earn_vault_deposit",
-      operationFamily: "program",
-      operationType: "earn_vault_deposit",
-      asset: TOKEN_MINT,
-      amount: "10",
-      destination: VAULT_A,
-      rawPayload: { requestId: "11111111-1111-4111-8111-111111111111" },
-      status: "pending_approval",
-    });
-    if (!operation) throw new Error("failed to seed approved wallet operation");
-    const approval = await repository.createApprovalRequest({
-      organizationId: ORG,
-      projectId: PROJECT,
-      walletOperationId: operation.id,
-    });
-    if (!approval) throw new Error("failed to seed approval request");
-    await repository.updateApprovalRequestStatus({
-      organizationId: ORG,
-      projectId: PROJECT,
-      approvalRequestId: approval.id,
-      status: "approved",
-      operationStatus: "executing",
-      resolvedBy: USER,
-    });
-    const attemptId = "earn-approved-interrupted-attempt";
-    expect(await repository.claimWalletOperationExecution(operation.id, attemptId)).not.toBeNull();
-    const contextValues: Record<string, unknown> = {
-      apiKey: {
-        id: "key_earn_approved_test",
-        organizationId: ORG,
-        projectId: PROJECT,
-        role: "api_admin",
-        permissions: ["*"],
-        environment: "sandbox",
-        signingWalletId: null,
-        signingWalletIds: [],
-        walletBindings: [],
-      },
-      projectId: PROJECT,
-      approvedWalletOperationId: operation.id,
-      approvedWalletOperationAttemptId: attemptId,
-    };
-    const context = {
-      env,
-      get: (key: string) => contextValues[key],
-    } as never;
-    broadcastVaultTransaction.mockRejectedValue(new Error("worker interrupted after insert"));
-
-    const result = await depositIntoVault(env, depositInput(), {
-      runIntentTransaction: (mutation) =>
-        runApprovedWalletOperationEffectTransaction(context, mutation),
-    });
-    expect(result.movement.status).toBe("requested");
-    const fenced = await repository.getWalletOperationById(operation.id);
-    expect(fenced?.execution_effect_started_at).not.toBeNull();
-    await getDb(env)
-      .prepare(
-        `UPDATE wallet_operations
-         SET execution_lease_expires_at = '2000-01-01T00:00:00.000Z'
-         WHERE id = ?`
-      )
-      .bind(operation.id)
-      .run();
-
-    expect(await recoverApprovedWalletOperations(env)).toBe(0);
-    expect(await repository.getWalletOperationById(operation.id)).toMatchObject({
-      status: "failed",
-      execution_attempt_id: attemptId,
-    });
-    expect((await repository.getWalletOperationById(operation.id))?.execution_error).toContain(
-      "manual reconciliation"
-    );
-    expect(await tableCount("earn_movements")).toBe(1);
-  });
 });
 
 describe("earn vault project attribution", () => {
