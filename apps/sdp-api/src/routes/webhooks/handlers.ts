@@ -13,6 +13,10 @@ import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ram
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError } from "@/lib/errors";
+import {
+  revokePendingInvitationsForOrganization,
+  revokePendingInvitationsForUser,
+} from "@/lib/invitations";
 import { success } from "@/lib/response";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -68,25 +72,29 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
 
   const db = getDb(c.env);
 
-  await db.batch([
-    db
+  await db.transaction(async (tx) => {
+    await tx
       .prepare(
         `UPDATE organizations
          SET status = 'deleted', updated_at = datetime('now')
          WHERE id = ?`
       )
-      .bind(mapping.organization_id),
-    db
+      .bind(mapping.organization_id)
+      .run();
+    await revokePendingInvitationsForOrganization(tx, mapping.organization_id);
+    await tx
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
-      .bind(mapping.organization_id),
-    db
+      .bind(mapping.organization_id)
+      .run();
+    await tx
       .prepare(
         `UPDATE api_keys
          SET status = 'revoked', revoked_at = datetime('now')
          WHERE organization_id = ? AND status = 'active'`
       )
-      .bind(mapping.organization_id),
-  ]);
+      .bind(mapping.organization_id)
+      .run();
+  });
 
   // Everything below is post-commit, and each effect is isolated so that one
   // throwing cannot skip the others — every one of them is what stops a live
@@ -313,7 +321,7 @@ async function upsertVerifiedMembership(
   const organizationId = await ensureOrganizationMapping(c, data.organization);
   const email = await resolveMemberEmail(c, data.userId);
   if (!email) {
-    return;
+    throw new AppError("INTERNAL_ERROR", "Clerk member has no stored email");
   }
   const clerkRole = mapClerkRoleToOrgRole(data.role);
 
@@ -390,14 +398,17 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     return;
   }
 
-  await getDb(c.env)
-    .prepare(
-      `UPDATE organization_members
-       SET status = 'removed'
-       WHERE organization_id = ? AND user_id = ?`
-    )
-    .bind(mapping.organization_id, identity.user_id)
-    .run();
+  await getDb(c.env).transaction(async (tx) => {
+    await revokePendingInvitationsForUser(tx, mapping.organization_id, identity.user_id);
+    await tx
+      .prepare(
+        `UPDATE organization_members
+         SET status = 'removed'
+         WHERE organization_id = ? AND user_id = ?`
+      )
+      .bind(mapping.organization_id, identity.user_id)
+      .run();
+  });
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {

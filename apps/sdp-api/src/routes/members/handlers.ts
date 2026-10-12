@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
+import { revokePendingInvitationsForUser } from "@/lib/invitations";
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -794,41 +795,8 @@ export const removeMember = async (c: AppContext) => {
 
   const removesAnAdmin = normalizeOrganizationRole(member.role) === "admin";
 
-  // Acceptance matches the caller's email against `users` or any auth
-  // identity, so revocation must cover the same set.
-  const inviteeEmailRows = await getDb(c.env)
-    .prepare(
-      `SELECT email FROM users WHERE id = ?
-       UNION
-       SELECT email FROM auth_user_identities WHERE user_id = ? AND email IS NOT NULL`
-    )
-    .bind(member.user_id, member.user_id)
-    .all<{ email: string | null }>();
-  const inviteeEmails = [
-    ...new Set(
-      inviteeEmailRows.results
-        .map((row) => row.email?.trim().toLowerCase())
-        .filter((email): email is string => Boolean(email))
-    ),
-  ];
-
   await getDb(c.env).transaction(async (tx) => {
-    // A pending invitation surviving the removal is a self-reinstatement token
-    // (acceptance reinstates inactive rows at the invited role), so it dies in
-    // the same transaction as the status flip. Clerk's link needs no matching
-    // revocation — sign-in refuses the inactive row first. First statement so
-    // locks are taken in acceptance's order (invitation, then member): no
-    // deadlock against a concurrent acceptance.
-    if (inviteeEmails.length > 0) {
-      await tx
-        .prepare(
-          `UPDATE invitations SET status = 'revoked'
-            WHERE organization_id = ? AND status = 'pending'
-              AND LOWER(email) IN (${inviteeEmails.map(() => "?").join(", ")})`
-        )
-        .bind(organizationId, ...inviteeEmails)
-        .run();
-    }
+    await revokePendingInvitationsForUser(tx, organizationId, member.user_id);
 
     if (removesAnAdmin) {
       // Lock every active admin row before counting them. A conditional UPDATE

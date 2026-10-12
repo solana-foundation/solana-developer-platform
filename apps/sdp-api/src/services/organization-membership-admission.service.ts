@@ -21,10 +21,13 @@ export type MembershipAdmission =
  * - An active member stays as they are. A live invitation still pending for
  *   them is marked accepted, so the directory stops listing it.
  * - A removed member returns only through a live SDP invitation, which is
- *   claimed and decides their role. Neither a sign-in nor a webhook alone
- *   reactivates them.
- * - Anyone else joins with the live invitation's role, else the Clerk role,
- *   unless their newest invitation was revoked.
+ *   claimed. Neither a sign-in nor a webhook alone reactivates them.
+ * - Anyone else joins, unless their newest invitation was revoked and no live
+ *   one replaced it.
+ *
+ * A claimed invitation never grants more than the verified Clerk role: the
+ * member gets the less privileged of the two, so a stale or edited local
+ * invitation cannot raise a Clerk `org:member` to admin.
  *
  * The organization row is locked first (FOR NO KEY UPDATE, which leaves
  * foreign-key inserts elsewhere unblocked), so admissions into one organization
@@ -37,7 +40,7 @@ export type MembershipAdmission =
  * @param params.organizationId - SDP organization id
  * @param params.userId - SDP user id
  * @param params.email - The user's verified email, the key invitations match on
- * @param params.clerkRole - The user's Clerk organization role, used when no live invitation names one
+ * @param params.clerkRole - The user's verified Clerk organization role, the ceiling on any invited role
  * @returns The admitted role and whether this call created or reactivated the membership, or the refusal reason
  */
 export async function admitOrganizationMember(
@@ -84,7 +87,10 @@ export async function admitOrganizationMember(
       if (!invitation) {
         return { admitted: false, reason: "membership_removed" };
       }
-      const role = normalizeOrganizationRole(invitation.role);
+      const role = leastPrivilegedRole(
+        normalizeOrganizationRole(invitation.role),
+        params.clerkRole
+      );
       await acceptInvitation(tx, invitation.id, role);
       await tx
         .prepare(
@@ -101,7 +107,9 @@ export async function admitOrganizationMember(
       return { admitted: false, reason: "invitation_revoked" };
     }
 
-    const role = invitation ? normalizeOrganizationRole(invitation.role) : params.clerkRole;
+    const role = invitation
+      ? leastPrivilegedRole(normalizeOrganizationRole(invitation.role), params.clerkRole)
+      : params.clerkRole;
     if (invitation) {
       await acceptInvitation(tx, invitation.id, role);
     }
@@ -175,6 +183,20 @@ async function acceptInvitation(
     )
     .bind(role, invitationId)
     .run();
+}
+
+/**
+ * Returns the less privileged of two organization roles.
+ *
+ * @param invitedRole - Role the invitation names
+ * @param clerkRole - Verified Clerk role
+ * @returns `admin` only when both are admin
+ */
+function leastPrivilegedRole(
+  invitedRole: OrganizationRole,
+  clerkRole: OrganizationRole
+): OrganizationRole {
+  return invitedRole === "admin" && clerkRole === "admin" ? "admin" : "member";
 }
 
 /** Mints an organization membership id. */
