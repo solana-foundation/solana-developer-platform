@@ -7,7 +7,9 @@ import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   getAbortablePromise,
+  getSolanaErrorFromJsonRpcError,
   isJsonRpcPayload,
+  isSolanaError,
   type RpcTransport,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
@@ -58,13 +60,13 @@ const GENESIS_PROBE_TIMEOUT_MS = 10_000;
  * behind the requested slot, missing history or block status). Kit's HTTP transport only throws
  * on non-2xx, so the pool reads these from the body and asks the next endpoint.
  */
-const FAILOVER_JSON_RPC_ERROR_CODES: ReadonlySet<number> = new Set([
+const FAILOVER_JSON_RPC_ERROR_CODES = [
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
-]);
+] as const;
 
 /** `<cluster> <endpointUrl>` to the time its last genesis match expires; only matches are recorded. */
 const genesisProofExpiry = new Map<string, number>();
@@ -188,22 +190,15 @@ class UnsentRequestError extends Error {
 }
 
 /**
- * Whether a JSON-RPC response body says the node can't serve the request yet. Kit's Solana
- * transport parses bodies with BigInt numbers, so the code arrives as a `bigint`.
+ * Whether a JSON-RPC response body says the node can't serve the request yet.
  *
  * @param response - The decoded JSON-RPC response.
- * @returns `true` when its `error.code` is in `FAILOVER_JSON_RPC_ERROR_CODES`.
+ * @returns `true` when its error maps to one of `FAILOVER_JSON_RPC_ERROR_CODES`.
  */
 function asksForAnotherEndpoint(response: unknown): boolean {
   if (typeof response !== "object" || response === null || !("error" in response)) return false;
-  const { error } = response;
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (typeof error.code === "number" || typeof error.code === "bigint") &&
-    FAILOVER_JSON_RPC_ERROR_CODES.has(Number(error.code))
-  );
+  const servedError = getSolanaErrorFromJsonRpcError(response.error);
+  return FAILOVER_JSON_RPC_ERROR_CODES.some((code) => isSolanaError(servedError, code));
 }
 
 /**
