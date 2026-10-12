@@ -13,7 +13,8 @@
  * making a late deposit recoverable.
  */
 
-import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { confirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
@@ -45,7 +46,7 @@ export async function observeDvpTradeNow(
   awaitSignature?: Signature
 ): Promise<DvpTradeRow | null> {
   try {
-    const rpc = createRpc(env);
+    const rpc = createClusterRpc();
 
     if (awaitSignature) {
       // Reading before the transfer confirms would record the balance it had
@@ -117,20 +118,16 @@ export async function observeDvpTradeNow(
  * answer the recording path gives: a reading that failed is not a balance of
  * zero, and must not be shown as one.
  *
- * @param env - API process environment.
  * @param trade - The trade to read without recording.
  * @returns The live derived trade, or the stored trade when it is ineligible or
  *   the chain cannot be read.
  */
-export async function observeDvpTradeWithoutRecording(
-  env: Env,
-  trade: DvpTradeRow
-): Promise<DvpTradeRow> {
+export async function observeDvpTradeWithoutRecording(trade: DvpTradeRow): Promise<DvpTradeRow> {
   if (OBSERVATION_MAX_AGE_BY_STATUS[trade.status] === null) {
     return trade;
   }
   try {
-    const rpc = createRpc(env);
+    const rpc = createClusterRpc();
     const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     const observation = await readDvpTradeObservation(
       rpc,
