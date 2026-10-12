@@ -23,8 +23,14 @@ import { parseIdempotencyKey } from "./idempotency-key";
 /** Set on a response replayed from a stored one. */
 export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
 
-/** Marks an {@link idempotent} handler with its key mode, for route inventory tests. */
+/**
+ * Marks an {@link idempotent} handler with its key mode and replay access, for
+ * route inventory tests.
+ */
 export const IDEMPOTENCY_MARKER = Symbol.for("sdp.idempotency");
+
+/** See {@link IdempotencyOptions.replayAccess}. */
+export type ReplayAccess = "chain" | ((c: Context<{ Bindings: Env }>) => void | Promise<void>);
 
 export interface IdempotencyOptions {
   key: IdempotencyKeyMode;
@@ -50,12 +56,18 @@ export interface IdempotencyOptions {
    */
   canonicalize?: (body: JsonValue) => JsonValue;
   /**
-   * Re-checks, before a stored response is replayed, the resource access the
-   * route checks after this step (for example, an API key's wallet bindings).
-   * Throw to refuse. Without it, a credential narrowed since the original
-   * request would still read that request's response.
+   * What a replay re-checks before it serves a stored response. Required: a
+   * replay skips the handler, so every check the handler makes about the
+   * caller is skipped with it unless this repeats it (ADR 0008).
+   *
+   * - `"chain"`: the handler checks nothing about the caller beyond the chain
+   *   before this step (authentication, project context, `requirePermissions`,
+   *   Allowed Operations), which every replay passes again.
+   * - A function: repeats the caller checks the handler makes (an API key's
+   *   wallet bindings, approver eligibility), reading fresh whatever the
+   *   handler reads fresh. Throw to refuse; nothing is replayed.
    */
-  authorizeReplay?: (c: Context<{ Bindings: Env }>) => void | Promise<void>;
+  replayAccess: ReplayAccess;
   /**
    * The route answers `Dry-Run: true` with a write-free verdict (its policy
    * gate short-circuits before anything is written), so a dry run skips this
@@ -320,7 +332,9 @@ export async function runIdempotency(
 
   switch (claim.kind) {
     case "completed":
-      await options.authorizeReplay?.(c);
+      if (options.replayAccess !== "chain") {
+        await options.replayAccess(c);
+      }
       logOutcome(operation, idempotencyKey, "replayed");
       return replay(c, claim.response);
     case "mismatch":
@@ -428,10 +442,32 @@ async function settle(write: () => Promise<unknown>, operation: string): Promise
 export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bindings: Env }> {
   const middleware: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
     runIdempotency(c, next, options);
-  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: options.key });
+  const declaration: IdempotencyDeclaration = {
+    key: options.key,
+    replayAccess: options.replayAccess === "chain" ? "chain" : "checked",
+  };
+  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: declaration });
+}
+
+/** What an {@link idempotent} handler declares. */
+export interface IdempotencyDeclaration {
+  key: IdempotencyKeyMode;
+  /** `checked` when the route passes a replay check, `chain` when it relies on the chain. */
+  replayAccess: "chain" | "checked";
+}
+
+function declaration(handler: unknown): IdempotencyDeclaration | undefined {
+  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyDeclaration } | null)?.[
+    IDEMPOTENCY_MARKER
+  ];
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
 export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
-  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+  return declaration(handler)?.key;
+}
+
+/** Reads the replay access an {@link idempotent} handler declares. */
+export function declaredReplayAccess(handler: unknown): "chain" | "checked" | undefined {
+  return declaration(handler)?.replayAccess;
 }
