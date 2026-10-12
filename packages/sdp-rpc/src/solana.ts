@@ -312,9 +312,11 @@ export async function getTransactionNetworkFee(
 function wireTransactionBase64(transactionBytes: Uint8Array): Base64EncodedWireTransaction {
   // NOTE: kit 7.1.1's base64 decoder encodes the whole backing ArrayBuffer of an offset-zero view
   // (fixed upstream in kit#1957), so a transaction built inside a larger buffer would be sent with
-  // its slack. `slice()` copies the view to its own exact-size buffer; drop it once the installed
-  // kit includes kit#1957.
-  return getBase64Decoder().decode(transactionBytes.slice()) as Base64EncodedWireTransaction;
+  // its slack. `new Uint8Array(view)` copies it to an exact-size buffer (`.slice()` would not: on
+  // a Node `Buffer` it returns a view). Drop the copy once the installed kit includes kit#1957.
+  return getBase64Decoder().decode(
+    new Uint8Array(transactionBytes)
+  ) as Base64EncodedWireTransaction;
 }
 
 /**
