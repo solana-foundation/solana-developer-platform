@@ -16,6 +16,8 @@
     "counterparties",
     "---Ramps---",
     "ramps",
-    "ramps-providers"
+    "ramps-providers",
+    "---Activity---",
+    "transactions"
   ]
 }

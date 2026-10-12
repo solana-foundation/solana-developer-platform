@@ -5,6 +5,8 @@ description: List inbound transfers, paginate, dedupe, and reconcile against you
 
 `GET /v1/payments/transfers` is the workhorse for reconciliation. By default, it returns paginated persisted transfer records across your organization's custody wallets, with filters for direction, status, token, exact `custodyWalletId`, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker. To include recent on-chain observations for one exact wallet, set `custodyWalletId` and `includeObserved=true`.
 
+For one feed of past payments and issuance transactions, with cursor pagination and search by ID or signature, use [Transaction history](/docs/payments/transactions). It lists persisted records only, so keep using this endpoint with `includeObserved=true` for observed on-chain activity.
+
 ## Listing inbound transfers
 
 The minimal inbound-only request:
@@ -135,4 +137,5 @@ Notes:
 - [Verifying a payment](/docs/payments/accept-verification) — single-transfer status reads.
 - [Accept overview](/docs/payments/accept-overview) — the broader inbound flow.
 - [Payouts and disbursements](/docs/payments/send-payouts) — the same list endpoint used outbound.
+- [Transaction history](/docs/payments/transactions) — one cursor-paginated feed across payments and issuance.
 - [Payments API reference](/docs/reference/api/payments) — full endpoint reference.
