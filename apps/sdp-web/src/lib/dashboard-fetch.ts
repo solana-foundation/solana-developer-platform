@@ -68,8 +68,21 @@ function mutationKeys(): IdempotencyKeyStore {
 const inFlightMutations = new Map<string, Promise<Response>>();
 
 /**
- * Whether an answer retires the key, so the next submit is a new action. The
- * vault flows' rule (`applyIdempotencyKeyOutcome`):
+ * Whether a response is the dashboard backend's own answer: never a redirect
+ * `fetch` followed (an expired session sent to sign-in comes back as an HTML
+ * 200), and JSON unless it carries no body. Anything else says nothing about
+ * the write, so it never retires the key.
+ */
+function isApiAnswer(response: Response): boolean {
+  if (response.redirected) return false;
+  if (BODYLESS_STATUSES.has(response.status)) return true;
+  return response.headers.get("content-type")?.toLowerCase().includes("application/json") ?? false;
+}
+
+/**
+ * Whether an answer retires the key, so the next submit is a new action. Only
+ * a backend answer can ({@link isApiAnswer}), on the vault flows' rule
+ * (`applyIdempotencyKeyOutcome`):
  *
  * - A success, or a replay, is definitive: sdp-api ran or stored the request.
  * - A refusal (4xx other than a conflict or a rate limit) retires a fresh key.
@@ -81,6 +94,7 @@ const inFlightMutations = new Map<string, Promise<Response>>();
  *   back as a replay, which then retires the key.
  */
 function retiresKey(response: Response, earlierAttemptUnanswered: boolean): boolean {
+  if (!isApiAnswer(response)) return false;
   if (response.headers.get("Idempotent-Replayed") === "true") return true;
   if (response.status < 400) return true;
   return (

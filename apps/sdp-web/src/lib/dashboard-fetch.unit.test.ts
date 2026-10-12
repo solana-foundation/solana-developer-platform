@@ -95,13 +95,20 @@ describe("dashboardRequest", () => {
   });
 });
 
+/** A dashboard backend answer: JSON, as every backend route returns. */
+function jsonResponse(status: number, headers: Record<string, string> = {}): Response {
+  return new Response("{}", {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
 describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   const PATH = "/api/dashboard/payments/recurring-payments";
 
   function statusFetchMock(...statuses: number[]) {
-    return vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response("{}", { status: statuses.shift() ?? 201 })
+    return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse(statuses.shift() ?? 201)
     );
   }
 
@@ -131,13 +138,13 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   it("retires the key once a 5xx comes back as a replay, so the next submit is new", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const responses = [
-      new Response("{}", { status: 500 }),
-      new Response("{}", { status: 500, headers: { "Idempotent-Replayed": "true" } }),
-      new Response("{}", { status: 201 }),
+      jsonResponse(500),
+      jsonResponse(500, { "Idempotent-Replayed": "true" }),
+      jsonResponse(201),
     ];
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        responses.shift() ?? new Response("{}", { status: 201 })
+        responses.shift() ?? jsonResponse(201)
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -155,10 +162,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   it("holds the key when the request never got an answer", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = vi
-      .fn(
-        async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Response("{}", { status: 201 })
-      )
+      .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
       .mockRejectedValueOnce(new TypeError("network down"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -173,16 +177,36 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   it("keeps an unanswered attempt's key through a later refusal", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = vi
-      .fn(
-        async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Response("{}", { status: 201 })
-      )
+      .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
       .mockRejectedValueOnce(new TypeError("network down"))
-      .mockResolvedValueOnce(new Response("{}", { status: 401 }));
+      .mockResolvedValueOnce(jsonResponse(401));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submit()).rejects.toThrow("network down");
     expect((await submit()).status).toBe(401);
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    expect(keyOfCall(fetchMock, 2)).toBe(keyOfCall(fetchMock, 0));
+  });
+
+  // Greptile (#2266): an expired session's redirect to sign-in comes back as an
+  // HTML 200 that says nothing about the write, so it keeps the key.
+  it("keeps the key when the answer is a followed redirect, not the backend's", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const signIn = new Response("<html>sign in</html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+    Object.defineProperty(signIn, "redirected", { value: true });
+    const fetchMock = vi
+      .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockResolvedValueOnce(signIn);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow("network down");
+    await submit();
     await submit();
 
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
@@ -212,10 +236,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
         { status: 201 }
       );
     const fetchMock = vi
-      .fn(
-        async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Response("{}", { status: 201 })
-      )
+      .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
       .mockResolvedValueOnce(brokenBody());
     vi.stubGlobal("fetch", fetchMock);
 
@@ -274,7 +295,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     const joined = submit();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     controller.abort();
-    respond(new Response("{}", { status: 201 }));
+    respond(jsonResponse(201));
 
     await expect(aborted).rejects.toBeDefined();
     expect((await joined).status).toBe(201);
