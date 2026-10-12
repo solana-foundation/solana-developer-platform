@@ -822,97 +822,32 @@ function useEnterSubmitsStep(formId: string) {
   }, [formId]);
 }
 
-export function WalletSetupFlow({
-  connectedProviders,
-  custodyAvailability,
-  environment,
-  initialProvider,
-  connections,
-}: WalletSetupFlowProps) {
+/**
+ * Submits the details form: checks it, names where the wallet lives, runs the create or initialize
+ * action, and on success marks the quick-start step and returns to the project's wallet list.
+ * A refusal lands in `setErrorMessage`.
+ */
+function useCreateWallet({
+  canSubmit,
+  formAction,
+  setErrorMessage,
+  showConnectionPicker,
+}: {
+  canSubmit: boolean;
+  formAction: typeof createCustodySetupWalletAction | typeof initializeCustodySetupAction;
+  setErrorMessage: (message: string | null) => void;
+  showConnectionPicker: boolean;
+}) {
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
   const refreshWalletInventory = useWalletInventoryRefresh();
   const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
-  const availability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, custodyAvailability }),
-    [connectedProviders, custodyAvailability]
-  );
-  const initialSelection = useMemo(
-    () =>
-      getInitialSelection({
-        availability,
-        initialProvider,
-      }),
-    [availability, initialProvider]
-  );
-  const [currentStep, setCurrentStep] = useState<SetupStep>(initialSelection.step);
-  const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(
-    initialSelection.provider
-  );
-  const [walletLabel, setWalletLabel] = useState("");
-  const [chosenMode, setChosenMode] = useState<CustodyMode | null>(null);
-  // While a BYOK submission is in an unknown state, leaving the step would
-  // unmount the frozen payload and key that are the only path to recovery.
-  const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
-  const [byokRequestPending, setByokRequestPending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
-  const selectedAvailability = useMemo(() => {
-    const match = availability.find((provider) => provider.entry.id === selectedProvider);
-    return match === undefined ? null : match;
-  }, [availability, selectedProvider]);
-  const selectedProviderEntry = selectedAvailability === null ? null : selectedAvailability.entry;
-  const {
-    byokSetupProvider,
-    connectionOptions,
-    hasManagedConfig,
-    isConnected,
-    setupMode,
-    modeChoices,
-  } = useMemo(
-    () => resolveSetupOptions({ selectedAvailability, connections, chosenMode }),
-    [selectedAvailability, connections, chosenMode]
-  );
-  const awaitingModeChoice = modeChoices !== null && setupMode === null;
-  const canProvisionWallet =
-    selectedProviderEntry !== null &&
-    (isConnected ? selectedProviderEntry.supportsAdditionalWallets : setupMode === "managed");
-  const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
-  const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
-  // A BYOK setup goes through provider details (credential submission + connection check)
-  // instead of the Managed initialize path.
-  const isByokDetails = byokSetupProvider !== null;
-  // Every setup request, Managed or BYOK, holds the mode picker and Back: a BYOK request
-  // settling after its form unmounted could lock recovery with no form left to recover from.
-  const setupRequestInFlight = isPending || byokRequestPending;
-  const canCreate = canProvisionWallet && walletLabel.trim().length > 0 && !isPending;
-
-  const leaveFlow = () => router.push(href("/dashboard/wallets"));
-
-  const goToProviderStep = () => {
-    setErrorMessage(null);
-    setCurrentStep("provider");
-  };
-
-  const handleProviderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedProviderEntry) {
-      return;
-    }
-    setCurrentStep("details");
-  };
-
-  const handleCreateWallet = (form: HTMLFormElement) => {
-    if (
-      submissionInFlightRef.current ||
-      !form.reportValidity() ||
-      !canProvisionWallet ||
-      isPending ||
-      !selectedProviderEntry
-    ) {
+  const createWallet = (form: HTMLFormElement) => {
+    if (submissionInFlightRef.current || !form.reportValidity() || !canSubmit || isPending) {
       return;
     }
 
@@ -957,9 +892,97 @@ export function WalletSetupFlow({
     });
   };
 
+  return { createWallet, isPending };
+}
+
+export function WalletSetupFlow({
+  connectedProviders,
+  custodyAvailability,
+  environment,
+  initialProvider,
+  connections,
+}: WalletSetupFlowProps) {
+  const t = useTranslations();
+  const router = useRouter();
+  const href = useProjectHref();
+  const availability = useMemo(
+    () => resolveCustodyProviderAvailability({ connectedProviders, custodyAvailability }),
+    [connectedProviders, custodyAvailability]
+  );
+  const initialSelection = useMemo(
+    () =>
+      getInitialSelection({
+        availability,
+        initialProvider,
+      }),
+    [availability, initialProvider]
+  );
+  const [currentStep, setCurrentStep] = useState<SetupStep>(initialSelection.step);
+  const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(
+    initialSelection.provider
+  );
+  const [walletLabel, setWalletLabel] = useState("");
+  const [chosenMode, setChosenMode] = useState<CustodyMode | null>(null);
+  // While a BYOK submission is in an unknown state, leaving the step would
+  // unmount the frozen payload and key that are the only path to recovery.
+  const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
+  const [byokRequestPending, setByokRequestPending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const selectedAvailability = useMemo(() => {
+    const match = availability.find((provider) => provider.entry.id === selectedProvider);
+    return match === undefined ? null : match;
+  }, [availability, selectedProvider]);
+  const selectedProviderEntry = selectedAvailability === null ? null : selectedAvailability.entry;
+  const {
+    byokSetupProvider,
+    connectionOptions,
+    hasManagedConfig,
+    isConnected,
+    setupMode,
+    modeChoices,
+  } = useMemo(
+    () => resolveSetupOptions({ selectedAvailability, connections, chosenMode }),
+    [selectedAvailability, connections, chosenMode]
+  );
+  const awaitingModeChoice = modeChoices !== null && setupMode === null;
+  const canProvisionWallet =
+    selectedProviderEntry !== null &&
+    (isConnected ? selectedProviderEntry.supportsAdditionalWallets : setupMode === "managed");
+  const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
+  const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
+  const { createWallet, isPending } = useCreateWallet({
+    canSubmit: canProvisionWallet && selectedProviderEntry !== null,
+    formAction,
+    setErrorMessage,
+    showConnectionPicker,
+  });
+  // A BYOK setup goes through provider details (credential submission + connection check)
+  // instead of the Managed initialize path.
+  const isByokDetails = byokSetupProvider !== null;
+  // Every setup request, Managed or BYOK, holds the mode picker and Back: a BYOK request
+  // settling after its form unmounted could lock recovery with no form left to recover from.
+  const setupRequestInFlight = isPending || byokRequestPending;
+  const canCreate = canProvisionWallet && walletLabel.trim().length > 0 && !isPending;
+
+  const leaveFlow = () => router.push(href("/dashboard/wallets"));
+
+  const goToProviderStep = () => {
+    setErrorMessage(null);
+    setCurrentStep("provider");
+  };
+
+  const handleProviderSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedProviderEntry) {
+      return;
+    }
+    setCurrentStep("details");
+  };
+
   const handleDetailsSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    handleCreateWallet(event.currentTarget);
+    createWallet(event.currentTarget);
   };
 
   useEnterSubmitsStep(currentStep === "provider" ? PROVIDER_FORM_ID : DETAILS_FORM_ID);
