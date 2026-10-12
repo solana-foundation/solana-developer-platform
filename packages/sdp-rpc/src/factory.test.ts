@@ -399,7 +399,7 @@ describe("createClusterRpc", () => {
     ]);
   });
 
-  it("fails over on a transport failure and starts the next request on the endpoint that answered", async () => {
+  it("fails over on a transport failure and skips the failed endpoint while it cools down", async () => {
     const down = "https://devnet-down.example.test";
     const healthy = "https://devnet-healthy.example.test";
     configurePool({
@@ -445,6 +445,67 @@ describe("createClusterRpc", () => {
       genesisProbe(healthy),
       slotRead(healthy),
     ]);
+  });
+
+  it("returns to the preferred endpoint once its 30-second cooldown ends", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-preferred.example.test";
+    const fallback = "https://devnet-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const outageCalls = stubEndpoints({
+      [preferred]: DEVNET_FETCH_FAILS,
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(outageCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(29_999);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [slotRead(fallback)]);
+
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [
+      slotRead(fallback),
+      genesisProbe(preferred),
+      slotRead(preferred),
+    ]);
+  });
+
+  it("stops failing over once the caller aborts", async () => {
+    const stalled = "https://devnet-abandoned.example.test";
+    const healthy = "https://devnet-never-asked.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: stalled,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const stall = stubStalledDevnetRead(stalled);
+    const caller = new AbortController();
+    const callerTimeout = new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError"
+    );
+
+    const slot = runInClusterScope(SANDBOX, createClusterRpc)
+      .getSlot()
+      .send({ abortSignal: caller.signal });
+    await stall.readStalled;
+    caller.abort(callerTimeout);
+
+    await assert.rejects(slot, (error: unknown) => error === callerTimeout);
+    await nextTurn();
+    assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
   });
 
   it("never fails sendTransaction over to another endpoint", async () => {
