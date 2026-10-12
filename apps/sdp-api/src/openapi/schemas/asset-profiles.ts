@@ -90,7 +90,9 @@ export const assetProfileSchema = withOpenApi(
       example: "active",
     }),
     createdBy: withOpenApi(userIdSchema.nullable(), {
-      description: "User who created the profile. Null when created via API key.",
+      description:
+        "User who created the profile; with an API key, the user who created that key. Profiles backfilled for older tokens carry the token's `createdBy`, which can be an API key ID.",
+      example: "usr_example",
     }),
     createdAt: withOpenApi(isoDateTimeSchema, {
       description: "Creation timestamp.",
@@ -131,11 +133,23 @@ export const listAssetProfilesResponseSchema = withOpenApi(
 export const assetProfileFieldOptionsResponseSchema = withOpenApi(
   z.object({
     fields: z.object({
-      categories: z.array(z.enum(ASSET_CATEGORIES)),
+      categories: withOpenApi(z.array(z.enum(ASSET_CATEGORIES)), {
+        description: "Supported asset categories.",
+        example: [...ASSET_CATEGORIES],
+      }),
       types: z.object({
-        generic: z.array(z.enum(ASSET_TYPES.generic)),
-        stablecoin: z.array(z.enum(ASSET_TYPES.stablecoin)),
-        tokenized_security: z.array(z.enum(ASSET_TYPES.tokenized_security)),
+        generic: withOpenApi(z.array(z.enum(ASSET_TYPES.generic)), {
+          description: "Asset types available in the `generic` category.",
+          example: [...ASSET_TYPES.generic],
+        }),
+        stablecoin: withOpenApi(z.array(z.enum(ASSET_TYPES.stablecoin)), {
+          description: "Asset types available in the `stablecoin` category.",
+          example: [...ASSET_TYPES.stablecoin],
+        }),
+        tokenized_security: withOpenApi(z.array(z.enum(ASSET_TYPES.tokenized_security)), {
+          description: "Asset types available in the `tokenized_security` category.",
+          example: [...ASSET_TYPES.tokenized_security],
+        }),
       }),
     }),
   }),

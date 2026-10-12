@@ -29,6 +29,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "mural",
                       "stripe",
                     ],
+                    "example": "moonpay",
                     "type": "string",
                   },
                   "status": {
@@ -87,9 +88,11 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         "items": {
                           "properties": {
                             "accountNumberLast4": {
+                              "example": "6789",
                               "type": "string",
                             },
                             "bankName": {
+                              "example": "Example Bank",
                               "type": "string",
                             },
                             "destinationCountry": {
@@ -98,13 +101,18 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "id": {
+                              "description": "Counterparty provider-account row identifier of the payout account.",
+                              "example": "counterparty_provider_account_example",
                               "type": "string",
                             },
                             "paymentRail": {
+                              "example": "ACH",
                               "nullable": true,
                               "type": "string",
                             },
                             "status": {
+                              "description": "Provider-reported external-account status.",
+                              "example": "ACTIVE",
                               "type": "string",
                             },
                           },
@@ -137,6 +145,19 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                           },
                           "type": "array",
                         },
+                        "description": "Payout rails offered for each destination country.",
+                        "example": {
+                          "US": [
+                            {
+                              "label": "ACH",
+                              "value": "ACH",
+                            },
+                            {
+                              "label": "Wire",
+                              "value": "WIRE",
+                            },
+                          ],
+                        },
                         "type": "object",
                       },
                       "railFields": {
@@ -146,6 +167,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "bankAccount.sortCode",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -155,26 +178,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Sort code",
                                     "type": "string",
                                   },
                                   "mask": {
+                                    "description": "Display mask for the input.",
+                                    "example": "##-##-##",
                                     "type": "string",
                                   },
                                   "maxLength": {
+                                    "example": 6,
                                     "minimum": 0,
                                     "type": "integer",
                                   },
                                   "minLength": {
+                                    "example": 6,
                                     "minimum": 0,
                                     "type": "integer",
                                   },
                                   "pattern": {
+                                    "description": "Regular expression the value must match.",
+                                    "example": "^[0-9]{6}$",
                                     "type": "string",
                                   },
                                   "placeholder": {
+                                    "example": "12-34-56",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -189,6 +223,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "purposeOfPayment",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -198,15 +234,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Purpose of payment",
                                     "type": "string",
                                   },
                                   "options": {
+                                    "description": "Allowed values.",
+                                    "example": [
+                                      {
+                                        "label": "Personal gift",
+                                        "value": "GIFT",
+                                      },
+                                      {
+                                        "label": "Transfer to yourself",
+                                        "value": "SELF",
+                                      },
+                                    ],
                                     "items": {
                                       "properties": {
                                         "label": {
+                                          "description": "Display label.",
+                                          "example": "Personal gift",
                                           "type": "string",
                                         },
                                         "value": {
+                                          "description": "Value to submit.",
+                                          "example": "GIFT",
                                           "type": "string",
                                         },
                                       },
@@ -219,6 +272,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -234,6 +289,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "taxIdentification.taxResidenceCountryCode",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -243,16 +300,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Tax residence country",
                                     "type": "string",
                                   },
                                   "options": {
                                     "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                    "example": [
+                                      "US",
+                                    ],
                                     "items": {
                                       "type": "string",
                                     },
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -267,6 +331,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "cdd.expectedMonthlyVolume.currency",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -276,16 +342,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Expected monthly volume currency",
                                     "type": "string",
                                   },
                                   "options": {
                                     "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                    "example": [
+                                      "USD",
+                                      "EUR",
+                                    ],
                                     "items": {
                                       "type": "string",
                                     },
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -300,9 +374,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "before": {
+                                    "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                    "example": "2026-07-01",
                                     "type": "string",
                                   },
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "customer.birthDate",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -312,9 +390,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Date of birth",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -334,6 +416,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "bankAccount.sortCode",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -343,26 +427,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Sort code",
                                               "type": "string",
                                             },
                                             "mask": {
+                                              "description": "Display mask for the input.",
+                                              "example": "##-##-##",
                                               "type": "string",
                                             },
                                             "maxLength": {
+                                              "example": 6,
                                               "minimum": 0,
                                               "type": "integer",
                                             },
                                             "minLength": {
+                                              "example": 6,
                                               "minimum": 0,
                                               "type": "integer",
                                             },
                                             "pattern": {
+                                              "description": "Regular expression the value must match.",
+                                              "example": "^[0-9]{6}$",
                                               "type": "string",
                                             },
                                             "placeholder": {
+                                              "example": "12-34-56",
                                               "type": "string",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -377,6 +472,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "purposeOfPayment",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -386,15 +483,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Purpose of payment",
                                               "type": "string",
                                             },
                                             "options": {
+                                              "description": "Allowed values.",
+                                              "example": [
+                                                {
+                                                  "label": "Personal gift",
+                                                  "value": "GIFT",
+                                                },
+                                                {
+                                                  "label": "Transfer to yourself",
+                                                  "value": "SELF",
+                                                },
+                                              ],
                                               "items": {
                                                 "properties": {
                                                   "label": {
+                                                    "description": "Display label.",
+                                                    "example": "Personal gift",
                                                     "type": "string",
                                                   },
                                                   "value": {
+                                                    "description": "Value to submit.",
+                                                    "example": "GIFT",
                                                     "type": "string",
                                                   },
                                                 },
@@ -407,6 +521,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -422,6 +538,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "taxIdentification.taxResidenceCountryCode",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -431,16 +549,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Tax residence country",
                                               "type": "string",
                                             },
                                             "options": {
                                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                              "example": [
+                                                "US",
+                                              ],
                                               "items": {
                                                 "type": "string",
                                               },
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -455,6 +580,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "cdd.expectedMonthlyVolume.currency",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -464,16 +591,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Expected monthly volume currency",
                                               "type": "string",
                                             },
                                             "options": {
                                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                              "example": [
+                                                "USD",
+                                                "EUR",
+                                              ],
                                               "items": {
                                                 "type": "string",
                                               },
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -488,9 +623,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "before": {
+                                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                              "example": "2026-07-01",
                                               "type": "string",
                                             },
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "customer.birthDate",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -500,9 +639,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Date of birth",
                                               "type": "string",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -519,6 +662,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "array",
                                   },
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "customer.address",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -528,9 +673,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Residential address",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -546,6 +695,21 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             ],
                           },
                           "type": "array",
+                        },
+                        "description": "Fields to collect for each payout rail, keyed by rail.",
+                        "example": {
+                          "ACH": [
+                            {
+                              "key": "bankAccount.routingNumber",
+                              "kind": "text",
+                              "label": "Routing number",
+                              "maxLength": 9,
+                              "minLength": 9,
+                              "pattern": "^[0-9]{9}$",
+                              "placeholder": "021000021",
+                              "required": true,
+                            },
+                          ],
                         },
                         "type": "object",
                       },
@@ -564,6 +728,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "type": "string",
                   },
                   "providerAccountId": {
+                    "description": "Payout account resolved for the corridor, for explicit quote selection.",
+                    "example": "counterparty_provider_account_example",
                     "type": "string",
                   },
                   "status": {
@@ -598,6 +764,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "bankAccount.sortCode",
                               "type": "string",
                             },
                             "kind": {
@@ -607,26 +775,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Sort code",
                               "type": "string",
                             },
                             "mask": {
+                              "description": "Display mask for the input.",
+                              "example": "##-##-##",
                               "type": "string",
                             },
                             "maxLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "minLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "pattern": {
+                              "description": "Regular expression the value must match.",
+                              "example": "^[0-9]{6}$",
                               "type": "string",
                             },
                             "placeholder": {
+                              "example": "12-34-56",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -641,6 +820,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "purposeOfPayment",
                               "type": "string",
                             },
                             "kind": {
@@ -650,15 +831,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Purpose of payment",
                               "type": "string",
                             },
                             "options": {
+                              "description": "Allowed values.",
+                              "example": [
+                                {
+                                  "label": "Personal gift",
+                                  "value": "GIFT",
+                                },
+                                {
+                                  "label": "Transfer to yourself",
+                                  "value": "SELF",
+                                },
+                              ],
                               "items": {
                                 "properties": {
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Personal gift",
                                     "type": "string",
                                   },
                                   "value": {
+                                    "description": "Value to submit.",
+                                    "example": "GIFT",
                                     "type": "string",
                                   },
                                 },
@@ -671,6 +869,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -686,6 +886,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "taxIdentification.taxResidenceCountryCode",
                               "type": "string",
                             },
                             "kind": {
@@ -695,16 +897,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Tax residence country",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "example": [
+                                "US",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -719,6 +928,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "cdd.expectedMonthlyVolume.currency",
                               "type": "string",
                             },
                             "kind": {
@@ -728,16 +939,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Expected monthly volume currency",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "example": [
+                                "USD",
+                                "EUR",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -752,9 +971,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "before": {
+                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                              "example": "2026-07-01",
                               "type": "string",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.birthDate",
                               "type": "string",
                             },
                             "kind": {
@@ -764,9 +987,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Date of birth",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -786,6 +1013,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "bankAccount.sortCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -795,26 +1024,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Sort code",
                                         "type": "string",
                                       },
                                       "mask": {
+                                        "description": "Display mask for the input.",
+                                        "example": "##-##-##",
                                         "type": "string",
                                       },
                                       "maxLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "minLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "pattern": {
+                                        "description": "Regular expression the value must match.",
+                                        "example": "^[0-9]{6}$",
                                         "type": "string",
                                       },
                                       "placeholder": {
+                                        "example": "12-34-56",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -829,6 +1069,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "purposeOfPayment",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -838,15 +1080,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Purpose of payment",
                                         "type": "string",
                                       },
                                       "options": {
+                                        "description": "Allowed values.",
+                                        "example": [
+                                          {
+                                            "label": "Personal gift",
+                                            "value": "GIFT",
+                                          },
+                                          {
+                                            "label": "Transfer to yourself",
+                                            "value": "SELF",
+                                          },
+                                        ],
                                         "items": {
                                           "properties": {
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Personal gift",
                                               "type": "string",
                                             },
                                             "value": {
+                                              "description": "Value to submit.",
+                                              "example": "GIFT",
                                               "type": "string",
                                             },
                                           },
@@ -859,6 +1118,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -874,6 +1135,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "taxIdentification.taxResidenceCountryCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -883,16 +1146,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Tax residence country",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "example": [
+                                          "US",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -907,6 +1177,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "cdd.expectedMonthlyVolume.currency",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -916,16 +1188,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Expected monthly volume currency",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "example": [
+                                          "USD",
+                                          "EUR",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -940,9 +1220,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "before": {
+                                        "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                        "example": "2026-07-01",
                                         "type": "string",
                                       },
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "customer.birthDate",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -952,9 +1236,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Date of birth",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -971,6 +1259,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.address",
                               "type": "string",
                             },
                             "kind": {
@@ -980,9 +1270,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Residential address",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1009,6 +1303,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "mural",
                       "stripe",
                     ],
+                    "example": "moonpay",
                     "type": "string",
                   },
                   "status": {
@@ -1043,6 +1338,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "bankAccount.sortCode",
                               "type": "string",
                             },
                             "kind": {
@@ -1052,26 +1349,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Sort code",
                               "type": "string",
                             },
                             "mask": {
+                              "description": "Display mask for the input.",
+                              "example": "##-##-##",
                               "type": "string",
                             },
                             "maxLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "minLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "pattern": {
+                              "description": "Regular expression the value must match.",
+                              "example": "^[0-9]{6}$",
                               "type": "string",
                             },
                             "placeholder": {
+                              "example": "12-34-56",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1086,6 +1394,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "purposeOfPayment",
                               "type": "string",
                             },
                             "kind": {
@@ -1095,15 +1405,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Purpose of payment",
                               "type": "string",
                             },
                             "options": {
+                              "description": "Allowed values.",
+                              "example": [
+                                {
+                                  "label": "Personal gift",
+                                  "value": "GIFT",
+                                },
+                                {
+                                  "label": "Transfer to yourself",
+                                  "value": "SELF",
+                                },
+                              ],
                               "items": {
                                 "properties": {
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Personal gift",
                                     "type": "string",
                                   },
                                   "value": {
+                                    "description": "Value to submit.",
+                                    "example": "GIFT",
                                     "type": "string",
                                   },
                                 },
@@ -1116,6 +1443,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1131,6 +1460,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "taxIdentification.taxResidenceCountryCode",
                               "type": "string",
                             },
                             "kind": {
@@ -1140,16 +1471,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Tax residence country",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "example": [
+                                "US",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1164,6 +1502,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "cdd.expectedMonthlyVolume.currency",
                               "type": "string",
                             },
                             "kind": {
@@ -1173,16 +1513,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Expected monthly volume currency",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "example": [
+                                "USD",
+                                "EUR",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1197,9 +1545,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "before": {
+                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                              "example": "2026-07-01",
                               "type": "string",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.birthDate",
                               "type": "string",
                             },
                             "kind": {
@@ -1209,9 +1561,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Date of birth",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1231,6 +1587,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "bankAccount.sortCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1240,26 +1598,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Sort code",
                                         "type": "string",
                                       },
                                       "mask": {
+                                        "description": "Display mask for the input.",
+                                        "example": "##-##-##",
                                         "type": "string",
                                       },
                                       "maxLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "minLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "pattern": {
+                                        "description": "Regular expression the value must match.",
+                                        "example": "^[0-9]{6}$",
                                         "type": "string",
                                       },
                                       "placeholder": {
+                                        "example": "12-34-56",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1274,6 +1643,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "purposeOfPayment",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1283,15 +1654,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Purpose of payment",
                                         "type": "string",
                                       },
                                       "options": {
+                                        "description": "Allowed values.",
+                                        "example": [
+                                          {
+                                            "label": "Personal gift",
+                                            "value": "GIFT",
+                                          },
+                                          {
+                                            "label": "Transfer to yourself",
+                                            "value": "SELF",
+                                          },
+                                        ],
                                         "items": {
                                           "properties": {
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Personal gift",
                                               "type": "string",
                                             },
                                             "value": {
+                                              "description": "Value to submit.",
+                                              "example": "GIFT",
                                               "type": "string",
                                             },
                                           },
@@ -1304,6 +1692,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1319,6 +1709,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "taxIdentification.taxResidenceCountryCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1328,16 +1720,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Tax residence country",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "example": [
+                                          "US",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1352,6 +1751,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "cdd.expectedMonthlyVolume.currency",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1361,16 +1762,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Expected monthly volume currency",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "example": [
+                                          "USD",
+                                          "EUR",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1385,9 +1794,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "before": {
+                                        "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                        "example": "2026-07-01",
                                         "type": "string",
                                       },
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "customer.birthDate",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1397,9 +1810,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Date of birth",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1416,6 +1833,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.address",
                               "type": "string",
                             },
                             "kind": {
@@ -1425,9 +1844,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Residential address",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1482,6 +1905,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "bankAccount.sortCode",
                               "type": "string",
                             },
                             "kind": {
@@ -1491,26 +1916,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Sort code",
                               "type": "string",
                             },
                             "mask": {
+                              "description": "Display mask for the input.",
+                              "example": "##-##-##",
                               "type": "string",
                             },
                             "maxLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "minLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "pattern": {
+                              "description": "Regular expression the value must match.",
+                              "example": "^[0-9]{6}$",
                               "type": "string",
                             },
                             "placeholder": {
+                              "example": "12-34-56",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1525,6 +1961,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "purposeOfPayment",
                               "type": "string",
                             },
                             "kind": {
@@ -1534,15 +1972,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Purpose of payment",
                               "type": "string",
                             },
                             "options": {
+                              "description": "Allowed values.",
+                              "example": [
+                                {
+                                  "label": "Personal gift",
+                                  "value": "GIFT",
+                                },
+                                {
+                                  "label": "Transfer to yourself",
+                                  "value": "SELF",
+                                },
+                              ],
                               "items": {
                                 "properties": {
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Personal gift",
                                     "type": "string",
                                   },
                                   "value": {
+                                    "description": "Value to submit.",
+                                    "example": "GIFT",
                                     "type": "string",
                                   },
                                 },
@@ -1555,6 +2010,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1570,6 +2027,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "taxIdentification.taxResidenceCountryCode",
                               "type": "string",
                             },
                             "kind": {
@@ -1579,16 +2038,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Tax residence country",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "example": [
+                                "US",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1603,6 +2069,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "cdd.expectedMonthlyVolume.currency",
                               "type": "string",
                             },
                             "kind": {
@@ -1612,16 +2080,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Expected monthly volume currency",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "example": [
+                                "USD",
+                                "EUR",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1636,9 +2112,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "before": {
+                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                              "example": "2026-07-01",
                               "type": "string",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.birthDate",
                               "type": "string",
                             },
                             "kind": {
@@ -1648,9 +2128,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Date of birth",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1670,6 +2154,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "bankAccount.sortCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1679,26 +2165,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Sort code",
                                         "type": "string",
                                       },
                                       "mask": {
+                                        "description": "Display mask for the input.",
+                                        "example": "##-##-##",
                                         "type": "string",
                                       },
                                       "maxLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "minLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "pattern": {
+                                        "description": "Regular expression the value must match.",
+                                        "example": "^[0-9]{6}$",
                                         "type": "string",
                                       },
                                       "placeholder": {
+                                        "example": "12-34-56",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1713,6 +2210,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "purposeOfPayment",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1722,15 +2221,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Purpose of payment",
                                         "type": "string",
                                       },
                                       "options": {
+                                        "description": "Allowed values.",
+                                        "example": [
+                                          {
+                                            "label": "Personal gift",
+                                            "value": "GIFT",
+                                          },
+                                          {
+                                            "label": "Transfer to yourself",
+                                            "value": "SELF",
+                                          },
+                                        ],
                                         "items": {
                                           "properties": {
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Personal gift",
                                               "type": "string",
                                             },
                                             "value": {
+                                              "description": "Value to submit.",
+                                              "example": "GIFT",
                                               "type": "string",
                                             },
                                           },
@@ -1743,6 +2259,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1758,6 +2276,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "taxIdentification.taxResidenceCountryCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1767,16 +2287,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Tax residence country",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "example": [
+                                          "US",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1791,6 +2318,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "cdd.expectedMonthlyVolume.currency",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1800,16 +2329,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Expected monthly volume currency",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "example": [
+                                          "USD",
+                                          "EUR",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1824,9 +2361,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "before": {
+                                        "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                        "example": "2026-07-01",
                                         "type": "string",
                                       },
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "customer.birthDate",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -1836,9 +2377,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Date of birth",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -1855,6 +2400,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.address",
                               "type": "string",
                             },
                             "kind": {
@@ -1864,9 +2411,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Residential address",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1921,6 +2472,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "bankAccount.sortCode",
                               "type": "string",
                             },
                             "kind": {
@@ -1930,26 +2483,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Sort code",
                               "type": "string",
                             },
                             "mask": {
+                              "description": "Display mask for the input.",
+                              "example": "##-##-##",
                               "type": "string",
                             },
                             "maxLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "minLength": {
+                              "example": 6,
                               "minimum": 0,
                               "type": "integer",
                             },
                             "pattern": {
+                              "description": "Regular expression the value must match.",
+                              "example": "^[0-9]{6}$",
                               "type": "string",
                             },
                             "placeholder": {
+                              "example": "12-34-56",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -1964,6 +2528,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "purposeOfPayment",
                               "type": "string",
                             },
                             "kind": {
@@ -1973,15 +2539,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Purpose of payment",
                               "type": "string",
                             },
                             "options": {
+                              "description": "Allowed values.",
+                              "example": [
+                                {
+                                  "label": "Personal gift",
+                                  "value": "GIFT",
+                                },
+                                {
+                                  "label": "Transfer to yourself",
+                                  "value": "SELF",
+                                },
+                              ],
                               "items": {
                                 "properties": {
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Personal gift",
                                     "type": "string",
                                   },
                                   "value": {
+                                    "description": "Value to submit.",
+                                    "example": "GIFT",
                                     "type": "string",
                                   },
                                 },
@@ -1994,6 +2577,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -2009,6 +2594,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "taxIdentification.taxResidenceCountryCode",
                               "type": "string",
                             },
                             "kind": {
@@ -2018,16 +2605,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Tax residence country",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                              "example": [
+                                "US",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -2042,6 +2636,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "cdd.expectedMonthlyVolume.currency",
                               "type": "string",
                             },
                             "kind": {
@@ -2051,16 +2647,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Expected monthly volume currency",
                               "type": "string",
                             },
                             "options": {
                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                              "example": [
+                                "USD",
+                                "EUR",
+                              ],
                               "items": {
                                 "type": "string",
                               },
                               "type": "array",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -2075,9 +2679,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         {
                           "properties": {
                             "before": {
+                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                              "example": "2026-07-01",
                               "type": "string",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.birthDate",
                               "type": "string",
                             },
                             "kind": {
@@ -2087,9 +2695,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Date of birth",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -2109,6 +2721,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "bankAccount.sortCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -2118,26 +2732,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Sort code",
                                         "type": "string",
                                       },
                                       "mask": {
+                                        "description": "Display mask for the input.",
+                                        "example": "##-##-##",
                                         "type": "string",
                                       },
                                       "maxLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "minLength": {
+                                        "example": 6,
                                         "minimum": 0,
                                         "type": "integer",
                                       },
                                       "pattern": {
+                                        "description": "Regular expression the value must match.",
+                                        "example": "^[0-9]{6}$",
                                         "type": "string",
                                       },
                                       "placeholder": {
+                                        "example": "12-34-56",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -2152,6 +2777,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "purposeOfPayment",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -2161,15 +2788,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Purpose of payment",
                                         "type": "string",
                                       },
                                       "options": {
+                                        "description": "Allowed values.",
+                                        "example": [
+                                          {
+                                            "label": "Personal gift",
+                                            "value": "GIFT",
+                                          },
+                                          {
+                                            "label": "Transfer to yourself",
+                                            "value": "SELF",
+                                          },
+                                        ],
                                         "items": {
                                           "properties": {
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Personal gift",
                                               "type": "string",
                                             },
                                             "value": {
+                                              "description": "Value to submit.",
+                                              "example": "GIFT",
                                               "type": "string",
                                             },
                                           },
@@ -2182,6 +2826,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -2197,6 +2843,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "taxIdentification.taxResidenceCountryCode",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -2206,16 +2854,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Tax residence country",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                        "example": [
+                                          "US",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -2230,6 +2885,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "cdd.expectedMonthlyVolume.currency",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -2239,16 +2896,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Expected monthly volume currency",
                                         "type": "string",
                                       },
                                       "options": {
                                         "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                        "example": [
+                                          "USD",
+                                          "EUR",
+                                        ],
                                         "items": {
                                           "type": "string",
                                         },
                                         "type": "array",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -2263,9 +2928,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                   {
                                     "properties": {
                                       "before": {
+                                        "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                        "example": "2026-07-01",
                                         "type": "string",
                                       },
                                       "key": {
+                                        "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                        "example": "customer.birthDate",
                                         "type": "string",
                                       },
                                       "kind": {
@@ -2275,9 +2944,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         "type": "string",
                                       },
                                       "label": {
+                                        "description": "Display label.",
+                                        "example": "Date of birth",
                                         "type": "string",
                                       },
                                       "required": {
+                                        "description": "Whether a value must be collected.",
+                                        "example": true,
                                         "type": "boolean",
                                       },
                                     },
@@ -2294,6 +2967,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "array",
                             },
                             "key": {
+                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                              "example": "customer.address",
                               "type": "string",
                             },
                             "kind": {
@@ -2303,9 +2978,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "label": {
+                              "description": "Display label.",
+                              "example": "Residential address",
                               "type": "string",
                             },
                             "required": {
+                              "description": "Whether a value must be collected.",
+                              "example": true,
                               "type": "boolean",
                             },
                           },
@@ -2360,9 +3039,11 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                         "items": {
                           "properties": {
                             "accountNumberLast4": {
+                              "example": "6789",
                               "type": "string",
                             },
                             "bankName": {
+                              "example": "Example Bank",
                               "type": "string",
                             },
                             "destinationCountry": {
@@ -2371,13 +3052,18 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "id": {
+                              "description": "Counterparty provider-account row identifier of the payout account.",
+                              "example": "counterparty_provider_account_example",
                               "type": "string",
                             },
                             "paymentRail": {
+                              "example": "ACH",
                               "nullable": true,
                               "type": "string",
                             },
                             "status": {
+                              "description": "Provider-reported external-account status.",
+                              "example": "ACTIVE",
                               "type": "string",
                             },
                           },
@@ -2410,6 +3096,19 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                           },
                           "type": "array",
                         },
+                        "description": "Payout rails offered for each destination country.",
+                        "example": {
+                          "US": [
+                            {
+                              "label": "ACH",
+                              "value": "ACH",
+                            },
+                            {
+                              "label": "Wire",
+                              "value": "WIRE",
+                            },
+                          ],
+                        },
                         "type": "object",
                       },
                       "railFields": {
@@ -2419,6 +3118,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "bankAccount.sortCode",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2428,26 +3129,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Sort code",
                                     "type": "string",
                                   },
                                   "mask": {
+                                    "description": "Display mask for the input.",
+                                    "example": "##-##-##",
                                     "type": "string",
                                   },
                                   "maxLength": {
+                                    "example": 6,
                                     "minimum": 0,
                                     "type": "integer",
                                   },
                                   "minLength": {
+                                    "example": 6,
                                     "minimum": 0,
                                     "type": "integer",
                                   },
                                   "pattern": {
+                                    "description": "Regular expression the value must match.",
+                                    "example": "^[0-9]{6}$",
                                     "type": "string",
                                   },
                                   "placeholder": {
+                                    "example": "12-34-56",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2462,6 +3174,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "purposeOfPayment",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2471,15 +3185,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Purpose of payment",
                                     "type": "string",
                                   },
                                   "options": {
+                                    "description": "Allowed values.",
+                                    "example": [
+                                      {
+                                        "label": "Personal gift",
+                                        "value": "GIFT",
+                                      },
+                                      {
+                                        "label": "Transfer to yourself",
+                                        "value": "SELF",
+                                      },
+                                    ],
                                     "items": {
                                       "properties": {
                                         "label": {
+                                          "description": "Display label.",
+                                          "example": "Personal gift",
                                           "type": "string",
                                         },
                                         "value": {
+                                          "description": "Value to submit.",
+                                          "example": "GIFT",
                                           "type": "string",
                                         },
                                       },
@@ -2492,6 +3223,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2507,6 +3240,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "taxIdentification.taxResidenceCountryCode",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2516,16 +3251,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Tax residence country",
                                     "type": "string",
                                   },
                                   "options": {
                                     "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                    "example": [
+                                      "US",
+                                    ],
                                     "items": {
                                       "type": "string",
                                     },
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2540,6 +3282,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "cdd.expectedMonthlyVolume.currency",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2549,16 +3293,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Expected monthly volume currency",
                                     "type": "string",
                                   },
                                   "options": {
                                     "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                    "example": [
+                                      "USD",
+                                      "EUR",
+                                    ],
                                     "items": {
                                       "type": "string",
                                     },
                                     "type": "array",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2573,9 +3325,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               {
                                 "properties": {
                                   "before": {
+                                    "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                    "example": "2026-07-01",
                                     "type": "string",
                                   },
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "customer.birthDate",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2585,9 +3341,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Date of birth",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2607,6 +3367,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "bankAccount.sortCode",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -2616,26 +3378,37 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Sort code",
                                               "type": "string",
                                             },
                                             "mask": {
+                                              "description": "Display mask for the input.",
+                                              "example": "##-##-##",
                                               "type": "string",
                                             },
                                             "maxLength": {
+                                              "example": 6,
                                               "minimum": 0,
                                               "type": "integer",
                                             },
                                             "minLength": {
+                                              "example": 6,
                                               "minimum": 0,
                                               "type": "integer",
                                             },
                                             "pattern": {
+                                              "description": "Regular expression the value must match.",
+                                              "example": "^[0-9]{6}$",
                                               "type": "string",
                                             },
                                             "placeholder": {
+                                              "example": "12-34-56",
                                               "type": "string",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -2650,6 +3423,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "purposeOfPayment",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -2659,15 +3434,32 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Purpose of payment",
                                               "type": "string",
                                             },
                                             "options": {
+                                              "description": "Allowed values.",
+                                              "example": [
+                                                {
+                                                  "label": "Personal gift",
+                                                  "value": "GIFT",
+                                                },
+                                                {
+                                                  "label": "Transfer to yourself",
+                                                  "value": "SELF",
+                                                },
+                                              ],
                                               "items": {
                                                 "properties": {
                                                   "label": {
+                                                    "description": "Display label.",
+                                                    "example": "Personal gift",
                                                     "type": "string",
                                                   },
                                                   "value": {
+                                                    "description": "Value to submit.",
+                                                    "example": "GIFT",
                                                     "type": "string",
                                                   },
                                                 },
@@ -2680,6 +3472,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -2695,6 +3489,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "taxIdentification.taxResidenceCountryCode",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -2704,16 +3500,23 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Tax residence country",
                                               "type": "string",
                                             },
                                             "options": {
                                               "description": "Subset of country codes the client may offer; absent means every supported country.",
+                                              "example": [
+                                                "US",
+                                              ],
                                               "items": {
                                                 "type": "string",
                                               },
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -2728,6 +3531,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "cdd.expectedMonthlyVolume.currency",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -2737,16 +3542,24 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Expected monthly volume currency",
                                               "type": "string",
                                             },
                                             "options": {
                                               "description": "Subset of fiat currencies the client may offer; absent means every supported currency.",
+                                              "example": [
+                                                "USD",
+                                                "EUR",
+                                              ],
                                               "items": {
                                                 "type": "string",
                                               },
                                               "type": "array",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -2761,9 +3574,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                         {
                                           "properties": {
                                             "before": {
+                                              "description": "ISO date (YYYY-MM-DD) the collected date must fall before.",
+                                              "example": "2026-07-01",
                                               "type": "string",
                                             },
                                             "key": {
+                                              "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                              "example": "customer.birthDate",
                                               "type": "string",
                                             },
                                             "kind": {
@@ -2773,9 +3590,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                               "type": "string",
                                             },
                                             "label": {
+                                              "description": "Display label.",
+                                              "example": "Date of birth",
                                               "type": "string",
                                             },
                                             "required": {
+                                              "description": "Whether a value must be collected.",
+                                              "example": true,
                                               "type": "boolean",
                                             },
                                           },
@@ -2792,6 +3613,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "array",
                                   },
                                   "key": {
+                                    "description": "Field key. Nested parts use dotted keys, e.g. \`customer.address.line1\`.",
+                                    "example": "customer.address",
                                     "type": "string",
                                   },
                                   "kind": {
@@ -2801,9 +3624,13 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                                     "type": "string",
                                   },
                                   "label": {
+                                    "description": "Display label.",
+                                    "example": "Residential address",
                                     "type": "string",
                                   },
                                   "required": {
+                                    "description": "Whether a value must be collected.",
+                                    "example": true,
                                     "type": "boolean",
                                   },
                                 },
@@ -2819,6 +3646,21 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             ],
                           },
                           "type": "array",
+                        },
+                        "description": "Fields to collect for each payout rail, keyed by rail.",
+                        "example": {
+                          "ACH": [
+                            {
+                              "key": "bankAccount.routingNumber",
+                              "kind": "text",
+                              "label": "Routing number",
+                              "maxLength": 9,
+                              "minLength": 9,
+                              "pattern": "^[0-9]{9}$",
+                              "placeholder": "021000021",
+                              "required": true,
+                            },
+                          ],
                         },
                         "type": "object",
                       },
@@ -2872,9 +3714,12 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "mural",
                       "stripe",
                     ],
+                    "example": "bvnk",
                     "type": "string",
                   },
                   "reason": {
+                    "description": "Why the provider cannot serve this counterparty or corridor.",
+                    "example": "BVNK supports USD only.",
                     "type": "string",
                   },
                   "status": {
@@ -2908,6 +3753,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "lightspark",
                       "mural",
                     ],
+                    "example": "mural",
                     "type": "string",
                   },
                   "status": {
@@ -2948,6 +3794,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "type": "string",
                   },
                   "termsOfServiceUrl": {
+                    "description": "Provider terms-of-service link the counterparty must accept.",
+                    "example": "https://example.com/terms-of-service",
                     "format": "uri",
                     "type": "string",
                   },
@@ -2967,23 +3815,28 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "properties": {
                         "description": {
                           "description": "Agreement summary text.",
+                          "example": "Embedded US Partner Platform Customers Agreement",
                           "type": "string",
                         },
                         "displayName": {
                           "description": "Agreement display name.",
+                          "example": "Embedded US Partner Platform Customers Agreement",
                           "type": "string",
                         },
                         "name": {
                           "description": "BVNK agreement identifier (v1 agreements have no id).",
+                          "example": "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
                           "type": "string",
                         },
                         "privacyPolicyUrl": {
                           "description": "Privacy policy URL, stored statically on the customer link.",
+                          "example": "https://help.bvnk.com/hc/en-us/articles/example",
                           "format": "uri",
                           "type": "string",
                         },
                         "url": {
                           "description": "Agreement text URL, stored statically on the customer link.",
+                          "example": "https://help.bvnk.com/hc/en-us/sections/example",
                           "format": "uri",
                           "type": "string",
                         },
@@ -3045,6 +3898,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "bvnk",
                       "mural",
                     ],
+                    "example": "bvnk",
                     "type": "string",
                   },
                   "status": {
@@ -3054,6 +3908,8 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "type": "string",
                   },
                   "verificationUrl": {
+                    "description": "Provider-hosted identity verification link for the counterparty.",
+                    "example": "https://example.com/verify/session_example",
                     "format": "uri",
                     "type": "string",
                   },
@@ -3082,6 +3938,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "bvnk",
                       "mural",
                     ],
+                    "example": "bvnk",
                     "type": "string",
                   },
                   "status": {
@@ -3089,6 +3946,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "customer_verifying",
                       "customer_verification_failed",
                     ],
+                    "example": "customer_verifying",
                     "type": "string",
                   },
                 },

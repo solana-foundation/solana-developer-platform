@@ -1033,7 +1033,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"counterparty_account_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -1070,7 +1070,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"counterparty_account_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -1099,7 +1099,7 @@
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpa_example",
+                "counterpartyAccountId": "counterparty_account_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
                 "status": "pending",
@@ -1333,7 +1333,7 @@
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpa_example",
+                "counterpartyAccountId": "counterparty_account_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
                 "status": "pending",
@@ -1432,7 +1432,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"counterparty_account_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -1446,7 +1446,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1562,7 +1562,7 @@
                 "sourceProviderWalletId": "privy_wallet_123",
                 "sourceAddress": "So11111111111111111111111111111111111111112",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpa_example",
+                "counterpartyAccountId": "counterparty_account_example",
                 "destinationAddress": "So11111111111111111111111111111111111111112",
                 "destinationTokenAccount": "So11111111111111111111111111111111111111112",
                 "token": "example",
@@ -1617,7 +1617,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"counterparty_account_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -1631,7 +1631,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1686,7 +1686,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1741,7 +1741,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1796,7 +1796,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1851,7 +1851,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1994,7 +1994,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpa_example",
+              "counterpartyAccountId": "counterparty_account_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -2037,7 +2037,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
+            "defaultValue": "{\n  \"ownerWalletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"privy_wallet_456\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
             "required": true
           }
         ],
@@ -2055,7 +2055,7 @@
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
               "destinationAddress": "So11111111111111111111111111111111111111112",
-              "pullerWalletId": "privy_wallet_123",
+              "pullerWalletId": "privy_wallet_456",
               "pullerAddress": "So11111111111111111111111111111111111111112",
               "metadataUri": "example",
               "status": "active",
@@ -2130,7 +2130,7 @@
                 "programPlanId": "17014118346046923173",
                 "planPda": "So11111111111111111111111111111111111111112",
                 "destinationAddress": "So11111111111111111111111111111111111111112",
-                "pullerWalletId": "privy_wallet_123",
+                "pullerWalletId": "privy_wallet_456",
                 "pullerAddress": "So11111111111111111111111111111111111111112",
                 "metadataUri": "example",
                 "status": "active",
@@ -2189,7 +2189,7 @@
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
               "destinationAddress": "So11111111111111111111111111111111111111112",
-              "pullerWalletId": "privy_wallet_123",
+              "pullerWalletId": "privy_wallet_456",
               "pullerAddress": "So11111111111111111111111111111111111111112",
               "metadataUri": "example",
               "status": "active",
@@ -2241,7 +2241,7 @@
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
               "destinationAddress": "So11111111111111111111111111111111111111112",
-              "pullerWalletId": "privy_wallet_123",
+              "pullerWalletId": "privy_wallet_456",
               "pullerAddress": "So11111111111111111111111111111111111111112",
               "metadataUri": "example",
               "status": "active",
@@ -2278,7 +2278,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"status\": \"active\"\n}",
+            "defaultValue": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"privy_wallet_456\",\n  \"status\": \"active\"\n}",
             "required": true
           }
         ],
@@ -2296,7 +2296,7 @@
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
               "destinationAddress": "So11111111111111111111111111111111111111112",
-              "pullerWalletId": "privy_wallet_123",
+              "pullerWalletId": "privy_wallet_456",
               "pullerAddress": "So11111111111111111111111111111111111111112",
               "metadataUri": "example",
               "status": "active",
@@ -3480,7 +3480,7 @@
             "key": "dest",
             "label": "dest",
             "description": "Optional Solana crypto rail destination filter.",
-            "defaultValue": "usdc.solana",
+            "defaultValue": "sol.solana",
             "required": false,
             "kind": "select",
             "options": [
@@ -3555,8 +3555,8 @@
             "pairs": [
               {
                 "source": "USD",
-                "dest": "usdc.solana",
-                "providers": ["moonpay", "lightspark"]
+                "dest": "sol.solana",
+                "providers": ["moonpay", "stripe"]
               }
             ],
             "providerDetails": {
@@ -3593,7 +3593,7 @@
             "key": "source",
             "label": "source",
             "description": "Optional Solana crypto rail source filter.",
-            "defaultValue": "usdc.solana",
+            "defaultValue": "sol.solana",
             "required": false,
             "kind": "select",
             "options": [
@@ -4265,7 +4265,7 @@
             },
             "pairs": [
               {
-                "source": "usdc.solana",
+                "source": "sol.solana",
                 "dest": "USD",
                 "providers": ["moonpay", "bvnk"]
               }
@@ -4307,7 +4307,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"sol.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
             "required": true
           }
         ],
@@ -4530,7 +4530,7 @@
         "expectedResponse": {
           "data": {
             "fields": {
-              "entityTypes": ["individual"],
+              "entityTypes": ["individual", "business"],
               "countries": [
                 {
                   "code": "US",
@@ -4799,7 +4799,7 @@
             "key": "assetRail",
             "label": "assetRail",
             "description": "Canonical SDP crypto asset rail.",
-            "defaultValue": "usdc.solana",
+            "defaultValue": "sol.solana",
             "required": true,
             "kind": "select",
             "options": [
@@ -5520,7 +5520,7 @@
           "data": {
             "accounts": [
               {
-                "id": "cpa_example",
+                "id": "counterparty_account_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "counterpartyId": "cpty_example",
@@ -5575,7 +5575,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpa_example",
+              "id": "counterparty_account_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -6731,7 +6731,7 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpa_example",
+            "defaultValue": "counterparty_account_example",
             "required": true
           }
         ],
@@ -6739,7 +6739,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpa_example",
+              "id": "counterparty_account_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -6779,7 +6779,7 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpa_example",
+            "defaultValue": "counterparty_account_example",
             "required": true
           }
         ],
@@ -6797,7 +6797,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpa_example",
+              "id": "counterparty_account_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -6837,7 +6837,7 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpa_example",
+            "defaultValue": "counterparty_account_example",
             "required": true
           }
         ],
@@ -9215,7 +9215,7 @@
         "operationId": "listHolders",
         "title": "List verified holders",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holders?page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9223,14 +9223,51 @@
             "description": "Token identifier.",
             "defaultValue": "tok_example",
             "required": true
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Items per page. Defaults to 50; values above 200 are capped at 200.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
           }
         ],
         "bodyFields": [],
         "expectedResponse": {
           "data": {
-            "holders": [{}]
+            "holders": [
+              {
+                "id": "wallet_asset_enrollment_example",
+                "organization_id": "org_example",
+                "project_id": "prj_example",
+                "kyc_wallet_id": "kyc_wallet_example",
+                "token_id": "tok_example",
+                "status": "active",
+                "review_mode": "auto",
+                "created_by": "key_example",
+                "created_at": "2026-07-02T10:00:00.000Z",
+                "revoked_at": null,
+                "wallet_address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+                "kyc_status": "verified"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 50
           },
-          "meta": {}
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         }
       },
       {
@@ -9255,15 +9292,45 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletAddress\": \"11111111111111111111111111111111\",\n  \"reviewMode\": \"auto\"\n}",
+            "defaultValue": "{\n  \"walletAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"counterpartyId\": \"cpty_example\",\n  \"reviewMode\": \"auto\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "enrollment": {}
+            "wallet": {
+              "id": "kyc_wallet_example",
+              "organization_id": "org_example",
+              "project_id": "prj_example",
+              "wallet_address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+              "network": "solana",
+              "counterparty_id": "cpty_example",
+              "kyc_status": "verified",
+              "kyc_provider": "mural",
+              "provider_ref": null,
+              "verified_at": "2026-07-02T09:30:00.000Z",
+              "status_changed_at": "2026-07-02T09:30:00.000Z",
+              "created_by": "key_example",
+              "created_at": "2026-07-01T12:00:00.000Z",
+              "updated_at": "2026-07-02T10:00:00.000Z"
+            },
+            "enrollment": {
+              "id": "wallet_asset_enrollment_example",
+              "organization_id": "org_example",
+              "project_id": "prj_example",
+              "kyc_wallet_id": "kyc_wallet_example",
+              "token_id": "tok_example",
+              "status": "active",
+              "review_mode": "auto",
+              "created_by": "key_example",
+              "created_at": "2026-07-02T10:00:00.000Z",
+              "revoked_at": null
+            }
           },
-          "meta": {}
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         }
       }
     ]
