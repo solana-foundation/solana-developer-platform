@@ -163,13 +163,28 @@ function withGenesisGuard(
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
     if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
-      await getAbortablePromise(
-        proveGenesis(endpointTransport, cluster, genesisProofKey),
-        rpcRequest.signal
-      );
+      try {
+        await getAbortablePromise(
+          proveGenesis(endpointTransport, cluster, genesisProofKey),
+          rpcRequest.signal
+        );
+      } catch (cause) {
+        if (rpcRequest.signal?.aborted || !isTransientRpcError(cause)) throw cause;
+        throw new UnsentRequestError(cause);
+      }
     }
     return await endpointTransport<TResponse>(rpcRequest);
   };
+}
+
+/**
+ * A transient failure that happened before the request left SDP (the genesis probe failed), so
+ * the pool may try another endpoint even for `sendTransaction`.
+ */
+class UnsentRequestError extends Error {
+  constructor(public readonly cause: unknown) {
+    super("The request was not sent: its endpoint could not be proven", { cause });
+  }
 }
 
 /**
@@ -194,8 +209,9 @@ function asksForAnotherEndpoint(response: unknown): boolean {
  * Per-request failover across a cluster's endpoints, starting at the endpoint that last answered.
  * A transient transport failure or a `FAILOVER_JSON_RPC_ERROR_CODES` body moves to the next
  * endpoint; the last endpoint's answer is returned as-is so kit raises its typed error.
- * `sendTransaction` never fails over: a failure can arrive after the transaction reached the
- * leader, and resubmitting elsewhere is the send primitive's decision, not the pool's.
+ * `sendTransaction` fails over only when the request never left SDP (`UnsentRequestError`): any
+ * later failure can arrive after the transaction reached the leader, and resubmitting elsewhere
+ * is the send primitive's decision, not the pool's.
  *
  * @param endpointTransports - The guarded endpoint transports, in failover order.
  * @param poolKey - The pool's identity for the last-answering index.
@@ -205,19 +221,22 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[], poolKe
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
     const isSend =
       isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
-    const attempts = isSend ? 1 : endpointTransports.length;
     const startIndex = lastAnsweringEndpoint.get(poolKey) ?? 0;
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = (startIndex + attempt) % endpointTransports.length;
-      const isLastAttempt = attempt === attempts - 1;
+      const isLastEndpoint = attempt === endpointTransports.length - 1;
       let response: TResponse;
       try {
         response = await endpointTransports[endpointIndex]<TResponse>(rpcRequest);
       } catch (error) {
-        if (isLastAttempt || !isTransientRpcError(error)) throw error;
+        if (error instanceof UnsentRequestError) {
+          if (isLastEndpoint) throw error.cause;
+          continue;
+        }
+        if (isSend || isLastEndpoint || !isTransientRpcError(error)) throw error;
         continue;
       }
-      if (!isLastAttempt && asksForAnotherEndpoint(response)) continue;
+      if (!isSend && !isLastEndpoint && asksForAnotherEndpoint(response)) continue;
       if (endpointIndex !== startIndex) lastAnsweringEndpoint.set(poolKey, endpointIndex);
       return response;
     }
