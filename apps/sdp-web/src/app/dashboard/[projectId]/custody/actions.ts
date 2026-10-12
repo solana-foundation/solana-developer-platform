@@ -11,6 +11,7 @@ import {
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
+import { actionIdempotencyHeaders } from "@/lib/idempotency";
 import {
   createSdpApiClient,
   extractSdpApiError,
@@ -122,6 +123,7 @@ async function initializeCustodyWallet(formData: FormData): Promise<void> {
   await client.fetch("/v1/wallets/initialize", {
     method: "POST",
     body: JSON.stringify(payload),
+    headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
   });
 }
 
@@ -150,6 +152,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
   await client.fetch("/v1/wallets", {
     method: "POST",
     body: JSON.stringify({ ...target, label }),
+    headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
   });
 }
 
@@ -223,7 +226,8 @@ export type UpdateWalletLabelActionResult =
 
 export async function updateWalletLabelAction(
   walletId: string,
-  label: string
+  label: string,
+  idempotencyKey?: string
 ): Promise<UpdateWalletLabelActionResult> {
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
@@ -237,6 +241,7 @@ export async function updateWalletLabelAction(
     const client = await createSdpApiClient();
     await client.fetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
       method: "PATCH",
+      headers: actionIdempotencyHeaders(idempotencyKey),
       body: JSON.stringify({
         label: nextLabel || null,
       }),
@@ -373,7 +378,8 @@ export type WalletFaucetActionResult =
     };
 
 export async function checkWalletSignerMemoAction(
-  walletId: string
+  walletId: string,
+  idempotencyKey?: string
 ): Promise<WalletSignerCheckActionResult> {
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
@@ -386,6 +392,7 @@ export async function checkWalletSignerMemoAction(
     const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
       body: JSON.stringify({ walletId: resolvedWalletId }),
+      headers: actionIdempotencyHeaders(idempotencyKey),
     });
 
     return {

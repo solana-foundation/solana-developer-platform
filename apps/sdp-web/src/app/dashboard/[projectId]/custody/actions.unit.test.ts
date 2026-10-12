@@ -87,6 +87,17 @@ describe("createCustodySetupWalletAction", () => {
     expect(requestBody(client)).toEqual({ connectionId: "conn_eu", label: "Treasury" });
   });
 
+  // HOO-1918: the browser mints the key per user action; the server forwards it
+  // and never mints one, so a retried action is the same request upstream.
+  it("forwards the browser's Idempotency-Key and keeps it out of the body", async () => {
+    await createCustodySetupWalletAction(
+      walletForm({ provider: "privy", label: "Treasury", idempotencyKey: "browser-key" })
+    );
+
+    expect(client.fetch.mock.calls[0]?.[1]?.headers).toEqual({ "Idempotency-Key": "browser-key" });
+    expect(requestBody(client)).not.toHaveProperty("idempotencyKey");
+  });
+
   // Sending both would leave the API to reconcile a connection against a
   // provider that may own several of them.
   it("drops the provider once a connection names the credential", async () => {

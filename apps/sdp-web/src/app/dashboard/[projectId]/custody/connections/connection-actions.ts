@@ -4,6 +4,7 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
+import { actionIdempotencyHeaders } from "@/lib/idempotency";
 import { createSdpApiClient, extractSdpApiError, requestProjectHref } from "@/lib/sdp-api";
 import type { CustodyOutcomeKind } from "./verification-outcome";
 import { resolveHttpOutcome, resolveRotationOutcome } from "./verification-outcome";
@@ -289,6 +290,7 @@ export async function createConnectionWalletAction(
     await client.fetch("/v1/wallets", {
       method: "POST",
       body: JSON.stringify({ connectionId, ...(label ? { label } : {}) }),
+      headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
     });
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.addWalletFailed"));

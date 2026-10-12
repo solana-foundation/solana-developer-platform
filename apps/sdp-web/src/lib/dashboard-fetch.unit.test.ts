@@ -16,10 +16,33 @@ function sentHeaders(fetchMock: ReturnType<typeof noContentFetchMock>): Headers 
   return new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
 }
 
+/** Gives the window a `sessionStorage`: an in-memory one, or one that refuses every write. */
+function installSessionStorage(refuseWrites = false): void {
+  const entries = new Map<string, string>();
+  const storage = {
+    getItem: (name: string) => entries.get(name) ?? null,
+    setItem: (name: string, value: string) => {
+      if (refuseWrites) throw new DOMException("quota exceeded", "QuotaExceededError");
+      entries.set(name, value);
+    },
+    removeItem: (name: string) => {
+      entries.delete(name);
+    },
+  };
+  Object.defineProperty(window, "sessionStorage", { value: storage, configurable: true });
+}
+
+/** Puts the tab on `pathname` with working storage, as a browser has. */
+function openTab(pathname: string): void {
+  setWindowPathname(pathname);
+  installSessionStorage();
+}
+
 afterEach(() => {
   restoreWindowLocation();
   vi.unstubAllGlobals();
   resetIdempotencyKeyStoresForTests();
+  if (typeof window !== "undefined") Reflect.deleteProperty(window, "sessionStorage");
 });
 
 describe("dashboardFetch", () => {
@@ -106,6 +129,7 @@ function jsonResponse(status: number, headers: Record<string, string> = {}): Res
 describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   const PATH = "/api/dashboard/payments/recurring-payments";
 
+
   function statusFetchMock(...statuses: number[]) {
     return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse(statuses.shift() ?? 201)
@@ -121,7 +145,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   }
 
   it("reuses the key across a retry after a 5xx, and retires it after success", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(502, 201, 201);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -136,7 +160,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("retires the key once a 5xx comes back as a replay, so the next submit is new", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const responses = [
       jsonResponse(500),
       jsonResponse(500, { "Idempotent-Replayed": "true" }),
@@ -160,7 +184,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("holds the key when the request never got an answer", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = vi
       .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
       .mockRejectedValueOnce(new TypeError("network down"));
@@ -175,7 +199,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   // Greptile (#2252): an expired session's 401 settles nothing about the
   // unanswered attempt before it, so signing in and retrying reuses its key.
   it("keeps an unanswered attempt's key through a later refusal", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = vi
       .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
       .mockRejectedValueOnce(new TypeError("network down"))
@@ -193,7 +217,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   // Greptile (#2266): an expired session's redirect to sign-in comes back as an
   // HTML 200 that says nothing about the write, so it keeps the key.
   it("keeps the key when the answer is a followed redirect, not the backend's", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const signIn = new Response("<html>sign in</html>", {
       status: 200,
       headers: { "content-type": "text/html" },
@@ -214,7 +238,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("retires a fresh key on a first-attempt refusal", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(400, 201);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -225,7 +249,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("keeps the key when a success's body fails to download", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const brokenBody = () =>
       new Response(
         new ReadableStream({
@@ -247,7 +271,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("sends nothing for a call already cancelled", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(201);
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
@@ -259,15 +283,32 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("still sends, and reuses the key in this page, when storage refuses the write", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+  it("refuses to send a money movement when storage refuses its key", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    installSessionStorage(true);
+    const fetchMock = statusFetchMock(201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await submit();
+
+    expect(response.status).toBe(428);
+    expect(await response.json()).toMatchObject({
+      error: { code: "IDEMPOTENCY_KEY_NOT_PERSISTED" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends any other mutation, reusing the key in this page, when storage refuses it", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/counterparties`);
+    installSessionStorage(true);
     const fetchMock = statusFetchMock(502, 201);
     vi.stubGlobal("fetch", fetchMock);
-    // This suite runs without browser storage, so every persist is refused.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const createCounterparty = () =>
+      dashboardRequest("/api/dashboard/counterparty", { method: "POST", body: '{"name":"a"}' });
 
-    await submit();
-    await submit();
+    await createCounterparty();
+    await createCounterparty();
 
     expect(keyOfCall(fetchMock, 0)).toMatch(/^[0-9a-f-]{36}$/);
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
@@ -276,7 +317,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("does not let one caller's abort cancel the request another caller joined", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     let respond: (response: Response) => void = () => undefined;
     const fetchMock = vi.fn(
       (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -303,7 +344,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("joins a double submit of the same action into one request", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(201);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -317,7 +358,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   // Greptile (#2252): a live submit must never join a demo request of the same
   // body, or it would receive the demo's canned answer.
   it("keeps demo and live submits of the same body apart", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(201, 201);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -336,7 +377,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   });
 
   it("gives a different action its own key", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(502, 502);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -346,8 +387,8 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 0)).not.toBe(keyOfCall(fetchMock, 1));
   });
 
-  it("leaves a caller-chosen key, reads and other modules alone", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+  it("keys every mutation, whatever module, and leaves a caller-chosen key and reads alone", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(201, 200, 201);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -361,6 +402,6 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
     expect(keyOfCall(fetchMock, 0)).toBe("own-key");
     expect(keyOfCall(fetchMock, 1)).toBeNull();
-    expect(keyOfCall(fetchMock, 2)).toBeNull();
+    expect(keyOfCall(fetchMock, 2)).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
