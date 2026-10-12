@@ -93,16 +93,15 @@ export const DOCS_REDIRECTS = [
     destination: "/docs/tokens/tokenize-an-asset",
     permanent: true,
   },
-  // Temporary until a signing-modes page replaces the deleted prepare-vs-execute
-  // guides; the execution model is summarized on the developing-with-sdp index.
+  // The prepare-vs-execute guides were replaced by the signing-modes page.
   {
     source: "/docs/guides/prepare-vs-execute",
-    destination: "/docs/developing-with-sdp",
-    permanent: false,
+    destination: "/docs/developing-with-sdp/signing-modes",
+    permanent: true,
   },
   {
     source: "/docs/tokens/prepare-vs-execute",
-    destination: "/docs/developing-with-sdp",
-    permanent: false,
+    destination: "/docs/developing-with-sdp/signing-modes",
+    permanent: true,
   },
 ];
