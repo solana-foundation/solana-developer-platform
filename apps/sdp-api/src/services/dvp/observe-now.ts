@@ -13,6 +13,7 @@
  * making a late deposit recoverable.
  */
 
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
@@ -42,7 +43,8 @@ import { readDvpTradeObservation } from "./read-chain";
  *   chain, or the sweep having moved the row first, in which case the caller's
  *   own copy is the stale one and it should re-read rather than trust this.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint, or
+ *   `RPC_CLUSTER_MISMATCH` when an endpoint serves another cluster.
  */
 export async function observeDvpTradeNow(
   env: Env,
@@ -95,6 +97,9 @@ export async function observeDvpTradeNow(
         observation.closeResolution === null ? null : observation.closeResolution.signature,
     });
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     getLogger().warn(
       { error, tradeId: trade.id },
       "dvp: could not observe the trade immediately; the sweep will pick it up"
@@ -126,7 +131,8 @@ export async function observeDvpTradeNow(
  * @returns The live derived trade, or the stored trade when it is ineligible or
  *   the chain cannot be read.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint, or
+ *   `RPC_CLUSTER_MISMATCH` when an endpoint serves another cluster.
  */
 export async function observeDvpTradeWithoutRecording(trade: DvpTradeRow): Promise<DvpTradeRow> {
   if (OBSERVATION_MAX_AGE_BY_STATUS[trade.status] === null) {
@@ -166,6 +172,9 @@ export async function observeDvpTradeWithoutRecording(trade: DvpTradeRow): Promi
       observedClusterTimestamp: observation.clusterUnixTimestamp.toString(),
     };
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     getLogger().warn(
       { error, tradeId: trade.id },
       "dvp: could not read the trade for a party; showing the stored reading"
@@ -215,8 +224,8 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
  * @param trade - The trade as it was last stored.
  * @param now - Current time, injectable for tests.
  * @returns A fresher row when one was written, otherwise the row given.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` or `RPC_NOT_CONFIGURED` from the door when a
- *   reading is due.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING`, `RPC_NOT_CONFIGURED` or `RPC_CLUSTER_MISMATCH`
+ *   from the door when a reading is due.
  */
 export async function observeDvpTradeIfStale(
   env: Env,
