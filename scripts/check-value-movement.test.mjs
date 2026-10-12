@@ -29,13 +29,9 @@ function fixture(files) {
 const CAPABILITY = {
   id: "admit",
   why: "test capability",
-  symbols: [
-    { file: "src/lib/cap.ts", name: "mint" },
-    { file: "src/lib/cap.ts", name: "Signer", member: "sign" },
-  ],
+  symbols: [{ file: "src/lib/cap.ts", name: "mint" }],
   owners: ["src/lib/cap.ts"],
   allow: ["src/allowed.ts"],
-  shrinkOnly: true,
 };
 
 const CAP_SOURCE = `export function mint(): number { return 1; }
@@ -52,6 +48,7 @@ function violations(files, capabilities = [CAPABILITY]) {
       rootDir,
       tsconfig: path.join(rootDir, "tsconfig.json"),
       capabilities,
+      scanRoot: "src/",
     });
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -74,16 +71,6 @@ test("allows an allowlisted file and flags everything else, however it is import
   );
 });
 
-test("flags a class method capability called through an instance", () => {
-  const found = violations({
-    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
-    "src/method.ts": `import { Signer } from "./lib/cap";\nnew Signer().sign();\n`,
-  });
-
-  assert.equal(found.length, 1);
-  assert.match(found[0], /^src\/method\.ts:2: references admit \(sign\)/);
-});
-
 test("fails a stale allowlist entry, so shrink-only lists cannot grow back silently", () => {
   const found = violations({ "src/allowed.ts": "export const unrelated = 1;\n" });
 
@@ -104,7 +91,7 @@ test("flags destructuring, element access and whole-module escapes", () => {
   const found = violations({
     "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
     "src/destructure.ts": `import * as cap from "./lib/cap";\nconst { mint } = cap;\nmint();\n`,
-    "src/element.ts": `import { Signer } from "./lib/cap";\nnew Signer()["sign"]();\n`,
+    "src/element.ts": `import * as cap from "./lib/cap";\ncap["mint"]();\n`,
     "src/dynamic.ts": `export async function load() {\n  return import("./lib/cap");\n}\n`,
     "src/star.ts": `export * from "./lib/cap";\n`,
     "src/star-as.ts": `export * as cap from "./lib/cap";\n`,
@@ -264,4 +251,19 @@ export type Config = { id: string };
 
   const flagged = new Set(found.map((violation) => violation.split(":")[0]));
   assert.deepEqual([...flagged].sort(), ["src/client.ts", "src/signer.ts"]);
+});
+
+test("refuses code the checker cannot follow", () => {
+  const found = violations({
+    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
+    "src/computed.ts": `export const load = (name: string) => import(name);\n`,
+    "src/evaluated.ts": `export const run = (code: string) => eval(code);\n`,
+    "src/constructed.ts": `export const make = (code: string) => new Function(code);\n`,
+  });
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual(
+    [...flagged].sort(),
+    ["src/computed.ts", "src/constructed.ts", "src/evaluated.ts"].sort()
+  );
 });

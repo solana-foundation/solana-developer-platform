@@ -45,7 +45,7 @@ const KEYCHAIN_SDKS = [
   "@solana/keychain-utila",
 ];
 
-/** @typedef {{ file?: string, module?: string, name: string, member?: string }} CapabilitySymbol */
+/** @typedef {{ file?: string, module?: string, name: string }} CapabilitySymbol */
 /**
  * @typedef {{
  *   id: string,
@@ -53,7 +53,6 @@ const KEYCHAIN_SDKS = [
  *   symbols: CapabilitySymbol[],
  *   owners: string[],
  *   allow: string[],
- *   shrinkOnly?: boolean,
  * }} Capability
  */
 
@@ -71,7 +70,6 @@ export const CAPABILITIES = [
     ],
     owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
     allow: [`${API}/services/domain/signing.service.ts`],
-    shrinkOnly: true,
   },
   {
     id: "credential-signing-adapter",
@@ -84,7 +82,6 @@ export const CAPABILITIES = [
     ],
     owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],
     allow: [`${API}/services/domain/signing/custody-runtime-target.ts`],
-    shrinkOnly: true,
   },
   {
     id: "fee-payment-adapter",
@@ -96,7 +93,6 @@ export const CAPABILITIES = [
     ],
     owners: [],
     allow: [`${API}/services/sponsorship.service.ts`],
-    shrinkOnly: true,
   },
   {
     id: "keychain-signing-adapter",
@@ -110,7 +106,6 @@ export const CAPABILITIES = [
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
       `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
     ],
-    shrinkOnly: true,
   },
   {
     id: "provider-signer",
@@ -125,7 +120,6 @@ export const CAPABILITIES = [
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
       `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
     ],
-    shrinkOnly: true,
   },
   {
     id: "native-fee-payer",
@@ -152,16 +146,13 @@ export const CAPABILITIES = [
     ],
     owners: [],
     allow: [`${API}/services/domain/signing.service.ts`],
-    shrinkOnly: true,
   },
 ];
 
 /** Test files and the API's own test-support tree; nothing else is exempt. */
 function isTestFile(relativePath) {
   return (
-    /\.(test|spec)\.(ts|tsx|mts)$/.test(relativePath) ||
-    relativePath.startsWith(`${API}/test/`) ||
-    relativePath.startsWith("src/test/")
+    /\.(test|spec)\.(ts|tsx|mts)$/.test(relativePath) || relativePath.startsWith(`${API}/test/`)
   );
 }
 
@@ -243,6 +234,29 @@ function isPinnedUse(checker, node) {
   );
 }
 
+/**
+ * Code the checker cannot resolve: an `import()` or `require()` whose
+ * specifier is not a literal, `createRequire`, `eval`, and `Function` as a
+ * constructor. None of it is needed in API code, so it is refused outright.
+ */
+function isOpaqueCodeLoad(node) {
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    const loadsModule =
+      callee.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(callee) && callee.text === "require");
+    if (loadsModule && !(node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]))) {
+      return true;
+    }
+    return ts.isIdentifier(callee) && ["createRequire", "eval", "Function"].includes(callee.text);
+  }
+  return (
+    ts.isNewExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "Function"
+  );
+}
+
 /** Resolves a package specifier (an external constructor) the way the program does. */
 function resolveModuleSource(program, specifier) {
   const containingFile = program.getRootFileNames()[0];
@@ -290,29 +304,19 @@ function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
   if (!exported) {
     throw new Error(`${capabilitySymbol.file} does not export ${capabilitySymbol.name}`);
   }
-  const target = resolve(exported);
-  if (!capabilitySymbol.member) {
-    return [target];
-  }
-  const member = target.members?.get(capabilitySymbol.member);
-  if (!member) {
-    throw new Error(`${capabilitySymbol.name} has no member ${capabilitySymbol.member}`);
-  }
-  return [member];
+  return [resolve(exported)];
 }
 
 /**
  * Finds every capability reference outside its allowlist, and every stale
  * allowlist entry. Returns human-readable violations.
  *
- * @param {{ rootDir: string, tsconfig: string, capabilities?: Capability[], scanRoot?: string }} options
+ * @param {{ rootDir: string, tsconfig: string, capabilities: Capability[], scanRoot: string }} options
  */
-export function findValueMovementViolations({
-  rootDir,
-  tsconfig,
-  capabilities = CAPABILITIES,
-  scanRoot = "",
-}) {
+export function findValueMovementViolations({ rootDir, tsconfig, capabilities, scanRoot }) {
+  for (const [name, value] of Object.entries({ rootDir, tsconfig, capabilities, scanRoot })) {
+    if (value === undefined) throw new Error(`findValueMovementViolations needs ${name}`);
+  }
   const configFile = ts.readConfigFile(tsconfig, ts.sys.readFile);
   if (configFile.error) {
     throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"));
@@ -339,7 +343,7 @@ export function findValueMovementViolations({
     if (!relativePath.startsWith(scanRoot)) continue;
     if (isTestFile(relativePath)) continue;
 
-    const report = (node, symbol, label, { module = false } = {}) => {
+    const report = (node, symbol, label, viaModule) => {
       if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
         symbol = checker.getAliasedSymbol(symbol);
       }
@@ -353,7 +357,7 @@ export function findValueMovementViolations({
         violations.push(
           `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
         );
-      } else if (!module && !isPinnedUse(checker, node)) {
+      } else if (!viaModule && !isPinnedUse(checker, node)) {
         violations.push(
           `${relativePath}:${line + 1}: hands ${capability.id} out as a value (${label}); an allowlisted file may only call it, construct it or re-export it by name, so every reference elsewhere still resolves to it. ${capability.why}`
         );
@@ -372,13 +376,13 @@ export function findValueMovementViolations({
         const capability = targets.get(symbol);
         if (capability && !reported.has(capability.id)) {
           reported.add(capability.id);
-          report(node, symbol, `module ${specifier.text}`, { module: true });
+          report(node, symbol, `module ${specifier.text}`, true);
         }
       }
     };
     const visit = (node) => {
       if (ts.isIdentifier(node)) {
-        report(node, checker.getSymbolAtLocation(node), node.text);
+        report(node, checker.getSymbolAtLocation(node), node.text, false);
       } else if (
         ts.isElementAccessExpression(node) &&
         ts.isStringLiteralLike(node.argumentExpression)
@@ -387,7 +391,7 @@ export function findValueMovementViolations({
           checker.getTypeAtLocation(node.expression),
           node.argumentExpression.text
         );
-        report(node, property, node.argumentExpression.text);
+        report(node, property, node.argumentExpression.text, false);
       } else if (
         ts.isBindingElement(node) &&
         !node.propertyName &&
@@ -398,7 +402,7 @@ export function findValueMovementViolations({
           checker.getTypeAtLocation(node.parent),
           node.name.text
         );
-        report(node, property, node.name.text);
+        report(node, property, node.name.text, false);
       } else if (
         ts.isImportDeclaration(node) &&
         node.importClause?.namedBindings &&
@@ -421,6 +425,11 @@ export function findValueMovementViolations({
           (ts.isIdentifier(node.expression) && node.expression.text === "require"))
       ) {
         reportModule(node, node.arguments[0]);
+      } else if (isOpaqueCodeLoad(node)) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        violations.push(
+          `${relativePath}:${line + 1}: loads code the check cannot follow (a computed import or require, createRequire, eval or new Function); name the module literally.`
+        );
       }
       ts.forEachChild(node, visit);
     };
@@ -431,9 +440,7 @@ export function findValueMovementViolations({
     for (const allowed of capability.allow) {
       if (!used.get(capability.id).has(allowed)) {
         violations.push(
-          capability.shrinkOnly
-            ? `${allowed}: no longer references ${capability.id}; remove it from the allowlist (the list only shrinks).`
-            : `${allowed}: allowlisted for ${capability.id} but does not reference it.`
+          `${allowed}: no longer references ${capability.id}; remove it from the allowlist (the list only shrinks).`
         );
       }
     }
@@ -449,7 +456,12 @@ if (isMain) {
     console.error(`Missing ${tsconfig}`);
     process.exit(1);
   }
-  const violations = findValueMovementViolations({ rootDir, tsconfig, scanRoot: `${API}/` });
+  const violations = findValueMovementViolations({
+    rootDir,
+    tsconfig,
+    capabilities: CAPABILITIES,
+    scanRoot: `${API}/`,
+  });
   if (violations.length > 0) {
     console.error("Value movement check failed (HOO-1955):");
     for (const violation of violations) console.error(`  ${violation}`);

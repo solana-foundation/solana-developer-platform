@@ -33,8 +33,8 @@ dropped.
    tenant sponsor signature from `createSponsorshipFeePayment`. There is no unscoped sponsor:
    every sponsor has a tenant and a movement. Each caller names its
    movement (`MOVEMENTS` in `@sdp/types`); a start the organization may not make
-   gets a signer or sponsor that refuses (`sdp_money_refused`, 403), and an
-   exit always signs. The decision is `decideMovement`, a pure function of the
+   gets a signer or sponsor that refuses with 403 `FORBIDDEN`, logged as
+   `sdp_money_refused`, and an exit always signs. The decision is `decideMovement`, a pure function of the
    `projects ⋈ organizations` row, read alongside rows the waist already reads.
    Refusing at signing, not at resolution, keeps confirm-only flows working.
 4. **CI pins what could bypass the waists**: the constructors that turn a
@@ -52,9 +52,13 @@ dropped.
   funds; a compromised organization is suspended, and a suspended
   organization's requests are refused before any handler runs.
 - A revoked organization's same-key retry of a completed request gets the
-  refusal, not its stored response (ADR 0008, idempotency, #2251). There is no special case.
-- Production entitlement is decided for starts only; the edge's own
-  production checks (#2228) still refuse some exits, which PR C reopens.
+  refusal, not its stored response: authentication refuses the organization
+  before idempotency replays anything (HOO-1918, #2251). There is no special
+  case.
+- Production entitlement is decided for starts only. The edge's own
+  production checks (#2228) still refuse some exits for a production project
+  without the entitlement; opening those routes at the edge is follow-up work,
+  and until then such an exit is refused at the edge, never at a waist.
 - Provider-API money (BVNK payouts, provider-managed withdrawals) does not pass
   a signer; a future provider-API start needs its own waist.
 - Asynchronous, quorum-based signing (pending approvals, not built yet) must
