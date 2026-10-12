@@ -105,6 +105,23 @@ describe("admitOrganizationMember", () => {
     expect(await readMemberships()).toEqual([{ role: "admin", status: "removed" }]);
   });
 
+  it("refuses a deleted user despite a live invitation and leaves it pending", async () => {
+    await seedInvitee("removed", { role: "member", status: "pending", expiresAt: LIVE_EXPIRY });
+    await getDb(env)
+      .prepare("UPDATE users SET status = 'deleted' WHERE id = ?")
+      .bind(INVITEE.id)
+      .run();
+
+    expect(await admitInvitee(ORGANIZATION.id, INVITEE.email, "admin")).toEqual({
+      admitted: false,
+      reason: "user_deleted",
+    });
+    expect(await readMemberships()).toEqual([{ role: "admin", status: "removed" }]);
+    expect(await readInvitations(getDb(env))).toEqual([
+      { id: "inv_admission", role: "member", status: "pending" },
+    ]);
+  });
+
   it("refuses a user whose invitation was revoked", async () => {
     await seedInvitee(null, { role: "member", status: "revoked", expiresAt: LIVE_EXPIRY });
 
