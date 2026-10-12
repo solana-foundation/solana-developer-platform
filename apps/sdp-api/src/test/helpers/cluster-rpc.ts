@@ -21,6 +21,8 @@ const MANAGED_POOL_ENV = {
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
 const jsonRpcRequestSchema = z.object({
   id: z.union([z.string(), z.number()]),
   method: z.string(),
@@ -70,10 +72,25 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
 }
 
 /**
+ * Whether `input` targets a server on this machine, such as the local Clerk issuer serving JWKS.
+ *
+ * @param input - The resource a `fetch` call was made with.
+ * @returns True when the request URL's host is a loopback address.
+ */
+function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
+  const requestUrl =
+    typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url);
+  return LOOPBACK_HOSTNAMES.has(requestUrl.hostname);
+}
+
+/**
  * Point the managed pool of each cluster at its one test endpoint (every other provider blanked)
  * and stub global `fetch` so each endpoint proves its own cluster's genesis hash and answers the
- * results a test registers. Opens no cluster scope: requests do, through the real middleware or
- * `runInClusterScope`. Register at `describe` level; env and `fetch` are restored after each test.
+ * results a test registers. Requests to a loopback host (`127.0.0.1`, `localhost`, `[::1]`), such
+ * as local test servers, pass through to the original `fetch` unchanged and are not recorded; any
+ * other URL that is not a cluster test endpoint throws, so no test reaches the network. Opens no
+ * cluster scope: requests do, through the real middleware or `runInClusterScope`. Register at
+ * `describe` level; env and `fetch` are restored after each test.
  *
  * @returns The current test's recorded calls and the answer registry.
  */
@@ -87,6 +104,9 @@ export function installClusterRpcStub(): ClusterRpcStub {
       vi.stubEnv(envKey, endpointUrl);
     }
     globalThis.fetch = async (input, init) => {
+      if (isLoopbackRequest(input)) {
+        return originalFetch(input, init);
+      }
       if (typeof input !== "string") {
         throw new Error("The cluster RPC stub expects kit to fetch a string URL");
       }
