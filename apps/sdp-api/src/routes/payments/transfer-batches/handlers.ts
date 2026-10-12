@@ -1,8 +1,8 @@
 export {
   admitTransferBatchExecution,
+  authorizeTransferBatch,
   createTransferBatch,
-  extractTransferBatchRequest,
-  findTransferBatchIdempotentKeyReplay,
+  findTransferBatchRecordReplay,
 } from "./create";
 export { estimateTransferBatch } from "./estimate";
 export { getTransferBatch, listTransferBatches } from "./read";

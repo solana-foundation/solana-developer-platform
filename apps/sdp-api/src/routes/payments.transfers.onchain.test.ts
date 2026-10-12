@@ -278,8 +278,16 @@ describe("Payments routes — on-chain transfers", () => {
     expect(rows[0]?.signature).toBeTruthy();
     expect(rows[0]?.signed_transaction).toBeTruthy();
 
+    // A second request to fund the same deposit (a retry after a crash, or
+    // another key) is answered from the funded row and sends nothing again
+    // (HOO-1918), instead of a 409 the client could never get past.
+    const sendsBefore = sendTransactionMock.mock.calls.length;
     const duplicate = await postTransfer(JSON.parse(requestBody), {});
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(200);
+    const duplicateBody = await readTransferResponse(duplicate);
+    expect(duplicateBody.data.transfer.id).toBe(body.data.transfer.id);
+    expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
   });
 

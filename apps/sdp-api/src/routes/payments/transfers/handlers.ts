@@ -50,14 +50,19 @@ import {
 } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
-import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
+import type { MovementStepInput } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
+} from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -79,7 +84,7 @@ import { mapTransferRow } from "../mappers";
 import { transferIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import {
-  admitExactPaymentWallet,
+  admitPaymentWalletRuntimeExecution,
   assertPaymentWalletExactAccess,
   assertPaymentWalletReadAccess,
   type ResolvedScope,
@@ -316,34 +321,26 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
- * Parse and resolve a create-transfer request for the request gate: the
- * validated body and the resolved scope and outbound operation.
+ * The create-transfer access check (HOO-1918, ADR 0008): the caller may move
+ * money from the named source wallet, read fresh, in its own project. It runs
+ * before the Idempotency-Key is claimed, so a replay passes exactly these
+ * checks. A wallet deactivated since a request ran still passes here (a replay
+ * moves nothing); admission refuses new work on it.
  *
- * @param c - Request context.
- * @returns The validated body and resolved resources.
+ * @returns The resolved scope and outbound operation, for the later steps.
  */
-export async function extractTransferRequest(
-  c: ValidatedBodyContext<typeof createTransferSchema>
-): Promise<RequestGateExtraction> {
-  const body = c.req.valid("json");
+export async function authorizeTransfer(
+  c: AppContext,
+  input: AuthorizeInput
+): Promise<TransferResolved> {
+  // SAFETY: mounted after validateBody(createTransferSchema).
+  const body = input.body as CreateTransferBody;
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
-
   const scope = await resolveScope(
     c,
-    c.req.header("Idempotency-Key") !== undefined ? body.sourceCustodyWalletId : undefined
+    parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
   );
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
-  if (body.transferId) {
-    // An excluded provider's deposit is refused before anything else runs.
-    const existing = await getPaymentsRepository(c).getTransferById({
-      transferId: body.transferId,
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-    });
-    if (existing) {
-      assertTransferRampProviderInChannel(c, existing);
-    }
-  }
   const operation = resolveOutboundPaymentOperation({
     auth: scope.auth,
     wallets: scope.wallets,
@@ -354,37 +351,79 @@ export async function extractTransferRequest(
     env: c.env,
     requiredWalletPermissions: ["payments:write"],
   });
-
-  return { body, resolved: { scope, operation } };
-}
-
-export async function admitTransferExecution(
-  c: AppContext,
-  extraction: RequestGateExtraction
-): Promise<void> {
-  // SAFETY: this callback is wired only beside extractTransferRequest in payments/index.ts.
-  const { operation } = extraction.resolved as TransferResolved;
-  await admitExactPaymentWallet(c, operation.sourceWallet, ["payments:write"]);
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    scope.auth,
+    operation.sourceWallet.id,
+    ["payments:write"],
+    "any"
+  );
+  return { scope, operation };
 }
 
 /**
- * Resolve an Idempotency-Key replay for a create-transfer request: a key that
- * matches a recorded transfer with the same fingerprint returns the recorded
- * outcome, so a replayed intent never runs twice.
- *
- * @param c - Request context.
- * @param extraction - The extraction produced by extractTransferRequest.
- * @param idempotencyKey - The Idempotency-Key header value the gate read.
- * @returns The recorded response, or null when the request is a new intent.
+ * Admits a new transfer: the ramp provider is still in the release channel,
+ * and the custody runtime takes the wallet (active, provider usable). State,
+ * so it runs after the replay exits.
  */
-export async function findTransferIdempotentKeyReplay(
+export async function admitTransferExecution(
   c: AppContext,
-  extraction: RequestGateExtraction,
+  input: MovementStepInput<TransferResolved>
+): Promise<void> {
+  // SAFETY: mounted after validateBody(createTransferSchema).
+  const body = input.body as CreateTransferBody;
+  if (body.transferId) {
+    const existing = await getPaymentsRepository(c).getTransferById({
+      transferId: body.transferId,
+      organizationId: input.authorized.scope.auth.organizationId,
+      projectId: input.authorized.scope.auth.projectId,
+    });
+    if (existing) {
+      // An excluded provider's deposit is never funded.
+      assertTransferRampProviderInChannel(c, existing);
+    }
+  }
+  await admitPaymentWalletRuntimeExecution(c, input.authorized.operation.sourceWallet);
+}
+
+/**
+ * Answers a create-transfer request from its row (HOO-1918): after a takeover
+ * of a crashed attempt, or once the shared record has expired. It reads the
+ * validated request and what authorize resolved only, never RPC, so a request
+ * that already ran is always answered.
+ *
+ * - A keyed transfer: the row recorded under this key with the same fingerprint.
+ * - Funding a ramp deposit (`transferId`): the deposit row once it carries the
+ *   on-chain values this request asked for, so a retry after a crash is
+ *   answered with it instead of a 409 "already has an on-chain transaction".
+ */
+export async function findTransferRecordReplay(
+  c: AppContext,
+  input: MovementStepInput<TransferResolved>,
   idempotencyKey: string
 ): Promise<Response | null> {
-  const body = extraction.body as CreateTransferBody;
-  if (body.transferId) return null;
-  const { scope, operation } = extraction.resolved as TransferResolved;
+  // SAFETY: mounted after validateBody(createTransferSchema).
+  const body = input.body as CreateTransferBody;
+  const { scope, operation } = input.authorized;
+  if (body.transferId) {
+    const existing = await getPaymentsRepository(c).getTransferById({
+      transferId: body.transferId,
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+    });
+    if (
+      existing &&
+      rampTransferHasOnchainValues(existing) &&
+      existing.custody_wallet_id === operation.sourceWallet.id &&
+      existing.destination_address === body.destination &&
+      existing.token === operation.token &&
+      existing.amount !== null &&
+      compareDecimalAmounts(existing.amount, operation.amount) === 0
+    ) {
+      return success(c, buildTransferReplayPayload(existing));
+    }
+    return null;
+  }
 
   const fingerprintInput = {
     custodyWalletId: operation.sourceWallet.id,
@@ -403,11 +442,7 @@ export async function findTransferIdempotentKeyReplay(
     buildPaymentTransferFingerprint(fingerprintInput),
     operation.sourceWallet.id
   );
-  if (!replay) {
-    return null;
-  }
-
-  return success(c, buildTransferReplayPayload(replay));
+  return replay ? success(c, buildTransferReplayPayload(replay)) : null;
 }
 
 async function updateTransferRecord(
@@ -711,11 +746,9 @@ function compareTransferRows(
   return createdAtComparison || right.id.localeCompare(left.id);
 }
 
-export async function createTransfer(c: AppContext) {
-  const {
-    body,
-    resolved: { scope, operation },
-  } = getRequestGateContext<CreateTransferBody, TransferResolved>(c);
+export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
+  const body = c.req.valid("json");
+  const { scope, operation } = getAuthorized<TransferResolved>(c);
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
 
   const reusedRampTransfer = body.transferId !== undefined;

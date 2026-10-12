@@ -117,6 +117,12 @@ export interface CounterpartyAccountsRepository {
     counterpartyAccountIds: string[];
     organizationId: string;
     projectId: string;
+    /**
+     * `any` for an access check (HOO-1918): the account must belong to the
+     * project whatever its status, so a request that already ran is still
+     * answered after the account is archived.
+     */
+    status?: "active" | "any";
   }): Promise<CounterpartyAccountRow[]>;
   listCounterpartyAccountsByCounterparty(
     params: ListCounterpartyAccountsByCounterpartyInput

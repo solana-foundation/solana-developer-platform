@@ -9,13 +9,21 @@ import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositorie
 import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
-import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
+import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
+import { normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
-import { admitExactPaymentWallet, assertPaymentWalletExactAccess } from "../wallets";
+import { admitPaymentWalletRuntimeExecution, assertPaymentWalletExactAccess } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
-import { resolveBatchRequest } from "./resolve";
+import {
+  type AuthorizedBatchRequest,
+  authorizeBatchRequest,
+  resolveBatchMovement,
+} from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
 import {
@@ -23,11 +31,7 @@ import {
   chunkInstructionGroups,
   DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
 } from "./transaction";
-import type { CreateTransferBatchInput, ResolvedBatchRequest } from "./types";
-
-interface TransferBatchGateResolved extends ResolvedBatchRequest {
-  idempotencyFingerprint: string;
-}
+import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
   c: AppContext,
@@ -40,99 +44,96 @@ async function respondToTransferBatchReplay(
 }
 
 /**
- * Parse and resolve a transfer-batch request for the request gate: the
- * validated body, the resolved request and its idempotency fingerprint.
- *
- * @param c - Request context.
- * @returns The validated body and resolved request.
+ * The create-batch access check (HOO-1918, ADR 0008): source wallet access,
+ * read fresh, and every named counterparty account in the project. A replay
+ * passes exactly these checks.
  */
-export async function extractTransferBatchRequest(
-  c: ValidatedBodyContext<typeof createTransferBatchSchema>
-): Promise<RequestGateExtraction> {
-  const input = c.req.valid("json");
-  assertPaymentWalletExactAccess(c, input.sourceCustodyWalletId, ["payments:write"]);
-  const resolved = await resolveBatchRequest(
+export async function authorizeTransferBatch(
+  c: AppContext,
+  input: AuthorizeInput
+): Promise<AuthorizedBatchRequest> {
+  // SAFETY: mounted after validateBody(createTransferBatchSchema).
+  const body = input.body as CreateTransferBatchInput;
+  assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
+  const authorized = await authorizeBatchRequest(
     c,
-    input,
+    body,
     ["payments:write"],
-    c.req.header("Idempotency-Key") !== undefined ? input.sourceCustodyWalletId : undefined
+    parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
   );
-
-  return {
-    body: input,
-    resolved: {
-      ...resolved,
-      idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
-    },
-  };
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    authorized.scope.auth,
+    authorized.sourceWallet.id,
+    ["payments:write"],
+    "any"
+  );
+  return authorized;
 }
 
+/** The custody runtime takes the source wallet: state, after the replay exits. */
 export async function admitTransferBatchExecution(
   c: AppContext,
-  extraction: RequestGateExtraction
+  input: MovementStepInput<AuthorizedBatchRequest>
 ): Promise<void> {
-  // SAFETY: this callback is wired only beside extractTransferBatchRequest in payments/index.ts.
-  const resolved = extraction.resolved as TransferBatchGateResolved;
-  await admitExactPaymentWallet(c, resolved.sourceWallet, ["payments:write"]);
+  await admitPaymentWalletRuntimeExecution(c, input.authorized.sourceWallet);
 }
 
-/**
- * Build the batch idempotency fingerprint from the resolved request.
- *
- * @param resolved - The resolved batch request.
- * @param options - The request's batch options.
- * @returns The fingerprint string.
- */
-function buildBatchIdempotencyFingerprint(
-  resolved: ResolvedBatchRequest,
-  options: CreateTransferBatchInput["options"]
+/** The batch row's fingerprint, from the validated request and what authorize loaded. */
+function buildBatchRecordFingerprint(
+  c: AppContext,
+  body: CreateTransferBatchInput,
+  authorized: AuthorizedBatchRequest
 ): string {
   return buildTransferBatchFingerprint({
-    sourceCustodyWalletId: resolved.sourceWallet.id,
-    sourceAddress: resolved.sourceAddress,
-    token: resolved.tokenContext.token,
-    recipients: resolved.recipients.map((recipient) => ({
-      externalId: recipient.externalId,
-      counterpartyId: recipient.counterpartyId,
-      counterpartyAccountId: recipient.counterpartyAccountId,
-      destinationAddress: recipient.destinationAddress,
-      amount: recipient.amount,
-    })),
-    options,
+    sourceCustodyWalletId: authorized.sourceWallet.id,
+    sourceAddress: authorized.sourceAddress,
+    token: normalizePaymentToken(body.token, c.env),
+    recipients: body.recipients.map((recipient) => {
+      const account = authorized.accounts.get(recipient.counterpartyAccountId);
+      if (!account) {
+        // authorizeBatchRequest refused any recipient without its account.
+        throw internalError("Authorized batch is missing a recipient's account");
+      }
+      return {
+        externalId: recipient.externalId ?? null,
+        counterpartyId: account.counterparty_id,
+        counterpartyAccountId: recipient.counterpartyAccountId,
+        amount: recipient.amount,
+      };
+    }),
+    options: body.options,
   });
 }
 
 /**
- * Resolve an Idempotency-Key replay before new transfer-batch work is admitted.
- *
- * @param c - Request context.
- * @param extraction - The transfer-batch gate extraction.
- * @param idempotencyKey - The Idempotency-Key header value.
- * @returns The recorded batch response, or null for a new request.
+ * Answers a create-batch request from its row: after a takeover of a crashed
+ * attempt, or once the shared record has expired. No RPC and no account state.
  */
-export async function findTransferBatchIdempotentKeyReplay(
+export async function findTransferBatchRecordReplay(
   c: AppContext,
-  extraction: RequestGateExtraction,
+  input: MovementStepInput<AuthorizedBatchRequest>,
   idempotencyKey: string
 ): Promise<Response | null> {
-  const resolved = extraction.resolved as TransferBatchGateResolved;
+  // SAFETY: mounted after validateBody(createTransferBatchSchema).
+  const body = input.body as CreateTransferBatchInput;
+  const { authorized } = input;
   const replay = await resolveTransferBatchIdempotencyReplay(
     getPaymentTransferBatchesRepository(c),
-    resolved.scope.auth.organizationId,
-    resolved.projectId,
+    authorized.scope.auth.organizationId,
+    authorized.projectId,
     idempotencyKey,
-    resolved.idempotencyFingerprint,
-    resolved.sourceWallet.id
+    buildBatchRecordFingerprint(c, body, authorized),
+    authorized.sourceWallet.id
   );
-  if (replay === null) {
-    return null;
-  }
-  return respondToTransferBatchReplay(
-    c,
-    replay,
-    resolved.scope.auth.organizationId,
-    resolved.projectId
-  );
+  return replay === null
+    ? null
+    : respondToTransferBatchReplay(
+        c,
+        replay,
+        authorized.scope.auth.organizationId,
+        authorized.projectId
+      );
 }
 
 /**
@@ -154,14 +155,16 @@ export async function findTransferBatchIdempotentKeyReplay(
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
  */
-export async function createTransferBatch(c: AppContext) {
-  const { body, resolved } = getRequestGateContext<
-    CreateTransferBatchInput,
-    TransferBatchGateResolved
-  >(c);
-  const idempotencyKeyHeader = c.req.header("Idempotency-Key");
-  const idempotencyKey = idempotencyKeyHeader === undefined ? null : idempotencyKeyHeader;
-  const idempotencyFingerprint = idempotencyKey ? resolved.idempotencyFingerprint : null;
+export async function createTransferBatch(
+  c: ValidatedBodyContext<typeof createTransferBatchSchema>
+) {
+  const body = c.req.valid("json");
+  const authorized = getAuthorized<AuthorizedBatchRequest>(c);
+  const resolved = await resolveBatchMovement(c, body, authorized);
+  const idempotencyKey = parseIdempotencyKey(c) ?? null;
+  const idempotencyFingerprint = idempotencyKey
+    ? buildBatchRecordFingerprint(c, body, authorized)
+    : null;
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([
@@ -216,7 +219,7 @@ export async function createTransferBatch(c: AppContext) {
         options: body.options === undefined ? {} : body.options,
         initiatedByKeyId: resolved.scope.auth.id,
         idempotencyKey,
-        idempotencyFingerprint: idempotencyKey ? resolved.idempotencyFingerprint : null,
+        idempotencyFingerprint,
       },
       recipients: resolved.recipients.map((recipient) => ({
         organizationId: resolved.scope.auth.organizationId,

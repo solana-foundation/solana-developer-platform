@@ -47,10 +47,12 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
       evidence: "resolved.scope.auth.organizationId",
     },
+    // Access before the key, the row replay before admission (ADR 0008).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
-      before: "requestGate(",
+      before: "authorize(authorizeTransferBatch)",
+      through: "replayFromRecord(findTransferBatchRecordReplay),\n  admit(",
       after: "\n  createTransferBatch\n",
     },
     replay: [
@@ -270,7 +272,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
-      before: "requestGate(",
+      before: "authorize(authorizeTransfer)",
+      through: "replayFromRecord(findTransferRecordReplay),\n  admit(",
       after: "\n  createTransfer\n",
     },
     replay: [

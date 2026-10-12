@@ -1433,6 +1433,56 @@ describe("payment transfer batches", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(sends);
   });
 
+  // Gap analysis (HOO-1918): the row replay works from the request's own
+  // identifiers, so an account archived since never refuses a request that ran.
+  it("answers a retry from the batch row after a recipient's account is archived", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_archived_backstop_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const request = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "batch-archived-backstop-key",
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+    const original = await request();
+    expect(original.status).toBe(200);
+    const sends = signAndSendMock.mock.calls.length;
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    await getDb(env).execute("UPDATE counterparty_accounts SET status = 'archived' WHERE id = ?", [
+      counterpartyAccountId,
+    ]);
+
+    const retry = await request();
+    expect(retry.status).toBe(200);
+    const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
+    const replayedBatch = ((await retry.json()) as { data: { batch: { id: string } } }).data;
+    expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -1636,6 +1686,12 @@ describe("payment transfer batches", () => {
   });
 
   it("refuses a transfer batch without an Idempotency-Key", async () => {
+    // A valid, authorized request: validation and access run before the key check.
+    const counterpartyId = await seedCounterparty("batch_no_key_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
     const response = await app.request(
       "/v1/payments/transfer-batches",
       {
@@ -1647,7 +1703,7 @@ describe("payment transfer batches", () => {
         body: JSON.stringify({
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: "SOL",
-          recipients: [],
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
         }),
       },
       env

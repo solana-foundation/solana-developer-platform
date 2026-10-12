@@ -168,10 +168,16 @@ export interface TransferBatchFingerprintRecipientInput {
   externalId: string | null;
   counterpartyId: string;
   counterpartyAccountId: string;
-  destinationAddress: string;
+  /** As the request sent it; normalised here (trailing zeros), never by token decimals. */
   amount: string;
 }
 
+/**
+ * Built from the request's own identifiers only (HOO-1918): no destination
+ * address resolved from a counterparty account, no amount scaled by token
+ * decimals read over RPC, so a replay from the batch row needs neither and is
+ * never refused because an account changed since.
+ */
 export interface TransferBatchFingerprintInput {
   sourceCustodyWalletId: string;
   sourceAddress: string;
@@ -213,11 +219,13 @@ function transferBatchFingerprint(
       token: input.token,
       // Order-insensitive, like the shared step's canonicalize (APE-667), so a
       // reordered retry that reaches this row backstop replays (HOO-1918).
-      recipients: [...input.recipients].sort((a, b) => {
-        const left = JSON.stringify(normalizeForFingerprint(a));
-        const right = JSON.stringify(normalizeForFingerprint(b));
-        return left < right ? -1 : left > right ? 1 : 0;
-      }),
+      recipients: input.recipients
+        .map((recipient) => ({ ...recipient, amount: normalizeDecimalString(recipient.amount) }))
+        .sort((a, b) => {
+          const left = JSON.stringify(normalizeForFingerprint(a));
+          const right = JSON.stringify(normalizeForFingerprint(b));
+          return left < right ? -1 : left > right ? 1 : 0;
+        }),
       options: input.options ?? null,
     })
   );
