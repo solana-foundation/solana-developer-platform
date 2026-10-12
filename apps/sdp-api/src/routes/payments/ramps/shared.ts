@@ -245,7 +245,7 @@ export async function persistRampQuoteTransfer(
     walletId: input.wallet.walletId,
     counterpartyId: input.counterparty.id,
     direction: input.direction,
-    token: rampTransferTokenMint(input.assetRail, c.env),
+    token: rampTransferTokenMint(input.assetRail),
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
     amount: input.cryptoAmount,
