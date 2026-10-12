@@ -12,14 +12,16 @@ Everything the dashboard does is available through the API. Build against the AP
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
+The environment is a property of the **project**, not of individual requests. Every organization has exactly two projects, one sandbox and one production. Every tenant resource and API key belongs to one of them and inherits that project's environment.
 
-| Environment  | Network      | API key prefix |
+| Project      | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
+Both environments use the same base URL, `https://api.solana.com`, and the same route shapes. The API key you send decides the project, and with it the environment. Develop and test against the sandbox project, then move to production with a production key.
+
+Resources don't carry over between projects: the production project has its own wallets, tokens, and API keys, so set those up there before you go live. Production access is enabled per organization; see [Set Up Your Organization & Projects](/docs/guides/setup-organization).
 
 ## Response conventions
 
