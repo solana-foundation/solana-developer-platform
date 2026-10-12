@@ -10,8 +10,7 @@ import { AppError, badRequest, conflict, internalError, serviceUnavailable } fro
 import { deriveProviderRequestId, resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { getIdempotencyFingerprint } from "@/middleware/idempotency";
-import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import { getIdempotencyClaim } from "@/middleware/idempotency";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -235,21 +234,20 @@ export function deriveCustodyWalletCreateRequestId(
   );
 }
 
-/** A keyed create's recovery point (migration 0131); null without a key. */
+/**
+ * A keyed create's recovery point (migration 0131): only when the shared step
+ * claimed a key for this request; null without one.
+ */
 function custodyWalletIdempotency(c: AppContext): CustodyWalletIdempotency | null {
-  const idempotencyKey = parseIdempotencyKey(c);
-  if (idempotencyKey === undefined) return null;
-  const fingerprint = getIdempotencyFingerprint(c);
-  if (fingerprint === undefined) {
-    throw internalError("A keyed wallet create reached its handler unfingerprinted");
-  }
+  const claim = getIdempotencyClaim(c);
+  if (claim === undefined) return null;
   const auth = getAuth(c);
   return {
     requestId: deriveCustodyWalletCreateRequestId(
       { organizationId: auth.organizationId, projectId: requireProjectId(c), principal: auth.id },
-      idempotencyKey
+      claim.key
     ),
-    fingerprint,
+    fingerprint: claim.fingerprint,
   };
 }
 

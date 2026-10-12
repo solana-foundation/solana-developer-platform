@@ -367,6 +367,7 @@ export async function runIdempotency(
       // The handler records it on its domain row, so a retry past the key's
       // 24 hours is matched by the same request identity.
       c.set("idempotencyFingerprint", fingerprint);
+      c.set("idempotencyClaimedKey", idempotencyKey);
       logOutcome(operation, idempotencyKey, claim.fresh ? "claimed" : "taken_over");
       if (claim.replacedUnfinished) {
         // The key's last request expired without recording an outcome.
@@ -484,6 +485,20 @@ export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bin
 /** Reads the key mode an {@link idempotent} handler declares. */
 export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
   return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+}
+
+/**
+ * The key and fingerprint this request claimed, for a handler that records
+ * them on its domain row or derives a provider request id from the key.
+ * Undefined unless this step claimed a key for the request, so a handler never
+ * reads the header itself (AGENTS.md: one step owns the key).
+ */
+export function getIdempotencyClaim(
+  c: Context<{ Bindings: Env }>
+): { key: string; fingerprint: string } | undefined {
+  const key = c.get("idempotencyClaimedKey");
+  const fingerprint = c.get("idempotencyFingerprint");
+  return key === undefined || fingerprint === undefined ? undefined : { key, fingerprint };
 }
 
 /**

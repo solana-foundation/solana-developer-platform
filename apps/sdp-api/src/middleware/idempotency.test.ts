@@ -10,6 +10,7 @@ import type { Env } from "@/types/env";
 import { authorize } from "./authorize";
 import {
   declaredIdempotency,
+  getIdempotencyClaim,
   getIdempotencyFingerprint,
   IDEMPOTENT_REPLAYED_HEADER,
   type IdempotencyOptions,
@@ -508,6 +509,33 @@ describe("idempotent()", () => {
     await post(app, "/v1/other", { a: 1 });
     expect(seen[0]).toMatch(/^[0-9a-f]{64}$/);
     expect(seen[1]).toBe(seen[0]);
+    expect(seen[2]).toBeUndefined();
+  });
+
+  it("hands the handler the claimed key only when this step claimed one", async () => {
+    const seen: Array<ReturnType<typeof getIdempotencyClaim>> = [];
+    const app = testApp();
+    app.post("/v1/other", idempotent({ key: "accepted", serverErrors: "store" }), (c) => {
+      seen.push(getIdempotencyClaim(c));
+      return c.json({}, 201);
+    });
+    const unclaimed = new Hono<{ Bindings: Env }>();
+    unclaimed.post("/v1/raw", (c) => {
+      seen.push(getIdempotencyClaim(c));
+      return c.json({}, 201);
+    });
+
+    await post(app, "/v1/other", { a: 1 }, KEY);
+    await post(app, "/v1/other", { a: 1 });
+    // A key header the step never claimed (no idempotent() on the route) is not a claim.
+    await unclaimed.request(
+      "/v1/raw",
+      { method: "POST", headers: { ...KEY, "Content-Type": "application/json" }, body: "{}" },
+      env
+    );
+
+    expect(seen[0]).toEqual({ key: "key-1", fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(seen[1]).toBeUndefined();
     expect(seen[2]).toBeUndefined();
   });
 
