@@ -42,7 +42,6 @@ const STABLE_MUTATION_PREFIXES = [
   "/api/dashboard/payments/subscriptions",
   "/api/dashboard/counterparty",
   "/api/dashboard/compliance/",
-  "/api/dashboard/approval-requests/",
 ] as const;
 
 function isStableMutationPath(path: string): boolean {

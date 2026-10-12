@@ -11,14 +11,12 @@ import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
   createEarnVaultWithdrawal: vi.fn(),
-  fetchEarnVaultWithdrawalsByRequestId: vi.fn(),
   fetchEarnVaultWithdrawalPreview: vi.fn(),
   useEarnVaultWithdrawalOutcome: vi.fn(),
 }));
 
 vi.mock("./earn-program-data", () => ({
   createEarnVaultWithdrawal: mocks.createEarnVaultWithdrawal,
-  fetchEarnVaultWithdrawalsByRequestId: mocks.fetchEarnVaultWithdrawalsByRequestId,
   fetchEarnVaultWithdrawalPreview: mocks.fetchEarnVaultWithdrawalPreview,
   useEarnVaultWithdrawalOutcome: mocks.useEarnVaultWithdrawalOutcome,
 }));
@@ -82,7 +80,6 @@ beforeEach(() => {
   sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
   vi.clearAllMocks();
-  mocks.fetchEarnVaultWithdrawalsByRequestId.mockResolvedValue({ kind: "absent" });
   // Kamino declares no exit floor policy, so most tests never quote; the veda
   // suite overrides this with a real quote.
   mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({ kind: "unavailable" });

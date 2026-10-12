@@ -27,7 +27,7 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { submitOfframpDeposit } from "../offramp-deposit";
-import { getRampTransferState, heldRampApprovalRequestId } from "../ramp-transfer-state";
+import { getRampTransferState } from "../ramp-transfer-state";
 import { sourceWalletSchema, withdrawAmountSchema, withdrawSelectionSchema } from "../schema";
 import {
   memoSummaryDetails,
@@ -306,8 +306,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     );
   };
 
-  const sendOutcome = onchainSendResult ?? null;
-
   return {
     ...wizard,
     sourceWalletHint:
@@ -320,8 +318,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     hasCryptoDepositInstruction,
     canSendOnchain,
     onchainSendLoading,
-    onchainSendResult: sendOutcome,
-    heldApprovalRequestId: heldRampApprovalRequestId(sendOutcome, transferStatus),
+    onchainSendResult: onchainSendResult ?? null,
     sendCryptoToDeposit,
     quoteExpired,
   };

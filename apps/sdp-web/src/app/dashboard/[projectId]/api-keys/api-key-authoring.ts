@@ -1,20 +1,25 @@
-import type {
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  ApiKeyWalletPolicyBindingSummary,
-  ApiKeyWalletScope,
-  Permission,
-  PolicyDefaultAction,
-  PolicyRule,
-  WalletOperationFamily,
-  WalletOperationType,
+import {
+  type AllowedOperation,
+  type ApiKeyEnvironment,
+  type ApiKeyRole,
+  type ApiKeyWalletScope,
+  isOperationFamily,
+  normalizeAllowedOperations,
+  OPERATION_FAMILIES,
+  OPERATION_FAMILY_BY_TYPE,
+  type OperationFamily,
+  type OperationType,
+  operationTypesInFamily,
+  type Permission,
 } from "@sdp/types";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
 
 export type ApiKeyAuthoringStep = (typeof API_KEY_AUTHORING_STEPS)[number];
 export type ApiKeyAuthoringMode = "create" | "edit";
-export type BindingConfirmation = "replace" | "clear";
+
+/** Whether a key may perform every operation, or only the ones ticked. */
+export type OperationsScope = "all" | "selected";
 
 export interface ApiKeyAuthoringDraft {
   name: string;
@@ -23,22 +28,9 @@ export interface ApiKeyAuthoringDraft {
   walletScope: ApiKeyWalletScope;
   selectedWalletIds: string[];
   defaultWalletId: string;
-  restrictionsEnabled: boolean;
-  restrictionsEdited: boolean;
-  defaultAction: PolicyDefaultAction;
-  operationFamilies: WalletOperationFamily[];
-  operationTypes: WalletOperationType[];
-  assets: string;
-  maximumAmount: string;
-  maximumAmountAssets: string;
-  destinations: string;
-  approvalRequired: boolean;
-}
-
-export interface InitialApiKeyAuthoringState {
-  walletScope: ApiKeyWalletScope;
-  selectedWalletIds: string[];
-  policyBindings: ApiKeyWalletPolicyBindingSummary[];
+  operationsScope: OperationsScope;
+  /** Ticked operations. A family entry covers every type in it. */
+  selectedOperations: AllowedOperation[];
 }
 
 export interface ApiKeyAuthoringExistingKey {
@@ -51,30 +43,9 @@ export interface ApiKeyAuthoringExistingKey {
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  policyBindings: ApiKeyWalletPolicyBindingSummary[];
+  /** Empty means the key is not restricted. */
+  allowedOperations?: AllowedOperation[];
 }
-
-export interface PolicyBindingTarget {
-  bindingScope: ApiKeyWalletScope;
-  walletId?: string;
-  apiKeyControlProfileId: string;
-}
-
-export type PolicyBindingIntent =
-  | { mode: "none" }
-  | { mode: "blocked"; reason: "replace_restrictions_required" | "policies_unavailable" }
-  | {
-      mode: "replace";
-      profile: "new" | "existing";
-      existingProfileId?: string;
-      confirmationRequired: boolean;
-      affectedTargets: string[];
-    }
-  | {
-      mode: "clear";
-      confirmationRequired: boolean;
-      affectedTargets: string[];
-    };
 
 export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
   return {
@@ -84,103 +55,103 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     walletScope: "all",
     selectedWalletIds: [],
     defaultWalletId: "",
-    restrictionsEnabled: false,
-    restrictionsEdited: false,
-    defaultAction: "allow",
-    operationFamilies: [],
-    operationTypes: [],
-    assets: "",
-    maximumAmount: "",
-    maximumAmountAssets: "",
-    destinations: "",
-    approvalRequired: false,
+    operationsScope: "all",
+    selectedOperations: [],
   };
 }
 
-export function splitPolicyValues(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/[\n,;\t]+/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-    )
+/** How much of a family is ticked: every type, some of them, or none. */
+export type FamilyState = "all" | "some" | "none";
+
+export function familyState(
+  selected: readonly AllowedOperation[],
+  family: OperationFamily
+): FamilyState {
+  if (selected.includes(family)) {
+    return "all";
+  }
+  const types = operationTypesInFamily(family);
+  const ticked = types.filter((type) => selected.includes(type));
+  if (ticked.length === 0) {
+    return "none";
+  }
+  return ticked.length === types.length ? "all" : "some";
+}
+
+export function isOperationTypeTicked(
+  selected: readonly AllowedOperation[],
+  type: OperationType
+): boolean {
+  return selected.includes(type) || selected.includes(OPERATION_FAMILY_BY_TYPE[type]);
+}
+
+function withoutFamily(
+  selected: readonly AllowedOperation[],
+  family: OperationFamily
+): AllowedOperation[] {
+  return selected.filter(
+    (entry) =>
+      entry !== family &&
+      (isOperationFamily(entry) || OPERATION_FAMILY_BY_TYPE[entry as OperationType] !== family)
   );
 }
 
-export function buildApiKeyPolicyRules(draft: ApiKeyAuthoringDraft): PolicyRule[] {
-  if (!draft.restrictionsEnabled || !draft.restrictionsEdited) {
+/** Ticks a whole family, or clears it and every type under it. */
+export function toggleFamily(
+  selected: readonly AllowedOperation[],
+  family: OperationFamily
+): AllowedOperation[] {
+  const cleared = withoutFamily(selected, family);
+  return familyState(selected, family) === "none"
+    ? normalizeAllowedOperations([...cleared, family])
+    : normalizeAllowedOperations(cleared);
+}
+
+/**
+ * Ticks or clears one type. A fully ticked family is stored as the family, and
+ * unticking one of its types turns it into the remaining types.
+ */
+export function toggleOperationType(
+  selected: readonly AllowedOperation[],
+  type: OperationType
+): AllowedOperation[] {
+  const family = OPERATION_FAMILY_BY_TYPE[type];
+  const familyTypes = operationTypesInFamily(family);
+  const tickedTypes = new Set(familyTypes.filter((item) => isOperationTypeTicked(selected, item)));
+
+  if (tickedTypes.has(type)) {
+    tickedTypes.delete(type);
+  } else {
+    tickedTypes.add(type);
+  }
+
+  const rest = withoutFamily(selected, family);
+  if (tickedTypes.size === familyTypes.length) {
+    return normalizeAllowedOperations([...rest, family]);
+  }
+  return normalizeAllowedOperations([...rest, ...tickedTypes]);
+}
+
+/** The list sent to the API. Empty means the key is not restricted. */
+export function buildAllowedOperations(draft: ApiKeyAuthoringDraft): AllowedOperation[] {
+  if (draft.operationsScope === "all") {
     return [];
   }
+  return normalizeAllowedOperations(draft.selectedOperations);
+}
 
-  const rules: PolicyRule[] = [];
-  if (draft.operationFamilies.length > 0) {
-    rules.push({
-      id: "additional-operation-families",
-      name: "Additional restriction: operation families",
-      kind: "operation_family",
-      families: draft.operationFamilies,
-      action: "deny",
-    });
+/** One line for the review step and the keys table. */
+export function summarizeAllowedOperations(allowedOperations: readonly AllowedOperation[]): {
+  kind: "unrestricted" | "families" | "mixed";
+  families: OperationFamily[];
+  typeCount: number;
+} {
+  if (allowedOperations.length === 0) {
+    return { kind: "unrestricted", families: [], typeCount: 0 };
   }
-
-  if (draft.operationTypes.length > 0) {
-    rules.push({
-      id: "additional-operation-types",
-      name: "Additional restriction: operation types",
-      kind: "operation_type",
-      operationTypes: draft.operationTypes,
-      action: "deny",
-    });
-  }
-
-  const assets = splitPolicyValues(draft.assets);
-  if (assets.length > 0) {
-    rules.push({
-      id: "additional-assets",
-      name: "Additional restriction: assets",
-      kind: "asset",
-      assets,
-      action: "deny",
-    });
-  }
-
-  // Amount bounds are always keyed by asset mint; without assets the
-  // constraint cannot be expressed and the form blocks continuing instead.
-  const maximumAmount = draft.maximumAmount.trim();
-  const maximumAmountAssets = splitPolicyValues(draft.maximumAmountAssets);
-  if (maximumAmount && maximumAmountAssets.length > 0) {
-    rules.push({
-      id: "additional-amount-constraint",
-      name: "Additional restriction: amount constraints",
-      kind: "amount",
-      max: maximumAmount,
-      assets: maximumAmountAssets,
-      action: "allow",
-    });
-  }
-
-  const destinations = splitPolicyValues(draft.destinations);
-  if (destinations.length > 0) {
-    rules.push({
-      id: "additional-destinations",
-      name: "Additional restriction: destinations",
-      kind: "destination",
-      allowlist: destinations,
-      action: "allow",
-    });
-  }
-
-  if (draft.approvalRequired) {
-    rules.push({
-      id: "additional-approval-requirement",
-      name: "Additional restriction: approval requirements",
-      kind: "approval",
-      action: "approval_required",
-    });
-  }
-
-  return rules;
+  const families = OPERATION_FAMILIES.filter((family) => allowedOperations.includes(family));
+  const typeCount = allowedOperations.filter((entry) => !isOperationFamily(entry)).length;
+  return { kind: typeCount > 0 ? "mixed" : "families", families, typeCount };
 }
 
 export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): {
@@ -202,158 +173,4 @@ export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): {
     signingWalletId,
     signingWalletIds: selectedWalletIds,
   };
-}
-
-export function buildPolicyBindingTargets(
-  draft: ApiKeyAuthoringDraft,
-  apiKeyControlProfileId: string
-): PolicyBindingTarget[] {
-  if (draft.walletScope === "all") {
-    return [{ bindingScope: "all", apiKeyControlProfileId }];
-  }
-
-  return Array.from(new Set(draft.selectedWalletIds)).map((walletId) => ({
-    bindingScope: "selected",
-    walletId,
-    apiKeyControlProfileId,
-  }));
-}
-
-function endpointScopeChanged(
-  initial: InitialApiKeyAuthoringState,
-  draft: ApiKeyAuthoringDraft
-): boolean {
-  if (initial.walletScope !== draft.walletScope) {
-    return true;
-  }
-  if (draft.walletScope === "all") {
-    return false;
-  }
-
-  const current = [...new Set(initial.selectedWalletIds)].sort();
-  const proposed = [...new Set(draft.selectedWalletIds)].sort();
-  return (
-    current.length !== proposed.length || current.some((value, index) => value !== proposed[index])
-  );
-}
-
-function bindingTargets(bindings: ApiKeyWalletPolicyBindingSummary[]): string[] {
-  return bindings.map((binding) =>
-    binding.bindingScope === "all" ? "all" : (binding.walletId ?? "selected")
-  );
-}
-
-/**
- * Outside the release channel the API refuses every policy-binding change, so an edit
- * that would need one is blocked up front instead of failing halfway through the save.
- */
-function getPolicyBindingIntentWithoutPolicies(
-  mode: ApiKeyAuthoringMode,
-  initial: InitialApiKeyAuthoringState | null,
-  draft: ApiKeyAuthoringDraft
-): PolicyBindingIntent {
-  const blocked: PolicyBindingIntent = { mode: "blocked", reason: "policies_unavailable" };
-  if (mode === "create" || !initial) {
-    return draft.restrictionsEnabled ? blocked : { mode: "none" };
-  }
-  const hadApiRestrictions = initial.policyBindings.some(
-    (binding) => binding.apiKeyControlProfileId
-  );
-  const restrictionsChanged =
-    draft.restrictionsEdited || draft.restrictionsEnabled !== hadApiRestrictions;
-  const bindingsWouldMove =
-    initial.policyBindings.length > 0 && endpointScopeChanged(initial, draft);
-  return restrictionsChanged || bindingsWouldMove ? blocked : { mode: "none" };
-}
-
-/**
- * Decides what a save does to the key's policy bindings.
- *
- * @param options.policiesInReleaseChannel - Whether the deployment runs the Policies module.
- */
-export function getPolicyBindingIntent(
-  mode: ApiKeyAuthoringMode,
-  initial: InitialApiKeyAuthoringState | null,
-  draft: ApiKeyAuthoringDraft,
-  { policiesInReleaseChannel }: { policiesInReleaseChannel: boolean }
-): PolicyBindingIntent {
-  if (!policiesInReleaseChannel) {
-    return getPolicyBindingIntentWithoutPolicies(mode, initial, draft);
-  }
-  if (mode === "create" || !initial) {
-    return draft.restrictionsEnabled
-      ? {
-          mode: "replace",
-          profile: "new",
-          confirmationRequired: false,
-          affectedTargets: [],
-        }
-      : { mode: "none" };
-  }
-
-  const currentBindings = initial.policyBindings;
-  const affectedTargets = bindingTargets(currentBindings);
-  const scopeChanged = endpointScopeChanged(initial, draft);
-  const apiProfileIds = Array.from(
-    new Set(
-      currentBindings
-        .map((binding) => binding.apiKeyControlProfileId)
-        .filter((profileId): profileId is string => Boolean(profileId))
-    )
-  );
-  const hadApiRestrictions = apiProfileIds.length > 0;
-
-  if (!draft.restrictionsEnabled) {
-    if (hadApiRestrictions || (scopeChanged && currentBindings.length > 0)) {
-      return {
-        mode: "clear",
-        confirmationRequired: currentBindings.length > 0,
-        affectedTargets,
-      };
-    }
-    return { mode: "none" };
-  }
-
-  if (draft.restrictionsEdited || !hadApiRestrictions) {
-    return {
-      mode: "replace",
-      profile: apiProfileIds.length === 1 ? "existing" : "new",
-      existingProfileId: apiProfileIds.length === 1 ? apiProfileIds[0] : undefined,
-      confirmationRequired: currentBindings.length > 0,
-      affectedTargets,
-    };
-  }
-
-  if (!scopeChanged) {
-    return { mode: "none" };
-  }
-
-  if (apiProfileIds.length !== 1) {
-    return { mode: "blocked", reason: "replace_restrictions_required" };
-  }
-
-  return {
-    mode: "replace",
-    profile: "existing",
-    existingProfileId: apiProfileIds[0],
-    confirmationRequired: currentBindings.length > 0,
-    affectedTargets,
-  };
-}
-
-export function requiredBindingConfirmation(
-  intent: PolicyBindingIntent
-): BindingConfirmation | null {
-  if (intent.mode === "clear" && intent.confirmationRequired) {
-    return "clear";
-  }
-  if (intent.mode === "replace" && intent.confirmationRequired) {
-    return "replace";
-  }
-  return null;
-}
-
-export function isPositiveDecimal(value: string): boolean {
-  const normalized = value.trim();
-  return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(normalized) && /[1-9]/.test(normalized);
 }

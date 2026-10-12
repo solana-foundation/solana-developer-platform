@@ -71,9 +71,8 @@ async function resolveProjectScope(c: Context<{ Bindings: Env }>): Promise<{
   }
 
   const clerk = c.get("clerk");
-  const replayActor = c.get("approvedOperationActor");
-  const orgId = clerk?.organizationId ?? replayActor?.organizationId;
-  const userId = clerk?.userId ?? replayActor?.userId;
+  const orgId = clerk?.organizationId;
+  const userId = clerk?.userId;
 
   if (!orgId || !userId) {
     throw unauthorized("Authentication is required");
@@ -95,10 +94,7 @@ async function resolvePathProjectScope(
 ): Promise<{ organizationId: string; projectId: string; environment: SdpEnvironment }> {
   // Mounted only under a `/:projectId` path, so the parameter is always present.
   const projectId = c.req.param(param) as string;
-  const organizationId =
-    c.get("apiKey")?.organizationId ??
-    c.get("clerk")?.organizationId ??
-    c.get("approvedOperationActor")?.organizationId;
+  const organizationId = c.get("apiKey")?.organizationId ?? c.get("clerk")?.organizationId;
   if (!organizationId) {
     throw unauthorized("Authentication is required");
   }

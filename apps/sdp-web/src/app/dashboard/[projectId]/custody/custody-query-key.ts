@@ -15,7 +15,4 @@ export const custodyQueryKeys = {
     (Array.isArray(key) && (key[0] === "wallet-balances" || key[0] === "wallet-activity")) ||
     key === custodyQueryKeys.walletCardBalances() ||
     (typeof key === "string" && key.startsWith(WALLET_CARD_BALANCE_FALLBACK_PREFIX)),
-  policyDestinationAccounts: () => "policy-destination-accounts",
-  walletPolicyRevisions: ({ walletId }: { walletId: string }) =>
-    ["wallet-policy-revisions", walletId] as const,
 };

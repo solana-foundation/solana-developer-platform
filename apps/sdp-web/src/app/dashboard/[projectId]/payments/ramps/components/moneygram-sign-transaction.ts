@@ -66,10 +66,9 @@ async function sendMoneygramTransfer(
     throw new Error(t("DashboardPayments.ramps.sourceWalletNoUsdc"));
   }
 
-  // The widget can ask to sign again while an approval still holds the first
-  // attempt, and without a key each attempt is a new payment: approve two of
-  // them and the money goes out twice.
-  const { outcome } = await sendTransferUnderKey(
+  // The widget can ask to sign again, and without a key each attempt is a new
+  // payment: the money goes out twice.
+  const { transfer } = await sendTransferUnderKey(
     {
       sourceCustodyWalletId: sourceWalletId,
       destination: request.to,
@@ -80,12 +79,6 @@ async function sendMoneygramTransfer(
     t,
     sessionId
   );
-  // MoneyGram needs a signature now and an approval answers later, so the
-  // widget is told nothing moved rather than that the payment failed.
-  if (outcome.kind === "approval_pending") {
-    throw new Error(t("DashboardPayments.ramps.transferHeldForApproval"));
-  }
-  const transfer = outcome.transfer;
   if (!transfer.signature) {
     throw new Error(
       t("DashboardPayments.ramps.transferSignatureMissing", { status: transfer.status })

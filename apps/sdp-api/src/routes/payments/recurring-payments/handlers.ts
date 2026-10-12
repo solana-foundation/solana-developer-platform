@@ -21,7 +21,6 @@ import {
   resumeRecurringPayment as resumeRecurringPaymentRecord,
   updateRecurringPayment as updateRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
@@ -113,8 +112,6 @@ export const createRecurringPayment = async (
     firstCollectionAt: body.firstCollectionAt === undefined ? null : body.firstCollectionAt,
     metadataUri: body.metadataUri === undefined ? null : body.metadataUri,
     createdBy: await resolveCreatorUserId(c),
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -173,8 +170,6 @@ export const updateRecurringPayment = async (
     recurringPayment,
     request: body,
     createdBy: await resolveCreatorUserId(c),
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),

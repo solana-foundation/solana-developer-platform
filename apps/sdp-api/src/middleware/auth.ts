@@ -37,7 +37,6 @@ import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist"
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
-import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
@@ -377,39 +376,10 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 }
 
 /**
- * Wallet and API-key policies are the control plane that constrains keys, so
- * authoring them is held to administrators on both actor axes: an API key
- * must hold the api_admin role — a lesser key must not rewrite the profile
- * that governs itself or a sibling — and a dashboard actor must hold the
- * org:admin permission, which only the organization admin role grants.
- */
-export function requireAdminApiKeyRole() {
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const apiKey = c.get("apiKey");
-    if (apiKey) {
-      if (apiKey.role !== "api_admin") {
-        throw new AppError("FORBIDDEN", "This operation requires an api_admin API key");
-      }
-      await next();
-      return;
-    }
-    const permissions = grantedPermissions(c);
-    if (permissions !== "*" && !permissions.includes("org:admin")) {
-      throw new AppError("FORBIDDEN", "This operation requires an organization admin");
-    }
-    await next();
-  };
-}
-
-/**
  * Require specific permissions
  */
 export function grantedPermissions(c: Context<{ Bindings: Env }>): readonly Permission[] | "*" {
-  const permissions =
-    c.get("apiKey")?.permissions ??
-    c.get("clerk")?.permissions ??
-    c.get("approvedOperationActor")?.permissions ??
-    null;
+  const permissions = c.get("apiKey")?.permissions ?? c.get("clerk")?.permissions ?? null;
 
   if (!permissions) {
     throw new AppError("UNAUTHORIZED");
@@ -450,7 +420,7 @@ export function requirePermissions(...required: Permission[]) {
 export function requirePermissionsWhenAuthenticated(...required: Permission[]) {
   const enforce = requirePermissions(...required);
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (!c.get("apiKey") && !c.get("clerk") && !c.get("approvedOperationActor")) {
+    if (!c.get("apiKey") && !c.get("clerk")) {
       await next();
       return;
     }
@@ -495,22 +465,12 @@ export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
 
 /**
  * Authenticates a request with either an API key or a Clerk JWT, the only two
- * credentials the platform accepts. Approved-operation replay capabilities
- * are honoured first and resolve to the original actor.
+ * credentials the platform accepts.
  *
  * @returns Hono middleware that sets the matching auth context or throws 401.
  */
 export function unifiedAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    // Replay capabilities resolve the wallet operation (and its tenant)
-    // before authentication, so the lookup runs privileged and the request
-    // then narrows to the operation's organization.
-    const replay = await runWithSystemDatabaseIdentity("http:auth", () =>
-      tryApprovedOperationReplayAuth(c)
-    );
-    if (replay) {
-      return runWithTenantDatabaseIdentity({ organizationId: replay.organizationId }, next);
-    }
     // Try API key first
     const apiKey = extractApiKey(c);
     if (apiKey && looksLikeApiKey(apiKey)) {

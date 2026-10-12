@@ -3,11 +3,9 @@ import { forbidden } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
-import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
-import { policyGate } from "@/middleware/policy-gate";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
-import { APPROVED_OPERATION_REPLAY_HEADER } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   cancelTrade,
@@ -20,7 +18,6 @@ import {
   reclaimTrade,
   settleTrade,
 } from "./handlers";
-import { extractDvpFundPolicyCandidate, extractDvpSettlePolicyCandidate } from "./policy";
 import { createDvpTradeSchema, fundDvpTradeSchema } from "./schemas";
 
 const dvp = new Hono<{ Bindings: Env }>();
@@ -35,27 +32,6 @@ async function requireDvpFeature(c: Context<{ Bindings: Env }>, next: Next) {
     throw forbidden("Markets is not enabled for this environment.");
   }
   await next();
-}
-
-/**
- * The caller's quota, skipped for an approved operation SDP is replaying.
- *
- * A gated action that an approver allows is executed by re-POSTing this route
- * (`services/policy/approved-operation-replay.ts`). That replay is SDP carrying
- * out an already-admitted operation, not a new caller request, and the DvP
- * quotas are small (`actorMax: 2`), so charging it would routinely 429 the
- * approval and leave the queue unable to submit. Earn skips its credential
- * check for the same header and the same reason.
- */
-function callerMeteredQuota(config: MeteredQuotaConfig) {
-  const enforce = meteredQuota(config);
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.req.header(APPROVED_OPERATION_REPLAY_HEADER)) {
-      await next();
-      return;
-    }
-    await enforce(c, next);
-  };
 }
 
 dvp.use("*", requireDvpFeature);
@@ -93,48 +69,43 @@ dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"),
 // Funding ONE side — creator and party funding are the same operation: the
 // right to fund side X is holding a custody wallet whose public key equals
 // that side's party address. Validation precedes quota so malformed bodies do
-// not consume the execution quota. Wallet-policy gated: this is the action that
-// commits a custody wallet's tokens to an escrow.
+// not consume the execution quota. Gated by Allowed Operations: this is the
+// action that commits a custody wallet's tokens to an escrow.
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
   requireAllowedOperation("dvp_fund"),
   validateBody(fundDvpTradeSchema),
-  // Quota before the gate, so a caller who is out of quota is refused without
-  // recording a wallet operation or raising an approval request for work that
-  // will not run.
-  callerMeteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
-  policyGate({ extract: extractDvpFundPolicyCandidate }),
+  meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
 );
 // Reclaiming ONE side: the same right as funding it, because the program only
 // lets the leg's own party sign, and the deposit goes back to that party. The
-// trade stays open. NOT wallet-policy gated: it is the party's way back out of
-// an escrow, and a rule that can hold it traps the deposit.
+// trade stays open. NOT gated by Allowed Operations: it is the party's way back out of
+// an escrow, and a control that can refuse it traps the deposit.
 dvp.post(
   "/trades/:tradeId/reclaim",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(fundDvpTradeSchema),
-  callerMeteredQuota({ name: "dvp-reclaim", actorMax: 2, orgMax: 10 }),
+  meteredQuota({ name: "dvp-reclaim", actorMax: 2, orgMax: 10 }),
   reclaimTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,
-// cancel refunds both and closes it. Settle is wallet-policy gated; cancel is
-// NOT, because it is how an unwanted trade is unwound and a policy that can
-// hold it would leave both deposits in escrow. See routes/dvp/policy.ts.
+// cancel refunds both and closes it. Settle is gated by Allowed Operations;
+// cancel is NOT, because it is how an unwanted trade is unwound and a control
+// that can refuse it would leave both deposits in escrow.
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
   requireAllowedOperation("dvp_settle"),
-  callerMeteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
-  policyGate({ extract: extractDvpSettlePolicyCandidate }),
+  meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
   requirePermissions("payments:write", "wallets:read"),
-  callerMeteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
+  meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );
 

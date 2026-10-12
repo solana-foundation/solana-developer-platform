@@ -46,7 +46,6 @@ export const {
   homepageOpenSignup,
   custody,
   issuance,
-  policies,
   assetProfiles,
   privateChannels,
   heliusRings,

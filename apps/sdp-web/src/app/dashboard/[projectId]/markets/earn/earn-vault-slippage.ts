@@ -132,8 +132,8 @@ export function derivedMinOut<Preview extends { blockingIssues: readonly unknown
  * - `fresh`: the resolution carries a brand-new key — the floor is the one
  *   derived from the live quote, remembered for exactly that key's future
  *   replays.
- * - `replay`: the key is a REUSE — a held approval's replay or a kept key's
- *   retry after an ambiguous failure — and the memo still holds the floor it
+ * - `replay`: the key is a REUSE — a kept key's retry after an ambiguous
+ *   failure — and the memo still holds the floor it
  *   was MINTED with, which must go out verbatim. A freshly derived floor would
  *   pair the reused key with a changed request, which the API refuses (its
  *   idempotency fingerprint includes the floor) and the refusal retires the
@@ -151,12 +151,12 @@ export type VaultFloorReplay =
   | { kind: "unavailable" };
 
 export function floorToReplay(
-  resolution: { wasHeld: boolean; wasReused: boolean },
+  resolution: { wasReused: boolean },
   recallFloor: (fingerprint: string) => string | null | undefined,
   fingerprint: string,
   freshFloor: string | null
 ): VaultFloorReplay {
-  if (!resolution.wasHeld && !resolution.wasReused) return { kind: "fresh", floor: freshFloor };
+  if (!resolution.wasReused) return { kind: "fresh", floor: freshFloor };
   const floor = recallFloor(fingerprint);
   return floor === undefined ? { kind: "unavailable" } : { kind: "replay", floor };
 }

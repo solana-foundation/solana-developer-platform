@@ -155,19 +155,6 @@ export function defineDashboardFlags({
     ],
   });
 
-  const policies = flag<boolean, DashboardFlagEntities>({
-    key: "policies",
-    adapter: moduleAdapter("policies"),
-    identify,
-    defaultValue: flagDefault("POLICIES_ENABLED", false),
-    description:
-      "Show the Policies module, wallet-policy workspaces, and Approvals inbox. API key authoring remains available independently.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
   const assetProfiles = flag<boolean, DashboardFlagEntities>({
     key: "asset-profiles",
     adapter: moduleAdapter("issuance"),
@@ -311,7 +298,6 @@ export function defineDashboardFlags({
     homepageOpenSignup,
     custody,
     issuance,
-    policies,
     assetProfiles,
     privateChannels,
     heliusRings,

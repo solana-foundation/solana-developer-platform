@@ -17,9 +17,7 @@ import {
   isPendingActivationRecurringPaymentStatus,
   isUpdatingRecurringPaymentStatus,
   recurringPaymentInFlightLifecycleOperation,
-  recurringPaymentPolicyPayloadSchema,
   type UpdatePaymentRecurringPaymentRequest,
-  type WalletOperationActor,
 } from "@sdp/types";
 import {
   type Address,
@@ -66,10 +64,6 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
 import { recoverOrBlockLifecycleCollection } from "./collection";
-import {
-  assertNoPendingRecurringCollectionApproval,
-  enforceRecurringPaymentPolicy,
-} from "./policy";
 import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
@@ -250,8 +244,6 @@ async function resolveRecurringPaymentUpdate(input: {
   sourceWallet: CustodyWallet;
   nextSourceWallet?: CustodyWallet;
   request: UpdatePaymentRecurringPaymentRequest;
-  apiKeyId: string | null;
-  actor: WalletOperationActor | null;
 }): Promise<ResolvedRecurringPaymentUpdate> {
   const finalSourceWallet =
     input.nextSourceWallet === undefined ? input.sourceWallet : input.nextSourceWallet;
@@ -339,35 +331,6 @@ async function resolveRecurringPaymentUpdate(input: {
     metadataUri,
     ...diff,
   };
-}
-
-async function enforceResolvedRecurringPaymentUpdatePolicy(input: {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  recurringPaymentId: string;
-  resolved: ResolvedRecurringPaymentUpdate;
-  apiKeyId: string | null;
-  actor: WalletOperationActor | null;
-}): Promise<void> {
-  await enforceRecurringPaymentPolicy({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: input.resolved.sourceWallet,
-    token: input.resolved.token,
-    amount: input.resolved.amount,
-    destination: input.resolved.destinationAddress,
-    apiKeyId: input.apiKeyId,
-    actor: input.actor,
-    rawPayload: recurringPaymentPolicyPayloadSchema.parse({
-      operationType: "recurring_payment_update",
-      recurringPaymentId: input.recurringPaymentId,
-      counterpartyId: input.resolved.counterpartyId,
-      counterpartyAccountId: input.resolved.counterpartyAccountId,
-      periodHours: input.resolved.periodHours,
-    }),
-  });
 }
 
 async function recordRecurringPaymentUpdateEvent(input: {
@@ -1610,15 +1573,6 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
     if (activeAttempt) return null;
   }
 
-  await assertNoPendingRecurringCollectionApproval({
-    db: input.db,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    custodyWalletId: input.sourceWallet.id,
-    recurringPaymentId: input.recurringPayment.id,
-    collectionDueAt: input.recurringPayment.next_collection_due_at,
-  });
-
   return createPostgresPaymentRecurringPaymentsRepository(input.db).claimRecurringPaymentUpdate({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -1637,8 +1591,6 @@ export async function updateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
-  apiKeyId: string | null;
-  actor: WalletOperationActor | null;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1650,11 +1602,6 @@ export async function updateRecurringPayment(input: {
       throw badRequest("nextCollectionDueAt can only be updated after activation");
     }
     const resolved = await resolveRecurringPaymentUpdate(input);
-    await enforceResolvedRecurringPaymentUpdatePolicy({
-      ...input,
-      recurringPaymentId: input.recurringPayment.id,
-      resolved,
-    });
     return updatePendingRecurringPayment({
       env: input.env,
       organizationId: input.organizationId,
@@ -1696,14 +1643,6 @@ export async function updateRecurringPayment(input: {
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
   if (sourceChanged) {
-    await assertNoPendingRecurringCollectionApproval({
-      db: getDb(input.env),
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      custodyWalletId: input.sourceWallet.id,
-      recurringPaymentId: settled.recurringPayment.id,
-      collectionDueAt: settled.recurringPayment.next_collection_due_at,
-    });
   }
 
   const mode = requestedActiveUpdateMode(resolved.changedFields);
@@ -1725,11 +1664,6 @@ export async function updateRecurringPayment(input: {
     }
   }
 
-  await enforceResolvedRecurringPaymentUpdatePolicy({
-    ...input,
-    recurringPaymentId: settled.recurringPayment.id,
-    resolved,
-  });
   if (resolved.changedFields.length === 0) {
     return settled.recurringPayment;
   }

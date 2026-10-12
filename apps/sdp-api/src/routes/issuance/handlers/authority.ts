@@ -9,16 +9,9 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import {
-  approvedWalletOperationId,
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-  runApprovedWalletOperationEffectTransaction,
-} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -37,7 +30,6 @@ import {
   resolveIssuanceWallet,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransactionThenOutcome,
@@ -48,7 +40,7 @@ type AppContext = Context<{ Bindings: Env }>;
 type MosaicAuthorityRole = Parameters<MosaicService["prepareUpdateAuthority"]>[0]["role"];
 type UpdateAuthorityBody = z.output<typeof updateAuthoritySchema>;
 
-interface UpdateAuthorityExecutionPolicyResolved {
+interface UpdateAuthorityExecutionResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
@@ -59,7 +51,7 @@ interface UpdateAuthorityExecutionPolicyResolved {
   newAuthority: ReturnType<typeof assertValidAddress> | null;
 }
 
-interface UpdateAuthorityReplayPolicyResolved {
+interface UpdateAuthorityReplayResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
@@ -69,16 +61,14 @@ interface UpdateAuthorityReplayPolicyResolved {
   replay: TokenTransaction;
 }
 
-type UpdateAuthorityPolicyResolved =
-  | UpdateAuthorityExecutionPolicyResolved
-  | UpdateAuthorityReplayPolicyResolved;
+type UpdateAuthorityResolved = UpdateAuthorityExecutionResolved | UpdateAuthorityReplayResolved;
 
 export async function admitUpdateAuthorityRuntimeExecution(
   c: AppContext,
-  extraction: PolicyGateExtraction
+  extraction: RequestGateExtraction
 ): Promise<void> {
-  const resolved = extraction.resolved as UpdateAuthorityPolicyResolved;
-  if ("replay" in resolved && isSettledAuthorityTransaction(resolved.replay)) return;
+  const resolved = extraction.resolved as UpdateAuthorityResolved;
+  if ("replay" in resolved) return;
   const { auth, tokenService, custodyWalletId } = resolved;
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -102,13 +92,6 @@ function updateAuthorityIdempotencyMetadata(
   });
 }
 
-function isSettledAuthorityTransaction(transaction: TokenTransaction): boolean {
-  return (
-    (transaction.status === "confirmed" || transaction.status === "finalized") &&
-    transaction.signature !== null
-  );
-}
-
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
@@ -130,9 +113,9 @@ async function resolveUpdateAuthorityReplayBeforeLiveChecks(
     auth: ApiKeyContext;
     tokenService: TokenService;
   }
-): Promise<{ transaction: TokenTransaction; providerWalletId: string } | null> {
+): Promise<{ transaction: TokenTransaction } | null> {
   const idempotencyKey = c.req.header("Idempotency-Key");
-  if (!idempotencyKey || isDryRunRequest(c)) return null;
+  if (!idempotencyKey) return null;
 
   const transaction = await resolved.tokenService.findTransactionByIdempotency(
     resolved.auth.organizationId,
@@ -155,7 +138,7 @@ async function resolveUpdateAuthorityReplayBeforeLiveChecks(
     throw conflict("Idempotency key already used with different request payload");
   }
 
-  const wallet = await resolveIssuanceWallet({
+  await resolveIssuanceWallet({
     env: c.env,
     auth: resolved.auth,
     custodyWalletId,
@@ -168,13 +151,13 @@ async function resolveUpdateAuthorityReplayBeforeLiveChecks(
     action: "update_authority",
   });
 
-  return { transaction: recovered, providerWalletId: wallet.providerWalletId };
+  return { transaction: recovered };
 }
 
 async function updateAuthorityReplayResponse(
   c: AppContext,
   resolved: Pick<
-    UpdateAuthorityReplayPolicyResolved,
+    UpdateAuthorityReplayResolved,
     "tokenId" | "tokenService" | "role" | "newAuthority" | "replay"
   >
 ) {
@@ -189,20 +172,16 @@ async function updateAuthorityReplayResponse(
   return success(c, { transaction: toPublicTokenTransaction(resolved.replay) });
 }
 
-/** Return a validated persisted authority update before admission or policy writes. */
+/** Return a validated persisted authority update before admitting new work. */
 export async function findUpdateAuthorityIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
-  const resolved = extraction.resolved as UpdateAuthorityPolicyResolved;
+  const resolved = extraction.resolved as UpdateAuthorityResolved;
   if (!("replay" in resolved)) return null;
   if (resolved.replay.idempotencyKey !== idempotencyKey) {
     throw conflict("Idempotency key already used with different request payload");
-  }
-  await assertApprovedWalletOperationCustodyWallet(c, resolved.custodyWalletId);
-  if (approvedWalletOperationId(c) && !isSettledAuthorityTransaction(resolved.replay)) {
-    return null;
   }
   return updateAuthorityReplayResponse(c, resolved);
 }
@@ -313,14 +292,14 @@ export const prepareUpdateAuthority = async (
 };
 
 /**
- * Parse and resolve an authority update into its wallet-operation policy candidate.
+ * Parse and resolve an authority update into the resources the handler works from.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resolved resources, and raw payload.
+ * @returns The validated body and the resolved resources.
  */
-export async function extractUpdateAuthorityPolicyCandidate(
+export async function extractUpdateAuthorityRequest(
   c: ValidatedBodyContext<typeof updateAuthoritySchema>
-): Promise<PolicyGateExtraction> {
+): Promise<RequestGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const input = c.req.valid("json");
@@ -351,21 +330,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
     if (!custodyWalletId) {
       throw conflict("Idempotent issuance transaction has no exact wallet identity");
     }
-    const currentAuthorityRaw =
-      typeof replay.transaction.params.currentAuthority === "string"
-        ? replay.transaction.params.currentAuthority
-        : null;
     return {
-      candidate: buildIssuancePolicyCandidate({
-        auth,
-        token,
-        custodyWalletId,
-        walletId: replay.providerWalletId,
-        operationType: "issuance_update_authority_execute",
-        amount: null,
-        destination: newAuthority,
-      }),
-      legs: [],
       body: input,
       resolved: {
         tokenId,
@@ -375,20 +340,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
         custodyWalletId,
         newAuthority,
         replay: replay.transaction,
-      } satisfies UpdateAuthorityReplayPolicyResolved,
-      rawPayload: {
-        tokenId: token.id,
-        mintAddress: token.mintAddress,
-        action: "update_authority",
-        role,
-        currentAuthority: currentAuthorityRaw,
-        newAuthority,
-      },
-      executionRequestBody: {
-        ...input,
-        signingCustodyWalletId: custodyWalletId,
-      },
-      idempotencyKey: null,
+      } satisfies UpdateAuthorityReplayResolved,
     };
   }
 
@@ -403,7 +355,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
     throw badRequest("Current authority is not available for this token");
   }
 
-  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,
@@ -412,16 +364,6 @@ export async function extractUpdateAuthorityPolicyCandidate(
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   return {
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId,
-      walletId: providerWalletId,
-      operationType: "issuance_update_authority_execute",
-      amount: null,
-      destination: newAuthority,
-    }),
-    legs: [],
     body: input,
     resolved: {
       tokenId,
@@ -433,32 +375,11 @@ export async function extractUpdateAuthorityPolicyCandidate(
       mintAddress,
       newAuthority,
     },
-    rawPayload: {
-      tokenId: token.id,
-      mintAddress: token.mintAddress,
-      action: "update_authority",
-      role,
-      currentAuthority: currentAuthorityRaw,
-      newAuthority,
-    },
-    executionRequestBody: {
-      ...input,
-      signingCustodyWalletId: custodyWalletId,
-    },
-    idempotencyKey: null,
   };
 }
 
 export const executeUpdateAuthority = async (c: AppContext) => {
-  const gate = getPolicyGateContext<UpdateAuthorityBody, UpdateAuthorityPolicyResolved>(c);
-  if ("replay" in gate.resolved) {
-    await assertApprovedWalletOperationCustodyWallet(c, gate.resolved.custodyWalletId);
-    if (approvedWalletOperationId(c) && !isSettledAuthorityTransaction(gate.resolved.replay)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict("Approved authority update is incomplete and requires manual reconciliation");
-    }
-    return updateAuthorityReplayResponse(c, gate.resolved);
-  }
+  const gate = getRequestGateContext<UpdateAuthorityBody, UpdateAuthorityExecutionResolved>(c);
 
   const {
     body: input,
@@ -473,8 +394,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       newAuthority,
     },
   } = gate;
-
-  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
@@ -491,22 +410,20 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     custodyWalletId
   );
 
-  const { transaction: tx, replayed } = await runApprovedWalletOperationEffectTransaction(c, (db) =>
-    getTenantTokenService(c, db).createTransaction({
-      tokenId,
-      organizationId: auth.organizationId,
-      custodyWalletId,
-      type: "update_authority",
-      params: {
-        role,
-        currentAuthority: currentAuthorityRaw,
-        newAuthority,
-      },
-      idempotencyKey: idempotencyMetadata.idempotencyKey,
-      idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
-      initiatedByKeyId: auth.id,
-    })
-  );
+  const { transaction: tx, replayed } = await tokenService.createTransaction({
+    tokenId,
+    organizationId: auth.organizationId,
+    custodyWalletId,
+    type: "update_authority",
+    params: {
+      role,
+      currentAuthority: currentAuthorityRaw,
+      newAuthority,
+    },
+    idempotencyKey: idempotencyMetadata.idempotencyKey,
+    idempotencyFingerprint: idempotencyMetadata.idempotencyFingerprint,
+    initiatedByKeyId: auth.id,
+  });
 
   if (tx.custodyWalletId !== custodyWalletId) {
     throw new AppError("FORBIDDEN", "Issuance transaction does not match wallet identity");
@@ -520,20 +437,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       transaction: tx,
       action: "update_authority",
     });
-    if (
-      approvedWalletOperationId(c) &&
-      (!transaction.signature ||
-        (transaction.status !== "confirmed" && transaction.status !== "finalized"))
-    ) {
-      // Settlement recovery above may repair a pending row from durable audit
-      // evidence. If it cannot, fail closed rather than presenting an
-      // unsubmitted authority update as a completed approval.
-      await beginApprovedWalletOperationEffect(c);
-      throw new AppError(
-        "CONFLICT",
-        "Approved authority update is incomplete and requires manual reconciliation"
-      );
-    }
     return updateAuthorityReplayResponse(c, {
       tokenId,
       tokenService,
@@ -553,7 +456,6 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   let onChainEffectCompleted = false;
 
   try {
-    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.updateAuthority({
       mint: mintAddress,
       role: mapAuthorityRole(role),

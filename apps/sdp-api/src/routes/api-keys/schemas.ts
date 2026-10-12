@@ -2,7 +2,6 @@ import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 import { custodyWalletOwnerSchema } from "../custody/schemas";
-import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/wallet-policies/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
@@ -57,63 +56,3 @@ export const apiKeyRotateSchema = z.object({
 export const apiKeyRevokeSchema = z.strictObject({
   confirmation: z.string().trim().min(1).optional(),
 });
-
-const policyDefaultActionSchema = z.enum(["allow", "deny", "approval_required", "review"]);
-
-export const apiKeyControlProfileCreateSchema = z.object({
-  name: z.string().min(1).max(100),
-});
-
-export const apiKeyControlProfileRevisionCreateBaseSchema = z.object({
-  rules: z.array(walletPolicyRuleSchema).max(100),
-  defaultAction: policyDefaultActionSchema,
-});
-
-export const apiKeyControlProfileRevisionCreateSchema =
-  apiKeyControlProfileRevisionCreateBaseSchema.superRefine((revision, ctx) =>
-    refinePolicyRules(revision.rules, ctx)
-  );
-
-const allWalletPolicyBindingSchema = z.object({
-  bindingScope: z.literal("all"),
-  apiKeyControlProfileId: z.string().min(1),
-});
-
-const selectedWalletPolicyBindingSchema = z
-  .object({
-    bindingScope: z.literal("selected"),
-    walletId: z.string().min(1),
-    walletControlProfileId: z.string().min(1).optional(),
-    apiKeyControlProfileId: z.string().min(1).optional(),
-  })
-  .refine(
-    (binding) => binding.walletControlProfileId || binding.apiKeyControlProfileId,
-    "Selected-wallet policy bindings must reference at least one control profile"
-  );
-
-const replacePolicyBindingsSchema = z.object({
-  mode: z.literal("replace"),
-  bindings: z
-    .array(z.union([allWalletPolicyBindingSchema, selectedWalletPolicyBindingSchema]))
-    .min(1)
-    .max(100)
-    .superRefine((bindings, ctx) => {
-      const targets = new Set<string>();
-      for (const [index, binding] of bindings.entries()) {
-        const target = binding.bindingScope === "all" ? "all" : `selected:${binding.walletId}`;
-        if (targets.has(target)) {
-          ctx.addIssue({
-            code: "custom",
-            message: "Policy binding targets must be unique",
-            path: [index],
-          });
-        }
-        targets.add(target);
-      }
-    }),
-});
-
-export const apiKeyPolicyBindingsWriteSchema = z.discriminatedUnion("mode", [
-  replacePolicyBindingsSchema,
-  z.object({ mode: z.literal("clear") }),
-]);

@@ -124,10 +124,6 @@ describe("OpenAPI spec", () => {
     );
     expect(publicDocument.tags?.map((tag) => tag.name)).not.toContain("Earn");
     expect(JSON.stringify(publicDocument)).not.toMatch(/\/v1\/earn/);
-    // Deliberately still present: the wallet-policy `operationTypes` enum keeps
-    // `earn_vault_deposit`, `earn_vault_withdrawal` and `earn_program_withdrawal`,
-    // because the policy API accepts them today and the public schema must not
-    // lie about accepted values. Nothing else in the document names Earn.
   });
 
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
@@ -710,27 +706,12 @@ describe("OpenAPI spec", () => {
     expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 
-  it("documents every supported public wallet policy rule kind", () => {
-    const doc = createPublicOpenApiDocument();
-    const policyPath = doc.paths?.["/v1/payments/wallets/{walletId}/policies"];
-    const serializedUpdate = JSON.stringify(policyPath?.put);
-    const serializedResponse = JSON.stringify(policyPath?.get?.responses?.["200"]);
-
-    for (const kind of [
-      "operation_family",
-      "operation_type",
-      "asset",
-      "destination",
-      "amount",
-      "approval",
-      "always",
-    ]) {
-      expect(serializedUpdate).toContain(`"${kind}"`);
-      expect(serializedResponse).toContain(`"${kind}"`);
-    }
-
-    for (const field of ["operationType", "operationTypes", "asset", "assets"]) {
-      expect(serializedResponse).toContain(`"${field}"`);
+  it("documents no wallet policy, approval or policy-profile endpoints (ADR 0006)", () => {
+    for (const doc of [createOpenApiDocument(), createPublicOpenApiDocument()]) {
+      const paths = Object.keys(doc.paths ?? {});
+      expect(paths.filter((path) => /polic|approval-requests/.test(path))).toEqual([]);
+      expect(doc.tags?.map((tag) => tag.name)).not.toContain("Policies");
+      expect(JSON.stringify(doc)).not.toContain("SIGNING_PENDING");
     }
   });
 
@@ -744,7 +725,6 @@ describe("OpenAPI spec", () => {
       "Projects",
       "Issuance",
       "Payments",
-      "Policies",
       "Compliance",
       "Counterparties",
       "Asset Profiles",
@@ -762,7 +742,6 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
-    expect(doc.paths?.["/v1/policies"]?.get).toBeDefined();
   });
 
   // DvP is documented internally and deliberately withheld from the public

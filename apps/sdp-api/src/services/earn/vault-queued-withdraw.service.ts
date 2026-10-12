@@ -98,11 +98,6 @@ export interface QueuedWithdrawalMutationResult {
   replayed: boolean;
 }
 
-export interface QueuedWithdrawalExecutionOptions {
-  /** Couple an approved-operation effect fence to the first durable mutation. */
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
-}
-
 export interface ExternalQueuedWithdrawalBuiltTransaction {
   id: string;
   environment: SdpEnvironment;
@@ -487,8 +482,7 @@ export async function createCustodyQueuedWithdrawal(
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     clientRequestId: string;
-  },
-  options: QueuedWithdrawalExecutionOptions = {}
+  }
 ): Promise<QueuedWithdrawalMutationResult> {
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const fingerprint = requestFingerprint({
@@ -629,9 +623,7 @@ export async function createCustodyQueuedWithdrawal(
         createdBy: input.actor.userId ?? null,
         initiatedByKeyId: input.actor.apiKeyId ?? null,
       });
-    const result = options.runIntentTransaction
-      ? await options.runIntentTransaction(persist)
-      : await persist(getDb(env));
+    const result = await persist(getDb(env));
     return broadcastQueuedAction(env, result);
   } finally {
     try {

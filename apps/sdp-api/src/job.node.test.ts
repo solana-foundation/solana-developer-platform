@@ -20,7 +20,6 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   describeCronFailure,
@@ -163,10 +162,6 @@ vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
   reconcileDvpTrades: vi.fn(async () => {}),
 }));
 
-vi.mock("@/services/policy/approved-operation-replay", () => ({
-  recoverApprovedWalletOperations: vi.fn(async () => {}),
-}));
-
 function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
   return {
     DATABASE_URL: "postgres://unit",
@@ -201,9 +196,6 @@ describe("runCronJob", () => {
     vi.mocked(waitForEgress).mockReset();
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
     vi.mocked(trackPendingTransfers)
-      .mockReset()
-      .mockResolvedValue(undefined as never);
-    vi.mocked(recoverApprovedWalletOperations)
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(reconcileSponsorshipBudgets)
@@ -383,7 +375,6 @@ describe("runCronJob", () => {
     const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
     expect(sweepOrder).toBeLessThan(transfersOrder);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
-    expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(env, {
       deadlineMs: expect.any(Number),

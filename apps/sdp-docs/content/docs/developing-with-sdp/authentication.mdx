@@ -3,7 +3,7 @@ title: Authentication
 description: Authenticate API requests with project-scoped API keys, layered with roles, wallet bindings, and network controls.
 ---
 
-SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, policy profiles, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
+SDP layers independent controls onto a single API key — role, per-key permissions, wallet bindings, allowed operations, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
 Authenticated API requests carry an API key in the `Authorization` header:
 
@@ -28,7 +28,6 @@ A request must clear every layer that is configured on its key:
 | **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
 | **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
 | **Allowed operations** | Optional allow-list of operation families and types the key may perform on those wallets. Empty means unrestricted |
-| **Policy profiles** | Rule sets (destination controls, amount limits, approval requirements) evaluated before a bound wallet moves funds |
 | **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
 
 | Role | Description |

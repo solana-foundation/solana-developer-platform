@@ -3,8 +3,9 @@ import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { custody, policies, privateChannels } from "@/flags";
+import { custody, privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import {
@@ -76,14 +77,13 @@ export default async function IntegrationsPage() {
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard");
   }
-  const [t, custodyEnabled, rampProviders, complianceEnabled, privateChannelsEnabled] =
-    await Promise.all([
-      getTranslations(),
-      custody(),
-      getOfferedRampProviders(),
-      policies(),
-      privateChannels(),
-    ]);
+  const [t, custodyEnabled, rampProviders, privateChannelsEnabled] = await Promise.all([
+    getTranslations(),
+    custody(),
+    getOfferedRampProviders(),
+    privateChannels(),
+  ]);
+  const complianceEnabled = isModuleInDeploymentReleaseChannel("compliance");
   const integrationFlags = {
     custody: custodyEnabled,
     rampProviders,

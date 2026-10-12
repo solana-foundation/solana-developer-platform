@@ -129,7 +129,6 @@ async function renderControlList(
           issuance: true,
           markets: false,
           payments: false,
-          policies: false,
           privateChannels: false,
           newDesign: true,
           ramps: false,

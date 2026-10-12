@@ -5,7 +5,6 @@ import {
   applyIdempotencyKeyOutcome,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
-  resolveHeldIdempotencyKey,
 } from "./idempotency-key-store";
 
 describe("unresolved Treasury intent identity", () => {
@@ -15,33 +14,21 @@ describe("unresolved Treasury intent identity", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it.each([401, 403, 429])("preserves an ambiguous submit key after a later %s", async (status) => {
+  it.each([401, 403, 429])("preserves an ambiguous submit key after a later %s", (status) => {
     const store = createIdempotencyKeyStore("test:treasury-recovery");
     const original = store.claim("same-intent");
     applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status: null });
     applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status });
-    const retry = await resolveHeldIdempotencyKey(
-      store,
-      "same-intent",
-      new AbortController().signal,
-      async () => ({ kind: "unavailable" })
-    );
-    expect(retry).toMatchObject({ kind: "key", key: original });
+    expect(store.claim("same-intent")).toBe(original);
   });
 
-  it("does not replace an unresolved intent just because fifteen minutes elapsed", async () => {
+  it("does not replace an unresolved intent just because fifteen minutes elapsed", () => {
     vi.useFakeTimers();
     const store = createIdempotencyKeyStore("test:treasury-recovery");
     const original = store.claim("same-intent");
     applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status: 504 });
     vi.setSystemTime(Date.now() + 16 * 60_000);
-    const retry = await resolveHeldIdempotencyKey(
-      store,
-      "same-intent",
-      new AbortController().signal,
-      async () => ({ kind: "unavailable" })
-    );
-    expect(retry).toMatchObject({ kind: "key", key: original });
+    expect(store.claim("same-intent")).toBe(original);
   });
   it("pins before transport and restores the identity on reload after the draft TTL", () => {
     vi.useFakeTimers();
@@ -95,19 +82,4 @@ describe("unresolved Treasury intent identity", () => {
       expect(new Set(keys).size).toBe(3);
     }
   );
-  it("preserves an approval-held key across authorization failures and releases explicit same-key denial", () => {
-    const store = createIdempotencyKeyStore("test:approval-recovery");
-    const key = store.claim("intent");
-    store.hold("intent");
-    const attempt = store.beginSubmission("intent");
-    expect(attempt).toEqual({ wasUncertain: true });
-    applyIdempotencyKeyOutcome(store, "intent", { ok: false, status: 403 }, attempt?.wasUncertain);
-    expect(store.claim("intent")).toBe(key);
-    applyIdempotencyKeyOutcome(store, "intent", {
-      ok: false,
-      status: 403,
-      body: { error: { details: { intentOutcome: "denied", idempotencyKey: key } } },
-    });
-    expect(store.claim("intent")).not.toBe(key);
-  });
 });

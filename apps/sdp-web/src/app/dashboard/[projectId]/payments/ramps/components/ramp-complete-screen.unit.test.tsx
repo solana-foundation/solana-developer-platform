@@ -99,7 +99,6 @@ function renderScreen(transfer: PaymentTransferSummary): string {
         issuance: false,
         markets: false,
         payments: true,
-        policies: false,
         privateChannels: false,
         ramps: true,
       }}
