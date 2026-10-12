@@ -12,11 +12,13 @@ Pick the **Tokenization Template** that matches your asset's compliance and oper
 | Asset model | Template | Typical controls |
 | --- | --- | --- |
 | Fiat-backed stablecoin | `stablecoin` | Mint authority, freeze authority, pausable, permanent delegate |
-| Tokenized security or RWA | `tokenized-security` | Allowlist required, freeze authority, pausable, permanent delegate |
+| Tokenized security or RWA | `tokenized-security` | Allowlist (on by default), freeze authority, pausable, permanent delegate |
 | Loyalty, rewards, or utility token | `custom` | Manually selected extensions |
 | Non-standard asset | `custom` | Manually selected extensions |
 
-**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
+The dashboard creates `stablecoin` tokens and `custom` tokens (shown as **Non-Security Digital Asset**). Create `tokenized-security` tokens through the API. See [Tokenization Templates](/docs/reference/issuance-token-types) for how each template's defaults work.
+
+**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing. If you'd rather sign transactions yourself, mint, burn, seize, force-burn, and authority changes also have caller-signed `/prepare` routes; see the [execution model](/docs/developing-with-sdp#execution-model).
 
 ## Implementation sequence
 
@@ -29,8 +31,9 @@ Each step links to its own guide with UI and API instructions:
 5. [Deploy a Token](/docs/tokens/deploy-a-token)
 6. [Mint and Burn](/docs/tokens/mint-and-burn)
 7. [Basic payment](/docs/payments/send-basic-payment) — transfer tokens between wallets
-8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, required for `tokenized-security`
-9. [Manage Token Settings](/docs/tokens/manage-token-settings) — freeze, pause, seize for compliance workflows
+8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, on by default for `tokenized-security`
+9. [Freeze and Compliance](/docs/tokens/freeze-and-compliance) — screen, freeze, pause, and seize for compliance workflows
+10. [Manage Token Settings](/docs/tokens/manage-token-settings) — rotate or revoke authorities and edit token information
 
 ## Core API endpoints
 
@@ -54,6 +57,7 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 - If the token is paused, minting and transfer operations are unavailable until it is unpaused.
 - Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
 - SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
+- Before SDP signs with a custody wallet, it checks the action against that wallet's policy. Deploy, mint, burn, force-burn, seize, authority changes, freeze and unfreeze, pause and unpause, on-chain metadata updates, and on-chain allowlist changes can all be denied (`403 FORBIDDEN`) or held for approval (`202 SIGNING_PENDING`). See [Wallet policies](/docs/wallet-operations/policies).
 
 ## For AI agents
 
