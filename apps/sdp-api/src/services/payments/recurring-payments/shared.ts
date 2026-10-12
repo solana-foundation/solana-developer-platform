@@ -1,4 +1,5 @@
 import { getSolanaConfig } from "@sdp/rpc";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -108,12 +109,18 @@ export async function derivePlanAddresses(
   return { owner, planId, planPda };
 }
 
+/**
+ * Resolves a plan's mint, token program and base-unit amount from the mint account on the
+ * request's cluster scope.
+ *
+ * @param plan - Stored subscription plan whose token and decimal amount are resolved.
+ * @returns The plan amount in base units, the mint address and the mint's token program.
+ */
 export async function resolvePlanRuntime(
-  env: Env,
   plan: PaymentSubscriptionPlanRow
 ): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
   const mint = assertSubscriptionTokenMint(plan.token);
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const [tokenProgram, decimals] = await Promise.all([
     resolveMintTokenProgram(rpc, mint),
     resolveMintDecimals(rpc, mint),
@@ -127,13 +134,21 @@ export async function resolvePlanRuntime(
   return { amountBaseUnits, mint, tokenProgram };
 }
 
+/**
+ * Compiles an unsigned subscription transaction using a recent blockhash from the request's
+ * cluster scope.
+ *
+ * @param feePayer - Address that pays the transaction fee.
+ * @param instructions - Instructions appended to the transaction message in order.
+ * @param requiredSigners - Addresses that must sign alongside the fee payer.
+ * @returns The base64 wire transaction, its blockhash lifetime and the deduplicated signer list.
+ */
 export async function buildPreparedSubscriptionTransaction(
-  env: Env,
   feePayer: Address,
   instructions: Instruction[],
   requiredSigners: Address[]
 ): Promise<PreparedPaymentSubscriptionTransaction> {
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
