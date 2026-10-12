@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
@@ -15,7 +16,6 @@ import {
   ServerIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import type { SdpModule } from "@sdp/types";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { docsReleaseChannel, isDocsModuleInChannel } from "@/lib/release-channel";

@@ -1,9 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  docsReleaseChannel,
-  isDocsModuleInChannel,
-  parseDocsModule,
-} from "@/lib/release-channel";
+import { docsReleaseChannel, isDocsModuleInChannel, parseDocsModule } from "@/lib/release-channel";
 
 /**
  * Renders its children only when the deployment's release channel runs `module`,

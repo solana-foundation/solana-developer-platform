@@ -703,8 +703,10 @@ jobs:
       - name: Configurator unit tests
         run: pnpm --filter @sdp/env-config test
 
-      - name: Build docs
+      - name: Build docs (stable, as production)
         run: pnpm --filter sdp-docs build
+        env:
+          SDP_RELEASE_CHANNEL: stable
 
   docs_integrity:
     name: Docs Integrity
@@ -737,8 +739,20 @@ jobs:
       - name: Committed docs artifacts match generated output
         run: git diff --exit-code apps/sdp-docs/public
 
-      - name: Check docs links
+      - name: Docs release-channel tests
+        run: pnpm --filter sdp-docs test
+
+      - name: Check docs links (experimental)
         run: pnpm --filter sdp-docs check:links
+
+      # Production runs stable: its pages must never link to a page or API
+      # reference family the stable build leaves out.
+      - name: Check docs links (stable)
+        env:
+          SDP_RELEASE_CHANNEL: stable
+        run: |
+          pnpm --filter sdp-docs generate:api
+          pnpm --filter sdp-docs check:links
 
   integration_tests_shard:
     name: Integration Tests (${{ matrix.name }})

@@ -15,7 +15,8 @@ interface GeneratedPlaygroundCatalog {
   routeOwners: [string, SdpModule | "core"][];
 }
 
-const catalog = generatedCatalog as GeneratedPlaygroundCatalog;
+// JSON imports type tuples as plain arrays; the generator writes this shape.
+const catalog = generatedCatalog as unknown as GeneratedPlaygroundCatalog;
 
 function operationKey(endpoint: ApiPlaygroundEndpointConfig): string {
   return `${endpoint.method} ${endpoint.path.split("?", 1)[0]}`;
@@ -59,10 +60,11 @@ export function filterPlaygroundEndpointsToReleaseChannel(
 ): ApiPlaygroundEndpointConfig[] {
   const modules: readonly string[] = SDP_RELEASE_CHANNELS[releaseChannel];
   return endpoints.filter((endpoint) => {
-    // An endpoint no module owns is not offered: the API would not serve it either.
+    // Every API route is filed under a module (route-modules.test.ts), so a path no
+    // module owns is not an API route the release channel could refuse.
     const releaseModule = releaseModuleOf(endpoint);
     return (
-      releaseModule === "core" || (releaseModule !== undefined && modules.includes(releaseModule))
+      releaseModule === undefined || releaseModule === "core" || modules.includes(releaseModule)
     );
   });
 }

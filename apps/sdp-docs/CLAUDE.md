@@ -189,6 +189,15 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
+## Release Channels
+
+Each docs deployment documents only the modules its release channel runs (`SDP_RELEASE_CHANNEL`, read by `src/lib/release-channel.ts`; required on Vercel, `experimental` when unset elsewhere). Never move or delete content to hide a module:
+
+- A page about one module takes `module: issuance` (or `ramps`, …) frontmatter. Outside the channel it leaves `source` (so it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
+- A module-specific passage in a shared page goes in `<InChannel module="ramps">…</InChannel>`. Blocks do not nest; put block content on its own lines with blank lines inside the tags.
+- `check:links` checks the channel in `SDP_RELEASE_CHANNEL`; CI runs it on `experimental` and `stable`, so a stable page linking to an issuance page fails.
+- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`) are built at `experimental`; the deployment's build regenerates them for its channel.
+
 API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
