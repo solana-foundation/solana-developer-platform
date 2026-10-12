@@ -105,6 +105,18 @@ signature its attempt recorded; it does not fail the row. A replay of a
 lifecycle action (activate, cancel, resume, PATCH, collect) finds the attempt its key claimed and
 returns the schedule as it stands now, which may still be mid-transition; clients poll GET.
 
+Custody wallet creation (`POST /v1/wallets`) moves no money but creates a provider wallet before its
+row, so it has no row to write first and stays `serverErrors: "store"`. A keyed create derives a
+request id from the key, scoped by organization, project and credential (the raw key never reaches
+a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0131). A
+retry the key cannot answer (a takeover, or past 24 hours) is answered from that row by
+`replayFromRecord` without calling the provider; another request on the same key is 422. A crash
+between the provider call and the row is covered only where the provider dedupes on the id:
+Privy (`privy-idempotency-key` plus a derived `external_id` it looks up first) and Coinbase CDP
+(`X-Idempotency-Key` plus an account name seeded by the id). Fireblocks, Turnkey, Para, DFNS,
+IBM Digital Asset Haven, Anchorage and Utila get no id from our clients, so that window can still
+leave a second, unreferenced wallet there.
+
 **Outcomes.**
 
 | Case | Stored? | Answer |

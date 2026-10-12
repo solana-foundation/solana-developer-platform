@@ -66,6 +66,7 @@ import {
   CustodyConfigStore,
   type CustodyConfigWallet,
   type CustodyWallet,
+  type CustodyWalletIdempotency,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -1023,6 +1024,8 @@ export class SigningService {
    * @param params.provider - The provider whose Managed config owns the new wallet.
    * @param params.label - Optional wallet label.
    * @param params.purpose - Optional wallet purpose.
+   * @param params.idempotency - A keyed request's derived request id (sent to
+   *   providers that dedupe on one) and fingerprint, recorded on the row.
    * @returns The persisted config wallet.
    */
   async createWallet(
@@ -1032,6 +1035,7 @@ export class SigningService {
       provider: SigningConfiguration["provider"];
       label?: string;
       purpose?: WalletPurpose;
+      idempotency?: CustodyWalletIdempotency | null;
     }
   ): Promise<CustodyConfigWallet> {
     const config = await this.configStore.findActiveByProvider(orgId, projectId, params.provider);
@@ -1053,6 +1057,7 @@ export class SigningService {
       projectId,
       params: {
         label: params.label,
+        requestId: params.idempotency?.requestId,
       },
       parsed,
       cipher: this.getCustodyCipher(),
@@ -1065,6 +1070,7 @@ export class SigningService {
         publicKey,
         label: params.label,
         purpose: params.purpose,
+        idempotency: params.idempotency,
       });
     } catch (error) {
       throw new SigningError(

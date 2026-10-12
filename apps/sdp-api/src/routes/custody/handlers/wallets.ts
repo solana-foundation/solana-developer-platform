@@ -6,9 +6,12 @@ import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
+import { AppError, badRequest, conflict, internalError, serviceUnavailable } from "@/lib/errors";
+import { deriveProviderRequestId, resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getIdempotencyFingerprint } from "@/middleware/idempotency";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -34,6 +37,7 @@ import {
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
+import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import type {
   CustodyWalletAggregateResponse,
@@ -215,6 +219,110 @@ async function getBalancesByWalletId(
   return attachUsdValuesToBalanceMap(c.env, balancesMap);
 }
 
+/**
+ * The provider request id a wallet create's Idempotency-Key stands for
+ * (HOO-1918). Scoped by organization, project and credential, so the same
+ * client key from another tenant or credential never reaches a provider, or
+ * the row's unique index, as the same request.
+ */
+export function deriveCustodyWalletCreateRequestId(
+  scope: { organizationId: string; projectId: string; principal: string },
+  idempotencyKey: string
+): string {
+  return deriveProviderRequestId(
+    ["custody_wallet_create", scope.organizationId, scope.projectId, scope.principal],
+    idempotencyKey
+  );
+}
+
+/** A keyed create's recovery point (migration 0131); null without a key. */
+function custodyWalletIdempotency(c: AppContext): CustodyWalletIdempotency | null {
+  const idempotencyKey = parseIdempotencyKey(c);
+  if (idempotencyKey === undefined) return null;
+  const fingerprint = getIdempotencyFingerprint(c);
+  if (fingerprint === undefined) {
+    throw internalError("A keyed wallet create reached its handler unfingerprinted");
+  }
+  const auth = getAuth(c);
+  return {
+    requestId: deriveCustodyWalletCreateRequestId(
+      { organizationId: auth.organizationId, projectId: requireProjectId(c), principal: auth.id },
+      idempotencyKey
+    ),
+    fingerprint,
+  };
+}
+
+interface KeyedCustodyWalletRow {
+  id: string;
+  custody_config_id: string | null;
+  custody_connection_id: string | null;
+  wallet_id: string;
+  public_key: string;
+  label: string | null;
+  purpose: string | null;
+  status: "active" | "inactive";
+  created_at: string;
+  idempotency_fingerprint: string | null;
+}
+
+/**
+ * Answers a wallet create whose Idempotency-Key already made a wallet, from
+ * its row (HOO-1918): after a crash between the row and the stored response, a
+ * lease takeover, or past the key's 24 hours. The provider is not called. The
+ * same key with a different request is refused (422). Reads one row only.
+ */
+export async function findCustodyWalletCreateReplay(c: AppContext): Promise<Response | null> {
+  const idempotency = custodyWalletIdempotency(c);
+  if (idempotency === null) return null;
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const row = await resolveIdentityBoundIdempotencyReplay(
+    () =>
+      getDb(c.env)
+        .prepare(
+          `SELECT w.id, w.custody_config_id, w.custody_connection_id, w.wallet_id, w.public_key,
+                  w.label, w.purpose, w.status, w.created_at, w.idempotency_fingerprint
+           FROM custody_wallets w
+           LEFT JOIN custody_configs cc ON cc.id = w.custody_config_id
+           LEFT JOIN custody_connections cn ON cn.id = w.custody_connection_id
+           WHERE w.idempotency_request_id = ?
+             AND COALESCE(cc.organization_id, cn.organization_id) = ?
+             AND COALESCE(cc.project_id, cn.project_id) = ?
+           LIMIT 1`
+        )
+        .bind(idempotency.requestId, auth.organizationId, projectId)
+        .first<KeyedCustodyWalletRow>(),
+    idempotency.fingerprint,
+    // The request id already binds the tenant and credential; the fingerprint is the request.
+    () => true
+  );
+  if (row === null) return null;
+  // custody_wallets_exactly_one_owner (0046): a row has a config or a connection.
+  let owner: { custodyConfigId: string } | { custodyConnectionId: string };
+  if (row.custody_config_id !== null) {
+    owner = { custodyConfigId: row.custody_config_id };
+  } else if (row.custody_connection_id !== null) {
+    owner = { custodyConnectionId: row.custody_connection_id };
+  } else {
+    throw internalError("Custody wallet row has no owner");
+  }
+  const response: CustodyWalletResponse = {
+    wallet: {
+      ...owner,
+      id: row.id,
+      isRuntimeExecutionAllowed: true,
+      walletId: row.wallet_id,
+      publicKey: row.public_key,
+      label: row.label,
+      purpose: row.purpose,
+      status: row.status,
+      createdAt: row.created_at,
+    },
+  };
+  return created(c, response);
+}
+
 export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSchema>) => {
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
@@ -223,6 +331,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   assertApiKeyNotWalletScoped(getAuth(c), "create custody wallets");
 
   const body = c.req.valid("json");
+  const idempotency = custodyWalletIdempotency(c);
 
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
@@ -240,6 +349,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         connectionId: body.connectionId,
         label: body.label,
         purpose: body.purpose,
+        idempotency,
       });
       clearWalletCaches();
       return created(c, { wallet } satisfies CustodyWalletResponse);
@@ -249,6 +359,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
       provider: body.provider,
       label: body.label,
       purpose: body.purpose,
+      idempotency,
     });
 
     const response: CustodyWalletResponse = {
