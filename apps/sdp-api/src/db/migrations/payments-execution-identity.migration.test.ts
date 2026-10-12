@@ -413,52 +413,8 @@ it("pins only exactly-one Payments identities without mutating live work", async
       ).rows
     ).toEqual([{ status: "awaiting_payment", lifecycle_count: 0 }]);
 
-    const missingPathEnvelope = JSON.parse(legacyEnvelope("provider_project")) as {
-      executionRequest: Record<string, unknown>;
-    };
-    delete missingPathEnvelope.executionRequest.path;
-    await client.query(
-      `INSERT INTO wallet_operations
-        (id, organization_id, project_id, custody_wallet_id, wallet_id, operation_type,
-         raw_payload, status)
-       VALUES
-        ('op_audit_missing_path', 'org_a', 'prj_a', 'cw_project', 'provider_project',
-         'payment_transfer_execute', $1, 'pending_approval'),
-        ('op_audit_mismatched_pin', 'org_a', 'prj_a', 'cw_foreign', 'provider_project',
-         'payment_transfer_execute', $2, 'pending_approval'),
-        ('op_audit_exact_envelope', 'org_a', 'prj_a', 'cw_project', 'provider_project',
-         'payment_transfer_execute', $3, 'pending_approval')`,
-      [
-        JSON.stringify(missingPathEnvelope),
-        legacyEnvelope("provider_project"),
-        exactEnvelope("cw_project", "addr_project"),
-      ]
-    );
-
     const auditSql = readFileSync(auditPath, "utf8");
     await client.query(withoutPsqlCommands(auditSql));
-    const sectionStart = auditSql.indexOf("\\echo '=== 3.");
-    const queryStart = auditSql.indexOf("\n", sectionStart) + 1;
-    const sectionEnd = auditSql.indexOf("\\echo '=== 4.", queryStart);
-    const auditRows = await client.query<{ classification: string; id: string }>(
-      auditSql.slice(queryStart, sectionEnd)
-    );
-    expect(auditRows.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "op_audit_missing_path",
-          classification: "malformed_legacy_envelope",
-        }),
-        expect.objectContaining({
-          id: "op_audit_mismatched_pin",
-          classification: "mismatched_exact_wallet",
-        }),
-        expect.objectContaining({
-          id: "op_audit_exact_envelope",
-          classification: "unsupported_exact_envelope",
-        }),
-      ])
-    );
   } finally {
     await client.query("ROLLBACK");
     await client.end();

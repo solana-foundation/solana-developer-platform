@@ -265,11 +265,13 @@ export function ActivityCard({
                     </TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
-                        <Badge variant={STATE_BADGE[operation.state] ?? "default"}>
-                          {isKnownOperationState(operation.state)
-                            ? t(`DashboardHeliusRings.activity.state_${operation.state}`)
-                            : operation.state}
-                        </Badge>
+                        {isKnownOperationState(operation.state) ? (
+                          <Badge variant={STATE_BADGE[operation.state]}>
+                            {t(`DashboardHeliusRings.activity.state_${operation.state}`)}
+                          </Badge>
+                        ) : (
+                          <Badge variant="default">{operation.state}</Badge>
+                        )}
                         {isSettling(operation.state) ? (
                           <Loader2Icon
                             className="size-3.5 animate-spin text-secondary"

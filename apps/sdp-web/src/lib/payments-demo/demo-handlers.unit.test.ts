@@ -61,10 +61,6 @@ describe("routing", () => {
     expect(write("POST", "/v1/payments/ramps/onramp/events")?.status).toBe(204);
     expect(ops).toEqual([]);
   });
-
-  it("answers wallet approvals with none waiting", () => {
-    expect(read("/v1/wallets/approval-requests").body.data.approvalRequests).toEqual([]);
-  });
 });
 
 describe("contacts", () => {

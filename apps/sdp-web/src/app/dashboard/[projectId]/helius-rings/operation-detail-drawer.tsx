@@ -92,11 +92,13 @@ export function OperationDetailDrawer({
                   {t("DashboardHeliusRings.activity.state")}
                 </dt>
                 <dd>
-                  <Badge variant={STATE_BADGE[detail.state] ?? "default"}>
-                    {isKnownOperationState(detail.state)
-                      ? t(`DashboardHeliusRings.activity.state_${detail.state}`)
-                      : detail.state}
-                  </Badge>
+                  {isKnownOperationState(detail.state) ? (
+                    <Badge variant={STATE_BADGE[detail.state]}>
+                      {t(`DashboardHeliusRings.activity.state_${detail.state}`)}
+                    </Badge>
+                  ) : (
+                    <Badge variant="default">{detail.state}</Badge>
+                  )}
                 </dd>
               </div>
               {detail.amountRaw ? (

@@ -4,7 +4,7 @@ Companion to [ADR 0002](../decisions/0002-earn-provider-pluggability.md). The
 current implementation is the contract; this doc maps where every piece of data
 comes from and which existing SDP components Earn rides on instead of
 rebuilding. Rule of thumb: **Earn adds a domain, not a platform**: auth,
-tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, policies, and
+tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, allowed operations, and
 audit all already exist and are reused. For the
 step-by-step of changing what Earn offers (provider / vault / category /
 custodian), see the
@@ -194,7 +194,7 @@ per-provider movement endpoints or status polling types from git history.
 | Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts` scheduled handler, `job.ts` | Catalogue sync, metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by the owning jobs |
 | Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_movements` request uniques + queued request/action client-request uniques + `earn_provider_wallets` provider-wallet unique | Movement and queued-action retries return the recorded intent instead of moving shares or assets twice. Program creation remains key-required and the provider-wallet unique is its replay anchor. External-wallet build rows are consumable once. | ✅ wired |
 | Compliance providers | `services/compliance/`, compliance family; provider-native eligibility capability | WisdomTree uses its Connect wallet/product checks before money-in. A generic SDP compliance-provider hook for other RWA strategies remains an open decision. | ✅ WisdomTree · ⏸ generic hook |
-| Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
+| Allowed operations | `requireAllowedOperation` (API key Allowed Operations, ADR 0006) | Treasury vault deposits and withdrawals are `program` operations (`earn_vault_deposit`, `earn_vault_withdrawal`) checked once on arrival; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
 | Audit log | `services/audit.service.ts`, `routes/earn/handlers/movement-audit.ts` | Program configuration, movement, queued request, and cancellation audit events | ✅ wired |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
 | OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations with exactly eight optional-auth operations; queued action builds, submits, and tenant reads stay keyed | ✅ source and generated artifacts aligned |
@@ -238,5 +238,6 @@ ADR 0002's 2026-08-03 addendum.
    Revisit with the next custodial integration.
 3. **Compliance hook** — do RWA deposits require a compliance-provider check
    (Genius-compliant tokens need app whitelisting — JOLT/B-reserves)?
-4. **Policy engine scope** — which of whitelist/buffer/limits/timelocks land in
-   V1, and whether they graft onto the existing policy/approvals domain.
+4. **Control scope** — which of whitelist/buffer/limits/timelocks land in
+   V1. The wallet policy engine is removed (ADR 0006); per-key Allowed
+   Operations are the only control today.

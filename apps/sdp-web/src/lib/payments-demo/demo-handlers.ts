@@ -1510,8 +1510,5 @@ export function demoFlowRead(
     }
     return ok({ data: requirementsFor(world, counterpartyId, params, now) });
   }
-  if (matchesShape(segments, "wallets/approval-requests")) {
-    return ok({ data: { approvalRequests: [] } });
-  }
   return undefined;
 }

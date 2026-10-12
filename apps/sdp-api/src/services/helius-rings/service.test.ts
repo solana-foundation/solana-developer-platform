@@ -1664,6 +1664,61 @@ describe("HeliusRingsService", () => {
       expect(resumed.state).toBe("indexing");
     });
 
+    describe("a stored approval_required row (retired, ADR 0006)", () => {
+      async function strandedApprovalRow() {
+        const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+        const reserved = await operations.reserveIntent({
+          ...tenant,
+          ringsConnectionId: TEST_CONNECTION_ID,
+          walletId,
+          opType: "merge",
+          intentKey: "sha256:stranded-approval",
+          assetMint: "So11111111111111111111111111111111111111112",
+          amountRaw: null,
+          fromAddr: null,
+          toAddr: null,
+          zoneId: null,
+          transferMode: null,
+          retryOfOperationId: null,
+          timelock: null,
+        });
+        await getDb(env)
+          .prepare("UPDATE helius_rings_operations SET state = 'approval_required' WHERE id = ?")
+          .bind(reserved.operation.id)
+          .run();
+        return reserved.operation.id;
+      }
+
+      it("reads as failed and not retryable, with a clear message", async () => {
+        const id = await strandedApprovalRow();
+
+        const operation = await liveishService().getOperation(id);
+
+        expect(operation.state).toBe("failed");
+        expect(operation.failure).toEqual({
+          code: "invalid_input",
+          message: "This operation was waiting for an approval that no longer exists.",
+          retryable: false,
+        });
+      });
+
+      it("is neither retried nor advanced, and the stored row is left alone", async () => {
+        const id = await strandedApprovalRow();
+        const svc = liveishService();
+
+        await expect(svc.retryOperation(id, "nonce-retry-approval")).rejects.toBeInstanceOf(
+          AppError
+        );
+        const executed = await svc.executeOperation(id);
+
+        expect(executed.state).toBe("failed");
+        const stored = await createPostgresHeliusRingsOperationRepository(
+          getDb(env)
+        ).getOperationById({ ...tenant, id });
+        expect(stored?.state).toBe("approval_required");
+      });
+    });
+
     it("polls indexing idempotently and completes on the Photon hit", async () => {
       let now = "2026-08-18T00:00:00.000Z";
       const gateway = new InMemoryRingsGateway({
