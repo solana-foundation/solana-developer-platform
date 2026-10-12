@@ -299,36 +299,50 @@ describe("collectDueRecurringPayments", () => {
     warn.mockRestore();
   });
 
-  it.each([
-    ["provider wallet ID", { id: "cwlt_1", walletId: "wallet_other", publicKey: "source_address" }],
-    ["public key", { id: "cwlt_1", walletId: "wallet_1", publicKey: "other_address" }],
-  ])("fails closed when the exact source wallet %s does not match its pin", async (_, wallet) => {
-    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+  it("collects the exact source when only its provider reference changed", async () => {
     mocks.rows.due = [recurringRow("active")];
-    mocks.findOperationalWalletById.mockResolvedValue(wallet);
+    mocks.findOperationalWalletById.mockResolvedValue({
+      id: "cwlt_1",
+      walletId: "wallet_other",
+      publicKey: "source_address",
+    });
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0, refused: 0 });
-    expect(mocks.findOperationalWalletById).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      projectId: "proj_1",
-      custodyWalletId: "cwlt_1",
-    });
-    expect(collectRecurringPayment).not.toHaveBeenCalled();
-    expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      {
-        organization_id: "org_1",
-        project_id: "proj_1",
-        recurring_payment_id: "prp_active",
-        custody_wallet_id: "cwlt_1",
-        reason: "source_wallet_mismatch",
-      },
-      "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
-    );
-    warn.mockRestore();
+    expect(result).toEqual({ recovered: 0, collected: 1, failed: 0, skipped: 0, refused: 0 });
+    expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
   });
+
+  it.each([["public key", { id: "cwlt_1", walletId: "wallet_1", publicKey: "other_address" }]])(
+    "fails closed when the exact source wallet %s does not match its pin",
+    async (_, wallet) => {
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      mocks.rows.due = [recurringRow("active")];
+      mocks.findOperationalWalletById.mockResolvedValue(wallet);
+
+      const result = await collectDueRecurringPayments(env, new Date());
+
+      expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0, refused: 0 });
+      expect(mocks.findOperationalWalletById).toHaveBeenCalledWith({
+        organizationId: "org_1",
+        projectId: "proj_1",
+        custodyWalletId: "cwlt_1",
+      });
+      expect(collectRecurringPayment).not.toHaveBeenCalled();
+      expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(
+        {
+          organization_id: "org_1",
+          project_id: "proj_1",
+          recurring_payment_id: "prp_active",
+          custody_wallet_id: "cwlt_1",
+          reason: "source_wallet_mismatch",
+        },
+        "collectDueRecurringPayments: recurring payment source wallet does not match its pin"
+      );
+      warn.mockRestore();
+    }
+  );
 
   it("summarizes stale recurring payment updates without changing them", async () => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);

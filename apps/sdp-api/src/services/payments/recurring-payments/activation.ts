@@ -19,7 +19,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -34,6 +34,7 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
+import { getDeploymentMode, type SdpDeploymentMode } from "@/lib/runtime-env";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -48,6 +49,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
@@ -57,6 +59,10 @@ import {
   sendSubscriptionInstructions,
   subscriptionProgramMetadataUri,
 } from "./shared";
+import {
+  initializeRecurringSponsorshipMessages,
+  recordConfirmedRecurringSponsorshipFailure,
+} from "./sponsorship";
 
 async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
   recurringRepo: ReturnType<typeof createPaymentRecurringPaymentsRepository>;
@@ -100,6 +106,7 @@ async function getOrCreateActivationPlan(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     ownerWalletId: input.sourceWallet.walletId,
+    ownerCustodyWalletId: input.sourceWallet.id,
     ownerAddress: input.sourceWallet.publicKey,
     token: input.claimed.token,
     amount: input.claimed.amount,
@@ -108,6 +115,7 @@ async function getOrCreateActivationPlan(input: {
     planPda: null,
     destinationAddress: input.destination,
     pullerWalletId: input.sourceWallet.walletId,
+    pullerCustodyWalletId: input.sourceWallet.id,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.claimed.metadata_uri,
     status: "draft",
@@ -198,6 +206,11 @@ async function recordActivationFailure(input: {
 }): Promise<void> {
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recordConfirmedRecurringSponsorshipFailure(tx, {
+      ...input,
+      attemptKind: "activation",
+      attemptId: input.attempt.id,
+    });
     requireUpdatedAttempt(
       await recurringRepo.updateActivationAttempt({
         attemptId: input.attempt.id,
@@ -297,6 +310,8 @@ async function journalActivationClaimConflict(input: {
 }
 
 async function createClaimedActivationAttempt(input: {
+  db: DatabaseExecutor;
+  deploymentMode: SdpDeploymentMode;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
@@ -346,6 +361,28 @@ async function createClaimedActivationAttempt(input: {
         if (resumed === null) {
           throw conflict("Recurring payment activation attempt changed concurrently");
         }
+        if (
+          existing.stage === "create_plan" &&
+          existing.plan_creation_signature &&
+          !existing.authorization_signature
+        ) {
+          if (!input.claimed.source_custody_wallet_id)
+            throw conflict("Recurring payment source wallet is unresolved");
+          const custodyWalletId = input.claimed.source_custody_wallet_id;
+          await initializeRecurringSponsorshipMessages(input.db, {
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            recurringPaymentId: input.claimed.id,
+            attemptKind: "activation",
+            attemptId: existing.id,
+            deploymentMode: input.deploymentMode,
+            messages: ["authorization_setup", "authorize_subscription"].map((key) => ({
+              key,
+              custodyWalletId,
+              providerWalletId: input.claimed.source_wallet_id,
+            })),
+          });
+        }
         return resumed;
       } catch (error) {
         await resetRecurringPaymentActivationUnlessAlreadyActive({
@@ -388,6 +425,27 @@ async function createClaimedActivationAttempt(input: {
   }
 
   if (attempt) {
+    if (!input.claimed.source_custody_wallet_id)
+      throw conflict("Recurring payment source wallet is unresolved");
+    const custodyWalletId = input.claimed.source_custody_wallet_id;
+    await initializeRecurringSponsorshipMessages(input.db, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.claimed.id,
+      attemptKind: "activation",
+      attemptId: attempt.id,
+      deploymentMode: input.deploymentMode,
+      messages: [
+        ...(input.claimed.plan_creation_signature ? [] : ["create_plan"]),
+        ...(input.claimed.authorization_signature
+          ? []
+          : ["authorization_setup", "authorize_subscription"]),
+      ].map((key) => ({
+        key,
+        custodyWalletId,
+        providerWalletId: input.claimed.source_wallet_id,
+      })),
+    });
     return attempt;
   }
 
@@ -460,7 +518,8 @@ async function fetchConfirmedActivationPlan(input: {
     await confirmSubscriptionSignature(
       input.env,
       input.planCreationSignature,
-      "Recurring payment activation failed on-chain"
+      "Recurring payment activation failed on-chain",
+      "create_plan"
     );
     return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
       commitment: "confirmed",
@@ -477,7 +536,8 @@ async function fetchConfirmedActivationPlan(input: {
   await confirmSubscriptionSignature(
     input.env,
     input.planCreationSignature,
-    "Recurring payment activation failed on-chain"
+    "Recurring payment activation failed on-chain",
+    "create_plan"
   );
   return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
     commitment: "confirmed",
@@ -495,7 +555,8 @@ async function fetchConfirmedSubscriptionDelegation(input: {
     await confirmSubscriptionSignature(
       input.env,
       input.authorizationSignature,
-      "Recurring payment activation failed on-chain"
+      "Recurring payment activation failed on-chain",
+      "authorize_subscription"
     );
     return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
       commitment: "confirmed",
@@ -514,7 +575,8 @@ async function fetchConfirmedSubscriptionDelegation(input: {
   await confirmSubscriptionSignature(
     input.env,
     input.authorizationSignature,
-    "Recurring payment activation failed on-chain"
+    "Recurring payment activation failed on-chain",
+    "authorize_subscription"
   );
   return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
     commitment: "confirmed",
@@ -564,6 +626,12 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
+    sponsorshipMessage: {
+      attemptKind: "activation",
+      attemptId: input.attempt.id,
+      recurringPaymentId: input.attempt.recurring_payment_id,
+      messageKey: "authorization_setup",
+    },
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -585,7 +653,8 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   await confirmSubscriptionSignature(
     input.env,
     initSignature,
-    "Recurring payment activation failed on-chain"
+    "Recurring payment activation failed on-chain",
+    "authorization_setup"
   );
 
   if (!initAuthorityInstruction) {
@@ -661,6 +730,8 @@ export async function activateRecurringPayment(input: {
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({
+      db: tx,
+      deploymentMode: getDeploymentMode(input.env),
       recurringRepo: transactionRepo,
       claimed,
       organizationId: input.organizationId,
@@ -728,6 +799,8 @@ export async function activateRecurringPayment(input: {
       destination,
       createdBy: input.createdBy,
     });
+    if (!planCreationSignature || !authorizationSignature)
+      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
 
     const programPlanId = parseU64String(plan.program_plan_id, "programPlanId");
     const [planPda] = await subscriptionsProgram.findPlanPda({ owner, planId: programPlanId });
@@ -773,6 +846,12 @@ export async function activateRecurringPayment(input: {
         }
       );
       planCreationSignature = await sendSubscriptionInstructions({
+        sponsorshipMessage: {
+          attemptKind: "activation",
+          attemptId: attempt.id,
+          recurringPaymentId: claimed.id,
+          messageKey: "create_plan",
+        },
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -929,6 +1008,12 @@ export async function activateRecurringPayment(input: {
         tokenMint: mint,
       });
       authorizationSignature = await sendSubscriptionInstructions({
+        sponsorshipMessage: {
+          attemptKind: "activation",
+          attemptId: attempt.id,
+          recurringPaymentId: claimed.id,
+          messageKey: "authorize_subscription",
+        },
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

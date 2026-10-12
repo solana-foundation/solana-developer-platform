@@ -1,7 +1,12 @@
 import type { PaymentRecurringPaymentResponse } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
-import { createRecurringPayment, updateRecurringPayment } from "./recurring-payments.data";
+import {
+  createRecurringPayment,
+  getRecurringPayment,
+  updateRecurringPayment,
+} from "./recurring-payments.data";
+import { getRecurringPayment as getRedesignRecurringPayment } from "./recurring-payments.data.redesign";
 
 const t: Parameters<typeof createRecurringPayment>[2] = (key) => key;
 
@@ -43,6 +48,21 @@ const responseEnvelope = {
 describe("recurring payment write requests", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([getRecurringPayment, getRedesignRecurringPayment])(
+    "reads saved exact identity and address without provider response metadata",
+    async (getPayment) => {
+      const { sourceProviderWalletId: _providerMetadata, ...savedPayment } =
+        responseEnvelope.data.recurringPayment;
+      vi.stubGlobal("fetch", () =>
+        Promise.resolve(Response.json({ data: { recurringPayment: savedPayment } }))
+      );
+      const payment = await getPayment("prp_1", undefined, t);
+      expect(payment.sourceCustodyWalletId).toBe("cwlt_create");
+      expect(payment.sourceAddress).toBe("source-address-1");
+      expect(payment.sourceProviderWalletId).toBeUndefined();
+    }
+  );
 
   it("sends the exact SDP Wallet ID for create and source replacement", async () => {
     const fetchMock = vi.fn<typeof globalThis.fetch>(() =>

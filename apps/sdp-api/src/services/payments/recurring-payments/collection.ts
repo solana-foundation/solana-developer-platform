@@ -65,6 +65,7 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import type { MoneyMovementRefusedError } from "@/lib/money-admission";
+import { getDeploymentMode } from "@/lib/runtime-env";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintDecimals,
@@ -82,11 +83,16 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
+import {
+  initializeRecurringSponsorshipMessages,
+  recordConfirmedRecurringSponsorshipFailure,
+} from "./sponsorship";
 
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
 interface VerifiedRecurringPaymentCollection {
@@ -641,7 +647,7 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       if (recentFailure && recentFailure.updated_at > retryBefore) return null;
     }
 
-    return subscriptionsRepo.createCollectionAttempt({
+    const attempt = await subscriptionsRepo.createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -658,6 +664,26 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       createdAt: input.attemptedAt,
       updatedAt: input.attemptedAt,
     });
+    if (attempt && input.status === "processing") {
+      if (!input.recurringPayment.source_custody_wallet_id)
+        throw conflict("Recurring payment source wallet is unresolved");
+      await initializeRecurringSponsorshipMessages(tx, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        attemptKind: "collection",
+        attemptId: attempt.id,
+        deploymentMode: getDeploymentMode(input.env),
+        messages: [
+          {
+            key: "collect",
+            custodyWalletId: input.recurringPayment.source_custody_wallet_id,
+            providerWalletId: input.recurringPayment.source_wallet_id,
+          },
+        ],
+      });
+    }
+    return attempt;
   });
 }
 
@@ -797,6 +823,11 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
   });
 
   await getDb(input.env).transaction(async (tx) => {
+    await recordConfirmedRecurringSponsorshipFailure(tx, {
+      ...input,
+      attemptKind: "collection",
+      attemptId: input.attempt.id,
+    });
     let confirmedTransferSignature: Signature | null = null;
 
     if (input.transfer) {
@@ -1285,7 +1316,8 @@ async function recoverRecurringPaymentCollection(input: {
     await confirmSubscriptionSignature(
       input.env,
       recoveredSignature,
-      "Recurring payment collection failed on-chain"
+      "Recurring payment collection failed on-chain",
+      "collect"
     );
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -1533,6 +1565,7 @@ export async function collectRecurringPayment(input: {
     if (!plan) {
       throw notFound("Subscription plan");
     }
+    assertRecurringPlanSourceWallet(plan, input.sourceWallet);
     if (plan.status !== "active") {
       throw badRequest("Subscription plan must be active before collection");
     }
@@ -1728,6 +1761,12 @@ export async function collectRecurringPayment(input: {
     }
 
     const signature = await sendSubscriptionInstructions({
+      sponsorshipMessage: {
+        attemptKind: "collection",
+        attemptId: attempt.id,
+        recurringPaymentId: input.recurringPayment.id,
+        messageKey: "collect",
+      },
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1778,7 +1817,8 @@ export async function collectRecurringPayment(input: {
     await confirmSubscriptionSignature(
       input.env,
       signature,
-      "Recurring payment collection failed on-chain"
+      "Recurring payment collection failed on-chain",
+      "collect"
     );
     const proof = await verifyRecurringPaymentCollection({
       env: input.env,

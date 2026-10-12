@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 
 /** Loopback-only balance provider fixture; no method can fund, sign or submit. */
-export async function startWalletIdentityRpc(port: number) {
+export async function startWalletIdentityRpc(port: number, includeRecurringToken = false) {
   let mode: "zero" | "unavailable" = "zero";
   const calls: Record<string, number> = {};
   const server = createServer(async (request, response) => {
@@ -36,8 +37,44 @@ export async function startWalletIdentityRpc(port: number) {
           }
           case "getAccountInfo":
             return { ...envelope, result: { context, value: null } };
-          case "getTokenAccountsByOwner":
-            return { ...envelope, result: { context, value: [] } };
+          case "getTokenAccountsByOwner": {
+            const filter = rpc.params?.[1];
+            const isTokenProgram =
+              typeof filter === "object" &&
+              filter !== null &&
+              "programId" in filter &&
+              filter.programId === SPL_TOKEN_PROGRAMS["spl-token"];
+            return {
+              ...envelope,
+              result: {
+                context,
+                // One synthetic base unit survives the balance reader's zero filter; no fixture method can fund or send.
+                value:
+                  includeRecurringToken && isTokenProgram
+                    ? [
+                        {
+                          pubkey: "11111111111111111111111111111111",
+                          account: {
+                            data: {
+                              parsed: {
+                                info: {
+                                  mint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+                                  tokenAmount: {
+                                    amount: "1",
+                                    decimals: WELL_KNOWN_TOKENS.USDC.mints.devnet.decimals,
+                                    uiAmount: 0.000001,
+                                    uiAmountString: "0.000001",
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      ]
+                    : [],
+              },
+            };
+          }
           case "getBalance":
             return { ...envelope, result: { context, value: 0 } };
           case "getSlot":

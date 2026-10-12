@@ -454,7 +454,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record with exact SDP owner and optional collector wallet identities. Legacy provider selectors remain temporarily supported; never combine old and new selectors for one role. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -515,7 +515,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan creation prepared",
         content: jsonContent(preparePaymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -546,7 +546,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
-    description: "Updates mutable subscription plan fields and on-chain identifiers.",
+    description:
+      "Updates mutable subscription plan fields and on-chain identifiers. An omitted collector selector retains its role; null clears all collector identity. Supply pullerCustodyWalletId or legacy pullerWalletId, never both.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -561,7 +562,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan updated",
         content: jsonContent(paymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -696,7 +697,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
-      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+      "Prepares the exact collector wallet's Solana subscriptions transfer transaction for an active subscription. A genuinely absent collector uses the exact owner; a configured unresolved collector refuses. The transaction must still be signed and submitted by the collector/fee-payer flow.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -711,7 +712,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription collection prepared",
         content: jsonContent(preparePaymentSubscriptionCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

@@ -9,6 +9,7 @@ import { createPostgresCounterpartiesRepository } from "./counterparty.repositor
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
+import { createPostgresPaymentSubscriptionsRepository } from "./payment-subscriptions.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_recurring_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_test";
@@ -73,6 +74,54 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     });
 
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
+  });
+
+  it("does not activate unfenced plan roles when updating metadata or on-chain identifiers", async () => {
+    const plans = createPostgresPaymentSubscriptionsRepository(getDb(env));
+    const plan = await plans.createPlan({
+      id: "plan_unfenced_metadata",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      ownerWalletId: TEST_PROVIDER_WALLET_ID,
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      ownerAddress: TEST_SOURCE_ADDRESS,
+      token: "USDC",
+      amount: "1",
+      periodHours: 24,
+      programPlanId: "12345",
+      planPda: null,
+      destinationAddress: null,
+      pullerWalletId: TEST_PROVIDER_WALLET_ID,
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      pullerAddress: TEST_SOURCE_ADDRESS,
+      metadataUri: null,
+      status: "draft",
+      createdBy: TEST_USER.id,
+      createdAt: "2026-10-12T00:00:00Z",
+      updatedAt: "2026-10-12T00:00:00Z",
+    });
+    if (!plan) throw new Error("Missing plan fixture");
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_plans SET role_projection_revision=0 WHERE id=?")
+      .bind(plan.id)
+      .run();
+    const updated = await plans.updatePlan({
+      planId: plan.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      metadataUri: "https://example.com/metadata.json",
+      planPda: "retained_plan_pda",
+      status: "active",
+      updatedAt: "2026-10-12T01:00:00Z",
+    });
+    expect(updated).toMatchObject({
+      owner_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      role_projection_revision: 0,
+      metadata_uri: "https://example.com/metadata.json",
+      plan_pda: "retained_plan_pda",
+      status: "active",
+    });
   });
 
   async function seedCounterpartyAccount() {

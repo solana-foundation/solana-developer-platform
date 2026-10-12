@@ -16,16 +16,25 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
+  getAccountInfoMock,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockTokenSupplyDecimalsOnce,
   seedCachedKey,
+  seedCounterparty,
+  TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const SUBSCRIPTION_HEADERS = {
@@ -75,6 +84,423 @@ function expectPreparedSubscriptionTransaction(
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
 
+  it.each(["project", "organization"] as const)(
+    "rejects an exact plan wallet outside its %s scope",
+    async (scope) => {
+      const organizationId = scope === "organization" ? "org_subscription_foreign" : TEST_ORG.id;
+      const projectId =
+        scope === "organization" ? "prj_subscription_foreign" : TEST_PRODUCTION_PROJECT_ID;
+      if (scope === "organization") {
+        await getDb(env)
+          .prepare(
+            "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Foreign subscription', 'foreign-subscription', 'enterprise', 'active')"
+          )
+          .bind(organizationId)
+          .run();
+        await seedDefaultProjects(getDb(env), {
+          organizationId,
+          createdBy: TEST_USER.id,
+          members: [],
+          ids: { sandbox: projectId, production: `${projectId}_production` },
+        });
+      }
+      await seedTestPrivyConnection(getDb(env), {
+        organizationId,
+        projectId,
+        connectionId: "cconn_subscription_foreign",
+        credentialId: "pcred_subscription_foreign",
+        createdBy: TEST_USER.id,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+        providerAccountFingerprint: "sha256:subscription-foreign",
+        lastCheckStatus: "success",
+        defaultCustodyWalletId: "cwlt_subscription_foreign",
+        wallets: [
+          {
+            id: "cwlt_subscription_foreign",
+            walletId: TEST_WALLET_ID,
+            publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+            label: null,
+            purpose: "transfer",
+            status: "active",
+          },
+        ],
+      });
+      const response = await app.request(
+        "/v1/payments/subscription-plans",
+        {
+          method: "POST",
+          headers: SUBSCRIPTION_HEADERS,
+          body: JSON.stringify({
+            ownerCustodyWalletId: "cwlt_subscription_foreign",
+            token: DEVNET_USDC_MINT,
+            amount: "25",
+            periodHours: 720,
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(404);
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { ownerWalletId: TEST_WALLET_ID, ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID },
+    {
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      pullerWalletId: TEST_WALLET_ID,
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+    },
+    { ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID, pullerWalletID: TEST_WALLET_ID },
+    {},
+  ])("rejects ambiguous or unknown subscription plan selectors: %j", async (selectors) => {
+    const response = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ...selectors,
+          token: DEVNET_USDC_MINT,
+          amount: "25",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("never interprets an exact owner selector as a provider reference", async () => {
+    const response = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerCustodyWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("revalidates stored owner grants before preparing an unsigned transaction", async () => {
+    const response = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25",
+          periodHours: 720,
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(201);
+    const planId = (await response.json()).data.subscriptionPlan.id;
+    await getDb(env)
+      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+      VALUES ('akw_subscription_owner', ?, ?, '["payments:write"]')`)
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["payments:write"],
+        },
+      ],
+    });
+    const prepare = () =>
+      app.request(
+        `/v1/payments/subscription-plans/${planId}/prepare-create`,
+        {
+          method: "POST",
+          headers: SUBSCRIPTION_HEADERS,
+          body: "{}",
+        },
+        env
+      );
+    mockTokenSupplyDecimalsOnce();
+    expect((await prepare()).status).toBe(200);
+    await getDb(env)
+      .prepare("DELETE FROM api_key_wallet_permissions WHERE id = 'akw_subscription_owner'")
+      .run();
+    getRecentBlockhashMock.mockClear();
+    expect((await prepare()).status).toBe(403);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a configured unresolved puller and falls back to the owner only after explicit clear", async () => {
+    const repository = createPostgresPaymentSubscriptionsRepository(getDb(env));
+    const now = new Date().toISOString();
+    const counterpartyId = await seedCounterparty();
+    const plan = await repository.createPlan({
+      id: "psp_unresolved_puller",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      ownerWalletId: TEST_WALLET_ID,
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: DEVNET_USDC_MINT,
+      amount: "25",
+      periodHours: 720,
+      programPlanId: "1770000001",
+      planPda: null,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      pullerWalletId: null,
+      pullerCustodyWalletId: null,
+      pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      metadataUri: null,
+      status: "active",
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(plan).not.toBeNull();
+    await repository.createSubscription({
+      id: "psub_unresolved_puller",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      planId: "psp_unresolved_puller",
+      counterpartyId,
+      subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      subscriberTokenAccount: null,
+      subscriptionPda: null,
+      subscriptionAuthorityAddress: null,
+      authorizationSignature: null,
+      status: "active",
+      currentPeriodStartAt: now,
+      nextCollectionDueAt: now,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const collect = () =>
+      app.request(
+        "/v1/payments/subscriptions/psub_unresolved_puller/prepare-collection",
+        {
+          method: "POST",
+          headers: SUBSCRIPTION_HEADERS,
+          body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
+        },
+        env
+      );
+    mockTokenSupplyDecimalsOnce();
+    const refused = await collect();
+    expect(refused.status).toBe(409);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    const cleared = await app.request(
+      "/v1/payments/subscription-plans/psp_unresolved_puller",
+      {
+        method: "PATCH",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ pullerCustodyWalletId: null }),
+      },
+      env
+    );
+    expect(cleared.status).toBe(200);
+    const prepared = await collect();
+    expect(prepared.status).toBe(200);
+    const body = successResponseSchema(preparePaymentSubscriptionCollectionResponseSchema).parse(
+      await prepared.json()
+    );
+    expectPreparedSubscriptionTransaction(body.data.preparedTransaction, [
+      TEST_SOLANA_ADDRESSES.wallet1,
+      TEST_MOCK_FEE_PAYER,
+    ]);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(1);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET public_key = ? WHERE id = ?")
+      .bind(TEST_SOLANA_ADDRESSES.wallet2, TEST_CUSTODY_WALLET_ID)
+      .run();
+    getRecentBlockhashMock.mockClear();
+    const mismatched = await collect();
+    expect(mismatched.status).toBe(400);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
+  it("prepares the exact owner despite shared provider references and addresses", async () => {
+    await seedTestPrivyConnection(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      connectionId: "cconn_subscription_alias",
+      credentialId: "pcred_subscription_alias",
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+      providerAccountFingerprint: "sha256:subscription-alias",
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: "cwlt_subscription_alias",
+      wallets: [
+        {
+          id: "cwlt_subscription_alias",
+          walletId: TEST_WALLET_ID,
+          publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+          label: null,
+          purpose: "transfer",
+          status: "active",
+        },
+      ],
+    });
+    const created = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25",
+          periodHours: 720,
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+        }),
+      },
+      env
+    );
+    expect(created.status).toBe(201);
+    const planId = (await created.json()).data.subscriptionPlan.id;
+    mockTokenSupplyDecimalsOnce();
+    const prepared = await app.request(
+      `/v1/payments/subscription-plans/${planId}/prepare-create`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+    expect(prepared.status).toBe(200);
+    const body = successResponseSchema(preparePaymentSubscriptionPlanResponseSchema).parse(
+      await prepared.json()
+    );
+    expect(body.data.subscriptionPlan.ownerCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
+    expectPreparedSubscriptionTransaction(body.data.preparedTransaction, [
+      TEST_SOLANA_ADDRESSES.wallet1,
+      TEST_MOCK_FEE_PAYER,
+    ]);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(1);
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
+    getRecentBlockhashMock.mockClear();
+    const inaccessible = await app.request(
+      `/v1/payments/subscription-plans/${planId}/prepare-create`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+    expect(inaccessible.status).toBe(404);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
+  it("persists exact subscription plan roles and preserves omission versus clear", async () => {
+    const response = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(201);
+    const body = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await response.json()
+    );
+    expect(body.data.subscriptionPlan).toMatchObject({
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      ownerWalletId: TEST_WALLET_ID,
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      pullerWalletId: TEST_WALLET_ID,
+    });
+    const exactPlan = structuredClone(body.data.subscriptionPlan);
+    delete exactPlan.ownerWalletId;
+    delete exactPlan.pullerWalletId;
+    expect(
+      paymentSubscriptionPlanResponseSchema.parse({ subscriptionPlan: exactPlan }).subscriptionPlan
+    ).toMatchObject({
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+    });
+    const planId = body.data.subscriptionPlan.id;
+    for (const patch of [
+      { pullerWalletId: null, pullerCustodyWalletId: null },
+      { status: "active", pullerWalletID: TEST_WALLET_ID },
+    ]) {
+      const rejected = await app.request(
+        `/v1/payments/subscription-plans/${planId}`,
+        { method: "PATCH", headers: SUBSCRIPTION_HEADERS, body: JSON.stringify(patch) },
+        env
+      );
+      expect(rejected.status).toBe(400);
+    }
+    const unchanged = await app.request(
+      `/v1/payments/subscription-plans/${planId}`,
+      {
+        method: "PATCH",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ status: "active" }),
+      },
+      env
+    );
+    expect(unchanged.status).toBe(200);
+    expect((await unchanged.json()).data.subscriptionPlan.pullerCustodyWalletId).toBe(
+      TEST_CUSTODY_WALLET_ID
+    );
+    const cleared = await app.request(
+      `/v1/payments/subscription-plans/${planId}`,
+      {
+        method: "PATCH",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ pullerCustodyWalletId: null }),
+      },
+      env
+    );
+    expect(cleared.status).toBe(200);
+    expect((await cleared.json()).data.subscriptionPlan).toMatchObject({
+      pullerCustodyWalletId: null,
+      pullerWalletId: null,
+      pullerAddress: null,
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_plans SET role_projection_revision = 0 WHERE id = ?")
+      .bind(planId)
+      .run();
+    const stale = await app.request(
+      `/v1/payments/subscription-plans/${planId}/prepare-create`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+    expect(stale.status).toBe(409);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+  });
+
   it("requires owner wallet access when updating subscription plans", async () => {
     const planRes = await app.request(
       "/v1/payments/subscription-plans",
@@ -98,6 +524,20 @@ describe("Payments routes — subscriptions", () => {
     await seedCachedKey({
       walletBindings: [{ walletId: "wal_other_wallet", permissions: ["payments:write"] }],
     });
+
+    const detail = await app.request(
+      `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
+      { headers: SUBSCRIPTION_HEADERS },
+      env
+    );
+    expect(detail.status).toBe(200);
+    const list = await app.request(
+      "/v1/payments/subscription-plans",
+      { headers: SUBSCRIPTION_HEADERS },
+      env
+    );
+    expect(list.status).toBe(200);
+    expect((await list.json()).data.total).toBe(1);
 
     const updateRes = await app.request(
       `/v1/payments/subscription-plans/${planBody.data.subscriptionPlan.id}`,
@@ -426,6 +866,11 @@ describe("Payments routes — subscriptions", () => {
       status: "pending_authorization",
     });
 
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
+
     mockTokenSupplyDecimalsOnce();
     const prepareAuthorizationRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
@@ -510,6 +955,11 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet2,
       TEST_MOCK_FEE_PAYER,
     ]);
+
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'active' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
 
     const amountOverrideRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,

@@ -134,7 +134,7 @@ export function RecurringPaymentsWorkspace({
       ? walletById.get(recurringPayment.sourceCustodyWalletId)
       : undefined;
     return wallet === undefined
-      ? recurringPayment.sourceProviderWalletId
+      ? shortenAddress(recurringPayment.sourceAddress)
       : wallet.label === null
         ? shortenAddress(wallet.publicKey)
         : wallet.label;
@@ -162,6 +162,7 @@ export function RecurringPaymentsWorkspace({
     return [
       getCounterpartyLabel(recurringPayment),
       getWalletLabel(recurringPayment),
+      recurringPayment.sourceAddress,
       resolveTokenLabel(recurringPayment.token, wallets),
     ]
       .join(" ")

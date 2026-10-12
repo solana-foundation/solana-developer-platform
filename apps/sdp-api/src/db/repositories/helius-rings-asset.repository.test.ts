@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -15,6 +15,12 @@ describe("HeliusRingsAssetRepository (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     repo = createPostgresHeliusRingsAssetRepository(getDb(env));
+  });
+
+  afterEach(async () => {
+    await getDb(env).execute("DELETE FROM helius_rings_asset_allowlist WHERE mint = ?", [
+      DISABLED_MINT,
+    ]);
   });
 
   it("returns the seeded SOL and USDC rows as active", async () => {

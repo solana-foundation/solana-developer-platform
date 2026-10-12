@@ -83,7 +83,7 @@ import {
 } from "./recurring-payments-shared";
 
 interface RecurringPaymentDetailWorkspaceProps {
-  recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string };
+  recurringPayment: PaymentRecurringPayment;
   wallet: RecurringPaymentWalletView | null;
   wallets: RecurringPaymentWalletView[];
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
@@ -425,7 +425,7 @@ export function RecurringPaymentDetailWorkspace({
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentValidationError, setPaymentValidationError] = useState<string | null>(null);
   const [selectedCustodyWalletId, setSelectedCustodyWalletId] = useState(
-    recurringPayment.sourceCustodyWalletId
+    recurringPayment.sourceCustodyWalletId ?? ""
   );
   const [selectedReceivingAccountId, setSelectedReceivingAccountId] = useState(
     recurringPayment.counterpartyAccountId
@@ -445,7 +445,7 @@ export function RecurringPaymentDetailWorkspace({
   const selectedWallet = liveWallets.find((entry) => entry.id === selectedCustodyWalletId);
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
-  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
+  const sourceWalletLabel = walletLabel(wallet, shortenAddress(recurringPayment.sourceAddress));
   const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
@@ -511,7 +511,7 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedToken(recurringPayment.token);
     setSelectedSchedulePreset(schedulePresetForPeriodHours(recurringPayment.periodHours));
     setSelectedCustomPeriodHours(String(recurringPayment.periodHours));
-    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId);
+    setSelectedCustodyWalletId(recurringPayment.sourceCustodyWalletId ?? "");
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);

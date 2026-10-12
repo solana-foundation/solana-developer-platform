@@ -121,7 +121,7 @@ async function resolveSourceWallet(
   });
   if (
     !wallet ||
-    wallet.walletId !== row.source_wallet_id ||
+    wallet.id !== row.source_custody_wallet_id ||
     wallet.publicKey !== row.source_address
   ) {
     getLogger().warn(

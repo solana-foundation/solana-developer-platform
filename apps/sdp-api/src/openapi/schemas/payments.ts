@@ -1047,9 +1047,14 @@ export const paymentRecurringPaymentListResponseSchema = z
   .openapi({ description: "Recurring payment list response payload." });
 
 export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
-  .extend({
+  .safeExtend({
+    ownerCustodyWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerCustodyWalletId, {
+      description:
+        "Exact SDP wallet ID of the plan owner. Supply this or legacy ownerWalletId, never both.",
+      example: "cwlt_merchant",
+    }),
     ownerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerWalletId, {
-      description: "Custody wallet that owns the Solana subscription plan.",
+      description: "Legacy provider wallet reference of the plan owner.",
       example: "wal_merchant",
     }),
     token: withOpenApi(createSubscriptionPlanSchemaBase.shape.token, {
@@ -1079,18 +1084,38 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Optional SDP custody wallet allowed to pull subscription payments.",
+      description: "Legacy provider wallet reference of the optional collector.",
       example: "wal_collector",
     }),
+    pullerCustodyWalletId: withOpenApi(
+      createSubscriptionPlanSchemaBase.shape.pullerCustodyWalletId,
+      {
+        description:
+          "Exact SDP wallet ID of the optional collector. Supply this or legacy pullerWalletId, never both.",
+        example: "cwlt_collector",
+      }
+    ),
     metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {
       description: "Optional plan metadata URI.",
       example: "https://example.com/subscriptions/monthly-usdc.json",
     }),
-    status: paymentSubscriptionPlanStatusSchema.optional(),
   })
   .openapi({
     description:
       "Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptions program transaction separately with the plan prepare endpoint.",
+    oneOf: [
+      { required: ["ownerCustodyWalletId"], not: { required: ["ownerWalletId"] } },
+      { required: ["ownerWalletId"], not: { required: ["ownerCustodyWalletId"] } },
+    ],
+    not: { required: ["pullerCustodyWalletId", "pullerWalletId"] },
+    example: {
+      ownerCustodyWalletId: "cwlt_merchant",
+      pullerCustodyWalletId: "cwlt_collector",
+      token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "25.00",
+      periodHours: 720,
+      destinationAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    },
   });
 
 export const updateSubscriptionPlanRequestSchema = updateSubscriptionPlanSchemaBase
@@ -1103,15 +1128,27 @@ export const updateSubscriptionPlanRequestSchema = updateSubscriptionPlanSchemaB
       description: "Destination owner address, or null to clear it.",
     }),
     pullerWalletId: withOpenApi(updateSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Collection wallet ID, or null to clear it.",
+      description: "Legacy provider wallet reference of the collector, or null to clear it.",
       example: "wal_collector",
     }),
+    pullerCustodyWalletId: withOpenApi(
+      updateSubscriptionPlanSchemaBase.shape.pullerCustodyWalletId,
+      {
+        description:
+          "Exact SDP collector wallet ID, or null to clear all collector identity. Omission retains the role; never combine with pullerWalletId.",
+        example: "cwlt_collector",
+      }
+    ),
     metadataUri: withOpenApi(updateSubscriptionPlanSchemaBase.shape.metadataUri, {
       description: "Plan metadata URI, or null to clear it.",
     }),
     status: paymentSubscriptionPlanStatusSchema.optional(),
   })
-  .openapi({ description: "Updates mutable SDP subscription plan fields." });
+  .openapi({
+    description: "Updates mutable SDP subscription plan fields.",
+    not: { required: ["pullerCustodyWalletId", "pullerWalletId"] },
+    example: { pullerCustodyWalletId: "cwlt_collector", status: "active" },
+  });
 
 export const paymentListSubscriptionPlansQuerySchema = listSubscriptionPlansQuerySchemaBase
   .extend({
@@ -1124,7 +1161,11 @@ export const paymentSubscriptionPlanSchema = z
     id: z.string().openapi({ description: "SDP subscription plan ID.", example: "psp_example" }),
     organizationId: orgIdParamSchema,
     projectId: projectIdParamSchema,
-    ownerWalletId: walletIdParamSchema,
+    ownerWalletId: walletIdParamSchema.optional(),
+    ownerCustodyWalletId: z
+      .string()
+      .nullable()
+      .openapi({ description: "Exact SDP owner wallet ID, nullable for unresolved history." }),
     ownerAddress: solanaAddressSchema,
     token: z.string().openapi({ description: "Token mint or normalized token identifier." }),
     amount: tokenAmountSchema,
@@ -1137,7 +1178,13 @@ export const paymentSubscriptionPlanSchema = z
     destinationAddress: solanaAddressSchema
       .nullable()
       .openapi({ description: "Allowed destination owner address." }),
-    pullerWalletId: walletIdParamSchema.nullable().openapi({ description: "Collector wallet ID." }),
+    pullerWalletId: walletIdParamSchema
+      .nullable()
+      .optional()
+      .openapi({ description: "Legacy collector provider reference." }),
+    pullerCustodyWalletId: z.string().nullable().openapi({
+      description: "Exact SDP collector wallet ID, nullable for an absent or unresolved role.",
+    }),
     pullerAddress: solanaAddressSchema
       .nullable()
       .openapi({ description: "Collector wallet address." }),

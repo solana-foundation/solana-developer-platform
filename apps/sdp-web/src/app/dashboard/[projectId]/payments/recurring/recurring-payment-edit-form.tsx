@@ -48,7 +48,7 @@ interface EditFields {
  */
 function editUpdates(
   fields: EditFields,
-  recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string },
+  recurringPayment: PaymentRecurringPayment,
   t: Translate
 ): { updates: UpdatePaymentRecurringPaymentRequest } | { error: string } {
   const amount = fields.amount.trim();
@@ -94,7 +94,7 @@ export function RecurringPaymentEditForm({
   onSavingChange,
   onClose,
 }: {
-  recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string };
+  recurringPayment: PaymentRecurringPayment;
   wallet: RecurringPaymentWalletView | null;
   liveWallets: RecurringPaymentWalletView[];
   counterpartyAccounts: CounterpartyAccount[];
@@ -108,7 +108,7 @@ export function RecurringPaymentEditForm({
   const [fields, setFields] = useState<EditFields>(() => ({
     amount: recurringPayment.amount,
     token: recurringPayment.token,
-    sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId,
+    sourceCustodyWalletId: recurringPayment.sourceCustodyWalletId ?? "",
     counterpartyAccountId: recurringPayment.counterpartyAccountId,
     schedulePreset: schedulePresetForPeriodHours(recurringPayment.periodHours),
     customPeriodHours: String(recurringPayment.periodHours),

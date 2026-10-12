@@ -11,7 +11,9 @@ import {
 } from "./local-dashboard-bootstrap";
 
 /** This fixture mutates only an explicitly configured isolated local database. */
-function isolatedDatabaseUrl(): string {
+export function walletIdentityDatabaseUrl(
+  profile: "foundation" | "recurring" = "foundation"
+): string {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl)
     throw new Error("Wallet identity E2E requires an explicit isolated DATABASE_URL");
@@ -23,18 +25,24 @@ function isolatedDatabaseUrl(): string {
     !["127.0.0.1", "localhost"].includes(database.hostname) ||
     !database.port ||
     database.port === "5432" ||
-    database.pathname !== "/sdp_wallet_foundation_e2e"
+    (profile === "recurring"
+      ? database.port !== "15454" ||
+        database.pathname !== "/sdp_payments_pr4_8996" ||
+        apiUrl.port !== "8914"
+      : database.pathname !== "/sdp_wallet_foundation_e2e")
   ) {
     throw new Error(
-      "Wallet identity E2E requires loopback API, dedicated Postgres port and sdp_wallet_foundation_e2e database"
+      "Wallet identity E2E requires loopback API and its explicitly assigned isolated database"
     );
   }
 
   return databaseUrl;
 }
 
-export async function cleanupWalletIdentityFixtures() {
-  const db = new Client({ connectionString: isolatedDatabaseUrl() });
+export async function cleanupWalletIdentityFixtures(
+  profile: "foundation" | "recurring" = "foundation"
+) {
+  const db = new Client({ connectionString: walletIdentityDatabaseUrl(profile) });
   await db.connect();
   try {
     await db.query("BEGIN");
@@ -53,9 +61,12 @@ export async function cleanupWalletIdentityFixtures() {
   }
 }
 
-export async function bootstrapWalletIdentityFixtures(browser: Browser) {
-  const databaseUrl = isolatedDatabaseUrl();
-  await cleanupWalletIdentityFixtures();
+export async function bootstrapWalletIdentityFixtures(
+  browser: Browser,
+  profile: "foundation" | "recurring" = "foundation"
+) {
+  const databaseUrl = walletIdentityDatabaseUrl(profile);
+  await cleanupWalletIdentityFixtures(profile);
   const admin = await getPlaywrightAdminSession(browser);
   const fixture = await bootstrapLocalWalletFixtures({
     identity: admin.identity,

@@ -13,32 +13,52 @@ export const subscriptionPlanIdParamsSchema = z.object({
 
 export const paymentSubscriptionPlanStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES);
 
-export const createSubscriptionPlanSchema = z.object({
-  ownerWalletId: z.string().min(1),
-  token: paymentTokenSchema,
-  amount: paymentAmountSchema,
-  periodHours: z
-    .number()
-    .int()
-    .positive()
-    .max(24 * 365),
-  programPlanId: u64StringSchema.optional(),
-  planPda: solanaAddressSchema("planPda").optional(),
-  destinationAddress: solanaAddressSchema("destinationAddress").optional(),
-  pullerWalletId: z.string().min(1).optional(),
-  metadataUri: z
-    .string()
-    .url({ protocol: /^https?$/ })
-    .max(128)
-    .optional(),
-  status: paymentSubscriptionPlanStatusSchema.default("draft"),
-});
+export const createSubscriptionPlanSchema = z
+  .object({
+    ownerWalletId: z.string().min(1).optional(),
+    ownerCustodyWalletId: z.string().min(1).optional(),
+    token: paymentTokenSchema,
+    amount: paymentAmountSchema,
+    periodHours: z
+      .number()
+      .int()
+      .positive()
+      .max(24 * 365),
+    programPlanId: u64StringSchema.optional(),
+    planPda: solanaAddressSchema("planPda").optional(),
+    destinationAddress: solanaAddressSchema("destinationAddress").optional(),
+    pullerWalletId: z.string().min(1).optional(),
+    pullerCustodyWalletId: z.string().min(1).optional(),
+    metadataUri: z
+      .string()
+      .url({ protocol: /^https?$/ })
+      .max(128)
+      .optional(),
+    status: paymentSubscriptionPlanStatusSchema.default("draft"),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      Number(value.ownerWalletId !== undefined) +
+        Number(value.ownerCustodyWalletId !== undefined) ===
+      1,
+    {
+      message: "Exactly one owner wallet selector is required",
+    }
+  )
+  .refine(
+    (value) => value.pullerWalletId === undefined || value.pullerCustodyWalletId === undefined,
+    {
+      message: "Only one puller wallet selector may be provided",
+    }
+  );
 
 export const updateSubscriptionPlanSchema = z
   .object({
     planPda: solanaAddressSchema("planPda").nullable().optional(),
     destinationAddress: solanaAddressSchema("destinationAddress").nullable().optional(),
     pullerWalletId: z.string().min(1).nullable().optional(),
+    pullerCustodyWalletId: z.string().min(1).nullable().optional(),
     metadataUri: z
       .string()
       .url({ protocol: /^https?$/ })
@@ -47,6 +67,13 @@ export const updateSubscriptionPlanSchema = z
       .optional(),
     status: paymentSubscriptionPlanStatusSchema.optional(),
   })
+  .strict()
+  .refine(
+    (value) => value.pullerWalletId === undefined || value.pullerCustodyWalletId === undefined,
+    {
+      message: "Only one puller wallet selector may be provided",
+    }
+  )
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one field must be provided",
   });

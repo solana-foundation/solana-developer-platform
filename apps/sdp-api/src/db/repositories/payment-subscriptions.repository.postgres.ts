@@ -31,6 +31,7 @@ const planRowSchema = z.object({
   organization_id: z.string(),
   project_id: z.string(),
   owner_wallet_id: z.string(),
+  owner_custody_wallet_id: z.string().nullable(),
   owner_address: z.string(),
   token: z.string(),
   amount: z.string(),
@@ -39,7 +40,9 @@ const planRowSchema = z.object({
   plan_pda: z.string().nullable(),
   destination_address: z.string().nullable(),
   puller_wallet_id: z.string().nullable(),
+  puller_custody_wallet_id: z.string().nullable(),
   puller_address: z.string().nullable(),
+  role_projection_revision: z.coerce.number().int().nonnegative(),
   metadata_uri: z.string().nullable(),
   status: z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES),
   created_by: z.string().nullable(),
@@ -170,6 +173,7 @@ export function createPostgresPaymentSubscriptionsRepository(
              organization_id,
              project_id,
              owner_wallet_id,
+             owner_custody_wallet_id,
              owner_address,
              token,
              amount,
@@ -178,13 +182,15 @@ export function createPostgresPaymentSubscriptionsRepository(
              plan_pda,
              destination_address,
              puller_wallet_id,
+             puller_custody_wallet_id,
              puller_address,
+             role_projection_revision,
              metadata_uri,
              status,
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -192,6 +198,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.organizationId,
           input.projectId,
           input.ownerWalletId,
+          input.ownerCustodyWalletId ?? null,
           input.ownerAddress,
           input.token,
           input.amount,
@@ -200,7 +207,9 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.planPda,
           input.destinationAddress,
           input.pullerWalletId,
+          input.pullerCustodyWalletId ?? null,
           input.pullerAddress,
+          input.ownerCustodyWalletId || input.pullerCustodyWalletId ? 1 : 0,
           input.metadataUri,
           input.status,
           input.createdBy,
@@ -224,13 +233,24 @@ export function createPostgresPaymentSubscriptionsRepository(
       });
       if (!existing) return null;
 
+      const updatesPuller =
+        input.pullerWalletId !== undefined ||
+        input.pullerCustodyWalletId !== undefined ||
+        input.pullerAddress !== undefined;
+
       await db
         .prepare(
           `UPDATE payment_subscription_plans
               SET plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
                   destination_address = CASE WHEN ?::boolean THEN ? ELSE destination_address END,
-                  puller_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_wallet_id END,
+                  ${
+                    updatesPuller
+                      ? `puller_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_wallet_id END,
+                  puller_custody_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_custody_wallet_id END,
                   puller_address = CASE WHEN ?::boolean THEN ? ELSE puller_address END,
+                  role_projection_revision = role_projection_revision + 1,`
+                      : ""
+                  }
                   metadata_uri = CASE WHEN ?::boolean THEN ? ELSE metadata_uri END,
                   status = COALESCE(?, status),
                   updated_at = ?
@@ -243,10 +263,16 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.planPda ?? null,
           input.destinationAddress !== undefined,
           input.destinationAddress ?? null,
-          input.pullerWalletId !== undefined,
-          input.pullerWalletId ?? null,
-          input.pullerAddress !== undefined,
-          input.pullerAddress ?? null,
+          ...(updatesPuller
+            ? [
+                input.pullerWalletId !== undefined,
+                input.pullerWalletId ?? null,
+                input.pullerCustodyWalletId !== undefined,
+                input.pullerCustodyWalletId ?? null,
+                input.pullerAddress !== undefined,
+                input.pullerAddress ?? null,
+              ]
+            : []),
           input.metadataUri !== undefined,
           input.metadataUri ?? null,
           input.status ?? null,
