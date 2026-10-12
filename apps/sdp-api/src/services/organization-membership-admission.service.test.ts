@@ -48,7 +48,14 @@ function invitationToInvitee(params: {
   expiresAt: string;
   createdAt: string;
 }): InvitationSeed {
-  return { ...params, email: INVITEE.email, invitedBy: INVITER.id, acceptedAt: null };
+  return {
+    ...params,
+    email: INVITEE.email,
+    invitedBy: INVITER.id,
+    tokenHash: `hash_${params.id}`,
+    acceptedAt: null,
+    clerkInvitationId: null,
+  };
 }
 
 function invitationRow(params: {

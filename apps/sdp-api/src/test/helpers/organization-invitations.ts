@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { InvitationStatus, OrganizationRole } from "@sdp/types";
 import type { DatabaseClient } from "@/db";
 import type { Organization, User } from "@/test/helpers/factories";
@@ -8,11 +9,13 @@ export interface InvitationSeed {
   email: string;
   role: OrganizationRole;
   invitedBy: string;
+  tokenHash: string;
   status: InvitationStatus;
   expiresAt: string;
-  /** Orders invitations for the newest-invitation reads; `YYYY-MM-DD HH:MM:SS`. */
+  /** Orders invitations for the newest-invitation reads. */
   createdAt: string;
   acceptedAt: string | null;
+  clerkInvitationId: string | null;
 }
 
 export interface InvitationRow {
@@ -58,7 +61,7 @@ export async function seedOrganizationsAndUsers(
 }
 
 /**
- * Inserts invitation rows, each with a token hash derived from its id.
+ * Inserts invitation rows in one batch.
  *
  * @param db - Test database client.
  * @param invitations - Invitations to insert.
@@ -73,8 +76,8 @@ export async function seedInvitations(
       db
         .prepare(
           `INSERT INTO invitations
-             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at, accepted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at, accepted_at, clerk_invitation_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           invitation.id,
@@ -82,11 +85,12 @@ export async function seedInvitations(
           invitation.email,
           invitation.role,
           invitation.invitedBy,
-          `hash_${invitation.id}`,
+          invitation.tokenHash,
           invitation.expiresAt,
           invitation.status,
           invitation.createdAt,
-          invitation.acceptedAt
+          invitation.acceptedAt,
+          invitation.clerkInvitationId
         )
     )
   );
@@ -102,4 +106,26 @@ export async function readInvitations(db: DatabaseClient): Promise<InvitationRow
   return db.queryMany<InvitationRow>(
     "SELECT id, organization_id, email, role, status, accepted_at FROM invitations ORDER BY id"
   );
+}
+
+/**
+ * Flips one seeded membership to removed, as SDP member removal leaves it.
+ *
+ * @param db - Test database client.
+ * @param params - The membership to remove.
+ * @param params.organizationId - Organization the member belongs to.
+ * @param params.userId - SDP user whose membership is removed.
+ * @returns Resolves once the membership is removed.
+ */
+export async function seedRemovedMember(
+  db: DatabaseClient,
+  params: { organizationId: string; userId: string }
+): Promise<void> {
+  const removed = await db
+    .prepare(
+      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+    )
+    .bind(params.organizationId, params.userId)
+    .run();
+  assert.equal(removed, 1, "Expected one seeded membership to remove");
 }

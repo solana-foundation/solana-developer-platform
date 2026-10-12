@@ -50,14 +50,16 @@ import {
   seedBvnkOnrampPayoutIssued,
   seedBvnkOnrampTransfer,
 } from "@/test/helpers/bvnk";
-import {
-  type InvitationSeed,
-  seedClerkIdentity,
-  seedInvitation,
-  seedRemovedMember,
-} from "@/test/helpers/clerk";
+import { seedClerkIdentity } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
+import {
+  type InvitationRow,
+  type InvitationSeed,
+  readInvitations,
+  seedInvitations,
+  seedRemovedMember,
+} from "@/test/helpers/organization-invitations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
@@ -544,9 +546,30 @@ describe("Clerk webhooks", () => {
   }): InvitationSeed {
     return {
       ...input,
+      tokenHash: `hash_${input.id}`,
       status: "pending",
       createdAt: "2026-02-01T00:00:00.000Z",
       expiresAt: INVITATION_EXPIRES_AT,
+      acceptedAt: null,
+      clerkInvitationId: null,
+    };
+  }
+
+  function invitationRow(params: {
+    id: string;
+    organizationId: string;
+    email: string;
+    role: OrganizationRole;
+    status: InvitationStatus;
+    accepted: boolean;
+  }): InvitationRow {
+    return {
+      id: params.id,
+      organization_id: params.organizationId,
+      email: params.email,
+      role: params.role,
+      status: params.status,
+      accepted_at: params.accepted ? expect.any(String) : null,
     };
   }
 
@@ -581,13 +604,6 @@ describe("Clerk webhooks", () => {
     );
   }
 
-  function readInvitations(organizationId: string) {
-    return getDb(env).queryMany<{ id: string; email: string; role: string; status: string }>(
-      "SELECT id, email, role, status FROM invitations WHERE organization_id = ? ORDER BY id",
-      [organizationId]
-    );
-  }
-
   function readProjectSlugs(organizationId: string) {
     return getDb(env).queryMany<{ slug: string }>(
       "SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug",
@@ -603,18 +619,25 @@ describe("Clerk webhooks", () => {
     const inviterId = `usr_inviter_${organizationId}`;
     await seedClerkOrganization({ organizationId, clerkOrgId, status: "active" });
     await seedUser(inviterId, "inviter@example.com");
-    for (const [index, status] of invitationStatuses.entries()) {
-      await seedInvitation(getDb(env), {
-        id: `inv_${organizationId}_${index}`,
-        organizationId,
-        email,
-        role: "member",
-        invitedBy: inviterId,
-        status,
-        createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
-        expiresAt: INVITATION_EXPIRES_AT,
-      });
-    }
+    await seedInvitations(
+      getDb(env),
+      invitationStatuses.map((status, index): InvitationSeed => {
+        const id = `inv_${organizationId}_${index}`;
+        return {
+          id,
+          organizationId,
+          email,
+          role: "member",
+          invitedBy: inviterId,
+          tokenHash: `hash_${id}`,
+          status,
+          createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+          expiresAt: INVITATION_EXPIRES_AT,
+          acceptedAt: null,
+          clerkInvitationId: null,
+        };
+      })
+    );
     mockClerkUserLookup(clerkUserId, email, { verificationStatus: "verified", memberships: [] });
     const response = await simulateClerkWebhook(
       membershipEvent("organizationMembership.created", {
@@ -634,19 +657,21 @@ describe("Clerk webhooks", () => {
           WHERE om.organization_id = ?`,
         [organizationId]
       ),
-      invitations: await readInvitations(organizationId),
+      invitations: await readInvitations(getDb(env)),
     };
   }
   it("declines a Clerk membership when the invitation was revoked", async () => {
     expect(await syncMembershipAfterInvitations(["revoked"])).toEqual({
       memberships: [],
       invitations: [
-        {
+        invitationRow({
           id: "inv_org_invited_revoked_0",
+          organizationId: "org_invited_revoked",
           email: "invitee@example.com",
           role: "member",
           status: "revoked",
-        },
+          accepted: false,
+        }),
       ],
     });
   });
@@ -654,18 +679,22 @@ describe("Clerk webhooks", () => {
     expect(await syncMembershipAfterInvitations(["revoked", "pending"])).toEqual({
       memberships: [{ email: "invitee@example.com", role: "member", status: "active" }],
       invitations: [
-        {
+        invitationRow({
           id: "inv_org_invited_revoked_pending_0",
+          organizationId: "org_invited_revoked_pending",
           email: "invitee@example.com",
           role: "member",
           status: "revoked",
-        },
-        {
+          accepted: false,
+        }),
+        invitationRow({
           id: "inv_org_invited_revoked_pending_1",
+          organizationId: "org_invited_revoked_pending",
           email: "invitee@example.com",
           role: "member",
           status: "accepted",
-        },
+          accepted: true,
+        }),
       ],
     });
   });
@@ -673,12 +702,14 @@ describe("Clerk webhooks", () => {
     expect(await syncMembershipAfterInvitations(["pending"])).toEqual({
       memberships: [{ email: "invitee@example.com", role: "member", status: "active" }],
       invitations: [
-        {
+        invitationRow({
           id: "inv_org_invited_pending_0",
+          organizationId: "org_invited_pending",
           email: "invitee@example.com",
           role: "member",
           status: "accepted",
-        },
+          accepted: true,
+        }),
       ],
     });
   });
@@ -701,7 +732,6 @@ describe("Clerk webhooks", () => {
       await seedRemovedMember(getDb(env), {
         organizationId: member.organizationId,
         userId: member.userId,
-        invitation: null,
       });
       mockClerkUserLookup(member.clerkUserId, member.email, {
         verificationStatus: "verified",
@@ -737,14 +767,16 @@ describe("Clerk webhooks", () => {
     await seedRemovedMember(getDb(env), {
       organizationId: member.organizationId,
       userId: member.userId,
-      invitation: pendingInvitation({
+    });
+    await seedInvitations(getDb(env), [
+      pendingInvitation({
         id: "inv_reinvited_member",
         organizationId: member.organizationId,
         email: member.email,
         role: "admin",
         invitedBy: "usr_reinvited_inviter",
       }),
-    });
+    ]);
     mockClerkUserLookup(member.clerkUserId, member.email, {
       verificationStatus: "verified",
       memberships: [],
@@ -758,8 +790,15 @@ describe("Clerk webhooks", () => {
     expect(await readMemberships(member.organizationId)).toEqual([
       { user_id: member.userId, role: "member", status: "active" },
     ]);
-    expect(await readInvitations(member.organizationId)).toEqual([
-      { id: "inv_reinvited_member", email: member.email, role: "member", status: "accepted" },
+    expect(await readInvitations(getDb(env))).toEqual([
+      invitationRow({
+        id: "inv_reinvited_member",
+        organizationId: member.organizationId,
+        email: member.email,
+        role: "member",
+        status: "accepted",
+        accepted: true,
+      }),
     ]);
     expect(await readProjectSlugs(member.organizationId)).toEqual([
       { slug: "default-production" },
@@ -839,36 +878,29 @@ describe("Clerk webhooks", () => {
     });
     await seedUser("usr_clerk_removal_inviter", "clerk-removal-inviter@example.com");
     await seedClerkMember({ ...member, role: "admin" });
-    await seedInvitation(
-      getDb(env),
+    await seedInvitations(getDb(env), [
       pendingInvitation({
         id: "inv_clerk_removal_member",
         organizationId: member.organizationId,
         email: member.email,
         role: "admin",
         invitedBy: "usr_clerk_removal_inviter",
-      })
-    );
-    await seedInvitation(
-      getDb(env),
+      }),
       pendingInvitation({
         id: "inv_clerk_removal_other_user",
         organizationId: member.organizationId,
         email: "clerk-removal-other@example.com",
         role: "member",
         invitedBy: "usr_clerk_removal_inviter",
-      })
-    );
-    await seedInvitation(
-      getDb(env),
+      }),
       pendingInvitation({
         id: "inv_clerk_removal_other_org",
         organizationId: "org_sdp_clerk_removal_other",
         email: member.email,
         role: "member",
         invitedBy: "usr_clerk_removal_inviter",
-      })
-    );
+      }),
+    ]);
 
     const res = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
@@ -882,17 +914,31 @@ describe("Clerk webhooks", () => {
     expect(await readMemberships(member.organizationId)).toEqual([
       { user_id: member.userId, role: "admin", status: "removed" },
     ]);
-    expect(await readInvitations(member.organizationId)).toEqual([
-      { id: "inv_clerk_removal_member", email: member.email, role: "admin", status: "revoked" },
-      {
+    expect(await readInvitations(getDb(env))).toEqual([
+      invitationRow({
+        id: "inv_clerk_removal_member",
+        organizationId: member.organizationId,
+        email: member.email,
+        role: "admin",
+        status: "revoked",
+        accepted: false,
+      }),
+      invitationRow({
+        id: "inv_clerk_removal_other_org",
+        organizationId: "org_sdp_clerk_removal_other",
+        email: member.email,
+        role: "member",
+        status: "pending",
+        accepted: false,
+      }),
+      invitationRow({
         id: "inv_clerk_removal_other_user",
+        organizationId: member.organizationId,
         email: "clerk-removal-other@example.com",
         role: "member",
         status: "pending",
-      },
-    ]);
-    expect(await readInvitations("org_sdp_clerk_removal_other")).toEqual([
-      { id: "inv_clerk_removal_other_org", email: member.email, role: "member", status: "pending" },
+        accepted: false,
+      }),
     ]);
   });
   it("ignores a membership deletion for an organization SDP has not mapped", async () => {
@@ -1171,26 +1217,28 @@ describe("Clerk webhooks", () => {
         "clerk_deleted_key_hash"
       )
       .run();
-    await seedInvitation(
-      db,
+    await seedInvitations(db, [
       pendingInvitation({
         id: "inv_clerk_deleted_pending",
         organizationId,
         email: "clerk-deleted-invitee@example.com",
         role: "member",
         invitedBy: "usr_clerk_deleted_admin",
-      })
-    );
-    await seedInvitation(db, {
-      id: "inv_clerk_deleted_accepted",
-      organizationId,
-      email: "clerk-deleted-member@example.com",
-      role: "member",
-      invitedBy: "usr_clerk_deleted_admin",
-      status: "accepted",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      expiresAt: INVITATION_EXPIRES_AT,
-    });
+      }),
+      {
+        id: "inv_clerk_deleted_accepted",
+        organizationId,
+        email: "clerk-deleted-member@example.com",
+        role: "member",
+        invitedBy: "usr_clerk_deleted_admin",
+        tokenHash: "hash_inv_clerk_deleted_accepted",
+        status: "accepted",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: INVITATION_EXPIRES_AT,
+        acceptedAt: null,
+        clerkInvitationId: null,
+      },
+    ]);
 
     const res = await simulateClerkWebhook({
       type: "organization.deleted",
@@ -1214,19 +1262,23 @@ describe("Clerk webhooks", () => {
         [organizationId]
       )
     ).toEqual([{ id: "key_clerk_deleted", status: "revoked" }]);
-    expect(await readInvitations(organizationId)).toEqual([
-      {
+    expect(await readInvitations(db)).toEqual([
+      invitationRow({
         id: "inv_clerk_deleted_accepted",
+        organizationId,
         email: "clerk-deleted-member@example.com",
         role: "member",
         status: "accepted",
-      },
-      {
+        accepted: false,
+      }),
+      invitationRow({
         id: "inv_clerk_deleted_pending",
+        organizationId,
         email: "clerk-deleted-invitee@example.com",
         role: "member",
         status: "revoked",
-      },
+        accepted: false,
+      }),
     ]);
   });
 });

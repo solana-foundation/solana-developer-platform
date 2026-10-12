@@ -92,9 +92,11 @@ function invitationSeed(invitation: SeededInvitation): InvitationSeed {
     ...invitation,
     role: "member",
     invitedBy: INVITER.id,
+    tokenHash: `hash_${invitation.id}`,
     expiresAt: expiresAtFor(invitation.status),
     createdAt: CREATED_AT,
     acceptedAt: acceptedAtFor(invitation.status),
+    clerkInvitationId: null,
   };
 }
 

@@ -6,6 +6,11 @@ import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import {
+  type InvitationSeed,
+  readInvitations,
+  seedInvitations,
+} from "@/test/helpers/organization-invitations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -338,23 +343,20 @@ describe("Organizations routes", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, "individual", "active")
         .run();
-      for (const invitation of DELETION_INVITATIONS) {
-        await getDb(env)
-          .prepare(
-            `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-             VALUES (?, ?, ?, 'member', ?, ?, ?, ?)`
-          )
-          .bind(
-            invitation.id,
-            invitation.organizationId,
-            invitation.email,
-            TEST_USER.id,
-            `hash_${invitation.id}`,
-            invitation.expiresAt,
-            invitation.status
-          )
-          .run();
-      }
+      await seedInvitations(
+        getDb(env),
+        DELETION_INVITATIONS.map(
+          (invitation): InvitationSeed => ({
+            ...invitation,
+            role: "member",
+            invitedBy: TEST_USER.id,
+            tokenHash: `hash_${invitation.id}`,
+            createdAt: "2026-01-01 00:00:00",
+            acceptedAt: null,
+            clerkInvitationId: null,
+          })
+        )
+      );
     });
     function deleteOrganization() {
       return app.request(
@@ -410,41 +412,38 @@ describe("Organizations routes", () => {
     });
     it("revokes the organization's pending invitations and leaves every other invitation alone", async () => {
       expect((await deleteOrganization()).status).toBe(204);
-      const invitations = await getDb(env)
-        .prepare(
-          "SELECT id, organization_id, email, status FROM invitations WHERE organization_id IN (?, ?) ORDER BY id"
-        )
-        .bind(TEST_ORG.id, OTHER_ORG.id)
-        .all<{
-          id: string;
-          organization_id: string;
-          email: string;
-          status: InvitationStatus;
-        }>();
-      expect(invitations.results).toEqual([
+      expect(await readInvitations(getDb(env))).toEqual([
         {
           id: "inv_org_delete_accepted",
           organization_id: TEST_ORG.id,
           email: "accepted@example.com",
+          role: "member",
           status: "accepted",
+          accepted_at: null,
         },
         {
           id: "inv_org_delete_expired",
           organization_id: TEST_ORG.id,
           email: "expired@example.com",
+          role: "member",
           status: "expired",
+          accepted_at: null,
         },
         {
           id: "inv_org_delete_other_org_pending",
           organization_id: OTHER_ORG.id,
           email: "pending@example.com",
+          role: "member",
           status: "pending",
+          accepted_at: null,
         },
         {
           id: "inv_org_delete_pending",
           organization_id: TEST_ORG.id,
           email: "pending@example.com",
+          role: "member",
           status: "revoked",
+          accepted_at: null,
         },
       ]);
     });
