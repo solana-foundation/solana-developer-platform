@@ -40,24 +40,59 @@ route pattern, read with `routePath(c)`, so it needs no shared vocabulary that c
 **Fingerprint.** SHA-256 over canonical JSON (keys sorted by code unit) of the parts below. The
 credential is recorded on the row and compared in plain text rather than hashed:
 
-- the operation, path parameters, query parameters (repeated values in order) and body;
+- the operation, path parameters, query parameters (repeated values in order) and the body as the
+  route's validator left it (defaults applied, values normalised), so two spellings the schema
+  treats as one request match;
 - the credential (API key id or user id), so another credential reusing the key gets 422 and
-  never reads a response produced for different wallet access. A retry made after rotating the
-  API key is therefore a new request; the resource row's own unique key still stops it moving
-  money twice;
+  never reads a response produced for it. A rotated API key is a new credential, so a same-key
+  retry after rotation gets 422; retry with a new key, and the resource row's own unique key still
+  stops it moving money twice.
 
 A route can pass `canonicalize` where two spellings mean one request, such as unordered batch
 recipients.
 
-**Order.** Authentication → project context → `requirePermissions` → Allowed Operations → **this
-step** → admission → validation → handler.
+**Order.** Authentication → project context → `requirePermissions` → Allowed Operations →
+validation → **`authorize`** → **this step** → replay from the domain row → admission → handler.
 
-- A replay re-checks the caller first.
-- A replay is not admitted again, because it isn't a new movement.
-- Edge refusals deliberately run before replay, and that stays. Once an organization is deleted or loses
-  production access, a same-key retry of a request that already completed is refused, not replayed: 401
-  when the organization (or its API key) is gone, 403 when it lost production access. A revoked organization is not special-cased to read status, and every new attempt is refused
+- **Authorize, then dedupe.** `authorize(fn)` (`middleware/authorize.ts`) checks that the caller may
+  act on every resource the request names, in tenant scope, and hands what it loaded to the
+  handler. It runs before this step, so a replay passes exactly the checks a new request passes,
+  and nothing after this step checks access. The step refuses to run (500) on a route without an
+  earlier `authorize` or `authorizeNone(reason)`; the stable route inventory pins every
+  `authorizeNone` with its reason.
+- **Access, never state.** `authorize` answers "may this caller act on these resources?" (an API
+  key bound to the wallet, a schedule in the caller's project), read fresh where the handler reads
+  fresh. State ("the wallet is active", "the schedule is active") stays in the handler. A state
+  check before this step would refuse the retry of a request that succeeded (the schedule is
+  active because the first activate worked) instead of replaying its stored answer. A credential
+  narrowed since the original request gets 403; one narrowed in a way that still covers the
+  resource gets the replay.
+- **Validation runs first** because a 400 is never stored: an invalid request claims nothing.
+- A replay is not admitted again, because it isn't a new movement. Replay from the domain row also
+  runs before admission, so a request that already ran is answered from its row even when
+  admission would now refuse new work.
+- Edge refusals deliberately run before replay, and that stays. Once an organization is deleted or
+  loses production access, a same-key retry of a request that already completed is refused, not
+  replayed: 401 when the organization (or its API key) is gone, 403 when it lost production access.
+  A revoked organization is not special-cased to read status, and every new attempt is refused
   too, so nothing can pay twice. Do not move replay ahead of authentication or project context.
+
+**Two layers.** This step is HTTP idempotency: one attempt per key, a stored answer for 24 hours,
+and a guard against concurrent duplicates. It does no foreign dedupe. The route's domain row is the
+recovery point:
+
+- it is written under its own unique key before anything is signed or sent, the signature and
+  blockhash window are saved before broadcast, and the outcome is recorded before this step saves
+  the response;
+- a provider call carries a request id derived from the key, so the provider dedupes the retry;
+- the reconciler settles unsettled rows from the chain; it never reads keys.
+
+A takeover (a retry after the original's lease ran out) **never resumes** the earlier attempt. The
+handler finds its row by key and answers from it; the reconciler settles or fails what the crashed
+attempt left. Every handler on a `rerun` route is therefore re-entrant: a retry after a crash at any
+point finds its row and never signs or sends twice. Unlike Brandur's design the recovery point lives
+on the domain row, not the key row, because domain rows outlive the key's 24 hours and the
+reconciler works from them.
 
 **Outcomes.**
 
@@ -67,12 +102,13 @@ step** → admission → validation → handler.
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
 | 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
-| 5xx, default `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
+| 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
 | 5xx, `serverErrors: "rerun"` | No: unlocked, still bound to its fingerprint | A same-key retry runs again |
 | 2xx and other 4xx | Yes, 24h | Same status and body + `Idempotent-Replayed: true` |
 
-- `rerun` is only for a route whose handler writes its own row under a unique key before it moves
-  anything. That row recovers the earlier attempt.
+- `serverErrors` is required: each route states which applies. `rerun` is only for a route whose
+  handler writes its own row under a unique key before it moves anything and answers a retry from
+  that row; every other route stores the 5xx.
 - An error thrown past a caller that composes `runIdempotency` is stored only if it is an
   `AppError`, whose status is known. Any other error is mapped by the app's handler, so the key is
   unlocked and stays bound to its request instead of storing a guess.
@@ -80,38 +116,27 @@ step** → admission → validation → handler.
   (204, 205, 304) replays without one.
 
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
-handler runs. A crashed request's key frees when the lease runs out.
-
-**Replay authorization.** A replay skips the handler, so it skips every check the handler makes
-about the caller. Each route therefore declares `replayAccess`, and the type makes it required:
-
-- `"chain"`: the handler checks nothing about the caller beyond the chain before this step
-  (authentication, project context, `requirePermissions`, Allowed Operations). Every replay passes
-  that chain again, so nothing more is needed.
-- A function: it repeats the handler's caller checks (an API key's wallet bindings, ownership of
-  the resource) before any stored response is replayed, reading fresh from the database whatever the
-  handler reads fresh. A credential narrowed since the original request is refused (403), not
-  served; one narrowed in a way that still covers the resource gets the replay. A resource's own
-  state is not re-checked: a wallet deactivated since still replays, because a replay moves nothing.
-
-The route marker records which one a route chose, and the stable route inventory pins every
-`"chain"` route with its reason, so relying on the chain is a reviewed decision.
-
-- The stored principal is the credential's id, not a snapshot of its access, so an unrelated
-  change to a key (another wallet bound, a permission added) never turns a retry into a 422.
+handler runs. A crashed request's key frees when the lease runs out. A request still running after
+15 minutes (`maxLeaseRenewalSeconds`) is treated as hung: renewal stops and logs
+`sdp_idempotency_lease_renewal_cap`, so a retry can take over once the lease lapses. Statement and
+signing timeouts end requests well before that.
 
 **No bypass.** Every request on a route with the step goes through it. (Approved-operation
 executions and Dry-Run skipped it until approvals and wallet policies were removed, HOO-1889.)
 
 **Retention.** 24 hours. Expired rows are pruned hourly in-process and on every run of the managed
-reconciliation job. A claim ignores an expired row.
+reconciliation job. A claim ignores an expired row. A row still `in_progress` when it is pruned
+(`sdp_idempotency_unfinished_pruned`) or replaced by a new claim
+(`sdp_idempotency_unfinished_replaced`) is a request that never recorded an outcome; both log at
+error level for alerting.
 
 **Declaration.** The step carries `Symbol.for("sdp.idempotency")` with its mode. `IdempotencyKeyMode`
 lives in `@sdp/types`.
 
-- A route mounts the step itself, directly after Allowed Operations. A future composite route
+- A route mounts the step itself, directly after its `authorize` step. A future composite route
   declaration can call the exported `runIdempotency` in the same position.
-- When the route-declarations primitive lands, the marker becomes `RouteDeclaration.idempotency`.
+- `authorize` carries `Symbol.for("sdp.authorize")`. When the route-declarations primitive lands,
+  the markers become `RouteDeclaration.authorize` and `RouteDeclaration.idempotency`.
 
 ## Consequences
 
@@ -121,6 +146,9 @@ lives in `@sdp/types`.
   credential routes.
 - Before a route takes accept mode, check its response for regulated data, such as counterparty
   bank details.
-- Replays return what was stored. The current state is a GET away.
+- A replay from this step returns the stored response, a snapshot: a transfer stored as
+  `processing` replays as `processing`. A replay from the domain row (after a takeover, or past 24
+  hours) returns the row's current state. Clients read the outcome with GET and never re-POST to
+  learn it.
 - Modules outside `stable` keep their own key handling until promoted. Their row fingerprints then
   become the backstop.

@@ -365,6 +365,8 @@ declare module "hono" {
     organizationEntitlements: OrganizationEntitlements;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
+    // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)
+    authorized?: { loaded: unknown };
     apiKey?: {
       id: string;
       organizationId: string;

@@ -77,6 +77,12 @@ const pooledClients = new Map<string, PooledPostgresClient>();
 
 const NODE_POOL_OPTIONS = {
   max: 10,
+  // Bounds every statement and every idle-in-transaction session (HOO-1918):
+  // a hung query fails its request instead of holding its Idempotency-Key and
+  // a pooled connection. Generous for OLTP; a statement that needs longer
+  // belongs in a job with its own connection settings.
+  statement_timeout: 30_000,
+  idle_in_transaction_session_timeout: 60_000,
   connectionTimeoutMillis: 5_000,
   idleTimeoutMillis: 30_000,
   maxLifetimeSeconds: 300,
