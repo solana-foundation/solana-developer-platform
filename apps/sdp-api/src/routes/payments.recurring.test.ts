@@ -26,7 +26,7 @@ import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories"
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
@@ -42,6 +42,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
@@ -80,6 +81,9 @@ import {
   setRecurringCollectionDue,
   testSignature,
 } from "@/test/helpers/recurring-payments";
+
+// Every mutation carries a fresh key unless a test sets its own (HOO-1918).
+const app = withIdempotencyKeys(baseApp);
 
 const recurringPaymentLogEventSchema = z.object({ event: z.string() });
 

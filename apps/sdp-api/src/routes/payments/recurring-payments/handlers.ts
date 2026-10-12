@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
@@ -8,9 +9,13 @@ import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequestParams, badRequestQuery, internalError } from "@/lib/errors";
+import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
+import { getAuthorized } from "@/middleware/authorize";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
@@ -21,6 +26,10 @@ import {
   resumeRecurringPayment as resumeRecurringPaymentRecord,
   updateRecurringPayment as updateRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
+import {
+  findKeyedRecurringPayment,
+  type RecurringPaymentIdempotency,
+} from "@/services/payments/recurring-payments/create";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
@@ -31,6 +40,11 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "../wallets";
+import type {
+  AuthorizedRecurringPayment,
+  AuthorizedRecurringPaymentCreate,
+  AuthorizedRecurringPaymentUpdate,
+} from "./access";
 import {
   type activateRecurringPaymentSchema,
   type collectRecurringPaymentSchema,
@@ -73,31 +87,64 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
   };
 }
 
-function resolvePinnedRecurringSourceWallet(
-  scope: ResolvedScope,
-  recurringPayment: PaymentRecurringPaymentRow & { source_custody_wallet_id: string }
-) {
-  return resolveWalletByCustodyWalletId(scope.wallets, recurringPayment.source_custody_wallet_id);
+/**
+ * The create request's Idempotency-Key and the fingerprint of the schedule it
+ * creates, recorded on the row (migration 0129). The route requires the key.
+ */
+function recurringPaymentIdempotency(
+  c: ValidatedBodyContext<typeof createRecurringPaymentSchema>,
+  body: z.output<typeof createRecurringPaymentSchema>,
+  sourceCustodyWalletId: string
+): RecurringPaymentIdempotency {
+  const key = parseIdempotencyKey(c);
+  if (key === undefined) {
+    throw internalError("Recurring payment create reached the handler without an Idempotency-Key");
+  }
+  return { key, fingerprint: recurringPaymentFingerprint(body, sourceCustodyWalletId) };
 }
 
-function assertPinnedRecurringPayment(
-  recurringPayment: PaymentRecurringPaymentRow
-): asserts recurringPayment is PaymentRecurringPaymentRow & { source_custody_wallet_id: string } {
-  if (recurringPayment.source_custody_wallet_id === null) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
-  }
+function recurringPaymentFingerprint(
+  body: z.output<typeof createRecurringPaymentSchema>,
+  sourceCustodyWalletId: string
+): string {
+  // SAFETY: a validated JSON body plus a string is a JSON value.
+  const value = JSON.parse(JSON.stringify({ ...body, sourceCustodyWalletId })) as JsonValue;
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+/**
+ * Answers a create request whose Idempotency-Key already made a schedule, from
+ * its row (HOO-1918): past the shared record's 24 hours, or after a 5xx re-run.
+ * The same key with a different request is refused (422).
+ */
+export async function findRecurringPaymentCreateReplay(
+  c: AppContext,
+  input: MovementStepInput<AuthorizedRecurringPaymentCreate>,
+  idempotencyKey: string
+): Promise<Response | null> {
+  // SAFETY: mounted after validateBody(createRecurringPaymentSchema).
+  const body = input.body as z.output<typeof createRecurringPaymentSchema>;
+  const existing = await findKeyedRecurringPayment(
+    c.env,
+    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+    {
+      key: idempotencyKey,
+      fingerprint: recurringPaymentFingerprint(body, input.authorized.sourceWallet.id),
+    }
+  );
+  if (!existing) return null;
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(existing),
+  };
+  return created(c, response);
 }
 
 export const createRecurringPayment = async (
   c: ValidatedBodyContext<typeof createRecurringPaymentSchema>
 ) => {
   const body = c.req.valid("json");
-
   const projectId = requireProjectId(c);
-  assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
-  const scope = await resolveScope(c);
-  const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
+  const { scope, sourceWallet } = getAuthorized<AuthorizedRecurringPaymentCreate>(c);
 
   const recurringPayment = await createRecurringPaymentRecord({
     env: c.env,
@@ -112,6 +159,7 @@ export const createRecurringPayment = async (
     firstCollectionAt: body.firstCollectionAt === undefined ? null : body.firstCollectionAt,
     metadataUri: body.metadataUri === undefined ? null : body.metadataUri,
     createdBy: await resolveCreatorUserId(c),
+    idempotency: recurringPaymentIdempotency(c, body, sourceWallet.id),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -125,41 +173,10 @@ export const updateRecurringPayment = async (
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
 
   const body = c.req.valid("json");
-
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:write",
-  ]);
-  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
-    recurringPaymentId: params.data.id,
-    organizationId: auth.organizationId,
-    projectId,
-    walletAuthorization,
-  });
-
-  if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-
-  assertPinnedRecurringPayment(recurringPayment);
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
-  const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
-  assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
-  const nextSourceWallet =
-    body.sourceCustodyWalletId && body.sourceCustodyWalletId !== sourceWallet.id
-      ? resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId)
-      : undefined;
-  if (nextSourceWallet) {
-    assertPaymentWalletExactAccess(c, nextSourceWallet.id, ["payments:write"]);
-    await assertFreshPaymentWalletAccess(c, nextSourceWallet, ["payments:write"]);
-  }
+  const { recurringPayment, sourceWallet, nextSourceWallet } =
+    getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
 
   const updated = await updateRecurringPaymentRecord({
     env: c.env,
@@ -183,31 +200,8 @@ export const activateRecurringPayment = async (
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
 
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:write",
-  ]);
-  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
-    recurringPaymentId: params.data.id,
-    organizationId: auth.organizationId,
-    projectId,
-    walletAuthorization,
-  });
-
-  if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-
-  assertPinnedRecurringPayment(recurringPayment);
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
-  const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
-  assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
+  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
 
   const activated = await activateRecurringPaymentRecord({
     env: c.env,
@@ -233,31 +227,8 @@ export const activateRecurringPayment = async (
 async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel" | "resume") {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
 
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:write",
-  ]);
-  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
-    recurringPaymentId: params.data.id,
-    organizationId: auth.organizationId,
-    projectId,
-    walletAuthorization,
-  });
-
-  if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-
-  assertPinnedRecurringPayment(recurringPayment);
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
-  const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
-  assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
+  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
 
   const updated =
     operation === "cancel"
@@ -303,31 +274,8 @@ export const collectRecurringPayment = async (
 ) => {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
 
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const walletAuthorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-    "payments:write",
-  ]);
-  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
-    recurringPaymentId: params.data.id,
-    organizationId: auth.organizationId,
-    projectId,
-    walletAuthorization,
-  });
-
-  if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
-  }
-
-  assertPinnedRecurringPayment(recurringPayment);
-  const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
-  const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
-  assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
+  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,

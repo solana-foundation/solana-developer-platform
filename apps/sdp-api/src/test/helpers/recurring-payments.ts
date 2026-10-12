@@ -4,7 +4,7 @@ import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import baseApp from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
   paymentRecurringPaymentCollectionResponseSchema,
@@ -24,6 +24,10 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { withIdempotencyKeys } from "./idempotency-keys";
+
+// Every mutation carries a fresh key unless a test sets its own (HOO-1918).
+const app = withIdempotencyKeys(baseApp);
 
 const recurringResponseSchema = successResponseSchema(paymentRecurringPaymentResponseSchema);
 const collectionResponseSchema = successResponseSchema(
