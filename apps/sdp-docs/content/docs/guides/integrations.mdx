@@ -1,0 +1,88 @@
+---
+title: Integrations
+description: Connect custody, compliance screening, and ramp providers to your organization and projects.
+---
+
+SDP works with outside providers for custody, compliance screening, and fiat ramps. This guide covers what your team can connect, where you manage each one, and which parts you can also use through the API.
+
+## Where integrations live
+
+In the dashboard sidebar, open **Integrations**. It has a tab for each provider family, including **Custody**, **Ramps**, and **Compliance**, which appear when the matching dashboard module is enabled for your organization.
+
+Each provider card shows a status. Click a card to open the provider's page, which explains how the provider connects and offers the next action available to you, such as **Configure**, **Manage**, or **Request access**.
+
+| Status | Meaning |
+| --- | --- |
+| **Connected** | Set up and in use. |
+| **Ready to connect** | You can set it up now. |
+| **Enabled** | Turned on for your organization. Used for ramp and compliance providers, which your team doesn't install itself. |
+| **Request access** | The SDP team grants access per organization. |
+| **Not configured** | Not available to your organization on this deployment. |
+
+## Custody
+
+Custody providers hold your wallets' keys and sign for them. You install them from **Wallets**; the **Custody** tab shows the same providers with their status. For the provider list, which providers sign transactions, and what each status means, see [Set Up Wallets](/docs/guides/setup-wallets#supported-providers).
+
+A provider's page says how it connects:
+
+- **Self-serve**: you connect it with credentials from your own provider account. Today this applies to Privy.
+- **By arrangement**: the SDP team grants access and sets up the connection with your organization.
+- **Provisioned per deployment**: the deployment holds the provider's credentials, and you install it from **Wallets**.
+
+### Privy with your own credentials
+
+When stored Privy credentials are enabled for your deployment, your team connects its own Privy app instead of using credentials held by the deployment. Each Privy app you connect becomes a **custody connection**. Connections belong to the current project, and a project can have several. Managing connections requires custody admin access, which organization admins have.
+
+To connect a Privy app:
+
+1. Open **Integrations** → **Custody** → **Privy** and click **Configure**. You can also go to **Wallets**, click **Create wallet**, and choose Privy.
+2. Under **Provider details**, enter:
+   - **Credential label**: a name for this credential.
+   - **Privy app ID**: from your Privy dashboard. After you save, SDP shows only redacted details.
+   - **Privy app secret**: from your Privy dashboard. You can't view it again after saving.
+   - **Initial wallet label** (optional): a name for the wallet SDP creates when the check succeeds.
+3. Click **Connect and verify**. SDP stores the credential, checks it with Privy, and creates the connection's first wallet once the check succeeds.
+
+If the check doesn't succeed, the dashboard says why:
+
+- Privy rejected the credentials: correct the app ID and secret, then connect again.
+- The Privy app is already connected to a custody setup: use a different Privy app.
+- SDP couldn't confirm whether verification finished: click **Check again**. Your credentials are stored, and checking again never creates a duplicate connection.
+
+To connect another Privy app to the same project, open the **Privy** page, find the **Connections** section, and click **Add connection**.
+
+Open a connection from that list to manage it:
+
+- **Connection ID**: copy it to [create wallets on this connection](/docs/guides/setup-wallets#create-a-wallet-on-a-custody-connection) through the API.
+- **Add wallet**: creates a wallet in this connection's Privy account.
+- **Make default**: requests that don't name a wallet use this connection from then on. A project has one default connection at a time, and operations already pinned to a wallet don't move.
+- **Rotate credentials**: replaces the Privy app secret. The current credentials stay in use until the new secret is verified, and you can roll back to the previous version for a limited time afterwards.
+- **Cancel setup**: for a connection whose verification never finished. The connection is deactivated and stays listed as **Deactivated**; to try again, add a new connection.
+- **Deactivate connection**: stops the connection permanently and keeps its history. It doesn't revoke the app secret at Privy, and it isn't available while the connection has active wallets.
+
+On a self-hosted deployment, `PRIVY_BYOK_ENABLED` turns on Privy connections. They use the deployment's own Privy credentials unless `SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED` is also on. Connections that use the deployment's credentials can't be rotated or rolled back from the dashboard.
+
+## Compliance screening
+
+SDP screens addresses through these providers:
+
+| Provider | `provider` value in results |
+| --- | --- |
+| **Range** | `range` |
+| **Elliptic** | `elliptic` |
+| **TRM Labs** | `trm` |
+| **Chainalysis** | `chainalysis` |
+
+The SDP team activates compliance providers per organization. On the **Compliance** tab, each provider shows **Enabled**, **Request access** if it isn't activated for your organization, or **Not configured** if it is activated but the deployment doesn't hold the provider's credentials.
+
+Screening runs when you ask for it. `POST /v1/compliance/address-screenings` checks one address against every provider enabled for your organization and returns a result per provider, with a normalized `status` (`ok`, `pending`, `unavailable`, or `error`), a `riskScore`, and the provider's own `riskLevel` label. The optional `intent` field says why you are screening: `transfer_destination`, `wallet_address_addition`, or `unknown`. Use the results in your own approval steps, for example before you approve a transfer destination or add an address to a token's allowlist.
+
+- The API key needs the `payments:read` permission.
+- If no compliance provider is enabled for your organization, the request returns `403`.
+- Screening has a quota: 30 requests per minute per API key or user, and 120 per minute per organization. Requests over the quota return `429`.
+
+For a walkthrough, see [Freeze and Compliance](/docs/tokens/freeze-and-compliance). For the full request and response schema, see the [Compliance API reference](/docs/reference/api/compliance).
+
+## Ramps
+
+Ramp providers move money between fiat and stablecoins for deposits and payouts. They are configured on the deployment, so the **Ramps** tab shows each one as **Enabled** or **Not configured** rather than offering a setup flow. For the provider list, what each one supports, and how they are configured, see [Ramp providers](/docs/payments/ramps-providers).
