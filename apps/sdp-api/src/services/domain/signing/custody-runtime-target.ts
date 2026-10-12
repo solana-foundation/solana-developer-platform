@@ -10,7 +10,7 @@ import type {
   OrganizationProviderAvailabilityResponse,
   ProviderCredentialStatus,
 } from "@sdp/types";
-import { MOVEMENTS, type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db";
