@@ -99,25 +99,93 @@ describe("SponsorshipBudgetRepository", () => {
     ).resolves.toEqual([]);
   });
 
-  it("retains a stored ID's contrary evidence so the caller can refuse a stale linkage", async () => {
+  it("retains a same-tenant stored ID's contrary message evidence for refusal", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
-    await repository.createReservation({
-      ...reservationInput("sbr_other_scope"),
-      projectId: "project_other",
-    });
+    await repository.createReservation(reservationInput("sbr_other_message"));
     const candidates = await repository.findReservationEvidence({
       organizationId: "org_1",
       projectId: "project_1",
       transactionDigest: "missing-message",
-      reservationId: "sbr_other_scope",
+      reservationId: "sbr_other_message",
     });
     expect(candidates).toEqual([
       expect.objectContaining({
-        id: "sbr_other_scope",
-        projectId: "project_other",
+        id: "sbr_other_message",
+        organizationId: "org_1",
+        projectId: "project_1",
         transactionDigest: "digest_1",
       }),
     ]);
+  });
+
+  it.each([
+    { organizationId: "org_other", projectId: "project_1" },
+    { organizationId: "org_1", projectId: "project_other" },
+    { organizationId: "org_1", projectId: null },
+  ])("excludes a foreign retained ID alongside a message digest: %o", async (foreignScope) => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation({
+      ...reservationInput("sbr_foreign_id"),
+      ...foreignScope,
+    });
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: "project_1",
+        transactionDigest: "missing-message",
+        reservationId: "sbr_foreign_id",
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it.each([
+    { organizationId: "org_other", projectId: "project_1", lookupProjectId: "project_1" },
+    { organizationId: "org_1", projectId: "project_other", lookupProjectId: "project_1" },
+    { organizationId: "org_1", projectId: null, lookupProjectId: "project_1" },
+    { organizationId: "org_1", projectId: "project_1", lookupProjectId: null },
+  ])("does not derive a local message match from a foreign ID: %o", async (scope) => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation({
+      ...reservationInput("sbr_foreign_id"),
+      organizationId: scope.organizationId,
+      projectId: scope.projectId,
+    });
+    await repository.createReservation({
+      ...reservationInput("sbr_local_same_message"),
+      projectId: scope.lookupProjectId,
+    });
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: scope.lookupProjectId,
+        reservationId: "sbr_foreign_id",
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it("keeps NULL-project evidence separate and detects its competing actors", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation({ ...reservationInput("sbr_null_legacy"), projectId: null });
+    await repository.createReservation({
+      ...reservationInput("sbr_null_exact"),
+      projectId: null,
+      actorType: "wallet",
+      actorId: "cwlt_1",
+    });
+    await repository.createReservation(reservationInput("sbr_project_message"));
+    const candidates = await repository.findReservationEvidence({
+      organizationId: "org_1",
+      projectId: null,
+      transactionDigest: "digest_1",
+    });
+    expect(candidates.map((row) => row.id)).toEqual(["sbr_null_exact", "sbr_null_legacy"]);
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: null,
+        reservationId: "sbr_null_legacy",
+      })
+    ).resolves.toEqual(candidates);
   });
 
   it("prefers exact tenant policies and falls back independently at each scope", async () => {

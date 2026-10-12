@@ -328,8 +328,13 @@ export class SponsorshipBudgetRepository {
     // An ID-only lookup still detects competing same-message reservations.
     const digest =
       input.transactionDigest === undefined
-        ? "(SELECT transaction_digest FROM sponsorship_budget_reservations WHERE id = ?)"
+        ? `(SELECT transaction_digest FROM sponsorship_budget_reservations
+            WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?)`
         : "?";
+    const digestValues =
+      input.transactionDigest === undefined
+        ? [input.reservationId, input.organizationId, input.projectId]
+        : [input.transactionDigest];
     const rows = await this.db.queryMany<{
       id: string;
       network: SponsorshipNetwork;
@@ -354,15 +359,10 @@ export class SponsorshipBudgetRepository {
               provider_config_fingerprint, recent_blockhash, status, signature,
               signed_transaction, reserved_lamports, actual_lamports, attempt
        FROM sponsorship_budget_reservations
-       WHERE (organization_id = ? AND project_id IS NOT DISTINCT FROM ?
-              AND transaction_digest = ${digest}) OR id = ?
+       WHERE organization_id = ? AND project_id IS NOT DISTINCT FROM ?
+         AND (transaction_digest = ${digest} OR id = ?)
        ORDER BY id LIMIT 2`,
-      [
-        input.organizationId,
-        input.projectId,
-        input.transactionDigest ?? input.reservationId,
-        input.reservationId ?? null,
-      ]
+      [input.organizationId, input.projectId, ...digestValues, input.reservationId ?? null]
     );
     return rows.map((row) => ({
       id: row.id,

@@ -119,6 +119,26 @@ type AdmissionContext = {
   actor: SponsorshipScope["actor"];
 };
 
+function buildSponsorshipReservationId(
+  scope: Pick<SponsorshipScope, "environment" | "organizationId" | "projectId">,
+  input: Pick<AdmissionContext, "network" | "actor" | "feePayer" | "transactionDigest">
+): string {
+  // Field order is part of the retained accounting identity.
+  return `sbr_${createHash("sha256")
+    .update(
+      JSON.stringify({
+        network: input.network,
+        productEnvironment: scope.environment,
+        organizationId: scope.organizationId,
+        projectId: scope.projectId,
+        actor: input.actor,
+        feePayer: input.feePayer,
+        transactionDigest: input.transactionDigest,
+      })
+    )
+    .digest("hex")}`;
+}
+
 /**
  * The budget network a scope draws from: the scope's cluster when the caller
  * named one (Earn movements execute per cluster), else the process default.
@@ -608,7 +628,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     }
     const permittedNewAccounting = () => {
-      if (reservationId || continuity.admission === "continue_only") {
+      if (reservationId !== undefined || continuity.admission === "continue_only") {
         throw new FeePaymentError(
           "Sponsorship accounting absence is not authorized for admission",
           "PROVIDER_NOT_AVAILABLE"
@@ -666,19 +686,12 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         candidate.type === reservation.actorType && candidate.id === reservation.actorId
     );
     const expectedId = actor
-      ? `sbr_${createHash("sha256")
-          .update(
-            JSON.stringify({
-              network: this.network,
-              productEnvironment: this.scope.environment,
-              organizationId: this.scope.organizationId,
-              projectId: this.scope.projectId,
-              actor,
-              feePayer,
-              transactionDigest,
-            })
-          )
-          .digest("hex")}`
+      ? buildSponsorshipReservationId(this.scope, {
+          network: this.network,
+          actor,
+          feePayer,
+          transactionDigest,
+        })
       : null;
     if (
       !actor ||
@@ -757,19 +770,12 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const transactionDigest = createHash("sha256")
       .update(new Uint8Array(decodedTransaction.messageBytes))
       .digest("hex");
-    const id = `sbr_${createHash("sha256")
-      .update(
-        JSON.stringify({
-          network,
-          productEnvironment: this.scope.environment,
-          organizationId: this.scope.organizationId,
-          projectId: this.scope.projectId,
-          actor,
-          feePayer: providerConfig.signerAddress,
-          transactionDigest,
-        })
-      )
-      .digest("hex")}`;
+    const id = buildSponsorshipReservationId(this.scope, {
+      network,
+      actor,
+      feePayer: providerConfig.signerAddress,
+      transactionDigest,
+    });
     const buckets = utcBuckets(this.now());
     return {
       id,

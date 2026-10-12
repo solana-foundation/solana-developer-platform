@@ -362,6 +362,27 @@ describe("BudgetedFeePayment", () => {
     expect(repository.createReservation).not.toHaveBeenCalled();
   });
 
+  it.each(["legacy_new", "after_writer_retirement"] as const)(
+    "refuses an empty retained reservation ID under %s before new admission or signing",
+    async (admission) => {
+      const persistAccountingIdentity = vi.fn();
+      const scope = continuationScope(persistAccountingIdentity);
+      if (!scope.continuity) throw new Error("continuity fixture missing");
+      scope.continuity.admission = admission;
+      scope.continuity.reservationId = "";
+      if (admission === "legacy_new") scope.actor = scope.continuity.legacyActor;
+      const { feePayment, repository, provider, budgetRedis } = harness(scope);
+
+      await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+        code: "PROVIDER_NOT_AVAILABLE",
+      });
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(budgetRedis.reserve).not.toHaveBeenCalled();
+      expect(persistAccountingIdentity).not.toHaveBeenCalled();
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    }
+  );
+
   it("links separate Request and recurring messages before their respective provider effects", async () => {
     const persistAccountingIdentity = vi.fn().mockResolvedValue(undefined);
     const scope = continuationScope(persistAccountingIdentity);
@@ -430,7 +451,7 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markReleased).not.toHaveBeenCalled();
   });
 
-  it("retains the independently recorded baseline reservation serialization", async () => {
+  it("retains baseline reservation serialization for admission and continuation", async () => {
     const feePayer = assertValidAddress("11111111111111111111111111111111");
     const tx = pipe(
       createTransactionMessage({ version: 0 }),
@@ -458,6 +479,36 @@ describe("BudgetedFeePayment", () => {
       transactionDigest: "a0f6ee5647fad475e2aee17b1ca2d2039e6a20f3af25f5107600e3fdf9cf9317",
       id: "sbr_ccf81482062175e6d873e528d4f616b87bf805d94a127624964655d19dd3862c",
     });
+    const recorded = repository.createReservation.mock.calls[0]?.[0];
+    if (!recorded) throw new Error("Baseline reservation was not recorded");
+    const continued = harness({
+      ...SCOPE,
+      actor: { type: "wallet", id: "cwlt_recipient" },
+      continuity: {
+        deploymentMode: "managed",
+        legacyActor: SCOPE.actor,
+        exactActor: { type: "wallet", id: "cwlt_recipient" },
+        admission: "continue_only",
+        reservationId: "sbr_ccf81482062175e6d873e528d4f616b87bf805d94a127624964655d19dd3862c",
+        persistAccountingIdentity: vi.fn(),
+      },
+    });
+    continued.repository.findReservationEvidence.mockResolvedValueOnce([
+      {
+        ...recorded,
+        id: "sbr_ccf81482062175e6d873e528d4f616b87bf805d94a127624964655d19dd3862c",
+        transactionDigest: "a0f6ee5647fad475e2aee17b1ca2d2039e6a20f3af25f5107600e3fdf9cf9317",
+        status: "released",
+        attempt: 1,
+        signature: null,
+        signedTransaction: null,
+        actualLamports: null,
+      },
+    ]);
+    vi.mocked(continued.provider.getFeePayer).mockResolvedValue(feePayer);
+    await expect(continued.feePayment.getFeePayer()).resolves.toBe(feePayer);
+    expect(continued.repository.createReservation).not.toHaveBeenCalled();
+    expect(continued.provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 
   it.each(["continue_only", "legacy_new"] as const)(
