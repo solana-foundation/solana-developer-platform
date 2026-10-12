@@ -22,6 +22,7 @@ type FlagCap =
 const FLAG_CAPS = {
   homepageOpenSignup: "uncapped",
   newDesign: "uncapped",
+  paymentsDemoMode: "uncapped",
   newDesignContacts: "uncapped",
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
@@ -119,6 +120,7 @@ describe("defineDashboardFlags", () => {
         "custody",
         "homepageOpenSignup",
         "newDesign",
+        "paymentsDemoMode",
         "newDesignContacts",
         "newDesignPayDeposit",
         "newDesignActivity",

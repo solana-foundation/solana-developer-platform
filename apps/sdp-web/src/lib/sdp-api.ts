@@ -6,6 +6,7 @@ import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -134,11 +135,20 @@ function createSdpApiRequest(
     // upstream request still receives the full path.
     const loggedPath = path.split("?", 1)[0];
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-      cache: "no-store",
-    });
+    const send = () =>
+      fetch(url, {
+        ...options,
+        headers,
+        cache: "no-store",
+      });
+
+    // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
+    const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
+    if (demoResponse) {
+      return demoResponse;
+    }
+
+    const response = await send();
 
     console.info(
       JSON.stringify({

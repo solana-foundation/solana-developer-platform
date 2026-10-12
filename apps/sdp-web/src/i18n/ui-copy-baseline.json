@@ -112,6 +112,7 @@
   "src/flags/definitions.ts:271:22:Enabled",
   "src/flags/definitions.ts:280:5:NEW DESIGN: show the 2026 refresh's shell (palette, type and sidebar, the language switch in the account menu) and the Privacy connect form. Each redesigned area also has a new-design-* flag of its own, which counts only while this one is on. Off serves the previous design everywhere.",
   "src/flags/definitions.ts:283:23:Previous design",
+  "src/flags/definitions.ts:283:5:Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Requires the new-design flag, and serves only Payments pages on the new design.",
   "src/flags/definitions.ts:284:22:New design",
   "src/flags/definitions.ts:83:7:`Show ${title} as a selectable provider in the onramp and offramp wizards.`",
   "src/flags/definitions.ts:85:25:Hidden",

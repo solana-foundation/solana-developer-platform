@@ -43,6 +43,8 @@ import { issuance, policies } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { offersCustodyMode } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -105,20 +107,22 @@ async function getWalletDetail(
  * connection's label, linked to its detail page, for a viewer who may manage
  * custody, and the truncated connection id, unlinked, for one who may not read
  * connections or whose lookup is refused (403) or finds no connection (404).
- * Any other lookup failure throws.
+ * The label stays unlinked while the project does not offer the connection's
+ * provider in `byok` mode, the same rule that hides the detail page. Any other
+ * lookup failure throws.
  *
  * @param params - The wallet's connection and the viewer's access.
- * @param params.request - The SDP API request function.
+ * @param params.client - The client scoped to the request's project.
  * @param params.connectionId - The wallet's custody connection id, absent for a Managed wallet.
  * @param params.canManageCustody - Whether the viewer may read custody connections.
  * @returns The row's label and link, or `null` for a Managed wallet.
  */
 async function resolveWalletConnectionRow(params: {
-  request: SdpApiClient["request"];
+  client: SdpApiClient;
   connectionId: string | undefined;
   canManageCustody: boolean;
 }): Promise<{ label: string; href: string | undefined } | null> {
-  const { request, connectionId, canManageCustody } = params;
+  const { client, connectionId, canManageCustody } = params;
   if (connectionId === undefined) {
     return null;
   }
@@ -127,7 +131,7 @@ async function resolveWalletConnectionRow(params: {
   }
   let connection: CustodyInstallationConnection;
   try {
-    connection = await fetchConnectionInstallation(request, connectionId);
+    connection = await fetchConnectionInstallation(client.request, connectionId);
   } catch (error) {
     if (
       error instanceof ConnectionDetailRequestError &&
@@ -136,6 +140,11 @@ async function resolveWalletConnectionRow(params: {
       return { label: truncateMiddle(connectionId), href: undefined };
     }
     throw error;
+  }
+  if (
+    !offersCustodyMode(await fetchProjectProviderAvailability(client), connection.provider, "byok")
+  ) {
+    return { label: connection.label, href: undefined };
   }
   return {
     label: connection.label,
@@ -295,7 +304,7 @@ export default async function WalletDetailPage({
   const providerLabel = formatCustodyProviderName(provider);
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
   const connectionRow = await resolveWalletConnectionRow({
-    request: apiClient.request,
+    client: apiClient,
     connectionId: wallet.custodyConnectionId,
     canManageCustody,
   });

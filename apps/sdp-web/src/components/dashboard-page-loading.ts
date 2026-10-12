@@ -99,25 +99,11 @@ const LEGACY_DESIGN_PAGE_LOADING: Partial<
   "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
 };
 
-// Requests and Schedules are still the previous design's pages, so they load as them with
-// new-design-activity on too.
-const HELD_ON_PREVIOUS_DESIGN: ReadonlySet<DashboardLoadingRoute> = new Set([
-  "payment-requests",
-  "payment-request-create",
-  "payment-request-detail",
-  "recurring-payments",
-  "recurring-payment-create",
-  "recurring-payment-detail",
-]);
-
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute,
   newDesign = true
 ): ComponentType<PageLoadingProps> {
-  const legacy =
-    newDesign && !HELD_ON_PREVIOUS_DESIGN.has(route)
-      ? undefined
-      : LEGACY_DESIGN_PAGE_LOADING[route];
+  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
   return legacy ?? resolveCurrentPageLoadingComponent(route);
 }
 
