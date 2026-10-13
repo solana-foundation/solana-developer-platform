@@ -171,8 +171,8 @@ export function vedaReadCacheSizes(): { clients: number; shareFacts: number; ass
 
 /**
  * Store `value` as the newest entry for `key`, after dropping every expired
- * entry and then the oldest past `capacity`, so distinct endpoints and vaults
- * cannot grow a cache for the process's lifetime.
+ * entry and then the oldest past `capacity`, so distinct vaults cannot grow a
+ * cache for the process's lifetime.
  */
 function storeBounded<V extends { expiresAt: number | null }>(
   cache: Map<string, V>,
