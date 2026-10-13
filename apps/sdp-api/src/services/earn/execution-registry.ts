@@ -190,7 +190,7 @@ export function resolveEarnExecutionClient(
   );
 
   if (provider === "kamino") {
-    const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);
+    const client = new KaminoVaultDirectClient(runOperation);
     assertNotPortfolioProvider(client);
     return instrumentVendorPort("kamino", client);
   }
@@ -200,7 +200,7 @@ export function resolveEarnExecutionClient(
     return instrumentVendorPort("jupiter_lend", client);
   }
   if (provider === "veda") {
-    const client = new VedaVaultDirectClient(provenRpcUrl, runOperation);
+    const client = new VedaVaultDirectClient(runOperation);
     assertVedaNotPortfolioProvider(client);
     return instrumentVendorPort("veda", client);
   }
@@ -219,7 +219,7 @@ export function resolveEarnExecutionClient(
     return instrumentVendorPort("hastra", client);
   }
   if (provider === "wisdomtree") {
-    const client = new WisdomTreeVaultDirectClient(provenRpcUrl, runOperation);
+    const client = new WisdomTreeVaultDirectClient(runOperation);
     assertWisdomTreeNotPortfolioProvider(client);
     return instrumentVendorPort("wisdomtree", client);
   }

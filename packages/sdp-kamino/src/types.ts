@@ -1,3 +1,4 @@
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import type { Address, Instruction, Slot, TransactionSigner } from "@solana/kit";
 
@@ -18,17 +19,13 @@ import type { Address, Instruction, Slot, TransactionSigner } from "@solana/kit"
  *    what makes `./sdk.ts` a firewall rather than a convention.
  */
 
-/** Which cluster a call runs against, and how to reach it. */
+/** Which cluster a call runs against, and the door clients that reach it. */
 export interface KaminoRuntime {
   cluster: SolanaCluster;
-  /**
-   * RPC endpoint for `cluster`. Supplied by the caller rather than read from
-   * env: `syncEarnCatalogue` walks both environments inside ONE process with
-   * one env object, so a process-level `SOLANA_RPC_URL` cannot be trusted to
-   * match the cluster being served — the mistake `listKaminoDevnetVaults` guards
-   * with a genesis-hash check.
-   */
-  rpcUrl: string;
+  /** Builds and quotes: every request, klend-sdk's own included, bounded at the transport. */
+  rpc: SolanaRpc;
+  /** Position reads only, never a build: concurrent identical reads go out once. */
+  readRpc: SolanaRpc;
 }
 
 /**
