@@ -138,7 +138,7 @@ export async function enforceApiKeyOrganizationAccess(
     .prepare(
       `SELECT o.status AS organization_status, o.settings,
               ak.status, ak.expires_at, ak.rotation_deadline,
-              ak.project_id, ak.signing_wallet_id, wb.wallet_bindings
+              ak.signing_wallet_id, wb.wallet_bindings
          FROM organizations o
          LEFT JOIN api_keys ak ON ak.id = ? AND ak.organization_id = o.id
          LEFT JOIN LATERAL (
@@ -198,12 +198,11 @@ export async function enforceApiKeyOrganizationAccess(
         settings: string | null;
         wallet_bindings: unknown;
       } & (
-        | (ApiKeyLifecycleColumns & { project_id: string; signing_wallet_id: string | null })
+        | (ApiKeyLifecycleColumns & { signing_wallet_id: string | null })
         | {
             status: null;
             expires_at: null;
             rotation_deadline: null;
-            project_id: null;
             signing_wallet_id: null;
           }
       )
@@ -229,8 +228,7 @@ export async function enforceApiKeyOrganizationAccess(
     settings: row.settings,
     walletAuthorization: resolveApiKeyWalletAuthorization(
       walletBindingCandidatesSchema.parse(parsePostgresJson<unknown>(row.wallet_bindings)),
-      row.signing_wallet_id,
-      { apiKeyId, organizationId, projectId: row.project_id }
+      row.signing_wallet_id
     ),
   };
 }

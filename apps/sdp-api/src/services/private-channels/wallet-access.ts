@@ -31,8 +31,8 @@ const explicitPermissionsSchema = z.array(z.enum(PERMISSIONS));
 /**
  * Refresh the key's role and permissions before authorizing a specific
  * operation or wallet, and its liveness from the same row, so a key revoked
- * while the request runs signs nothing. Wallet bindings need no re-read:
- * authentication read them fresh for this request.
+ * between authentication and this read signs nothing. Wallet bindings need no
+ * re-read: authentication read them fresh for this request.
  */
 export async function refreshPrivateChannelAuth(
   env: Env,

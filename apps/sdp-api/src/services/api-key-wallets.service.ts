@@ -109,30 +109,24 @@ function resolveBindingCandidate(candidates: ApiKeyWalletCandidate[]): string | 
 
 /**
  * Resolve binding rows to exact custody wallets. A binding that names no
- * wallet, or is ambiguous, hydrates as deny-only (the key stays selected
- * scope, with no usable wallet there), and is logged for operators.
+ * wallet, or is ambiguous, hydrates as deny-only: the key stays selected
+ * scope, with no usable wallet there. Pure, because authentication runs it on
+ * every request; the cache fill reports unresolved bindings to operators.
  */
 export function resolveApiKeyWalletAuthorization(
   rows: ApiKeyWalletBindingCandidates[],
-  preferredSigningWalletId: string | null,
-  key: { apiKeyId: string; organizationId: string; projectId: string }
+  preferredSigningWalletId: string | null
 ) {
-  const resolvedRows = rows.map((row): ApiKeyWalletPermissionRow => {
-    const custodyWalletId = resolveBindingCandidate(row.candidates);
-    if (custodyWalletId === null) {
-      getLogger().warn(
-        { ...key, walletId: row.wallet_id, candidateCount: row.candidates.length },
-        "api_key_wallet_binding_unresolved"
-      );
-    }
-    return {
-      wallet_id: row.wallet_id,
-      permissions: row.permissions,
-      custody_wallet_id: custodyWalletId,
-    };
-  });
-
-  return hydrateApiKeyWalletAuthorization(resolvedRows, preferredSigningWalletId);
+  return hydrateApiKeyWalletAuthorization(
+    rows.map(
+      (row): ApiKeyWalletPermissionRow => ({
+        wallet_id: row.wallet_id,
+        permissions: row.permissions,
+        custody_wallet_id: resolveBindingCandidate(row.candidates),
+      })
+    ),
+    preferredSigningWalletId
+  );
 }
 
 export async function loadApiKeyWalletAuthorization(
@@ -192,15 +186,28 @@ export async function loadApiKeyWalletAuthorization(
     candidatesByWalletId.set(candidate.wallet_id, matches);
   }
 
-  return resolveApiKeyWalletAuthorization(
-    permissionRows.map((row) => ({
-      wallet_id: row.wallet_id,
-      permissions: row.permissions,
-      candidates: candidatesByWalletId.get(row.wallet_id) ?? [],
-    })),
-    preferredSigningWalletId,
-    { apiKeyId, organizationId, projectId }
-  );
+  const rows = permissionRows.map((row) => ({
+    wallet_id: row.wallet_id,
+    permissions: row.permissions,
+    candidates: candidatesByWalletId.get(row.wallet_id) ?? [],
+  }));
+  // Once per cache fill, not per request: the binding hydrates as deny-only, so
+  // the key silently loses that wallet.
+  for (const row of rows) {
+    if (resolveBindingCandidate(row.candidates) === null) {
+      getLogger().warn(
+        {
+          apiKeyId,
+          organizationId,
+          projectId,
+          walletId: row.wallet_id,
+          candidateCount: row.candidates.length,
+        },
+        "api_key_wallet_binding_unresolved"
+      );
+    }
+  }
+  return resolveApiKeyWalletAuthorization(rows, preferredSigningWalletId);
 }
 
 export async function listApiKeyWalletBindings(

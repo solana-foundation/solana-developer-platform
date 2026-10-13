@@ -116,7 +116,6 @@ it("does not replace an unresolved preferred wallet with another binding", () =>
 // Wallet status is state, not access: a binding still names its deactivated
 // wallet, so a replay passes the same check as the original request.
 it("resolves a binding to its one active wallet, else to its one wallet of any status", () => {
-  const key = { apiKeyId: "key_1", organizationId: "org_1", projectId: "prj_1" };
   const auth = resolveApiKeyWalletAuthorization(
     [
       {
@@ -141,8 +140,7 @@ it("resolves a binding to its one active wallet, else to its one wallet of any s
         ],
       },
     ],
-    null,
-    key
+    null
   );
 
   expect(auth.walletBindings).toEqual([
