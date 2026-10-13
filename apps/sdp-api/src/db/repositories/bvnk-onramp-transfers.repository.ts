@@ -10,10 +10,9 @@ export type BvnkOnrampPayoutIntent = NonNullable<
   NonNullable<BvnkOnrampTransferData["payout"]>["intent"]
 >;
 
-/** A candidate row carries the joined active funding-wallet reference and project environment. */
+/** A candidate row carries the joined active funding-wallet reference. */
 export interface BvnkOnrampTransferCandidateRow extends PaymentTransferRow {
   fundingWalletReference: string;
-  environment: SdpEnvironment;
 }
 
 export interface GetBvnkOnrampTransferByPayinIdInput {
@@ -111,17 +110,17 @@ export interface BvnkOnrampTransfersRepository {
    */
   applyPayin(input: ApplyBvnkOnrampPayinInput): Promise<PaymentTransferRow | null>;
 
-  /** Lists settling transfers with no payout claim; eligibility is decided in SQL before LIMIT, oldest first. */
+  /** Lists the open cluster scope's settling transfers with no payout claim; eligibility is decided in SQL before LIMIT, oldest first. Throws `CLUSTER_SCOPE_MISSING` outside a scope. */
   listUnclaimedPayoutCandidates(
     input: ListBvnkPayoutCandidatesInput
   ): Promise<BvnkOnrampTransferCandidateRow[]>;
 
-  /** Lists claimed-without-payoutId transfers whose claim predates the cutoff; decided in SQL before LIMIT, oldest first. */
+  /** Lists the open cluster scope's claimed-without-payoutId transfers whose claim predates the cutoff; decided in SQL before LIMIT, oldest first. Throws `CLUSTER_SCOPE_MISSING` outside a scope. */
   listRecoverablePayoutCandidates(
     input: ListBvnkPayoutCandidatesInput
   ): Promise<BvnkOnrampTransferCandidateRow[]>;
 
-  /** Lists settling transfers with a payoutId whose last poll (or claim) predates the cutoff; decided in SQL before LIMIT, oldest first. */
+  /** Lists the open cluster scope's settling transfers with a payoutId whose last poll (or claim) predates the cutoff; decided in SQL before LIMIT, oldest first. Throws `CLUSTER_SCOPE_MISSING` outside a scope. */
   listPollablePayoutCandidates(
     input: ListBvnkPayoutCandidatesInput
   ): Promise<BvnkOnrampTransferCandidateRow[]>;

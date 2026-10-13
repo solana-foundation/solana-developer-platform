@@ -1,4 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { isDecimalString } from "@sdp/solana/amount";
 import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
@@ -26,7 +27,6 @@ function mapOnrampTransferCandidateRow(
   return {
     ...mapTransferRow(row),
     fundingWalletReference: row.funding_wallet_reference as string,
-    environment: row.environment as BvnkOnrampTransferCandidateRow["environment"],
   };
 }
 
@@ -46,23 +46,24 @@ JOIN counterparty_provider_accounts cpa
  AND cpa.fiat_currency = pt.fiat_currency
 JOIN projects prj
   ON prj.id = pt.project_id
-WHERE pt.provider = 'bvnk'
+WHERE prj.environment = ?
+  AND pt.provider = 'bvnk'
   AND pt.type = 'onramp'
   AND pt.status = 'settling'
   AND jsonb_exists(pt.provider_data->'bvnk','payin')`;
 
-const UNCLAIMED_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference, prj.environment AS environment${PAYOUT_CANDIDATE_FROM}
+const UNCLAIMED_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference${PAYOUT_CANDIDATE_FROM}
   AND NOT jsonb_exists(pt.provider_data->'bvnk','payout')
 ORDER BY pt.updated_at ASC
 LIMIT ?`;
 
-const RECOVERABLE_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference, prj.environment AS environment${PAYOUT_CANDIDATE_FROM}
+const RECOVERABLE_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference${PAYOUT_CANDIDATE_FROM}
   AND NOT jsonb_exists(pt.provider_data->'bvnk'->'payout','payoutId')
   AND pt.provider_data->'bvnk'->'payout'->>'claimedAt' < ?
 ORDER BY pt.updated_at ASC
 LIMIT ?`;
 
-const POLLABLE_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference, prj.environment AS environment${PAYOUT_CANDIDATE_FROM}
+const POLLABLE_PAYOUT_CANDIDATES_SQL = `SELECT pt.*, ${ONRAMP_KIND}, cpa.external_account_reference AS funding_wallet_reference${PAYOUT_CANDIDATE_FROM}
   AND jsonb_exists(pt.provider_data->'bvnk'->'payout','payoutId')
   AND coalesce(pt.provider_data->'bvnk'->'payout'->>'lastPolledAt', pt.provider_data->'bvnk'->'payout'->>'claimedAt') < ?
 ORDER BY pt.updated_at ASC
@@ -280,7 +281,7 @@ export function createPostgresBvnkOnrampTransfersRepository(
     async listUnclaimedPayoutCandidates(input: ListBvnkPayoutCandidatesInput) {
       const rows = await db
         .prepare(UNCLAIMED_PAYOUT_CANDIDATES_SQL)
-        .bind(input.limit)
+        .bind(currentClusterScope().environment, input.limit)
         .all<OnrampTransferProjectionRow>();
 
       return rows.results.map(mapOnrampTransferCandidateRow);
@@ -289,7 +290,7 @@ export function createPostgresBvnkOnrampTransfersRepository(
     async listRecoverablePayoutCandidates(input: ListBvnkPayoutCandidatesInput) {
       const rows = await db
         .prepare(RECOVERABLE_PAYOUT_CANDIDATES_SQL)
-        .bind(input.cutoff, input.limit)
+        .bind(currentClusterScope().environment, input.cutoff, input.limit)
         .all<OnrampTransferProjectionRow>();
 
       return rows.results.map(mapOnrampTransferCandidateRow);
@@ -298,7 +299,7 @@ export function createPostgresBvnkOnrampTransfersRepository(
     async listPollablePayoutCandidates(input: ListBvnkPayoutCandidatesInput) {
       const rows = await db
         .prepare(POLLABLE_PAYOUT_CANDIDATES_SQL)
-        .bind(input.cutoff, input.limit)
+        .bind(currentClusterScope().environment, input.cutoff, input.limit)
         .all<OnrampTransferProjectionRow>();
 
       return rows.results.map(mapOnrampTransferCandidateRow);
