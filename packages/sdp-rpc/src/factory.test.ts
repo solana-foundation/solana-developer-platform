@@ -1074,4 +1074,40 @@ describe("createClusterJsonRpcFetch", () => {
     }
     assert.ok(documents.some((document) => document.includes("18446744073709551615")));
   });
+
+  it("returns a genuine $n object in a response kit decodes as plain JSON exactly as the endpoint sent it", async () => {
+    const devnet = "https://devnet-json-rpc-value-object.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const answered =
+      '{"jsonrpc":"2.0","id":1,"result":{"interface":{"$n":"5"},"supply":{"$n":"-12"},"slot":7}}';
+    stubRawJsonRpc(GENESIS_HASH_BY_CLUSTER.devnet, () => answered);
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    const response = await jsonRpcFetch("https://door.invalid", jsonRpcInit("getAsset"));
+
+    assert.equal(await response.text(), answered);
+  });
+
+  it("refuses a JSON-RPC batch before any request reaches the pool", async () => {
+    const devnet = "https://devnet-json-rpc-batch.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const calls = stubEndpoints({ [devnet]: SERVES_DEVNET });
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    await assert.rejects(
+      jsonRpcFetch("https://door.invalid", {
+        method: "POST",
+        body: '[{"jsonrpc":"2.0","id":1,"method":"getSlot"},{"jsonrpc":"2.0","id":2,"method":"getSlot"}]',
+      }),
+      {
+        name: "TypeError",
+        message: "The cluster JSON-RPC fetch sends one JSON-RPC request at a time",
+      }
+    );
+    assert.deepEqual(calls, []);
+  });
 });

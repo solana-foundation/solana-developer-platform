@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
 import {
   classifyProviderStatus,
   extractProviderErrorMessage,
   providerFetch,
   providerFetchJson,
+  providerFetchVia,
 } from "./fetch";
 
 /**
@@ -244,6 +246,23 @@ describe("providerFetch", () => {
         timeoutMs: 20,
       }),
       earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API/)
+    );
+  });
+});
+
+describe("providerFetchVia", () => {
+  it("rethrows the door's SdpRpcError as the door threw it", async () => {
+    const doorRefusal = new SdpRpcError(
+      "RPC_CLUSTER_MISMATCH",
+      "The pool serves mainnet-beta, not devnet"
+    );
+    const send: typeof fetch = async () => {
+      throw doorRefusal;
+    };
+
+    await assert.rejects(
+      providerFetchVia(send, "kamino", "https://door.invalid", { method: "POST" }),
+      (error: unknown) => error === doorRefusal
     );
   });
 });

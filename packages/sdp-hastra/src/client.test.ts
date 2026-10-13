@@ -35,6 +35,10 @@ const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
   projectId: "proj_hastra_client",
   environment: "production",
 };
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_hastra_client",
+  environment: "sandbox",
+};
 const BEYOND_SAFE_INTEGER = "9007199254740993";
 /** The chain slot every stubbed account read reports. */
 const STUB_SLOT = 1_000;
@@ -403,15 +407,22 @@ function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapL
   };
 }
 
-function makeClient(port: Partial<HastraSwapPort> = {}) {
+function makeClientIn(
+  scope: Parameters<typeof runInClusterScope>[0],
+  port: Partial<HastraSwapPort>
+) {
   const swapPort: HastraSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "125", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => swapLeg("120", "125")),
   };
   return new HastraVaultDirectClient(
-    (_label, operation) => runInClusterScope(PRODUCTION_SCOPE, () => operation(() => {})),
+    (_label, operation) => runInClusterScope(scope, () => operation(() => {})),
     () => swapPort
   );
+}
+
+function makeClient(port: Partial<HastraSwapPort> = {}) {
+  return makeClientIn(PRODUCTION_SCOPE, port);
 }
 
 function instructionAmount(instruction: EarnVaultInstruction): bigint {
@@ -1320,7 +1331,7 @@ describe("Hastra positions and deployment guardrails", () => {
 
   it("fails closed in sandbox because Hastra has no verified devnet deployment", async () => {
     await expect(
-      makeClient().readVaultPositions(
+      makeClientIn(SANDBOX_SCOPE, {}).readVaultPositions(
         { env: {}, environment: "sandbox" },
         { owner: OWNER, providerReferences: [] }
       )
