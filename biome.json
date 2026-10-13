@@ -295,6 +295,7 @@
         "**/apps/sdp-api/src/routes/earn/index.ts",
         "**/apps/sdp-api/src/cron/cluster-runs.ts",
         "**/apps/sdp-api/src/cron/earn-catalogue-sync.ts",
+        "**/apps/sdp-api/scripts/inventory-veda-catalogue.ts",
         "**/apps/sdp-api/src/cron/earn-metrics-refresh.ts",
         "**/apps/sdp-api/src/routes/webhooks/handlers.ts",
         "**/apps/sdp-api/src/services/jobs/replay-ramp-webhook-events.ts"
