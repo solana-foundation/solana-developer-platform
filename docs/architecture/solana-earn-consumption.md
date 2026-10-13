@@ -35,9 +35,10 @@ records the movement before broadcast, and reconciles its final state.
 An authenticated project determines its own environment, and every deployment
 serves both clusters by project. A keyless request has no project, so the
 caller picks the shelf: `GET /v1/earn/strategies?environment=` names it
-(production when omitted), and a quote or build follows the environment of the
-strategy it names. On an authenticated strategy list, an `?environment=` value
-that disagrees with the API-key project is refused with 400. The deployment's
+(required; 400 when omitted), and a strategy read, quote or build follows the
+environment of the strategy row it names. On an authenticated strategy list, an
+`?environment=` value that disagrees with the API-key project is refused with
+409. The deployment's
 own `ENVIRONMENT` never selects a cluster. This revisits the
 earlier "request input never selects production" rule: an anonymous production
 build moves no funds, and its RPC spend is metered per client address.
