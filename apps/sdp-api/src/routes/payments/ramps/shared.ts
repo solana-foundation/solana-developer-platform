@@ -41,7 +41,7 @@ import {
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import {
@@ -379,6 +379,7 @@ export async function estimateAcrossProviders(
           provider,
           organization_id: scope.auth.organizationId,
           error_message: redactCredentialString(cause.message),
+          error_diagnostics: paymentsErrorDiagnostics(error),
           ...describeError(error),
         });
         const observability = c.get("observability");

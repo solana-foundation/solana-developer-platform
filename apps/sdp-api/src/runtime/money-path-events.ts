@@ -1,3 +1,5 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
+import { scrubTelemetry } from "@sdp/redaction";
 import { getLogger } from "./logger";
 
 export type MoneyPathEvent = Record<string, unknown> & { event: string };
@@ -18,4 +20,18 @@ export function describeError(error: unknown): { error_name: string; error_code?
     error_name: error.name,
     error_code: typeof code === "string" ? code : undefined,
   };
+}
+
+/**
+ * The scrubbed diagnostics a payments error carries: the provider's own
+ * wording, which the API never returns. Only ramp-specific logs add these; the
+ * shared vendor-call event stays name and code only (EARN-025).
+ *
+ * @param cause - The thrown value.
+ * @returns The scrubbed diagnostics, or undefined when the error carries none.
+ */
+export function paymentsErrorDiagnostics(cause: unknown): Record<string, unknown> | undefined {
+  return cause instanceof SdpPaymentsError && cause.diagnostics !== undefined
+    ? scrubTelemetry(cause.diagnostics)
+    : undefined;
 }

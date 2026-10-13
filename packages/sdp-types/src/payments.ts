@@ -1147,7 +1147,9 @@ export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCrypto
 
 export type PaymentRampInstruction = BvnkPaymentRampInstruction;
 
-export type RampDirection = "onramp" | "offramp";
+export const RAMP_DIRECTIONS = ["onramp", "offramp"] as const;
+
+export type RampDirection = (typeof RAMP_DIRECTIONS)[number];
 
 export interface PaymentRampEstimateFees {
   currency: RampFiatCurrency | CryptoAssetSymbol;

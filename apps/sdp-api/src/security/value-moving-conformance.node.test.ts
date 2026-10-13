@@ -259,7 +259,7 @@ const contracts: ValueMovingContract[] = [
     family: "payments",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/context.ts",
-      evidence: "createRequestSponsorshipFeePayment(c)",
+      evidence: "createRequestSponsorshipFeePayment(c, movement)",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",

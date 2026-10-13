@@ -31,13 +31,20 @@ const DEFAULT_ERROR_MESSAGES: Record<SdpPaymentsErrorCode, string> = {
     "An indicative estimate is not available; the rate is known at quote time",
 };
 
+/**
+ * A payments failure. `message` and `details` are public: the API serializes
+ * them into error bodies and transfer rows, so they never carry provider
+ * response text. Whatever the provider said, and why its response was refused,
+ * goes in `diagnostics`, which the API logs scrubbed and never returns.
+ */
 export class SdpPaymentsError extends Error {
   public readonly statusCode: number;
 
   constructor(
     public readonly code: SdpPaymentsErrorCode,
     message?: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    public readonly diagnostics?: Record<string, unknown>
   ) {
     super(message || DEFAULT_ERROR_MESSAGES[code]);
     this.name = "SdpPaymentsError";
@@ -45,33 +52,44 @@ export class SdpPaymentsError extends Error {
   }
 }
 
-export function badRequest(message?: string, details?: Record<string, unknown>): SdpPaymentsError {
-  return new SdpPaymentsError("BAD_REQUEST", message, details);
+export function badRequest(
+  message?: string,
+  details?: Record<string, unknown>,
+  diagnostics?: Record<string, unknown>
+): SdpPaymentsError {
+  return new SdpPaymentsError("BAD_REQUEST", message, details, diagnostics);
 }
 
 export function internalError(
   message?: string,
-  details?: Record<string, unknown>
+  details?: Record<string, unknown>,
+  diagnostics?: Record<string, unknown>
 ): SdpPaymentsError {
-  return new SdpPaymentsError("INTERNAL_ERROR", message, details);
+  return new SdpPaymentsError("INTERNAL_ERROR", message, details, diagnostics);
 }
 
-export function rateLimited(message?: string, details?: Record<string, unknown>): SdpPaymentsError {
-  return new SdpPaymentsError("RATE_LIMITED", message, details);
+export function rateLimited(
+  message?: string,
+  details?: Record<string, unknown>,
+  diagnostics?: Record<string, unknown>
+): SdpPaymentsError {
+  return new SdpPaymentsError("RATE_LIMITED", message, details, diagnostics);
 }
 
 export function providerNotConfigured(
   message?: string,
-  details?: Record<string, unknown>
+  details?: Record<string, unknown>,
+  diagnostics?: Record<string, unknown>
 ): SdpPaymentsError {
-  return new SdpPaymentsError("PROVIDER_NOT_CONFIGURED", message, details);
+  return new SdpPaymentsError("PROVIDER_NOT_CONFIGURED", message, details, diagnostics);
 }
 
 export function providerUnavailable(
   message?: string,
-  details?: Record<string, unknown>
+  details?: Record<string, unknown>,
+  diagnostics?: Record<string, unknown>
 ): SdpPaymentsError {
-  return new SdpPaymentsError("PROVIDER_UNAVAILABLE", message, details);
+  return new SdpPaymentsError("PROVIDER_UNAVAILABLE", message, details, diagnostics);
 }
 
 export function estimateNotAvailable(

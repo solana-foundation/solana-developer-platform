@@ -51,22 +51,24 @@ interface MoonpayConfig {
   offrampUrl: string;
 }
 
-interface MoonpayBuyQuoteResponse {
-  baseCurrencyAmount: number;
-  quoteCurrencyAmount: number;
-  quoteCurrencyPrice: number;
-  feeAmount: number;
-  networkFeeAmount: number;
-  extraFeeAmount: number;
-}
+/** The fields `estimateOnramp` reads from a MoonPay buy quote. */
+const moonpayBuyQuoteSchema = z.object({
+  baseCurrencyAmount: z.number(),
+  quoteCurrencyAmount: z.number(),
+  quoteCurrencyPrice: z.number(),
+  feeAmount: z.number(),
+  networkFeeAmount: z.number(),
+  extraFeeAmount: z.number(),
+});
 
-interface MoonpaySellQuoteResponse {
-  baseCurrencyAmount: number;
-  quoteCurrencyAmount: number;
-  baseCurrencyPrice: number;
-  feeAmount: number;
-  extraFeeAmount: number;
-}
+/** The fields `estimateOfframp` reads from a MoonPay sell quote. */
+const moonpaySellQuoteSchema = z.object({
+  baseCurrencyAmount: z.number(),
+  quoteCurrencyAmount: z.number(),
+  baseCurrencyPrice: z.number(),
+  feeAmount: z.number(),
+  extraFeeAmount: z.number(),
+});
 
 function readMoonpayConfig(
   env: Record<string, string | undefined>,
@@ -404,9 +406,12 @@ export class MoonpayRampClient implements RampProvider {
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.fiatAmount);
-    const quote = await providerFetchJson<MoonpayBuyQuoteResponse>(this.id, url.toString(), {
-      method: "GET",
-    });
+    const quote = await providerFetchJson(
+      this.id,
+      url.toString(),
+      { method: "GET" },
+      moonpayBuyQuoteSchema
+    );
     return {
       provider: this.id,
       direction: "onramp",
@@ -438,9 +443,12 @@ export class MoonpayRampClient implements RampProvider {
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
     url.searchParams.set("baseCurrencyAmount", input.cryptoAmount);
-    const quote = await providerFetchJson<MoonpaySellQuoteResponse>(this.id, url.toString(), {
-      method: "GET",
-    });
+    const quote = await providerFetchJson(
+      this.id,
+      url.toString(),
+      { method: "GET" },
+      moonpaySellQuoteSchema
+    );
     return {
       provider: this.id,
       direction: "offramp",

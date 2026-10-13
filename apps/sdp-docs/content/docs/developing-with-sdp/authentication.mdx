@@ -44,7 +44,7 @@ Authentication and authorization failures are always machine-distinguishable:
 | --- | --- | --- |
 | No API key on a keyed-only request | 401 | `UNAUTHORIZED` |
 | Malformed or unknown key | 401 | `INVALID_API_KEY` |
-| Key has been revoked | 401 | `REVOKED_API_KEY` |
+| Key has been revoked, or its organization was deleted or suspended | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
 | Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
 | Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |

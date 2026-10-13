@@ -20,6 +20,7 @@ import type {
   CachedApiKey,
   Permission,
 } from "@sdp/types";
+import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
@@ -29,11 +30,11 @@ import {
   loadCachedApiKeyFromDb,
 } from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
-import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
-import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
+import { enforceApiKeyOrganizationAccess } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
@@ -311,25 +312,28 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // row still says active, a key created or rotated after an organization
   // deletion enumerated that org's keys is covered by neither the
   // deletion's revocation nor its cache refresh.
-  if (cachedKey.organizationStatus !== "active") {
+  // A legacy entry without an organization status is refused, as before.
+  if (
+    cachedKey.organizationStatus === undefined ||
+    !organizationStatusMayAuthenticate(cachedKey.organizationStatus)
+  ) {
     throw new AppError("REVOKED_API_KEY");
   }
 
-  // Check status
-  if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
+  // The same predicate as the live re-check below, so a malformed expiry
+  // fails closed here too.
+  const cachedRefusal = apiKeyRowRefusal(
+    {
+      status: cachedKey.status,
+      expires_at: cachedKey.expiresAt,
+      rotation_deadline: cachedKey.rotationDeadline,
+    },
+    Date.now()
+  );
+  if (cachedRefusal === "revoked") {
     throw new AppError("REVOKED_API_KEY");
   }
-
-  if (cachedKey.status === "expired") {
-    throw new AppError("EXPIRED_API_KEY");
-  }
-
-  // Check expiration
-  if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
-    throw new AppError("EXPIRED_API_KEY");
-  }
-
-  if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
+  if (cachedRefusal === "expired") {
     throw new AppError("EXPIRED_API_KEY");
   }
 
@@ -339,13 +343,15 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 
   await enforceRateLimit(c, cachedKey.id, RATE_LIMIT_TIERS[cachedKey.rateLimitTier]);
 
-  // Uncached Postgres read (so enabling it takes effect immediately) — which
-  // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
-  // key costs one DB read per rejected request. Behind it, reads are capped
-  // at the tier; the quota this spends belongs to whoever holds the key.
+  // The authoritative check: one uncached Postgres read of the organization and
+  // this key's own row, so a deletion or revocation the cache has not caught up
+  // with (a failed refresh, APE-387) still refuses this request. The cached
+  // checks above only reject cheaply. It must sit behind the KV-backed limiter:
+  // ahead of it, a flooding key costs one DB read per rejected request. Behind
+  // it, reads are capped at the tier; the quota belongs to whoever holds the key.
   recordOrganizationEntitlements(
     c,
-    await enforceOrganizationIpAllowlist(c, cachedKey.organizationId)
+    await enforceApiKeyOrganizationAccess(c, cachedKey.organizationId, cachedKey.id)
   );
 
   // Set auth context

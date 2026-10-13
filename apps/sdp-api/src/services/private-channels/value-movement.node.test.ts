@@ -15,6 +15,7 @@ import {
   mapPrivateChannelTransferRow,
   mapPrivateChannelWithdrawalRow,
 } from "@/db/repositories";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env } from "@/test/helpers/env";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -227,6 +228,19 @@ describe.each(["deposit", "withdrawal", "transfer"] as const)(
     });
   }
 );
+
+describe.each(["deposit", "transfer"] as const)("Private Channels %s refusal", (kind) => {
+  // A start the organization may no longer make is refused at signing; the
+  // row records the failure and the caller gets the 403, not a failed row.
+  it("surfaces a money-admission refusal instead of returning a failed row", async () => {
+    signTransactions.mockImplementationOnce(async () => {
+      throw new MoneyMovementRefusedError("organization_inactive");
+    });
+
+    await expect(execute(kind)).rejects.toBeInstanceOf(MoneyMovementRefusedError);
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+  });
+});
 
 it("keeps the withdrawal signer across one 401 refresh and records the new signature before resending", async () => {
   failSend = rpcHttpError(401);
