@@ -17,7 +17,7 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import { env, resetManagedRpcEnv } from "@/test/helpers/env";
+import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedRateLimit } from "@/test/mocks/kv";
@@ -196,16 +196,18 @@ describe("RPC Relay Routes", () => {
         expiresAt: null,
       })
     );
-    resetManagedRpcEnv();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("relays through plain fetch with a 30s bound and answers the masked provider", async () => {
-    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test/?api-key={API_KEY}";
-    env.SOLANA_RPC_QUICKNODE_API_KEY = "quicknode_key";
+    vi.stubEnv(
+      "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
+      "https://rpc.quicknode.test/?api-key=quicknode_key"
+    );
     const timeout = vi.spyOn(AbortSignal, "timeout");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -231,8 +233,8 @@ describe("RPC Relay Routes", () => {
   });
 
   it("alternates two managed providers across requests", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test");
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () =>
@@ -284,8 +286,8 @@ describe("RPC Relay Routes", () => {
         "failover",
         "active"
       );
-      env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test/";
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+      vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test/");
     });
 
     it("hops to the next provider when the first answers a JSON-RPC error", async () => {
@@ -421,7 +423,7 @@ describe("RPC Relay Routes", () => {
     }
 
     beforeEach(() => {
-      env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
     });
 
     it("refuses a destination no tenant wallet owns, before any upstream call", async () => {
@@ -501,7 +503,6 @@ describe("RPC Relay Routes", () => {
     });
 
     it("relays an airdrop bound to the tenant's own wallet inside a batch array", async () => {
-      env.SOLANA_RPC_TRITON_API_KEY = "triton_key";
       await seedCustodyWalletForProject(
         TEST_ORG.id,
         TEST_PROJECT_ID,
@@ -564,8 +565,7 @@ describe("RPC Relay Routes", () => {
     });
 
     it("answers a distinct code when the upstream times out", async () => {
-      env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-      env.SOLANA_RPC_TRITON_API_KEY = "triton_key";
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
       vi.spyOn(globalThis, "fetch").mockRejectedValue(
         new DOMException("The operation timed out.", "TimeoutError")
       );

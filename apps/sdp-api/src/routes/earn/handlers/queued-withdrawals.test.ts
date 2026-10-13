@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   earnExternalWalletQueuedWithdrawalPreviewSchema,
@@ -126,7 +127,7 @@ describe("queued withdrawal handler contracts", () => {
 
   it("keeps instant-only providers available and leaves queue-only fields null", async () => {
     capabilities.instant = withdrawalClient();
-    await expect(readOptions({ env } as never, "sandbox", position)).resolves.toEqual({
+    await expect(readOptions({ env } as never, position)).resolves.toEqual({
       instant: true,
       providerOrder: false,
       queued: false,
@@ -139,7 +140,7 @@ describe("queued withdrawal handler contracts", () => {
 
   it("advertises a provider-managed redemption order without calling it instant", async () => {
     capabilities.instant = withdrawalClient({ vaultWithdrawalSettlement: "provider_order" });
-    await expect(readOptions({ env } as never, "production", position)).resolves.toEqual({
+    await expect(readOptions({ env } as never, position)).resolves.toEqual({
       instant: false,
       providerOrder: true,
       queued: false,
@@ -163,7 +164,12 @@ describe("queued withdrawal handler contracts", () => {
       }),
     };
 
-    await expect(readOptions({ env } as never, "production", position)).resolves.toMatchObject({
+    await expect(
+      runInClusterScope(
+        { projectId: "prj_queued_withdrawal_test", environment: "production" },
+        () => readOptions({ env } as never, position)
+      )
+    ).resolves.toMatchObject({
       instant: false,
       providerOrder: false,
       queued: false,
@@ -186,7 +192,11 @@ describe("queued withdrawal handler contracts", () => {
         queueAsset: null,
       }),
     };
-    await expect(readOptions({ env } as never, "sandbox", position)).resolves.toMatchObject({
+    await expect(
+      runInClusterScope({ projectId: "prj_queued_withdrawal_test", environment: "sandbox" }, () =>
+        readOptions({ env } as never, position)
+      )
+    ).resolves.toMatchObject({
       instant: false,
       providerOrder: false,
       queued: false,
