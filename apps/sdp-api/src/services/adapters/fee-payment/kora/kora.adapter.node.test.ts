@@ -1,5 +1,6 @@
 import { createKoraAdapter } from "@sdp/payments/fee-payment";
 import { KoraAdapter } from "@sdp/payments/fee-payment/kora";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { KoraClient } from "@solana/kora";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -406,14 +407,16 @@ describe("KoraAdapter user_id forwarding", () => {
           result: { signed_transaction: "AQIDBA==" },
         })
       );
-    const adapter = createKoraAdapter(
-      {
-        FEE_PAYMENT_PROVIDER: "kora",
-        KORA_RPC_URL: "https://private-kora.example",
-        KORA_API_KEY: "kora-api-key",
-        KORA_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
-      },
-      "sdp:v1:production:org:project:user:actor"
+    const adapter = runInClusterScope({ projectId: null, environment: "production" }, () =>
+      createKoraAdapter(
+        {
+          FEE_PAYMENT_PROVIDER: "kora",
+          KORA_RPC_URL_MAINNET: "https://private-kora.example",
+          KORA_API_KEY_MAINNET: "kora-api-key",
+          KORA_CLOUD_RUN_AUDIENCE_MAINNET: "https://private-kora.example",
+        },
+        "sdp:v1:production:org:project:user:actor"
+      )
     );
 
     await adapter.signAsFeePayer(TX);
@@ -434,15 +437,19 @@ describe("KoraAdapter user_id forwarding", () => {
 
   it("rejects a Cloud Run identity audience that does not match the Kora origin", () => {
     expect(() =>
-      createKoraAdapter(
-        {
-          FEE_PAYMENT_PROVIDER: "kora",
-          KORA_RPC_URL: "https://kora-devnet.solana.com",
-          KORA_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
-        },
-        "sdp:v1:production:org:organization:api_key:key"
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        createKoraAdapter(
+          {
+            FEE_PAYMENT_PROVIDER: "kora",
+            KORA_RPC_URL_DEVNET: "https://kora-devnet.solana.com",
+            KORA_CLOUD_RUN_AUDIENCE_DEVNET: "https://private-kora.example",
+          },
+          "sdp:v1:production:org:organization:api_key:key"
+        )
       )
-    ).toThrow("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+    ).toThrow(
+      "KORA_RPC_URL_<CLUSTER> must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE_<CLUSTER> origin"
+    );
   });
 
   it("rejects sending a Cloud Run identity token over HTTP", () => {
@@ -453,6 +460,8 @@ describe("KoraAdapter user_id forwarding", () => {
           identityTokenAudience: "http://private-kora.example",
           userId: "sdp:v1:production:org:organization:api_key:key",
         })
-    ).toThrow("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+    ).toThrow(
+      "KORA_RPC_URL_<CLUSTER> must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE_<CLUSTER> origin"
+    );
   });
 });

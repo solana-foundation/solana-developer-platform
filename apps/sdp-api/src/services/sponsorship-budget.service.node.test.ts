@@ -1,4 +1,5 @@
 import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
   compileTransaction,
@@ -111,12 +112,16 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
-  const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
-    repository,
-    budgetRedis,
-    getNetworkFee: vi.fn().mockResolvedValue(5_000n),
-    now: () => new Date("2026-08-03T10:15:00.000Z"),
-  });
+  const feePayment = runInClusterScope(
+    { projectId: scope.projectId, environment: scope.environment },
+    () =>
+      new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
+        repository,
+        budgetRedis,
+        getNetworkFee: vi.fn().mockResolvedValue(5_000n),
+        now: () => new Date("2026-08-03T10:15:00.000Z"),
+      })
+  );
   return { feePayment, provider, repository, budgetRedis };
 }
 
@@ -144,11 +149,8 @@ describe("BudgetedFeePayment", () => {
     expect(created).toBeLessThan(reserved);
   });
 
-  it("charges the scope's cluster network, not the process default", async () => {
-    // A mainnet Earn movement on a devnet-default process must reserve against
-    // the mainnet policies and record a mainnet reservation, or the devnet
-    // budget silently pays for mainnet and the mainnet breaker never sees it.
-    const { feePayment, repository } = harness({ ...SCOPE, cluster: "mainnet-beta" });
+  it("charges the open cluster scope's network", async () => {
+    const { feePayment, repository } = harness({ ...SCOPE, environment: "production" });
     repository.resolvePolicies.mockResolvedValue([
       { ...policy("global"), network: "mainnet" },
       { ...policy("organization"), network: "mainnet" },
