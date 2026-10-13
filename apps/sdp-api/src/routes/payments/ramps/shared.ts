@@ -2,6 +2,7 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   isStagedProviderRefusalReason,
   type PaymentRampEstimate,
@@ -44,12 +45,7 @@ import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterpartie
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
-import {
-  type AppContext,
-  getPaymentsRepository,
-  rampRuntime,
-  resolveSdpEnvironment,
-} from "../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "../context";
 import {
   assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
@@ -82,7 +78,7 @@ type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsI
 function isRampProviderOffered(c: AppContext, provider: RampProviderId): boolean {
   return (
     isRampProviderInChannel(c, provider) &&
-    isRampProviderSurfaced(provider, resolveSdpEnvironment(c))
+    isRampProviderSurfaced(provider, currentClusterScope().environment)
   );
 }
 

@@ -1,8 +1,7 @@
-import type { SdpEnvironment } from "@sdp/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { EARN_SWAP_DEFAULT_SLIPPAGE_BPS, earnSwapSourceTokens } from "@sdp/types";
 import { z } from "zod";
 import { badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
-import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { AppContext } from "../context";
 
 /**
@@ -60,10 +59,18 @@ export function pageWindow({ page, pageSize }: EarnPageQuery): { limit: number; 
  *   so a picker can always send its selection;
  * - `swapSlippageBps` without a swap is refused rather than ignored, because
  *   a caller who sent it believed it would do something.
+ *
+ * The cluster is the open cluster scope's.
+ *
+ * @param body - The deposit request's swap fields.
+ * @param body.sourceTokenMint - The stablecoin the caller funds the deposit from, if any.
+ * @param body.swapSlippageBps - The caller's swap slippage, if any.
+ * @param depositTokenMint - The vault's deposit mint.
+ * @returns The validated swap input, or null when no swap is needed.
+ * @throws AppError `BAD_REQUEST` on an unsupported source mint or slippage without a swap.
  */
 export function resolveDepositSwapRequest(
   body: { sourceTokenMint?: string; swapSlippageBps?: number },
-  environment: SdpEnvironment,
   depositTokenMint: string
 ): { sourceTokenMint: string; slippageBps: number } | null {
   if (body.sourceTokenMint === undefined) {
@@ -75,7 +82,7 @@ export function resolveDepositSwapRequest(
   if (body.sourceTokenMint === depositTokenMint) {
     return null;
   }
-  const cluster = earnClusterFor(environment);
+  const { cluster } = currentClusterScope();
   const supported = earnSwapSourceTokens(cluster);
   if (!supported.some((token) => token.mint === body.sourceTokenMint)) {
     throw badRequest(
