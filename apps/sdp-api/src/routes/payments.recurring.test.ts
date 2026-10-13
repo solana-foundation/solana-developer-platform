@@ -4524,8 +4524,9 @@ describe("Payments routes — recurring", () => {
         key,
       });
       await crashIdempotencyKey(key);
-      // Admission now refuses any new start for the organization.
-      await deleteTestOrganization();
+      // Admission now refuses any new start for the organization. Deleted just
+      // after authentication, which reads organization status fresh (#2262).
+      deleteTestOrganizationAfterAuth();
       const sendsBefore = send.mock.calls.length;
 
       const retry = await request();
