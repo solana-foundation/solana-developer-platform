@@ -15,7 +15,7 @@ import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
-import { registerPaymentsPaths } from "./paths/payments";
+import { registerPaymentsPaths, registerSubscriptionPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
@@ -87,6 +87,16 @@ const OPENAPI_TAG = {
  * "Public OpenAPI promotion"); spec.test.ts pins both states.
  */
 export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
+
+/**
+ * Whether the public OpenAPI document includes subscription plans and
+ * subscriptions. Held false because their prepare routes return transactions
+ * that also need SDP's fee-payer signature, which SDP never adds, so a
+ * subscriber cannot land them. The internal document and the runtime are
+ * unaffected, and collection attempts stay public because recurring payments
+ * read them. Flip it once the prepare flows can complete.
+ */
+export const SUBSCRIPTIONS_PUBLIC_SURFACE_PUBLISHED = false;
 
 export type PublicOpenApiDocumentOptions = {
   /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
@@ -165,6 +175,9 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerProjectPaths(registry, publishEarn);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  if (SUBSCRIPTIONS_PUBLIC_SURFACE_PUBLISHED) {
+    registerSubscriptionPaths(registry);
+  }
   registerTransactionsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
@@ -183,6 +196,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerSubscriptionPaths(registry);
   registerTransactionsPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);

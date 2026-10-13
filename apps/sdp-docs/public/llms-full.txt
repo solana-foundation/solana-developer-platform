@@ -5407,19 +5407,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/recurring-payments/{id}/cancel` | Cancel recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/collect` | Collect recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/resume` | Resume recurring payment |
-| `GET` | `/v1/payments/subscription-plans` | List subscription plans |
-| `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
-| `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |
-| `PATCH` | `/v1/payments/subscription-plans/{planId}` | Update subscription plan |
-| `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | Prepare subscription plan creation |
-| `GET` | `/v1/payments/subscriptions` | List subscriptions |
-| `POST` | `/v1/payments/subscriptions` | Create subscription |
-| `GET` | `/v1/payments/subscriptions/{subscriptionId}` | Get subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | List subscription collection attempts |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Prepare subscription authorization |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | Prepare subscription resume |
 | `GET` | `/v1/payments/transfer-batches` | List transfer batches |
 | `POST` | `/v1/payments/transfer-batches` | Create transfer batch |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |

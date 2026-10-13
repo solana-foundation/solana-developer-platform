@@ -448,6 +448,126 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "get",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    tags: ["Payments"],
+    summary: "List subscription collection attempts",
+    operationId: "listPaymentSubscriptionCollectionAttempts",
+    description: "Lists collection attempts for a recurring-payment subscription.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentSubscriptionIdParamsSchema,
+      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Collection attempt list",
+        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/onramp/currency",
+    tags: ["Payments"],
+    summary: "List on-ramp currency support",
+    operationId: "listPaymentOnrampCurrencies",
+    description:
+      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentOnrampCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "On-ramp currency support",
+        content: jsonContent(onrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/ramps/offramp/currency",
+    tags: ["Payments"],
+    summary: "List off-ramp currency support",
+    operationId: "listPaymentOfframpCurrencies",
+    description:
+      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentOfframpCurrenciesQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Off-ramp currency support",
+        content: jsonContent(offrampCurrenciesResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/onramp/quote",
+    tags: ["Payments"],
+    summary: "Create on-ramp quote",
+    operationId: "createPaymentOnrampQuote",
+    description:
+      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      body: {
+        required: true,
+        content: jsonContent(createOnrampQuoteRequestSchema),
+      },
+    },
+    responses: {
+      200: {
+        description: "On-ramp quote created",
+        content: jsonContent(onrampQuoteResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/ramps/sandbox/simulate",
+    tags: ["Payments"],
+    summary: "Simulate sandbox transfer",
+    operationId: "simulateSandboxTransfer",
+    description:
+      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(simulateSandboxTransferRequestSchema),
+      },
+    },
+    responses: {
+      204: { description: "Sandbox pay-in requested from the provider" },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+}
+
+/**
+ * Subscription plans and subscriptions, registered apart from the rest of
+ * Payments because the public document holds them back (see
+ * `SUBSCRIPTIONS_PUBLIC_SURFACE_PUBLISHED` in ../spec.ts). Collection attempts
+ * stay in `registerPaymentsPaths`: recurring payments read them there.
+ */
+export function registerSubscriptionPaths(registry: OpenAPIRegistry) {
+  registry.registerPath({
     method: "post",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],
@@ -733,118 +853,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentSubscriptionResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
-    tags: ["Payments"],
-    summary: "List subscription collection attempts",
-    operationId: "listPaymentSubscriptionCollectionAttempts",
-    description: "Lists collection attempts for a recurring-payment subscription.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentSubscriptionIdParamsSchema,
-      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
-    },
-    responses: {
-      200: {
-        description: "Collection attempt list",
-        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/ramps/onramp/currency",
-    tags: ["Payments"],
-    summary: "List on-ramp currency support",
-    operationId: "listPaymentOnrampCurrencies",
-    description:
-      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      query: paymentOnrampCurrenciesQuerySchema,
-    },
-    responses: {
-      200: {
-        description: "On-ramp currency support",
-        content: jsonContent(onrampCurrenciesResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/ramps/offramp/currency",
-    tags: ["Payments"],
-    summary: "List off-ramp currency support",
-    operationId: "listPaymentOfframpCurrencies",
-    description:
-      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      query: paymentOfframpCurrenciesQuerySchema,
-    },
-    responses: {
-      200: {
-        description: "Off-ramp currency support",
-        content: jsonContent(offrampCurrenciesResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/onramp/quote",
-    tags: ["Payments"],
-    summary: "Create on-ramp quote",
-    operationId: "createPaymentOnrampQuote",
-    description:
-      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(createOnrampQuoteRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "On-ramp quote created",
-        content: jsonContent(onrampQuoteResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/payments/ramps/sandbox/simulate",
-    tags: ["Payments"],
-    summary: "Simulate sandbox transfer",
-    operationId: "simulateSandboxTransfer",
-    description:
-      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(simulateSandboxTransferRequestSchema),
-      },
-    },
-    responses: {
-      204: { description: "Sandbox pay-in requested from the provider" },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

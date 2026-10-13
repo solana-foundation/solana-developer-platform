@@ -138,12 +138,13 @@ export const tokenExtensionsConfigSchema = z
   .strict()
   .openapi({ description: "Token-2022 extensions configuration." });
 
-export const tokenTemplateIdSchema = z
-  .enum(["stablecoin", "arcade", "tokenized-security", "custom", "rwa"])
-  .openapi({
-    description: "Token template identifier.",
-    example: "stablecoin",
-  });
+/** Templates the public document offers for new tokens; the retired arcade template is left out. */
+const PUBLIC_TOKEN_TEMPLATES = ["stablecoin", "tokenized-security", "custom"] as const;
+
+export const tokenTemplateIdSchema = z.enum([...PUBLIC_TOKEN_TEMPLATES, "rwa"]).openapi({
+  description: "Token template identifier.",
+  example: "stablecoin",
+});
 
 export const tokenSchema = z
   .object({
@@ -762,7 +763,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       description: "Maximum supply as a string (UI units).",
       example: "1000000",
     }),
-    template: withOpenApi(createTokenSchemaBase.shape.template, {
+    template: z.enum(PUBLIC_TOKEN_TEMPLATES).optional().openapi({
       description: "Token template preset. Defaults to 'custom' if not specified.",
       example: "stablecoin",
     }),

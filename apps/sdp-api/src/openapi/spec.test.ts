@@ -596,6 +596,21 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("holds subscription plans and subscriptions out of the public document", () => {
+    const subscriptionPaths = (doc: ReturnType<typeof createOpenApiDocument>) =>
+      Object.keys(doc.paths ?? {}).filter((path) => path.startsWith("/v1/payments/subscription"));
+
+    // Collection attempts stay public: recurring payments read them.
+    expect(subscriptionPaths(createPublicOpenApiDocument())).toEqual([
+      "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
+    ]);
+    expect(subscriptionPaths(createOpenApiDocument())).toHaveLength(10);
+  });
+
+  it("offers no arcade template in the public document", () => {
+    expect(JSON.stringify(createPublicOpenApiDocument())).not.toContain("arcade");
+  });
+
   it("documents every runtime error code in the public error envelope", () => {
     const doc = createPublicOpenApiDocument();
     const forbidden = doc.paths?.["/v1/payments/transfers"]?.post?.responses?.["403"];

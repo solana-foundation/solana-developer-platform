@@ -1061,8 +1061,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     example: "key_example",
   });
   const kycStatusSchema = z.enum(KYC_STATUSES).openapi({
-    description:
-      "SDP-owned, provider-agnostic KYC status of the wallet.",
+    description: "SDP-owned, provider-agnostic KYC status of the wallet.",
     example: "verified",
   });
   const enrollmentFields = {
