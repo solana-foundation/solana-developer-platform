@@ -7,13 +7,15 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { badRequest, internalError } from "@/lib/errors";
-import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyRecordKey, markIdempotencyCommitted } from "@/middleware/idempotency";
-import type { MovementStepInput } from "@/middleware/movement-steps";
+import {
+  getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
+  markIdempotencyCommitted,
+} from "@/middleware/idempotency";
+import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
 import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
@@ -23,7 +25,7 @@ import {
   authorizeBatchRequest,
   resolveBatchMovement,
 } from "./resolve";
-import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
+import { buildTransferBatchResponse } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
 import {
   buildInstructionGroups,
@@ -67,33 +69,6 @@ export async function admitTransferBatchExecution(
   await admitPaymentWalletRuntimeExecution(c, input.authorized.sourceWallet);
 }
 
-/** The batch row's fingerprint, from the validated request and what authorize loaded. */
-function buildBatchRecordFingerprint(
-  c: AppContext,
-  body: CreateTransferBatchInput,
-  authorized: AuthorizedBatchRequest
-): string {
-  return buildTransferBatchFingerprint({
-    sourceCustodyWalletId: authorized.sourceWallet.id,
-    sourceAddress: authorized.sourceAddress,
-    token: normalizePaymentToken(body.token, c.env),
-    recipients: body.recipients.map((recipient) => {
-      const account = authorized.accounts.get(recipient.counterpartyAccountId);
-      if (!account) {
-        // authorizeBatchRequest refused any recipient without its account.
-        throw internalError("Authorized batch is missing a recipient's account");
-      }
-      return {
-        externalId: recipient.externalId ?? null,
-        counterpartyId: account.counterparty_id,
-        counterpartyAccountId: recipient.counterpartyAccountId,
-        amount: recipient.amount,
-      };
-    }),
-    options: body.options,
-  });
-}
-
 /**
  * Answers a create-batch request from its row: after a takeover of a crashed
  * attempt, or once the shared record has expired. No RPC and no account state.
@@ -101,27 +76,20 @@ function buildBatchRecordFingerprint(
 export async function findTransferBatchRecordReplay(
   c: AppContext,
   input: MovementStepInput<AuthorizedBatchRequest>,
-  idempotencyKey: string
-): Promise<Response | null> {
-  // SAFETY: mounted after validateBody(createTransferBatchSchema).
-  const body = input.body as CreateTransferBatchInput;
+  recordKey: string
+): Promise<RecordAnswer | null> {
   const { authorized } = input;
-  const replay = await resolveTransferBatchIdempotencyReplay(
-    getPaymentTransferBatchesRepository(c),
-    authorized.scope.auth.organizationId,
-    authorized.projectId,
-    idempotencyKey,
-    buildBatchRecordFingerprint(c, body, authorized),
-    authorized.sourceWallet.id
-  );
-  return replay === null
-    ? null
-    : respondToTransferBatchReplay(
-        c,
-        replay,
-        authorized.scope.auth.organizationId,
-        authorized.projectId
-      );
+  const organizationId = authorized.scope.auth.organizationId;
+  const row = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+    organizationId,
+    projectId: authorized.projectId,
+    idempotencyKey: recordKey,
+  });
+  if (row === null || row.idempotency_fingerprint === null) return null;
+  return {
+    fingerprint: row.idempotency_fingerprint,
+    respond: () => respondToTransferBatchReplay(c, row, organizationId, authorized.projectId),
+  };
 }
 
 /**
@@ -149,11 +117,10 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(c, body, authorized);
-  // The credential-bound record key (ADR 0008), never the raw client key.
+  // The credential-bound record key (ADR 0008), never the raw client key, and
+  // the key layer's fingerprint, which canonicalizes the batch body.
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
-  const idempotencyFingerprint = idempotencyKey
-    ? buildBatchRecordFingerprint(c, body, authorized)
-    : null;
+  const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
 
   const feePayment = getFeePayment(c, "payments.transfer_batch");
   const [signer, feePayer, lifetime] = await Promise.all([
@@ -228,15 +195,13 @@ export async function createTransferBatch(
     // The batch row exists under the key: any later answer is stored for its retries.
     markIdempotencyCommitted(c);
   } catch (error) {
-    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
-      const replay = await resolveTransferBatchIdempotencyReplay(
-        batchRepository,
-        resolved.scope.auth.organizationId,
-        resolved.projectId,
+    if (idempotencyKey && isPostgresUniqueViolation(error)) {
+      // A concurrent attempt under this key (a takeover) wrote the row first.
+      const replay = await batchRepository.findTransferBatchByIdempotency({
+        organizationId: resolved.scope.auth.organizationId,
+        projectId: resolved.projectId,
         idempotencyKey,
-        idempotencyFingerprint,
-        resolved.sourceWallet.id
-      );
+      });
       if (replay) {
         return respondToTransferBatchReplay(
           c,

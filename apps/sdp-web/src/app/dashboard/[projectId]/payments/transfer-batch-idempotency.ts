@@ -2,10 +2,9 @@
 
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import {
-  beginKeyedSend,
   createIdempotencyKeyStore,
-  refusalRetiresKey,
   resetIdempotencyKeyStoresForTests,
+  settleIdempotencyKey,
 } from "@/lib/idempotency-key-store";
 import {
   type CreateTransferBatchResult,
@@ -19,7 +18,7 @@ import {
  *
  * `POST /v1/payments/transfer-batches` replays by Idempotency-Key + payload
  * fingerprint, but only when the caller carries a key at all: an unkeyed retry
- * is a brand-new batch that moves the whole amount again. Storage, expiry and
+ * is a brand-new batch that moves the whole amount again. Storage and
  * the retire rule are the shared key store's (`lib/idempotency-key-store.ts`),
  * as for single transfers; this module owns what makes two batches the same one.
  */
@@ -38,7 +37,7 @@ export function resetTransferBatchIdempotencyStateForTests(): void {
  * the SAME intent, but the API fingerprints resolved recipients IN ORDER. Left
  * to diverge, a retry that reorders the list (remove a recipient, add it back)
  * carries the same key with a differently-ordered body, which the API refuses
- * as a fingerprint conflict — and a refusal is exactly what retires the key,
+ * as a fingerprint conflict — and that refusal (422) is what retires the key,
  * so the next press mints a fresh one and sends a SECOND batch for a request
  * that may already be recorded.
  *
@@ -86,7 +85,7 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
  * The same batch rebuilt after a retry or a reload gets the SAME key.
  */
 export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
+  return store.claim(fingerprint).key;
 }
 
 /**
@@ -100,10 +99,10 @@ export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
 /**
  * Sends one batch under the key that makes a retry a retry: claimed and pinned
  * before the request goes out (a batch whose key storage refused is not sent;
- * see `createTransferBatch`), and retired only on the dashboard-wide rule. A
- * recorded batch retires it; a network failure, a 5xx, a 409 or a 429 keeps
- * it, and so does any refusal once an earlier attempt went unanswered, since
- * that attempt may have paid every recipient.
+ * see `createTransferBatch`), and retired only on the dashboard-wide rule
+ * (`answerRetiresKey`): a recorded batch, a replay or a 422 retires it, and
+ * anything else keeps it, since an earlier attempt may have paid every
+ * recipient.
  *
  * @param request - The batch, in canonical form.
  * @param t - Translator, for the API's refusal message.
@@ -114,14 +113,13 @@ export async function sendTransferBatchUnderKey(
   t: Translate
 ): Promise<CreateTransferBatchResult> {
   const fingerprint = transferBatchRequestFingerprint(request);
-  const { key, earlierAttemptUnanswered } = beginKeyedSend(store, fingerprint);
+  const { key, persisted } = store.claim(fingerprint);
   let result: CreateTransferBatchResult;
   try {
-    result = await createTransferBatch(request, t, key);
+    result = await createTransferBatch(request, t, { value: key, persisted });
   } catch (error) {
-    const refusal = error instanceof TransferBatchRequestError ? error : null;
-    if (refusalRetiresKey(refusal, earlierAttemptUnanswered)) {
-      releaseTransferBatchIdempotencyKey(fingerprint);
+    if (error instanceof TransferBatchRequestError) {
+      settleIdempotencyKey(store, fingerprint, { status: error.status, replayed: error.replayed });
     }
     throw error;
   }

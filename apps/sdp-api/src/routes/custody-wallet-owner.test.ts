@@ -497,6 +497,18 @@ describe("Custody wallet owner contract", () => {
         expect(
           (await readWalletRows()).filter((row) => row.wallet_id === "privy_raced_loser")
         ).toEqual([]);
+        // Every audit intent the losing attempt opened has its outcome: none is
+        // left for reconciliation.
+        expect(
+          await getDb(env).queryOne(
+            `SELECT COUNT(*)::integer AS count FROM audit_logs i
+              WHERE i.metadata::jsonb->>'auditPhase' = 'intent'
+                AND NOT EXISTS (
+                  SELECT 1 FROM audit_logs o
+                   WHERE o.metadata::jsonb->>'auditIntentId' = i.resource_id
+                )`
+          )
+        ).toEqual({ count: 0 });
       }
     );
   });

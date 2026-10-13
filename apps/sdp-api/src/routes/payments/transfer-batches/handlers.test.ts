@@ -1542,11 +1542,13 @@ describe("payment transfer batches", () => {
       }>();
     expect(required(stored).source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     assert(stored);
-    assert(stored.idempotency_fingerprint);
-    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
-      "sourceCustodyWalletId",
-      TEST_CUSTODY_WALLET_ID
-    );
+    // The row records the key layer's fingerprint, which replayFromRecord compares.
+    const keyRecord = await getDb(env)
+      .prepare(
+        "SELECT fingerprint FROM idempotency_keys WHERE operation LIKE 'POST %transfer-batches'"
+      )
+      .first<{ fingerprint: string }>();
+    expect(stored.idempotency_fingerprint).toBe(required(keyRecord).fingerprint);
 
     const count = await getDb(env)
       .prepare(

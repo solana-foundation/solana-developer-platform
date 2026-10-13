@@ -108,19 +108,6 @@ describe("claim / release", () => {
     resetTransferBatchIdempotencyStateForTests();
     expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
   });
-
-  it("expires an unheld key after the TTL", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T12:00:00Z"));
-    const fingerprint = "fingerprint-ttl";
-    const key = claimTransferBatchIdempotencyKey(fingerprint);
-
-    vi.setSystemTime(new Date("2026-08-20T12:14:00Z"));
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
-
-    vi.setSystemTime(new Date("2026-08-20T12:16:00Z"));
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(key);
-  });
 });
 
 describe("sendTransferBatchUnderKey", () => {

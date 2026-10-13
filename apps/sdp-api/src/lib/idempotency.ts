@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AppError, conflict } from "@/lib/errors";
+import { conflict } from "@/lib/errors";
 
 /**
  * Turn a caller's `Idempotency-Key` into the stable request id a provider
@@ -80,25 +80,6 @@ export function isAbandonedReservation(row: { status: string; updated_at: string
   );
 }
 
-export async function resolveIdentityBoundIdempotencyReplay<
-  Row extends { idempotency_fingerprint: string | null },
->(
-  findExisting: () => Promise<Row | null>,
-  fingerprint: string,
-  identityMatches: (row: Row) => boolean
-): Promise<Row | null> {
-  const existing = await findExisting();
-  if (!existing || existing.idempotency_fingerprint === null) {
-    return null;
-  }
-  if (identityMatches(existing) && existing.idempotency_fingerprint === fingerprint) {
-    return existing;
-  }
-  // The row backstop answers like the shared Idempotency-Key step (HOO-1918):
-  // a key reused for a different request is 422, not 409.
-  throw new AppError("IDEMPOTENCY_KEY_REUSED");
-}
-
 /** A JSON value as `JSON.parse` returns it. */
 export type JsonValue =
   | null
@@ -172,87 +153,6 @@ export const normalizeForFingerprint = (value: unknown): unknown => {
 
   return value;
 };
-
-export interface PaymentTransferFingerprintInput {
-  custodyWalletId: string;
-  sourceAddress: string | null;
-  destinationAddress: string | null;
-  token: string;
-  amount: string | null;
-  memo: string | null | undefined;
-  type: string;
-}
-
-export interface TransferBatchFingerprintRecipientInput {
-  externalId: string | null;
-  counterpartyId: string;
-  counterpartyAccountId: string;
-  /** As the request sent it; normalised here (trailing zeros), never by token decimals. */
-  amount: string;
-}
-
-/**
- * Built from the request's own identifiers only (HOO-1918): no destination
- * address resolved from a counterparty account, no amount scaled by token
- * decimals read over RPC, so a replay from the batch row needs neither and is
- * never refused because an account changed since.
- */
-export interface TransferBatchFingerprintInput {
-  sourceCustodyWalletId: string;
-  sourceAddress: string;
-  token: string;
-  recipients: TransferBatchFingerprintRecipientInput[];
-  options: Record<string, unknown> | undefined;
-}
-
-function paymentTransferFingerprint(
-  input: PaymentTransferFingerprintInput,
-  custodyWalletId?: string
-): string {
-  return JSON.stringify(
-    normalizeForFingerprint({
-      scope: "payment_transfer",
-      custodyWalletId,
-      sourceAddress: input.sourceAddress,
-      destinationAddress: input.destinationAddress,
-      token: input.token,
-      // "0.0150" and "0.015" move the same, as the key step's fingerprint agrees.
-      amount: input.amount === null ? null : normalizeDecimalString(input.amount),
-      memo: input.memo ?? null,
-      type: input.type,
-    })
-  );
-}
-
-export const buildPaymentTransferFingerprint = (input: PaymentTransferFingerprintInput): string =>
-  paymentTransferFingerprint(input, input.custodyWalletId);
-
-function transferBatchFingerprint(
-  input: TransferBatchFingerprintInput,
-  sourceCustodyWalletId?: string
-): string {
-  return JSON.stringify(
-    normalizeForFingerprint({
-      scope: "payment_transfer_batch",
-      sourceCustodyWalletId,
-      sourceAddress: input.sourceAddress,
-      token: input.token,
-      // Order-insensitive, like the shared step's canonicalize (APE-667), so a
-      // reordered retry that reaches this row backstop replays (HOO-1918).
-      recipients: input.recipients
-        .map((recipient) => ({ ...recipient, amount: normalizeDecimalString(recipient.amount) }))
-        .sort((a, b) => {
-          const left = JSON.stringify(normalizeForFingerprint(a));
-          const right = JSON.stringify(normalizeForFingerprint(b));
-          return left < right ? -1 : left > right ? 1 : 0;
-        }),
-      options: input.options ?? null,
-    })
-  );
-}
-
-export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
-  transferBatchFingerprint(input, input.sourceCustodyWalletId);
 
 export interface EarnVaultDepositFingerprintInput {
   environment: string;

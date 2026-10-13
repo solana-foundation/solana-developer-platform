@@ -20,7 +20,8 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
@@ -1280,7 +1281,7 @@ export function EarnVaultDepositModal({
       toleranceBps: slippagePolicy === null ? null : slippageBps,
       ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
     });
-    const resolvedKey = vaultDepositIdempotencyKeyStore.claimReportingReuse(fingerprint);
+    const reused = vaultDepositIdempotencyKeyStore.has(fingerprint);
 
     // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
     // live — must replay the floor it was MINTED with, verbatim: the API's
@@ -1292,7 +1293,7 @@ export function EarnVaultDepositModal({
     // floor cannot re-floor safely at all — it stops here, submitting nothing,
     // rather than pair the live key with a changed request.
     const replay = floorToReplay(
-      resolvedKey,
+      { reused },
       recallVaultDepositFloor,
       fingerprint,
       minSharesOut ?? null
@@ -1311,8 +1312,8 @@ export function EarnVaultDepositModal({
     // bookkeeping needs. The controller still exists, but it gates the UI
     // below, never the request or the key bookkeeping.
     const submittedAt = Date.now();
-    const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
-    if (!submission) {
+    const { key, persisted } = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    if (!persisted) {
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
     }
@@ -1329,20 +1330,19 @@ export function EarnVaultDepositModal({
             }
           : {}),
       },
-      resolvedKey.key
+      key
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording what the
     // server just answered.
-    const disposition = applyIdempotencyKeyOutcome(
+    const retired = settleIdempotencyKey(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
-      result,
-      submission.wasUncertain
+      fetchResultAnswer(result)
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
-    if (disposition === "retired") forgetVaultDepositFloor(fingerprint);
+    if (retired) forgetVaultDepositFloor(fingerprint);
     if (controller.signal.aborted) return;
     const resolution = resolveDepositSubmission(
       result,

@@ -64,12 +64,12 @@ describe("vault deposit idempotency keys", () => {
   it("hands the same key to a retry and a different key to a different deposit", () => {
     const fingerprint = vaultDepositRequestFingerprint(request);
 
-    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(first);
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe(first);
     expect(
       vaultDepositIdempotencyKeyStore.claim(
         vaultDepositRequestFingerprint({ ...request, amount: "2" })
-      )
+      ).key
     ).not.toBe(first);
   });
 
@@ -77,35 +77,22 @@ describe("vault deposit idempotency keys", () => {
     // A reload is exactly this: the component that minted the key is gone and
     // the only thing that can tell a retry from a second deposit is the store.
     const fingerprint = vaultDepositRequestFingerprint(request);
-    const beforeReload = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    const beforeReload = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(beforeReload);
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe(beforeReload);
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
   });
 
   it("mints a fresh key once the previous one is retired", () => {
     const fingerprint = vaultDepositRequestFingerprint(request);
-    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
     vaultDepositIdempotencyKeyStore.release(fingerprint);
 
     // Not a retry any more: depositing the same amount from the same wallet
     // again is a SECOND deposit, and replaying the old key would silently
     // no-op it.
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(first);
-  });
-
-  it("expires a key that is far too old to be a retry", () => {
-    const fingerprint = vaultDepositRequestFingerprint(request);
-    const stale = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-
-    const entries = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as Array<{
-      createdAt: number;
-    }>;
-    entries[0].createdAt = Date.now() - 60 * 60_000;
-    sessionStorage.setItem(IDEMPOTENCY_STORE_KEY, JSON.stringify(entries));
-
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(stale);
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).not.toBe(first);
   });
 
   it("stays stable in-memory when the browser refuses to store anything", () => {
@@ -119,17 +106,17 @@ describe("vault deposit idempotency keys", () => {
     // scope by design, so it outlives `sessionStorage.clear()` between tests.
     const fingerprint = vaultDepositRequestFingerprint({ ...request, amount: "11" });
 
-    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
     // A refusing store costs DURABILITY, never correctness. Minting again here
     // would make an ambiguous retry a second on-chain deposit — failing soft
     // must not mean failing open.
     expect(first).toBe("00000000-0000-4000-8000-000000000001");
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(first);
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe(first);
     expect(
       vaultDepositIdempotencyKeyStore.claim(
         vaultDepositRequestFingerprint({ ...request, amount: "12" })
-      )
+      ).key
     ).not.toBe(first);
     expect(crypto.randomUUID).toHaveBeenCalledTimes(2);
   });
@@ -142,60 +129,26 @@ describe("vault deposit idempotency keys", () => {
       throw new Error("SecurityError");
     });
     const fingerprint = vaultDepositRequestFingerprint({ ...request, amount: "13" });
-    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
     vaultDepositIdempotencyKeyStore.release(fingerprint);
 
     expect(first).toBe("00000000-0000-4000-8000-000000000001");
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(first);
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).not.toBe(first);
   });
 });
 
-describe("an approval hold suspends expiry", () => {
-  it("keeps the key past the default TTL, because a human is the clock", () => {
-    const fingerprint = vaultDepositRequestFingerprint(request);
-    const held = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-    vaultDepositIdempotencyKeyStore.hold(fingerprint);
-
-    // Two hours later — far past the 15-minute default, which is calibrated to
-    // a blockhash and means nothing to an approval sitting in someone's queue.
-    const entries = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as Array<{
-      createdAt: number;
-      expiresAt?: number | null;
-    }>;
-    entries[0].createdAt = Date.now() - 2 * 60 * 60_000;
-    sessionStorage.setItem(IDEMPOTENCY_STORE_KEY, JSON.stringify(entries));
-
-    // A fresh key here would open a SECOND approval request for one intent.
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(held);
-  });
-
-  it("still retires a held key once the API answers", () => {
-    const fingerprint = vaultDepositRequestFingerprint(request);
-    const held = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-    vaultDepositIdempotencyKeyStore.hold(fingerprint);
-
-    vaultDepositIdempotencyKeyStore.release(fingerprint);
-
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(held);
-  });
-
-  it("does nothing for a request that was never claimed", () => {
-    vaultDepositIdempotencyKeyStore.hold(vaultDepositRequestFingerprint(request));
-    expect(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY)).toBeNull();
-  });
-
-  it("keeps an entry written before this field existed working under the default TTL", () => {
-    // Forward compatibility runs both ways: an entry from an older build has no
-    // `expiresAt`, and dropping it as unrecognized would mint a fresh key for a
-    // request already in flight.
+describe("entries from an earlier build", () => {
+  it("keeps an entry an older build wrote", () => {
+    // Dropping it as unrecognized would mint a fresh key for a request already
+    // in flight.
     const fingerprint = vaultDepositRequestFingerprint(request);
     sessionStorage.setItem(
       IDEMPOTENCY_STORE_KEY,
       JSON.stringify([{ id: fingerprint, value: "legacy-key", createdAt: Date.now() }])
     );
 
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe("legacy-key");
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe("legacy-key");
   });
 });
 
@@ -210,23 +163,8 @@ describe("a quota-diverged storage", () => {
     });
     const fingerprint = vaultDepositRequestFingerprint(request);
 
-    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(first);
-  });
-
-  it("keeps a hold visible when its write never reached storage", () => {
-    // The absorbed-by-approval detection and the spent-key pre-flight both key
-    // off "was this held" — losing the marker presents an executed approval
-    // replay as a fresh successful submission.
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("QuotaExceededError");
-    });
-    const fingerprint = vaultDepositRequestFingerprint(request);
-    vaultDepositIdempotencyKeyStore.claim(fingerprint);
-
-    vaultDepositIdempotencyKeyStore.hold(fingerprint);
-
-    expect(vaultDepositIdempotencyKeyStore.isHeld(fingerprint)).toBe(true);
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe(first);
   });
 
   it("hands authority back to storage once a write lands, syncing what failed", () => {
@@ -238,13 +176,13 @@ describe("a quota-diverged storage", () => {
       throw new Error("QuotaExceededError");
     });
     const fingerprint = vaultDepositRequestFingerprint(request);
-    const key = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    const key = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
     // Quota clears; the next write (a different claim) syncs everything.
     failing.mockImplementation(original);
     vaultDepositIdempotencyKeyStore.claim(
       vaultDepositRequestFingerprint({ ...request, amount: "7" })
-    );
+    ).key;
 
     const persisted = JSON.parse(sessionStorage.getItem(IDEMPOTENCY_STORE_KEY) ?? "[]") as Array<{
       id: string;
@@ -255,86 +193,31 @@ describe("a quota-diverged storage", () => {
     // Storage is authoritative again: an external edit is honoured, not
     // shadowed by memory.
     sessionStorage.setItem(IDEMPOTENCY_STORE_KEY, JSON.stringify([]));
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(key);
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).not.toBe(key);
   });
 });
 
 describe("storage bound", () => {
-  it("evicts expiring keys before a key an approval is waiting on", () => {
-    // The hazard: a held key dropped by a plain "keep newest N" mints a fresh
-    // key on the next submit, which opens a SECOND approval for one intent.
-    const heldFingerprint = vaultDepositRequestFingerprint(request);
-    const held = vaultDepositIdempotencyKeyStore.claim(heldFingerprint);
-    vaultDepositIdempotencyKeyStore.hold(heldFingerprint);
-
-    // Push well past the 20-entry cap with ordinary, expiring entries.
+  it("never evicts a kept key, however many requests follow it", () => {
+    const keptFingerprint = vaultDepositRequestFingerprint(request);
+    const kept = vaultDepositIdempotencyKeyStore.claim(keptFingerprint).key;
     for (let index = 0; index < 40; index += 1) {
       vaultDepositIdempotencyKeyStore.claim(
         vaultDepositRequestFingerprint({ ...request, amount: `10${index}` })
-      );
+      ).key;
     }
-
-    expect(vaultDepositIdempotencyKeyStore.claim(heldFingerprint)).toBe(held);
-  });
-
-  it("never evicts a held key, however many approvals are pending", () => {
-    // The cap governs EXPIRING entries. A held key is an approval still parked
-    // server-side under that exact value: dropping it mints a fresh key on the
-    // next submit, opening a second approval request for one intent. Losing an
-    // expiring entry costs a replay; losing this one can deposit twice.
-    const fingerprints = Array.from({ length: 30 }, (_, index) =>
-      vaultDepositRequestFingerprint({ ...request, amount: `20${index}` })
-    );
-    const keys = fingerprints.map((fingerprint) => {
-      const key = vaultDepositIdempotencyKeyStore.claim(fingerprint);
-      vaultDepositIdempotencyKeyStore.hold(fingerprint);
-      return key;
-    });
-
-    // Every one of them, including the OLDEST — the entry a shared cap dropped.
-    for (const [index, fingerprint] of fingerprints.entries()) {
-      expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(keys[index]);
-    }
-  });
-
-  it("gives up the OLDEST expiring entry when held keys fill the cap", () => {
-    const heldFingerprints = Array.from({ length: 20 }, (_, index) =>
-      vaultDepositRequestFingerprint({ ...request, amount: `30${index}` })
-    );
-    for (const fingerprint of heldFingerprints) {
-      vaultDepositIdempotencyKeyStore.claim(fingerprint);
-      vaultDepositIdempotencyKeyStore.hold(fingerprint);
-    }
-
-    const olderFingerprint = vaultDepositRequestFingerprint({ ...request, amount: "998" });
-    const older = vaultDepositIdempotencyKeyStore.claim(olderFingerprint);
-    const newerFingerprint = vaultDepositRequestFingerprint({ ...request, amount: "999" });
-    const newer = vaultDepositIdempotencyKeyStore.claim(newerFingerprint);
-
-    // The newest expiring entry always survives — it is the key `claim` just
-    // handed back, and returning a key that was never stored would let the next
-    // call silently replace it.
-    expect(vaultDepositIdempotencyKeyStore.claim(newerFingerprint)).toBe(newer);
-    // The older one is the honest thing to surrender: a stale expiring key risks
-    // only a replay, which the API reports as `replayed`.
-    expect(vaultDepositIdempotencyKeyStore.claim(olderFingerprint)).not.toBe(older);
-    // And every held key is untouched.
-    expect(vaultDepositIdempotencyKeyStore.claim(heldFingerprints[0] as string)).toBeTruthy();
+    expect(vaultDepositIdempotencyKeyStore.claim(keptFingerprint).key).toBe(kept);
   });
 
   it("drops an entry the store cannot recognize as a whole entry", () => {
     const fingerprint = vaultDepositRequestFingerprint(request);
     sessionStorage.setItem(
       IDEMPOTENCY_STORE_KEY,
-      JSON.stringify([
-        { id: fingerprint, value: "", createdAt: Date.now() },
-        { id: fingerprint, value: "ok", createdAt: "not-a-number" },
-        { id: fingerprint, value: "ok", createdAt: Date.now(), expiresAt: "soon" },
-      ])
+      JSON.stringify([{ id: fingerprint, value: "" }, { id: "", value: "ok" }, { value: "ok" }])
     );
 
     // None of the three parse, so nothing is reused and a fresh key is minted.
-    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(
+    expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).toBe(
       "00000000-0000-4000-8000-000000000001"
     );
   });

@@ -19,7 +19,7 @@ import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import { getIdempotencyClaim, getIdempotencyRecordKey } from "@/middleware/idempotency";
-import type { MovementStepInput } from "@/middleware/movement-steps";
+import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
@@ -114,14 +114,14 @@ function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
 export async function findRecurringPaymentCreateReplay(
   c: AppContext,
   _input: MovementStepInput<AuthorizedRecurringPaymentCreate>,
-  _idempotencyKey: string
-): Promise<Response | null> {
-  const existing = await findKeyedRecurringPayment(c.env, tenant(c), requiredIdempotency(c));
+  recordKey: string
+): Promise<RecordAnswer | null> {
+  const existing = await findKeyedRecurringPayment(c.env, tenant(c), recordKey);
   if (!existing) return null;
   const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(existing),
+    recurringPayment: mapRecurringPayment(existing.recurringPayment),
   };
-  return created(c, response);
+  return { fingerprint: existing.fingerprint, respond: () => created(c, response) };
 }
 
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
@@ -145,16 +145,21 @@ function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWall
 function answerFromAttempt(
   c: AppContext,
   recurringPayment: PaymentRecurringPaymentRow,
-  attempt: { recurring_payment_id: string } | null
-): Response | null {
+  attempt: { recurring_payment_id: string; idempotency_fingerprint?: string | null } | null
+): RecordAnswer | null {
   if (attempt === null) return null;
+  // Activation, lifecycle and collection attempts record no fingerprint: the
+  // schedule they name is the request (the path's id, an empty body).
   if (attempt.recurring_payment_id !== recurringPayment.id) {
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),
   };
-  return success(c, response);
+  return {
+    fingerprint: attempt.idempotency_fingerprint ?? null,
+    respond: () => success(c, response),
+  };
 }
 
 function tenant(c: AppContext): { organizationId: string; projectId: string } {
@@ -166,7 +171,7 @@ export async function findRecurringPaymentActivateReplay(
   c: AppContext,
   input: MovementStepInput<AuthorizedRecurringPayment>,
   idempotencyKey: string
-): Promise<Response | null> {
+): Promise<RecordAnswer | null> {
   const attempt = await getPaymentRecurringPaymentsRepository(
     c
   ).findActivationAttemptByIdempotencyKey({ ...tenant(c), idempotencyKey });
@@ -178,7 +183,7 @@ function findLifecycleReplay(operation: "cancel" | "resume") {
     c: AppContext,
     input: MovementStepInput<AuthorizedRecurringPayment>,
     idempotencyKey: string
-  ): Promise<Response | null> => {
+  ): Promise<RecordAnswer | null> => {
     const attempt = await getPaymentRecurringPaymentsRepository(
       c
     ).findLifecycleAttemptByIdempotencyKey({ ...tenant(c), operation, idempotencyKey });
@@ -197,14 +202,12 @@ export async function findRecurringPaymentUpdateReplay(
   c: AppContext,
   input: MovementStepInput<AuthorizedRecurringPaymentUpdate>,
   idempotencyKey: string
-): Promise<Response | null> {
+): Promise<RecordAnswer | null> {
   const attempt = await getPaymentRecurringPaymentsRepository(c).findUpdateAttemptByIdempotencyKey({
     ...tenant(c),
     idempotencyKey,
   });
-  if (attempt !== null && attempt.idempotency_fingerprint !== requiredIdempotency(c).fingerprint) {
-    throw new AppError("IDEMPOTENCY_KEY_REUSED");
-  }
+  // The update attempt records the key layer's fingerprint; the step compares it.
   return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
 }
 
@@ -217,7 +220,7 @@ export async function findRecurringPaymentCollectReplay(
   c: AppContext,
   input: MovementStepInput<AuthorizedRecurringPayment>,
   idempotencyKey: string
-): Promise<Response | null> {
+): Promise<RecordAnswer | null> {
   const attempt = await getPaymentSubscriptionsRepository(c).findCollectionAttemptByIdempotencyKey({
     ...tenant(c),
     idempotencyKey,
@@ -242,7 +245,8 @@ export async function findRecurringPaymentCollectReplay(
     collectionAttempt: mapCollectionAttemptRow(attempt),
     transfer: mapTransferRow(transfer),
   };
-  return success(c, response);
+  // A collection attempt records no fingerprint: the schedule it names, checked above, is the request.
+  return { fingerprint: null, respond: () => success(c, response) };
 }
 
 export const createRecurringPayment = async (

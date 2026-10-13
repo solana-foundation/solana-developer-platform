@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
@@ -171,19 +171,21 @@ export function DepositForm({
       recipient: recipient.trim() || undefined,
     };
     const fingerprint = privateChannelDepositRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelDepositIdempotencyKeyStore.claim(fingerprint);
+    const idempotencyKey = privateChannelDepositIdempotencyKeyStore.claim(fingerprint).key;
 
     startTransition(async () => {
       const result = await createDepositAction({ ...requestPayload, idempotencyKey });
-      // Retire the key only on an answer that proves what happened. A transport
-      // failure or a 5xx keeps it, so the retry replays rather than depositing
-      // twice; a validation error retires it because nothing was ever sent.
-      applyIdempotencyKeyOutcome(
+      // Retire the key only on an answer that proves what happened
+      // (`answerRetiresKey`). A transport failure or a 5xx keeps it, so the
+      // retry replays rather than depositing twice.
+      settleIdempotencyKey(
         privateChannelDepositIdempotencyKeyStore,
         fingerprint,
         result.ok
-          ? { ok: true, status: 200, data: { kind: "deposit" } }
-          : { ok: false, status: result.kind === "server" ? result.status : 400 }
+          ? { status: 200, replayed: false }
+          : result.kind === "server"
+            ? result.answer
+            : { status: null, replayed: false }
       );
       if (result.ok) {
         updateState({ deposit: result.deposit });

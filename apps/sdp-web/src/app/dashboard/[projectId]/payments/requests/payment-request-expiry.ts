@@ -1,7 +1,8 @@
 "use client";
 
 import { z } from "zod";
-import { createActionMemo, dashboardFetchKeyAnswer } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { createActionMemo } from "@/lib/idempotency-key-store";
 
 const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", z.string().nullable());
 
@@ -27,7 +28,7 @@ export function expiresAtForAction(
 ): string | null | undefined {
   const expiresAt = frozenExpiries.valueFor(input, () => resolve()?.toISOString() ?? null);
   if (expiresAt !== null && Date.parse(expiresAt) <= Date.now()) {
-    frozenExpiries.settle(input, "definitive");
+    frozenExpiries.settle(input, { status: 200, replayed: false });
     return undefined;
   }
   return expiresAt;
@@ -38,5 +39,5 @@ export function settleExpiresAt(
   input: string,
   result: { ok: boolean; status: number | null; replayed?: boolean }
 ) {
-  frozenExpiries.settle(input, dashboardFetchKeyAnswer(result));
+  frozenExpiries.settle(input, fetchResultAnswer(result));
 }
