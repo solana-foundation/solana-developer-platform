@@ -1,0 +1,91 @@
+---
+title: Integrations
+description: Connect your own custody provider account and see the custody, compliance, and ramp providers your project can use.
+---
+
+SDP works with outside providers for custody, compliance screening, and fiat ramps. This guide covers what the dashboard's **Integrations** page shows, how to connect your own custody provider account, and which parts you can also use through the API.
+
+## Where integrations live
+
+In the dashboard sidebar, open **Integrations**. The page, and the sidebar entry's submenu, list one family each: **Custody**, **Ramps**, and **Compliance**. A family appears when its module is turned on for your deployment. Choose a family to see its providers as cards.
+
+The page shows the project selected in the workspace switcher, and lists only the providers that project can use. A provider the project can't use is hidden rather than shown as unavailable. Each card shows a status:
+
+| Status | Meaning |
+| --- | --- |
+| **Connected** | The project uses this custody provider for Managed custody. |
+| **Ready to connect** | The project can set this custody provider up now. |
+| **Enabled** | A ramp or compliance provider the project can use. The deployment provides it, so there is nothing to connect. |
+
+Click a card to open the provider's page. It describes the provider and has a **How it connects** section. A custody provider's page also lists its capabilities, and its header offers the next step: **Configure** opens wallet setup with the provider selected, and **Manage**, shown once the provider is Connected, opens **Wallets**.
+
+The same availability is in the API: `GET /v1/projects/{projectId}/provider-availability` lists every custody, compliance, and ramp provider the deployment knows, with whether the project can use it. See [Which providers a project can use](/docs/guides/setup-wallets#which-providers-a-project-can-use).
+
+## Custody
+
+Custody providers hold your wallets' keys and sign for them. You set them up from **Wallets**, and the **Custody** family lists the same providers. For the provider list, which providers sign transactions, and what decides whether a project can use each one, see [Set Up Wallets](/docs/guides/setup-wallets#supported-providers).
+
+A custody provider's **How it connects** section says how it is set up:
+
+- **Self-serve**: you connect it with credentials from your own provider account. Today this applies to Privy.
+- **By arrangement**: the SDP team grants your organization access and sets up the connection. This applies to Fireblocks, DFNS, IBM Digital Asset Haven, Anchorage, and Utila.
+- **Provisioned per deployment**: the deployment's operator configures the provider. This applies to Coinbase CDP, Para, Turnkey, and Local Signer.
+
+### Custody connections
+
+A **custody connection** links the project to a provider account your team owns, using credentials you store in SDP. Wallets created in a connection sign with its credentials. Privy is the only provider that supports connections today. A connection belongs to one project, and a project can have several.
+
+Connections are the only custody a production project can use: Managed custody, which runs on the deployment's own provider accounts, is available in sandbox projects only. A sandbox project can use both.
+
+You manage connections in the dashboard, signed in as a user with custody admin access, which organization admins have. API keys can't add or change connections. Other members see a note that managing connections needs the custody admin role.
+
+To connect a Privy app:
+
+1. Open **Integrations** → **Custody** → **Privy**. In the **Connections** section, click **Add connection**.
+
+   The first time you set Privy up in a project, you can also start from **Wallets** by choosing Privy when you create a wallet. If the project can use Privy either way, choose **Bring your own credentials** under **Custody mode**; otherwise the wizard goes straight to the credential form.
+2. Enter:
+   - **Credential label**: a name for this credential.
+   - **Privy app ID**: from your Privy dashboard. After you save, SDP shows only redacted details.
+   - **Privy app secret**: from your Privy dashboard. You can't view it again after saving.
+   - **Initial wallet label** (optional): a name for the wallet SDP creates when the check succeeds.
+3. Click **Connect and verify**. SDP stores the credential, checks it with Privy, and creates the connection's first wallet once the check succeeds.
+
+If the check doesn't succeed, the dashboard says why:
+
+- Privy rejected the credentials: correct the app ID and secret, then connect again.
+- The Privy app is already connected to a custody setup: use a different Privy app.
+- SDP couldn't confirm whether verification finished: click **Check again**. Your credentials are stored, and checking again never creates a duplicate connection.
+
+Open a connection from the **Connections** list to manage it:
+
+- **Connection ID**: copy it to [create wallets in this connection](/docs/guides/setup-wallets#create-a-wallet-on-a-custody-connection) through the API.
+- **Add wallet**: creates a wallet in this connection's Privy account. Available while the connection is active.
+- **Rotate credentials**: replaces the stored Privy credentials. Enter the app ID and the new app secret. If Privy rejects them, the current credentials stay in use. Rotation applies to every connection that uses the same credentials, and you can **Roll back** to the previous secret until the rollback window shown on the page ends.
+- **Check again** and **Cancel setup**: for a connection whose verification didn't finish. Checking again continues the same setup. Cancelling deactivates the connection, which stays listed as **Deactivated**; to try again, add a new connection.
+- **Deactivate connection**: stops the connection permanently and keeps its history. It doesn't revoke the app secret at Privy, and it isn't available while the connection has active wallets.
+
+## Compliance screening
+
+SDP screens addresses through these providers:
+
+| Provider | `provider` value in results |
+| --- | --- |
+| **Range** | `range` |
+| **Elliptic** | `elliptic` |
+| **TRM Labs** | `trm` |
+| **Chainalysis** | `chainalysis` |
+
+The SDP team activates compliance providers per organization. The **Compliance** family lists each provider your project can use as **Enabled**; a provider that isn't activated for your organization isn't listed.
+
+Screening runs when you ask for it. `POST /v1/compliance/address-screenings` checks one address against every provider enabled for your organization and returns a result per provider, with a normalized `status` (`ok`, `pending`, `unavailable`, or `error`), a `riskScore`, and the provider's own `riskLevel` label. The optional `intent` field says why you are screening: `transfer_destination`, `wallet_address_addition`, or `unknown`. Use the results in your own approval steps, for example before you approve a transfer destination or add an address to a token's allowlist.
+
+- The API key needs the `payments:read` permission.
+- If no compliance provider is enabled for your organization, the request returns `403`.
+- Screening has a quota: 30 requests per minute per API key or user, and 120 per minute per organization. Requests over the quota return `429`.
+
+For a walkthrough, see [Freeze and Compliance](/docs/tokens/freeze-and-compliance). For the full request and response schema, see the [Compliance API reference](/docs/reference/api/compliance).
+
+## Ramps
+
+Ramp providers move money between fiat and stablecoins for deposits and payouts. The deployment provides them, so the **Ramps** family lists each ramp provider your project can use as **Enabled** rather than offering a setup flow. For the provider list, what each one supports, and how they are configured, see [Ramp providers](/docs/payments/ramps-providers).

@@ -1,63 +1,161 @@
 ---
 title: Set Up Wallets
-description: Initialize a custody provider and create wallets for signing transactions.
+description: Set up a custody provider in your project and create wallets for signing transactions.
 ---
 
-A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for token deployment, minting, transfers, and other onchain operations.
+A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Set up a provider in your project, then create wallets for token deployment, minting, transfers, and other onchain operations.
+
+Custody belongs to a project. The sandbox and production projects each set up their own providers and hold their own wallets. There is no default provider and no default wallet: every wallet names the provider account it lives in, and every operation that signs names its wallet.
+
+## Custody modes
+
+A wallet lives in one of two kinds of provider account, fixed when it is created:
+
+| Mode | Where the wallet lives | Projects |
+| --- | --- | --- |
+| **Managed** | The provider account the SDP deployment holds. You set it up from the dashboard or with `POST /v1/wallets/initialize`, and create wallets in it with `provider`. | Sandbox only |
+| **Bring your own credentials** | A **custody connection**: a provider account your team owns, connected with credentials you store in SDP. You add it from the dashboard and create wallets in it with `connectionId`. Privy is the only provider that supports connections today. | Sandbox and production |
+
+A production project uses custody connections only. To add one, see [Custody connections](/docs/guides/integrations#custody-connections).
 
 ## Supported providers
 
-| Provider | Description |
+Use the `provider` value when you set up Managed custody or create a Managed wallet through the API.
+
+| Provider | `provider` value | Signs transactions | Modes | Access |
+| --- | --- | --- | --- | --- |
+| **Privy** | `privy` | Yes | Managed, bring your own credentials | Every organization |
+| **Coinbase CDP** | `coinbase_cdp` | Yes | Managed | Every organization |
+| **Para** | `para` | Yes | Managed | Every organization |
+| **Turnkey** | `turnkey` | Yes | Managed | Every organization |
+| **Fireblocks** | `fireblocks` | Yes | Managed | By arrangement |
+| **DFNS** | `dfns` | Yes | Managed | By arrangement |
+| **IBM Digital Asset Haven** | `ibm_haven` | Yes | Managed | By arrangement |
+| **Utila** | `utila` | Yes | Managed | By arrangement |
+| **Anchorage** | `anchorage` | No | Managed | By arrangement |
+| **Local Signer** | `local` | Yes | Managed | Self-hosted deployments only |
+
+- **Every organization**: your organization has access without asking for it.
+- **By arrangement**: the SDP team has to grant your organization access first.
+- **Anchorage**: SDP can create and delete Anchorage wallets, but it does not sign transactions with them.
+- **Local Signer**: SDP generates the wallet's key and stores it encrypted in the deployment's database. It holds one wallet per project and can't create more. Only a [self-hosted](/docs/self-hosting) deployment with `CUSTODY_PRIVATE_KEY` set offers it, and the operator enables it per organization.
+
+### Which providers a project can use
+
+A project can use a provider in a mode when all of these checks pass, in this order. The first check that fails is the reason SDP reports:
+
+| Check | Reason when it fails |
 | --- | --- |
-| **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
-| **Coinbase CDP** | Embedded wallets for developers |
-| **Para** | Wallet and authentication suite |
-| **Turnkey** | Non-custodial wallet infrastructure platform |
-| **DFNS** | Digital asset wallet infrastructure |
-| **Anchorage** | Regulated institutional crypto custody |
+| The deployment's release channel offers the provider in that mode. | `custody_provider_not_in_release_channel` |
+| The project's environment allows the mode: Managed in sandbox only, bring your own credentials in both. | `custody_mode_not_allowed` |
+| Your organization has access to the provider. | `provider_not_entitled` |
+| Managed only: the deployment holds the provider's credentials. | `provider_not_configured` |
+
+In a production project, that leaves custody connections, so Privy is the only provider a production project can use.
+
+The dashboard lists only the providers the project can use in at least one mode; a provider the project can't use isn't shown. A request that sets up or uses an unavailable provider is refused with `403` and `details.reason` set to the failed check, or with `503` when the deployment doesn't hold the provider's credentials.
+
+To check through the API, read the project's provider availability. Any API key of the project can read it, and `{projectId}` must be the key's own project; any other ID returns `404`.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/projects/prj_123/provider-availability \
+  -H "Authorization: Bearer sk_live_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="provider-availability.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/projects/prj_123/provider-availability",
+  { headers: { "Authorization": "Bearer sk_live_..." } },
+);
+const { data } = await response.json();
+// data: { projectId, environment, providers }
+```
+</Tab>
+<Tab value="Java">
+```java title="ProviderAvailability.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/projects/prj_123/provider-availability"))
+    .header("Authorization", "Bearer sk_live_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+The response lists every custody, compliance, and ramp provider the deployment knows. A custody entry lists the modes the project can use in `modes`, which is empty when there are none, and the first failed check for each other mode in `unavailableModes`:
+
+```json title="response.json"
+{
+  "data": {
+    "projectId": "prj_123",
+    "environment": "production",
+    "providers": [
+      {
+        "family": "custody",
+        "provider": "privy",
+        "modes": ["byok"],
+        "unavailableModes": [{ "mode": "managed", "reason": "custody_mode_not_allowed" }]
+      },
+      {
+        "family": "custody",
+        "provider": "fireblocks",
+        "modes": [],
+        "unavailableModes": [
+          { "mode": "managed", "reason": "custody_mode_not_allowed" },
+          { "mode": "byok", "reason": "custody_provider_not_in_release_channel" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`byok` is the API's name for bring your own credentials. Compliance and ramp entries carry `available` instead, plus a `reason` when it is `false`.
+
+## Create wallets
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-### 1. Navigate to Wallets
+### 1. Open Wallets
 
-Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
+Open the sidebar and click **Wallets**. The page shows the wallets of the project selected in the workspace switcher; see [Set Up Your Organization & Projects](/docs/guides/setup-organization#switch-between-projects). Only organization admins can create wallets. Members see the project's wallets but can't create new ones.
 
 ### 2. Choose a custody provider
 
-The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
+If the project has no wallets yet, the page shows **Create your first wallet** with a card for each provider the project can use. Click the provider's card.
 
-![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
+If the project already has wallets, click **Create wallet**, pick a provider under **Choose provider**, and click **Next**.
+
+A provider the project already uses for Managed custody is marked **Active**. If no provider is available to the project, the page says so instead of listing providers.
 
 ### 3. Create the wallet
 
-Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
+Under **Wallet details**, enter a **Wallet label** and click **Create wallet**. Depending on the provider and the project, this step also asks:
 
-If you have connected your own account with that provider, choose the account the wallet is created in: the provider's Managed account (when the project has one) or one of your active connections. The choice appears as soon as one active connection exists, and nothing is preselected: SDP has no default custody, so every wallet names where it lives.
-
-<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
+- **Custody mode**: shown when the provider isn't set up in the project yet and can run either way, such as Privy in a sandbox project. Choose **Managed** or **Bring your own credentials**.
+- **Provider details**: bring your own credentials replaces the wallet form with a form for your own Privy app. In a production project with no Privy connection yet, Privy goes straight to this form. See [Custody connections](/docs/guides/integrations#custody-connections).
+- **Account**: shown when the provider has an active custody connection. Choose the account the wallet is created in: **Managed by SDP**, when the project uses that provider for Managed custody, or one of the connections. Nothing is preselected, because every wallet names where it lives. Connections that aren't ready yet are listed but can't be chosen.
 
 ### 4. View your wallet
 
-After provisioning, the wallet card appears on the Wallets page with its address, wallet ID, and balance.
+After provisioning, the wallet's card appears on the Wallets page with its provider, label, balance, address, and wallet ID. Click the card to open the wallet's page.
 
-![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
-
-To create additional wallets, click **Create Wallet** in the top right and repeat the process.
+To create more wallets, click **Create wallet** and repeat the process.
 
 ### 5. Provider capabilities
 
-Each provider supports a different set of operations shown as capability chips:
-
-- **Issuance** — can deploy and mint tokens
-- **Transfers** — can sign payment transactions
-- **Compliance** — can sign freeze/unfreeze instructions
+A provider's page under **Integrations** → **Custody** lists its capabilities. **Issuance**, **Transfers**, and **Compliance** name the SDP features its wallets are meant for. **Transaction signing** and **Additional wallets** appear when the provider signs transactions and can create more than one wallet.
 
 </Tab>
 <Tab value="API">
 
-#### 1. Initialize the signing provider
+#### 1. Set up Managed custody
+
+In a sandbox project, set up Managed custody with a provider. SDP creates the project's signing configuration for that provider and its first wallet.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -104,21 +202,13 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId`:
-
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_live_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connectionId": "cconn_123",
-    "label": "Treasury wallet"
-  }'
-```
+- The API key needs the `custody:admin` permission, which `api_admin` keys have. Keys scoped to selected wallets (`"walletScope": "selected"`) are refused.
+- Production projects use bring your own credentials only, so in a production project this returns `403` with `details.reason` set to `custody_mode_not_allowed`. Create wallets in a custody connection instead; see [Create a wallet on a custody connection](#create-a-wallet-on-a-custody-connection).
+- If the project already has Managed custody with that provider, the request returns `409`. Create more wallets with `POST /v1/wallets`.
 
 #### 2. Create additional wallets
 
-Every wallet names the provider account it lives under: `provider` for the provider's Managed account, or `connectionId` for a connection your project added. Send exactly one of them. There is no default account to fall back to.
+Every wallet names the provider account it lives under: `provider` for the project's Managed custody with that provider, or `connectionId` for a custody connection. Send exactly one of them; a body with both or neither returns `400`. This example creates a Managed wallet:
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -166,7 +256,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
+`provider` needs Managed custody with that provider in the project; without it, the request returns `404`. The API key needs the same permission as step 1. The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
 
 #### 3. List wallets
 
@@ -197,6 +287,8 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
+Each wallet carries `custodyConfigId` when it is Managed, or `custodyConnectionId` when it lives in a custody connection.
+
 Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`, and issuance takes it as `signingCustodyWalletId`. Wallet-scoped API keys bind the wallet's `walletId` in `signingWalletIds`.
 
 ```typescript title="transfer-request.ts"
@@ -210,3 +302,115 @@ const body = {
 
 </Tab>
 </Tabs>
+
+## Create a wallet on a custody connection
+
+A custody connection is added in the dashboard; see [Custody connections](/docs/guides/integrations#custody-connections). Once it is active, create wallets in it by passing its `connectionId` instead of `provider`. This works in sandbox and production projects.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionId": "cconn_123",
+    "label": "Treasury wallet"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-connection-wallet.ts"
+const response = await fetch("https://api.solana.com/v1/wallets", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_live_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    connectionId: "cconn_123",
+    label: "Treasury wallet",
+  }),
+});
+const { data } = await response.json();
+// data.wallet.custodyConnectionId === "cconn_123"
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateConnectionWallet.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets"))
+    .header("Authorization", "Bearer sk_live_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "connectionId": "cconn_123",
+          "label": "Treasury wallet"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The created wallet carries `custodyConnectionId` instead of `custodyConfigId`, and signs with the connection's credentials. To find a connection's ID, open **Integrations** → **Custody** → **Privy** in the dashboard, open the connection, and copy its **Connection ID**.
+
+The request fails when:
+
+| Status | Cause |
+| --- | --- |
+| `400` | The body names both `connectionId` and `provider`, or neither. |
+| `403` | The API key lacks `custody:admin` or is scoped to selected wallets. Also returned with `details.reason` `custody_provider_not_in_release_channel` when the deployment's release channel doesn't offer the provider for connections, or `provider_not_entitled` when your organization no longer has access to it. |
+| `404` | No connection with that ID exists in the API key's project. |
+| `409` | The connection isn't active: its verification is unfinished or failed, or it or its credentials were deactivated. |
+| `503` | The provider or the stored credentials couldn't be reached. |
+
+To give a new API key its own wallet in a connection, pass `"provisionWallet": { "connectionId": "..." }` on `POST /v1/api-keys`, or `{ "provider": "..." }` for a Managed wallet. See the [API keys reference](/docs/reference/api/api-keys).
+
+## Check signer readiness
+
+`POST /v1/wallets/signer-check` confirms that SDP can sign with a wallet before you rely on it. SDP builds a memo transaction with server-generated text, asks the custody provider to sign it with the wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no fees are spent.
+
+Pass the provider wallet ID, which is the `walletId` field from `GET /v1/wallets` (for example `privy_wallet_123`), not the record `id` (`cwlt_…`). You can leave `walletId` out when the API key has a signing wallet (`signingWalletId`) or is bound to exactly one wallet; SDP then checks that wallet.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets/signer-check \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletId": "privy_wallet_123" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="signer-check.ts"
+const response = await fetch("https://api.solana.com/v1/wallets/signer-check", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ walletId: "privy_wallet_123" }),
+});
+const { data } = await response.json();
+// data: { walletId, walletAddress, feePayer, memo, signature, simulated, checkedAt }
+```
+</Tab>
+<Tab value="Java">
+```java title="SignerCheck.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets/signer-check"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        { "walletId": "privy_wallet_123" }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+A `200` response means the provider returned a valid signature and the transaction passed simulation. `simulated` is always `true`, and the returned `signature` never appears on chain. If the provider can't sign, returns an invalid signature, or simulation fails, the request returns an error instead.
+
+- The API key needs the `wallets:write` permission.
+- Signer checks have a small quota: 2 per minute per API key or user, and 10 per minute per organization. Requests over the quota return `429`.
+
+See the [Wallets API reference](/docs/reference/api/wallets) for every wallet endpoint.
