@@ -659,6 +659,9 @@ importers:
       '@sdp/redaction':
         specifier: workspace:*
         version: link:../sdp-redaction
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

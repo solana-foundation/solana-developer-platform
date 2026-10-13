@@ -1,3 +1,4 @@
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
@@ -18,7 +19,8 @@ export function runEarnSplitSwapDetection(deps: {
   bg: BackgroundRunner;
   observability?: Observability;
 }): void {
-  const work = () => detectOrphanedEarnSplitSwaps(deps.env);
+  const work = () =>
+    runPerCluster("detect-orphaned-earn-split-swaps", () => detectOrphanedEarnSplitSwaps(deps.env));
   const promise = deps.observability
     ? deps.observability.withMonitor(EARN_SPLIT_SWAPS_MONITOR, work, {
         schedule: { type: "crontab", value: EARN_SPLIT_SWAPS_CRON },

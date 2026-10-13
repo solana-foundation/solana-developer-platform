@@ -447,9 +447,9 @@ export function distillKaminoVault(
  * Two facts shape everything else here (measured 2026-08-14):
  *
  * - **No API credential.** The REST shelf is public — there is no
- *   `KAMINO_API_KEY` anywhere. The one `ctx.env` read is `SOLANA_RPC_URL`, on
- *   the devnet path, and a blank one fails closed with
- *   PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
+ *   `KAMINO_API_KEY` anywhere. The devnet path reads the chain through the
+ *   door for the open cluster scope, and a cluster with no endpoint fails
+ *   closed with PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
  * - **Two clusters, two SOURCES.** `ctx.environment` selects between them:
  *   production reads the mainnet REST shelf (`hostCluster: "mainnet-beta"`),
  *   every other environment reads the devnet kvault program on-chain
@@ -573,7 +573,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    */
   override async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
     if (ctx.environment !== "production") {
-      return await this._listDevnetStrategies(ctx);
+      return await this._listDevnetStrategies();
     }
 
     // Both reads are issued together: they are independent, and the vault list
@@ -609,9 +609,8 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    *   be a fiction — and it is why the live-metrics refresh also skips
    *   non-production (see `getStrategyMetrics`).
    */
-  async _listDevnetStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
-    const rpcUrl = ctx.env.SOLANA_RPC_URL ?? "";
-    const vaults = await listKaminoDevnetVaults(rpcUrl);
+  async _listDevnetStrategies(): Promise<ProviderStrategySnapshot[]> {
+    const vaults = await listKaminoDevnetVaults();
 
     return (
       vaults

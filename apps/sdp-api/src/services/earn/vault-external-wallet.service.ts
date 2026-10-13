@@ -493,7 +493,7 @@ export async function buildExternalWalletDepositTransaction(
       }),
       hasTenant
         ? deadline.run("Reading the split-swap baseline balance", () =>
-            readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+            readOwnerMintBalance(input.ownerAddress, input.tokenMint)
           )
         : Promise.resolve(null),
     ]);

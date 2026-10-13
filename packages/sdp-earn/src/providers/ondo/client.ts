@@ -6,12 +6,7 @@ import {
   ondoDepositMints,
 } from "@sdp/types/ondo-programs";
 import { internalError, providerNotConfigured } from "../../errors";
-import {
-  assertRpcServesCluster,
-  fromBase64,
-  resolveCatalogueRpcUrl,
-  solanaRpcCall,
-} from "../../solana-rpc";
+import { assertRpcServesCluster, fromBase64, solanaRpcCall } from "../../solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
@@ -77,13 +72,12 @@ interface RpcAccountInfo {
  * (an empty return is the one shape that makes the sync skip its delist pass).
  */
 export async function readOndoUsdyMint(
-  rpcUrl: string,
   cluster: SolanaCluster,
   deployment: OndoDeployment
 ): Promise<{ decimals: number }> {
-  await assertRpcServesCluster("ondo", rpcUrl, cluster);
+  assertRpcServesCluster("ondo", cluster);
 
-  const info = await solanaRpcCall<RpcAccountInfo>("ondo", rpcUrl, "getAccountInfo", [
+  const info = await solanaRpcCall<RpcAccountInfo>("ondo", "getAccountInfo", [
     deployment.usdyMint,
     { encoding: "base64" },
   ]);
@@ -138,16 +132,13 @@ export class OndoEarnClient extends StubEarnClient {
    * Devnet has NO Ondo deployment (verified on-chain 2026-09-02, and Ondo
    * confirmed their staging environment also runs on mainnet), so the sandbox
    * catalogue carries Ondo only through the PRO-1742 browse-only mainnet
-   * mirror. The cluster is MEASURED (genesis hash) before the mint is read,
+   * mirror. The read runs under the production pass's mainnet cluster scope,
+   * through the door, which proves the endpoint's genesis before serving it,
    * and the mint account itself is verified, so a row here is an observation
-   * about a live instrument rather than a restatement of this file.
-   *
-   * The RPC is resolved PER CLUSTER (`resolveCatalogueRpcUrl`): a devnet
-   * deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`, which is what
-   * lets its production pass succeed and the sandbox mirror carry the row.
-   * Without the override the process endpoint is tried and the genesis proof
-   * refuses it, so the pass skips as PROVIDER_NOT_CONFIGURED rather than
-   * reading the wrong chain.
+   * about a live instrument rather than a restatement of this file. That
+   * production pass is what lets a devnet deployment's sandbox mirror carry
+   * the row; a deployment with no mainnet endpoint skips as
+   * PROVIDER_NOT_CONFIGURED rather than reading the wrong chain.
    */
   async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
@@ -159,7 +150,7 @@ export class OndoEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listUsdyStrategy(resolveCatalogueRpcUrl(ctx.env, cluster), cluster, deployment);
+    return this._listUsdyStrategy(cluster, deployment);
   }
 
   /**
@@ -168,17 +159,13 @@ export class OndoEarnClient extends StubEarnClient {
    * registry's opinion of which clusters are deployed.
    */
   async _listUsdyStrategy(
-    rpcUrl: string,
     cluster: SolanaCluster,
     deployment: OndoDeployment
   ): Promise<ProviderStrategySnapshot[]> {
     // The on-chain identity check and the issuer's published figures, in
     // parallel. Either failing fails the pass: rows keep their last figures
     // and the outage is logged, rather than the sync nulling a shown rate.
-    const [, rate] = await Promise.all([
-      readOndoUsdyMint(rpcUrl, cluster, deployment),
-      readOndoUsdyRate(),
-    ]);
+    const [, rate] = await Promise.all([readOndoUsdyMint(cluster, deployment), readOndoUsdyRate()]);
 
     const depositMints = ondoDepositMints(cluster);
     if (depositMints.length === 0) {

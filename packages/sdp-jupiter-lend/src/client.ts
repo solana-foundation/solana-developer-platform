@@ -160,13 +160,10 @@ export class JupiterLendVaultDirectClient
     EarnVaultDepositQuoteProvider,
     EarnVaultWithdrawQuoteProvider
 {
-  constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: JupiterLendVaultOperationRunner
-  ) {
+  /**
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
+   */
+  constructor(private readonly runOperation: JupiterLendVaultOperationRunner) {
     super();
   }
 
@@ -187,9 +184,7 @@ export class JupiterLendVaultDirectClient
           "Jupiter Lend Earn is available on mainnet-beta only"
         );
       }
-      const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-      assertActive();
-      return operation(jupiterLendConnection(rpcUrl), assertActive);
+      return operation(jupiterLendConnection(), assertActive);
     });
   }
 

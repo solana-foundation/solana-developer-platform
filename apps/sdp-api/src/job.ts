@@ -276,7 +276,13 @@ export async function runCronJob(): Promise<void> {
           runPerCluster("reconcile-dvp-trades", () => reconcileDvpTrades(env))
         ).catch(() => undefined);
         // Keep advisory detection after vault reconciliation and collect its failures.
-        await collect(monitored(EARN_SPLIT_SWAPS_MONITOR, () => detectOrphanedEarnSplitSwaps(env)));
+        await collect(
+          monitored(EARN_SPLIT_SWAPS_MONITOR, () =>
+            runPerCluster("detect-orphaned-earn-split-swaps", () =>
+              detectOrphanedEarnSplitSwaps(env)
+            )
+          )
+        );
         await monitored(SECRET_RETIREMENTS_MONITOR, () => retireOrphanedSecrets(env)).catch(
           () => undefined
         );

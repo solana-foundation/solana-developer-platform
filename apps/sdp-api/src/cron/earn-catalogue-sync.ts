@@ -42,6 +42,7 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
@@ -325,6 +326,16 @@ type CatalogueFetch =
  * steady states (stubs, missing credentials) come back as a quiet `ok: false`,
  * anything else logs an error and comes back the same way, so one provider can
  * never sink another's pass.
+ *
+ * The sync legitimately spans both clusters (the sandbox mirror carries the
+ * production pass's mainnet shelf), so it is a cluster-scope entry point: each
+ * provider READ runs inside its own environment's scope, opened and closed
+ * here one at a time, never nested, and every lane WRITE runs outside any
+ * scope (database only). This is the only place the sync opens a scope.
+ *
+ * @param client - The provider whose catalogue to read.
+ * @param ctx - The environment being read, which also opens the cluster scope.
+ * @returns The accepted snapshots, or why there are none.
  */
 async function fetchAcceptedSnapshots(
   client: EarnVaultProvider,
@@ -335,7 +346,9 @@ async function fetchAcceptedSnapshots(
   let snapshots: ProviderStrategySnapshot[];
   const startedAt = Date.now();
   try {
-    snapshots = await client.listStrategies(ctx);
+    snapshots = await runInClusterScope({ projectId: null, environment: ctx.environment }, () =>
+      client.listStrategies(ctx)
+    );
   } catch (err) {
     if (err instanceof SdpEarnError && SKIPPABLE_SYNC_ERROR_CODES.has(err.code)) {
       getLogger().info(

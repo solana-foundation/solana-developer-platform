@@ -1,54 +1,33 @@
-import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterJsonRpcFetch } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaCluster } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { internalError, providerNotConfigured } from "./errors";
-import { providerFetchJson } from "./fetch";
-import type { EarnRuntimeEnvironment } from "./types";
+import { providerFetchJsonVia } from "./fetch";
 
 /**
  * Raw Solana JSON-RPC for CATALOGUE reads, shared by every provider whose shelf
  * lives on chain (Kamino's devnet vaults, Veda's).
  *
  * ── Why this package speaks JSON-RPC at all ─────────────────────────────────
- * `@sdp/earn` runs inside the hourly catalogue cron and its only dependencies
- * are `@sdp/types` and the dependency-free `@sdp/redaction`. A chain SDK here
- * would be loaded on every pass in both
- * environments to read a handful of accounts, which is why the execution
- * packages (`@sdp/kamino`, `@sdp/veda`) exist as separate consumers. The cost of
- * that rule is this file: base58, base64 and one RPC helper, hand-rolled.
+ * `@sdp/earn` runs inside the hourly catalogue cron and keeps chain SDKs out:
+ * a handful of accounts does not justify loading one on every pass, which is
+ * why the execution packages (`@sdp/kamino`, `@sdp/veda`) exist as separate
+ * consumers. The cost of that rule is this file: base58, base64 and one RPC
+ * helper, hand-rolled. The bytes still travel through the door
+ * (`createClusterJsonRpcFetch`), so the catalogue reads the cluster the open
+ * scope names, from a genesis-proven managed endpoint.
  *
- * Everything goes through `providerFetchJson`, so timeouts and the error
+ * Everything goes through `providerFetchJsonVia`, so timeouts and the error
  * taxonomy are the package's rather than bespoke per provider.
  */
 
 /** Default deadline for a catalogue RPC read, inherited from the Kamino path. */
 export const CATALOGUE_RPC_TIMEOUT_MS = 20_000;
 
-/**
- * The RPC endpoint a catalogue read should use for `cluster`.
- *
- * `SOLANA_RPC_URL` is the PROCESS endpoint: it serves whichever cluster the
- * deployment is configured for. The catalogue sync walks BOTH environments in
- * that one process, so a provider whose instrument lives on the OTHER cluster
- * can only be read when that cluster has an endpoint of its own. Without one,
- * a mainnet-only provider (Ondo) is invisible to every non-production
- * deployment: its production fetch fails the genesis proof, the sync treats
- * that as a steady-state skip, and the browse-only mirror converges to empty.
- *
- * `SOLANA_MAINNET_RPC_URL` / `SOLANA_DEVNET_RPC_URL` are the same two override
- * keys the API's execution path reads (`resolveClusterRpcUrl`), so one Doppler
- * value serves catalogue and execution alike. Falling back to the process
- * endpoint keeps today's behaviour for every single-cluster deployment, and
- * `assertRpcServesCluster` still measures whatever URL comes back — an
- * override pointed at the wrong chain is refused exactly like the default.
- */
-export function resolveCatalogueRpcUrl(
-  env: EarnRuntimeEnvironment,
-  cluster: SolanaCluster
-): string {
-  const override = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
-  if (typeof override === "string" && override.trim() !== "") return override.trim();
-  return env.SOLANA_RPC_URL?.trim() ?? "";
-}
+// Never dialed: the door's cluster JSON-RPC fetch ignores the URL it is handed.
+const DOOR_ENDPOINT_PLACEHOLDER = "https://door.invalid";
 
 // biome-ignore lint/security/noSecrets: the bitcoin/Solana base58 alphabet
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -149,28 +128,55 @@ export interface RpcProgramAccount {
 export type RpcAccount = { data?: [string, string] } | null;
 
 /**
- * One JSON-RPC call, with the failure mode that matters here handled.
+ * One JSON-RPC call on the open cluster scope's cluster, through the door's managed pool (genesis
+ * guard, failover, deadline), with the failure mode that matters here handled.
  *
  * JSON-RPC reports failure INSIDE a 200 body, so the HTTP layer above cannot
  * see it. Left unchecked, an errored read looks like an empty shelf — and the
  * catalogue sync DELETES rows a provider no longer lists, so "empty" is the one
  * shape that quietly delists a provider's whole catalogue. Both branches below
- * throw for that reason.
+ * throw for that reason. A cluster with no endpoint configured is the steady
+ * state "this deployment cannot read that cluster", reported as
+ * `PROVIDER_NOT_CONFIGURED` so the sync skips quietly.
+ *
+ * @param provider - The provider the read is for, for errors.
+ * @param method - The JSON-RPC method.
+ * @param params - Its positional params.
+ * @param timeoutMs - The read's end-to-end deadline.
+ * @returns The response's `result`.
+ * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the cluster has no endpoint configured;
+ *   `PROVIDER_UNAVAILABLE` when the read fails; `INTERNAL_ERROR` on a JSON-RPC error or no result.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function solanaRpcCall<T>(
   provider: EarnProviderId,
-  rpcUrl: string,
   method: string,
   params: unknown[],
   timeoutMs = CATALOGUE_RPC_TIMEOUT_MS
 ): Promise<T> {
-  const response = await providerFetchJson<JsonRpcResponse<T>, JsonRpcRequest>(provider, rpcUrl, {
-    method: "POST",
-    // `providerFetchJson` serializes the body and sets the JSON headers itself,
-    // so the request object goes in as a value rather than pre-stringified.
-    body: { jsonrpc: "2.0", id: 1, method, params },
-    timeoutMs,
-  });
+  let clusterFetch: typeof fetch;
+  try {
+    clusterFetch = createClusterJsonRpcFetch({ timeoutMs });
+  } catch (error) {
+    if (error instanceof SdpRpcError && error.code === "RPC_NOT_CONFIGURED") {
+      throw providerNotConfigured(
+        `${provider} catalogue needs a Solana RPC for ${currentClusterScope().cluster}`
+      );
+    }
+    throw error;
+  }
+  const response = await providerFetchJsonVia<JsonRpcResponse<T>, JsonRpcRequest>(
+    clusterFetch,
+    provider,
+    DOOR_ENDPOINT_PLACEHOLDER,
+    {
+      method: "POST",
+      // `providerFetchJson` serializes the body and sets the JSON headers itself,
+      // so the request object goes in as a value rather than pre-stringified.
+      body: { jsonrpc: "2.0", id: 1, method, params },
+      timeoutMs,
+    }
+  );
 
   if (response.error) {
     throw internalError(
@@ -184,39 +190,27 @@ export async function solanaRpcCall<T>(
 }
 
 /**
- * MEASURE the cluster before reading anything from it.
+ * Refuse to read `cluster` unless it is the open cluster scope's cluster.
  *
- * `EarnRuntimeContext.environment` is a PER-PROJECT attribute while `ctx.env` is
- * the PROCESS environment, and `syncEarnCatalogue` walks both environments
- * inside one process with one env object. A production deployment therefore
- * reaches this code with `SOLANA_RPC_URL` pointing at MAINNET while syncing the
- * sandbox environment. Without this check a devnet program id would be queried
- * against mainnet, return zero accounts, and hand back a confident empty
- * shelf — which is also the shape that makes the sync skip its delist pass, so
- * sandbox would silently freeze on whatever it last held.
+ * `EarnRuntimeContext.environment` decides which deployment a provider reads, while the scope
+ * decides which cluster the door reaches, and the door proves every endpoint's genesis before
+ * serving it. Requiring the two to agree is what keeps a snapshot's `hostCluster` a
+ * MEASUREMENT rather than a derivation: a devnet program id is never queried against mainnet,
+ * where it would return zero accounts and a confident empty shelf. For a provider whose devnet
+ * and mainnet deployments may share addresses (Veda's might), it is the ONLY thing standing
+ * between the two.
  *
- * It is also what makes a snapshot's `hostCluster` a MEASUREMENT rather than a
- * derivation. Migration 0057's whole point is that the environment must never be
- * assumed to imply the cluster; asserting the chain actually read is how a
- * provider honours that instead of quietly re-introducing the assumption. For a
- * provider whose devnet and mainnet deployments may share addresses — Veda's
- * might — it is the ONLY thing standing between the two.
+ * @param provider - The provider about to read, for the error.
+ * @param cluster - The cluster the provider means to read.
+ * @returns Nothing; it throws on a mismatch.
+ * @throws SdpEarnError `INTERNAL_ERROR` when the scope serves another cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export async function assertRpcServesCluster(
-  provider: EarnProviderId,
-  rpcUrl: string,
-  cluster: SolanaCluster,
-  timeoutMs = CATALOGUE_RPC_TIMEOUT_MS
-): Promise<void> {
-  if (rpcUrl.trim() === "") {
-    throw providerNotConfigured(`${provider} catalogue needs a Solana RPC URL for ${cluster}`);
-  }
-
-  const observed = await solanaRpcCall<string>(provider, rpcUrl, "getGenesisHash", [], timeoutMs);
-  const expected = GENESIS_HASH_BY_CLUSTER[cluster];
-  if (observed !== expected) {
-    throw providerNotConfigured(
-      `${provider} catalogue requires a ${cluster} RPC; the configured endpoint reports genesis ${observed}, not ${expected}`
+export function assertRpcServesCluster(provider: EarnProviderId, cluster: SolanaCluster): void {
+  const scopeCluster = currentClusterScope().cluster;
+  if (scopeCluster !== cluster) {
+    throw internalError(
+      `${provider} catalogue read for ${cluster} ran inside a ${scopeCluster} cluster scope`
     );
   }
 }

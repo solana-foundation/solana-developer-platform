@@ -103,7 +103,27 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
   return message === undefined ? fallback : scrubTelemetryString(message);
 }
 
-export async function providerFetch<TBody = never>(
+export function providerFetch<TBody = never>(
+  provider: EarnProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<ProviderResponse> {
+  return providerFetchVia(fetch, provider, url, init);
+}
+
+/**
+ * `providerFetch` over an explicit transport, for a provider read that must not dial `url`
+ * itself (an on-chain catalogue read, sent through the door's cluster JSON-RPC fetch).
+ *
+ * @param send - The transport the request goes through.
+ * @param provider - The provider the request is for, for errors.
+ * @param url - The URL handed to `send`.
+ * @param init - The request.
+ * @returns The response, its raw body, and the body parsed as JSON when it is JSON.
+ * @throws SdpEarnError `PROVIDER_UNAVAILABLE` when `send` fails or the timeout elapses.
+ */
+export async function providerFetchVia<TBody = never>(
+  send: typeof fetch,
   provider: EarnProviderId,
   url: string,
   init: ProviderRequestInit<TBody>
@@ -116,7 +136,7 @@ export async function providerFetch<TBody = never>(
   let response: Response;
   let raw: string;
   try {
-    response = await fetch(url, {
+    response = await send(url, {
       method: init.method,
       headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
       body: serializeProviderBody(init.body),
@@ -145,12 +165,32 @@ export async function providerFetch<TBody = never>(
   return { response, raw, parsed };
 }
 
-export async function providerFetchJson<TResponse, TBody = never>(
+export function providerFetchJson<TResponse, TBody = never>(
   provider: EarnProviderId,
   url: string,
   init: ProviderRequestInit<TBody>
 ): Promise<TResponse> {
-  const { response, parsed } = await providerFetch(provider, url, init);
+  return providerFetchJsonVia<TResponse, TBody>(fetch, provider, url, init);
+}
+
+/**
+ * `providerFetchJson` over an explicit transport; see `providerFetchVia`.
+ *
+ * @param send - The transport the request goes through.
+ * @param provider - The provider the request is for, for errors.
+ * @param url - The URL handed to `send`.
+ * @param init - The request.
+ * @returns The parsed JSON body.
+ * @throws SdpEarnError classified by status on a non-2xx answer; `PROVIDER_UNAVAILABLE` when
+ *   `send` fails, the timeout elapses, or the body is not JSON.
+ */
+export async function providerFetchJsonVia<TResponse, TBody = never>(
+  send: typeof fetch,
+  provider: EarnProviderId,
+  url: string,
+  init: ProviderRequestInit<TBody>
+): Promise<TResponse> {
+  const { response, parsed } = await providerFetchVia(send, provider, url, init);
 
   if (!response.ok) {
     // The normalizer is a nicety on an already-failing path: a provider client

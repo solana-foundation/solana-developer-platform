@@ -6,8 +6,9 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
  * Run a chain-touching job once per environment, each run inside that environment's cluster
  * scope with no project, so the job reads the cluster from the scope and selects only its own
  * environment's rows. The runs are concurrent and independent: a provider outage on one cluster
- * never stalls or skips the other. This is the only place a job's cluster scope is opened; job
- * bodies never open one.
+ * never stalls or skips the other. Job bodies never open a scope; the one exception is the Earn
+ * catalogue crons (`earn-catalogue-sync.ts`, `earn-metrics-refresh.ts`), which span both
+ * clusters in one pass and open each environment's scope in turn around its chain reads.
  *
  * @param job - The job's name, carried on the per-cluster failure event.
  * @param work - The job body; it runs once per environment.

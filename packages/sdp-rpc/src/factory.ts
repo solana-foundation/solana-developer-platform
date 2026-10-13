@@ -110,6 +110,9 @@ const clusterBoundedRpcs = new Map<string, SolanaRpc>();
 /** `<timeoutMs> <poolKey>` to the memoized read client. */
 const clusterReadRpcs = new Map<string, SolanaRpc>();
 
+/** `<timeoutMs> <poolKey>` to the memoized JSON-RPC fetch. */
+const clusterJsonRpcFetches = new Map<string, typeof fetch>();
+
 /** Behaviour options for a scope client: never a URL or a cluster, which come from the scope. */
 export type ClusterRpcOptions = Readonly<{
   /** End-to-end deadline for each request, failover hops and genesis probes included. */
@@ -536,6 +539,59 @@ export function createClusterReadRpc(options: ClusterRpcOptions): SolanaRpc {
   );
   clusterReadRpcs.set(clientKey, rpc);
   return rpc;
+}
+
+/**
+ * JSON text for a response the door's transport decoded: kit's Solana HTTP transport parses every
+ * integer as a bigint, so each one is written back as the bare integer it was on the wire. Same
+ * value-object round trip as kit's own (unexported) `stringifyJsonWithBigInts`.
+ *
+ * @param value - The decoded JSON-RPC response.
+ * @returns The response as JSON text, integers at full precision.
+ */
+function jsonTextWithBigInts(value: unknown): string {
+  return JSON.stringify(value, (_key, member: unknown) =>
+    typeof member === "bigint" ? { $n: member.toString() } : member
+  ).replace(/\{\s*"\$n"\s*:\s*"(-?\d+)"\s*\}/g, "$1");
+}
+
+/**
+ * A `fetch` for a JSON-RPC client that can only dial a URL (a web3.js `Connection`): it ignores
+ * the URL it is called with and sends the JSON-RPC body through the open cluster scope's managed
+ * pool, so the genesis guard, failover and cooldowns are the same as `createClusterRpc()`'s, and
+ * each request is bounded end to end by `timeoutMs`. Transport failures reject, as a failed
+ * `fetch` does; every answered request is an HTTP 200 carrying the JSON-RPC response. The
+ * caller's read scope (`withRpcReadContextFetch`) and any request sharing go above it. Memoized
+ * per process by deadline, cluster and pool.
+ *
+ * @param options - The fetch's behaviour.
+ * @param options.timeoutMs - The end-to-end deadline for each request.
+ * @returns The fetch for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function createClusterJsonRpcFetch(options: ClusterRpcOptions): typeof fetch {
+  const { poolKey, poolTransport } = clusterPool();
+  const clientKey = `${options.timeoutMs} ${poolKey}`;
+  const memoizedFetch = clusterJsonRpcFetches.get(clientKey);
+  if (memoizedFetch) return memoizedFetch;
+  const boundedTransport = withAttemptDeadline(poolTransport, options.timeoutMs);
+  const jsonRpcFetch: typeof fetch = async (_input, init) => {
+    if (typeof init?.body !== "string") {
+      throw new TypeError("The cluster JSON-RPC fetch sends only a JSON string body");
+    }
+    const payload: unknown = JSON.parse(init.body);
+    const response = await boundedTransport<unknown>({
+      payload,
+      ...(init.signal ? { signal: init.signal } : {}),
+    });
+    return new Response(jsonTextWithBigInts(response), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  clusterJsonRpcFetches.set(clientKey, jsonRpcFetch);
+  return jsonRpcFetch;
 }
 
 /**

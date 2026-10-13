@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import { lendingPda } from "@jup-ag/lend";
+import { createClusterJsonRpcFetch } from "@sdp/rpc/factory";
 import {
   currentMinimumRpcSlot,
-  fetchWithReadSocketRetry,
   readFloor,
   readStamp,
   withRpcReadContextFetch,
@@ -50,15 +49,7 @@ interface SharedResponse {
   body: string;
 }
 
-function requestUrl(input: Parameters<typeof fetch>[0]): string {
-  if (typeof input === "string") return input;
-  return input instanceof URL ? input.href : input.url;
-}
-
-function sharedReadKey(
-  input: Parameters<typeof fetch>[0],
-  init: RequestInit | undefined
-): string | undefined {
+function sharedReadKey(init: RequestInit | undefined): string | undefined {
   if (init?.signal || typeof init?.body !== "string") return undefined;
   let request: unknown;
   try {
@@ -69,13 +60,7 @@ function sharedReadKey(
   if (request === null || typeof request !== "object" || Array.isArray(request)) return undefined;
   const { method, params } = request as { method?: unknown; params?: unknown };
   if (typeof method !== "string" || !SHARED_READ_METHODS.has(method)) return undefined;
-  // The endpoint by hash: RPC URLs carry API keys.
-  return JSON.stringify([
-    createHash("sha256").update(requestUrl(input)).digest("hex").slice(0, 16),
-    method,
-    params ?? null,
-    currentMinimumRpcSlot() ?? null,
-  ]);
+  return JSON.stringify([method, params ?? null, currentMinimumRpcSlot() ?? null]);
 }
 
 /**
@@ -85,7 +70,8 @@ function sharedReadKey(
  * caller's minimum slot, so a scoped read never shares with an unscoped one or
  * with another floor, and every consumer still validates the returned context
  * itself. Nothing is kept once a request settles, and requests carrying a
- * signal are never shared. A caller joins only a request `canJoinJupiterLendRead`
+ * signal are never shared. Each sharing layer wraps one cluster pool's fetch,
+ * so a share never crosses clusters. A caller joins only a request `canJoinJupiterLendRead`
  * admits, so a stalled request never captures later callers; an older entry is
  * replaced, and its joiners keep their response.
  */
@@ -95,7 +81,7 @@ export function withJupiterLendReadSharing(send: typeof fetch): typeof fetch {
     { stamp: number; sentAt: number; response: Promise<SharedResponse> }
   >();
   return async (input, init) => {
-    const key = sharedReadKey(input, init);
+    const key = sharedReadKey(init);
     if (key === undefined) return send(input, init);
     let shared = inFlight.get(key);
     if (shared && !canJoinJupiterLendRead(shared)) shared = undefined;
@@ -195,32 +181,36 @@ class JupiterLendConnection extends Connection {
   }
 }
 
-const CONNECTION_CAPACITY = 32;
-const connections = new Map<string, Connection>();
+/** Maximum time a single Jupiter Lend RPC request may take, failover hops included. */
+export const JUPITER_LEND_RPC_REQUEST_TIMEOUT_MS = 30_000;
+
+// Never dialed: the door fetch ignores the URL, and the Connection opens no websocket here.
+const DOOR_ENDPOINT_PLACEHOLDER = "https://door.invalid";
+
+/** The door fetch for a cluster pool to the Connection built over it. */
+const connections = new WeakMap<typeof fetch, Connection>();
 
 /**
- * One Connection per RPC URL (the 32 most recently used), shared by every
- * Jupiter Lend operation so that concurrent owners share identical in-flight
- * reads. web3.js keeps no answers between calls and keeps its default 429
- * retries. The socket retry sits under the sharing layer, so one re-send
- * serves every joiner. Node's fetch has no use for web3.js's keep-alive agent.
+ * The open cluster scope's Connection, shared by every Jupiter Lend operation on that cluster pool
+ * so concurrent owners share identical in-flight reads. Its HTTP goes through the door
+ * (`createClusterJsonRpcFetch`): genesis guard, failover and the per-request deadline. The read
+ * scope sits above the sharing layer, so each caller still validates the context it is served.
+ * web3.js keeps no answers between calls; nothing on this path subscribes, so the websocket
+ * client web3.js builds never connects.
+ *
+ * @returns The Connection for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
-export function jupiterLendConnection(rpcUrl: string): Connection {
-  const known = connections.get(rpcUrl);
-  if (known) {
-    connections.delete(rpcUrl);
-    connections.set(rpcUrl, known);
-    return known;
-  }
-  const connection = new JupiterLendConnection(rpcUrl, {
+export function jupiterLendConnection(): Connection {
+  const doorFetch = createClusterJsonRpcFetch({ timeoutMs: JUPITER_LEND_RPC_REQUEST_TIMEOUT_MS });
+  const known = connections.get(doorFetch);
+  if (known) return known;
+  const connection = new JupiterLendConnection(DOOR_ENDPOINT_PLACEHOLDER, {
     commitment: "confirmed",
-    fetch: withRpcReadContextFetch(withJupiterLendReadSharing(fetchWithReadSocketRetry)),
+    fetch: withRpcReadContextFetch(withJupiterLendReadSharing(doorFetch)),
     httpAgent: false,
   });
-  connections.set(rpcUrl, connection);
-  if (connections.size > CONNECTION_CAPACITY) {
-    const oldest = connections.keys().next().value;
-    if (oldest !== undefined) connections.delete(oldest);
-  }
+  connections.set(doorFetch, connection);
   return connection;
 }
