@@ -16,46 +16,38 @@ export function actionIdempotencyHeaders(key: unknown): Record<string, string> |
     : undefined;
 }
 
-/**
- * What an sdp-api answer settles about the write its key carried:
- *
- * - `definitive`: a success, or a replay. sdp-api ran or stored the request.
- * - `refused`: a 4xx other than a conflict or a rate limit. It retires a key
- *   on its first attempt only; once an earlier attempt went unanswered, a
- *   refusal settles nothing about that attempt, which may have written.
- * - `open`: a 5xx, a 409, a 429, or no answer. The write may have run, so the
- *   key stays for the retry.
- */
-export type ActionKeyAnswer = "definitive" | "refused" | "open";
-
-/**
- * The one rule behind {@link ActionKeyAnswer}, shared by `dashboard-fetch` and
- * the server actions that forward the browser's key.
- *
- * @param status - The HTTP status, or `null` when nothing answered.
- * @param replayed - Whether sdp-api marked the answer `Idempotent-Replayed`.
- */
-export function keyAnswerFor(status: number | null, replayed: boolean): ActionKeyAnswer {
-  if (replayed) return "definitive";
-  if (status === null) return "open";
-  if (status < 400) return "definitive";
-  return status < 500 && status !== 409 && status !== 429 ? "refused" : "open";
+/** What sdp-api answered a keyed request: its status (`null` for no answer) and replay mark. */
+export interface ApiAnswer {
+  status: number | null;
+  replayed: boolean;
 }
 
 /**
- * Whether an answer retires its key, so the next submit is a new action: a
- * definitive answer always does, a refusal only when no earlier attempt under
- * the key went unanswered. Every dashboard key holder applies this one rule.
- *
- * @param answer - What the answer settles ({@link keyAnswerFor}).
- * @param earlierAttemptUnanswered - Whether an earlier attempt under this key
- *   never got a definitive answer, so it may have written.
+ * The one rule every dashboard key holder applies (HOO-1918): an answer retires
+ * its key, so the next submit of the same input is a new action, when it is a
+ * success, a replay (`Idempotent-Replayed`), or a 422 (the key is another
+ * request's). Anything else keeps it, a lost answer included, so the retry is
+ * the same request: an unstored refusal simply runs again under it, and a
+ * failure recorded after the request's row comes back as a replay, which
+ * retires it.
  */
-export function answerRetiresKey(
-  answer: ActionKeyAnswer,
-  earlierAttemptUnanswered: boolean
-): boolean {
-  return answer === "definitive" || (answer === "refused" && !earlierAttemptUnanswered);
+export function answerRetiresKey(answer: ApiAnswer): boolean {
+  const { status, replayed } = answer;
+  return replayed || (status !== null && ((status >= 200 && status < 300) || status === 422));
+}
+
+/**
+ * The answer a `dashboardFetch`-shaped result carries. A failure below 400 (a
+ * followed redirect, a body nobody could read) is no answer from sdp-api, so it
+ * reads as a lost one.
+ */
+export function fetchResultAnswer(result: {
+  ok: boolean;
+  status: number | null;
+  replayed?: boolean;
+}): ApiAnswer {
+  const answered = result.ok || (result.status !== null && result.status >= 400);
+  return { status: answered ? result.status : null, replayed: result.replayed === true };
 }
 
 /**

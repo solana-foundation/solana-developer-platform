@@ -20,7 +20,10 @@ describe("useActionIdempotencyKey", () => {
     const first = result.current.keyFor("label=a");
 
     expect(result.current.keyFor("label=a")).toBe(first);
-    result.current.settled("label=a", { status: "error", keyAnswer: "open" });
+    result.current.settled("label=a", {
+      status: "error",
+      answer: { status: 503, replayed: false },
+    });
     expect(result.current.keyFor("label=a")).toBe(first);
 
     const edited = result.current.keyFor("label=b");
@@ -33,10 +36,16 @@ describe("useActionIdempotencyKey", () => {
   it("reuses A's unanswered key after the user went A, B and back to A", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const a = result.current.keyFor("label=a");
-    result.current.settled("label=a", { status: "error", keyAnswer: "open" });
+    result.current.settled("label=a", {
+      status: "error",
+      answer: { status: 503, replayed: false },
+    });
 
     const b = result.current.keyFor("label=b");
-    result.current.settled("label=b", { status: "error", keyAnswer: "open" });
+    result.current.settled("label=b", {
+      status: "error",
+      answer: { status: 503, replayed: false },
+    });
 
     expect(result.current.keyFor("label=a")).toBe(a);
     expect(result.current.keyFor("label=b")).toBe(b);
@@ -44,23 +53,40 @@ describe("useActionIdempotencyKey", () => {
 
   // A server action hides Idempotent-Replayed from the browser, so the action
   // reports it: a stored failure replayed is definitive and must not replay forever.
-  it("retires the key on a replayed failure and on a refusal of a fresh key", () => {
+  it("retires the key on a replayed failure and on a 422, and keeps it on a plain refusal", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const replayed = result.current.keyFor("label=a");
-    result.current.settled("label=a", { status: "error", keyAnswer: "open" });
-    result.current.settled("label=a", { status: "error", keyAnswer: "definitive" });
+    result.current.settled("label=a", {
+      status: "error",
+      answer: { status: 503, replayed: false },
+    });
+    result.current.settled("label=a", { status: "error", answer: { status: 400, replayed: true } });
     expect(result.current.keyFor("label=a")).not.toBe(replayed);
 
-    const refused = result.current.keyFor("label=b");
-    result.current.settled("label=b", { status: "error", keyAnswer: "refused" });
-    expect(result.current.keyFor("label=b")).not.toBe(refused);
+    const reused = result.current.keyFor("label=b");
+    result.current.settled("label=b", {
+      status: "error",
+      answer: { status: 422, replayed: false },
+    });
+    expect(result.current.keyFor("label=b")).not.toBe(reused);
+
+    // An unstored refusal runs again under the same key; nothing to retire.
+    const refused = result.current.keyFor("label=c");
+    result.current.settled("label=c", {
+      status: "error",
+      answer: { status: 400, replayed: false },
+    });
+    expect(result.current.keyFor("label=c")).toBe(refused);
   });
 
   it("keeps the key when a refusal follows an unanswered attempt, or the action threw", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const key = result.current.keyFor("label=a");
     result.current.settled("label=a", { status: "error" });
-    result.current.settled("label=a", { status: "error", keyAnswer: "refused" });
+    result.current.settled("label=a", {
+      status: "error",
+      answer: { status: 400, replayed: false },
+    });
     expect(result.current.keyFor("label=a")).toBe(key);
   });
 
@@ -69,7 +95,10 @@ describe("useActionIdempotencyKey", () => {
   it("keeps an unanswered key across a reload", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const key = result.current.keyFor("wallet=treasury");
-    result.current.settled("wallet=treasury", { status: "error", keyAnswer: "open" });
+    result.current.settled("wallet=treasury", {
+      status: "error",
+      answer: { status: 503, replayed: false },
+    });
 
     reload();
     const { result: reloaded } = renderHook(() => useActionIdempotencyKey());
@@ -84,7 +113,10 @@ describe("useActionIdempotencyKey", () => {
     reload();
     const { result: reloaded } = renderHook(() => useActionIdempotencyKey());
     expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
-    reloaded.current.settled("wallet=treasury", { status: "error", keyAnswer: "refused" });
+    reloaded.current.settled("wallet=treasury", {
+      status: "error",
+      answer: { status: 400, replayed: false },
+    });
 
     expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
   });
@@ -96,7 +128,10 @@ describe("useActionIdempotencyKey", () => {
     try {
       const { result } = renderHook(() => useActionIdempotencyKey());
       const key = result.current.keyFor("label=a");
-      result.current.settled("label=a", { status: "error", keyAnswer: "open" });
+      result.current.settled("label=a", {
+        status: "error",
+        answer: { status: 503, replayed: false },
+      });
 
       expect(result.current.keyFor("label=a")).toBe(key);
     } finally {

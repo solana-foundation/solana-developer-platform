@@ -60,7 +60,10 @@ describe("initializeCustodySetupAction", () => {
       walletForm({ provider: "privy", walletLabel: "Treasury" })
     );
 
-    expect(result).toEqual({ status: "provider_already_set_up", keyAnswer: "open" });
+    expect(result).toEqual({
+      status: "provider_already_set_up",
+      answer: { status: 409, replayed: false },
+    });
     expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
       "/v1/wallets/initialize",
       expect.anything()
@@ -99,22 +102,22 @@ describe("createCustodySetupWalletAction", () => {
     expect(requestBody(client)).not.toHaveProperty("idempotencyKey");
   });
 
-  // The browser cannot see Idempotent-Replayed through a server action, so the
-  // action says what each failure settles about the key it forwarded.
+  // The browser cannot see the status or Idempotent-Replayed through a server
+  // action, so the action reports what sdp-api answered for the key it forwarded.
   it.each([
-    ["a replayed stored failure", new SdpApiResponseError(422, "{}", true), "definitive"],
-    ["a fresh refusal", new SdpApiResponseError(422, "{}"), "refused"],
-    ["a conflict", new SdpApiResponseError(409, "{}"), "open"],
-    ["a server error", new SdpApiResponseError(502, "{}"), "open"],
-    ["a transport failure", new TypeError("fetch failed"), "open"],
-  ] as const)("reports %s as %s for the key", async (_name, error, keyAnswer) => {
+    ["a replayed stored failure", new SdpApiResponseError(422, "{}", true), 422, true],
+    ["a fresh refusal", new SdpApiResponseError(422, "{}"), 422, false],
+    ["a conflict", new SdpApiResponseError(409, "{}"), 409, false],
+    ["a server error", new SdpApiResponseError(502, "{}"), 502, false],
+    ["a transport failure", new TypeError("fetch failed"), null, false],
+  ] as const)("reports %s to the browser", async (_name, error, status, replayed) => {
     client.fetch.mockRejectedValue(error);
 
     const result = await createCustodySetupWalletAction(
       walletForm({ provider: "privy", idempotencyKey: "browser-key" })
     );
 
-    expect(result).toMatchObject({ status: "error", keyAnswer });
+    expect(result).toMatchObject({ status: "error", answer: { status, replayed } });
   });
 
   // Sending both would leave the API to reconcile a connection against a

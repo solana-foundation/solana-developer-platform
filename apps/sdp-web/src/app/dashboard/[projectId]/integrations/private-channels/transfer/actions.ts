@@ -2,11 +2,12 @@
 
 import type { PrivateChannelTransfer, PrivateChannelTransferRecipientDto } from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
+import type { ApiAnswer } from "@/lib/idempotency";
 import {
   createPrivateChannelTransfer,
   fetchPrivateChannelTransferRecipients,
 } from "@/lib/private-channels";
-import { createSdpApiClient, extractSdpApiErrorMessage, SdpApiResponseError } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, sdpApiAnswer } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
 export interface CreateTransferInput {
@@ -34,7 +35,7 @@ export interface CreateTransferInput {
 export type CreateTransferResult =
   | { ok: true; transfer: PrivateChannelTransfer }
   | { ok: false; kind: "validation"; messageKey: MessageKey }
-  | { ok: false; kind: "server"; message: string; status: number | null };
+  | { ok: false; kind: "server"; message: string; answer: ApiAnswer };
 
 export type FetchTransferRecipientsResult =
   | { ok: true; recipients: PrivateChannelTransferRecipientDto[] }
@@ -88,7 +89,7 @@ export async function createTransferAction(
       ok: false,
       kind: "server",
       message: extractSdpApiErrorMessage(error),
-      status: error instanceof SdpApiResponseError ? error.status : null,
+      answer: sdpApiAnswer(error),
     };
   }
 }

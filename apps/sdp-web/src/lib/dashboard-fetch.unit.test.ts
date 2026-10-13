@@ -254,15 +254,17 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 2)).toBe(keyOfCall(fetchMock, 0));
   });
 
-  it("retires a fresh key on a first-attempt refusal", async () => {
+  it("keeps the key on a plain refusal, which runs again, and retires it on a 422", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
-    const fetchMock = statusFetchMock(400, 201);
+    const fetchMock = statusFetchMock(400, 422, 201);
     vi.stubGlobal("fetch", fetchMock);
 
     await submit();
     await submit();
+    await submit();
 
-    expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    expect(keyOfCall(fetchMock, 2)).not.toBe(keyOfCall(fetchMock, 1));
   });
 
   it("keeps the key when a success's body fails to download", async () => {

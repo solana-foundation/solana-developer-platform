@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
@@ -361,17 +361,19 @@ function TransferFormState({
       mint: selectedToken?.mint,
     };
     const fingerprint = privateChannelTransferRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelTransferIdempotencyKeyStore.claim(fingerprint);
+    const idempotencyKey = privateChannelTransferIdempotencyKeyStore.claim(fingerprint).key;
 
     startTransition(async () => {
       try {
         const result = await createTransferAction({ ...requestPayload, idempotencyKey });
-        applyIdempotencyKeyOutcome(
+        settleIdempotencyKey(
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,
           result.ok
-            ? { ok: true, status: 200, data: { kind: "transfer" } }
-            : { ok: false, status: result.kind === "server" ? result.status : 400 }
+            ? { status: 200, replayed: false }
+            : result.kind === "server"
+              ? result.answer
+              : { status: null, replayed: false }
         );
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });

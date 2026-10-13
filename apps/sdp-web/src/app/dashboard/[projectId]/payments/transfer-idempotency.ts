@@ -2,10 +2,9 @@
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import {
-  beginKeyedSend,
   createIdempotencyKeyStore,
-  refusalRetiresKey,
   resetIdempotencyKeyStoresForTests,
+  settleIdempotencyKey,
 } from "@/lib/idempotency-key-store";
 import {
   type CreateTransferInput,
@@ -19,7 +18,7 @@ import {
  *
  * Without a key, pressing Send again after a timeout is a new payment to the
  * API, and both can send the money. With the same key the API's replay finds
- * the first transfer and sends nothing more. Storage, expiry, holds and the
+ * the first transfer and sends nothing more. Storage and the
  * retire rule are the shared store's; this module owns what makes two sends
  * the same payment.
  */
@@ -51,7 +50,7 @@ export function transferRequestFingerprint(input: CreateTransferInput): string {
 
 /** The key for this payment, the same one on every retry until it is released. */
 export function claimTransferIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
+  return store.claim(fingerprint).key;
 }
 
 /** Retire the key once the API recorded the transfer or definitively refused it. */
@@ -76,23 +75,16 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  const { key, earlierAttemptUnanswered } = beginKeyedSend(store, fingerprint);
-  // A provider may repeat its signature callback after a lost event response.
-  // Its session still names the same payment, even after the transfer lands.
-  if (providerSession) store.hold(fingerprint);
+  const { key, persisted } = store.claim(fingerprint);
   let transfer: TransferRecord;
   try {
-    transfer = await createTransfer(submission, t, key);
+    transfer = await createTransfer(submission, t, { value: key, persisted });
   } catch (error) {
-    // A provider session always names the same payment, including after an
-    // expired login rejects a callback retry. Never release its recorded key.
-    // Otherwise the dashboard-wide rule decides: a network failure, a 5xx, a
-    // 409 or a 429 keeps the key, and so does any refusal once an earlier
-    // attempt went unanswered, since that attempt may have recorded the
-    // transfer.
-    const refusal = error instanceof TransferRequestError ? error : null;
-    if (!providerSession && refusalRetiresKey(refusal, earlierAttemptUnanswered)) {
-      releaseTransferIdempotencyKey(fingerprint);
+    // A provider may repeat its signature callback after a lost event response,
+    // and its session always names the same payment, so its key is never
+    // released. Otherwise the dashboard-wide rule decides (`answerRetiresKey`).
+    if (!providerSession && error instanceof TransferRequestError) {
+      settleIdempotencyKey(store, fingerprint, { status: error.status, replayed: error.replayed });
     }
     throw error;
   }
