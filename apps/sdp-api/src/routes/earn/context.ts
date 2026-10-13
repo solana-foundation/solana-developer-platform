@@ -5,12 +5,9 @@ import type { Context } from "hono";
 import { createEarnRepository } from "@/db/repositories";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { conflict, notFound } from "@/lib/errors";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
-
-export { resolveSdpEnvironment } from "@/lib/sdp-environment";
 
 /**
  * The shelf an optional-auth catalogue read answers (PRO-1998): the environment of the open
@@ -36,30 +33,37 @@ export function resolveEarnCatalogueEnvironment(
 }
 
 /**
- * Loads the strategy a keyless-capable money route names, with the environment the request acts
+ * Loads the strategy a keyless-capable money route names, in the environment the request acts
  * in: the open cluster scope's. A tenant caller's scope is its project's, so a row from another
  * environment is 404, never a cross-tier answer. A keyless caller's scope was opened from this
  * same row's `environment` (index.ts), so the row IS the choice of cluster, RPC and paymaster
- * (PRO-1998).
+ * (PRO-1998). Callers read the scope themselves where they need the environment.
  *
  * @param c - The request context.
  * @param strategyId - The catalogue strategy id the request names.
- * @returns The strategy row and the scope's environment.
+ * @returns The strategy row.
  * @throws AppError `NOT_FOUND` when the row is absent or belongs to another environment.
  */
 export async function requireEarnStrategyForCaller(
   c: AppContext,
   strategyId: string
-): Promise<{ strategy: EarnStrategyRow; environment: SdpEnvironment }> {
+): Promise<EarnStrategyRow> {
   const strategy = await getEarnRepository(c).getStrategyById(strategyId);
   if (!strategy) throw notFound("Earn strategy");
-  const { environment } = currentClusterScope();
-  if (strategy.environment !== environment) throw notFound("Earn strategy");
-  return { strategy, environment };
+  if (strategy.environment !== currentClusterScope().environment) throw notFound("Earn strategy");
+  return strategy;
 }
 
+/**
+ * The `@sdp/earn` runtime for this request: the process bindings and the open cluster scope's
+ * environment. The one constructor route handlers use.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @returns The runtime context.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export function earnRuntime(c: AppContext): EarnRuntimeContext {
-  return { env: c.env, environment: resolveSdpEnvironment(c) };
+  return { env: c.env, environment: currentClusterScope().environment };
 }
 
 export function getEarnRepository(c: AppContext) {

@@ -1,110 +1,65 @@
 import { resolveRoundRobinRpcTargets, resolveRpcTarget } from "@sdp/rpc/relay";
-import { beforeEach, describe, expect, it } from "vitest";
-import type { KVStore, KVStoreSet } from "@/runtime/kv";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { env, resetManagedRpcEnv } from "@/test/helpers/env";
+import { env } from "@/test/helpers/env";
+import { clearKVStores } from "@/test/mocks/kv";
 
-const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
-const kv: KVStoreSet = createKVStoreSet(env);
+type ClusterScopeFacts = Parameters<typeof runInClusterScope>[0];
 
-async function clearKvStore(store: KVStore) {
-  const listed = await store.list();
-  for (const key of listed.keys) {
-    await store.delete(key.name);
-  }
+const DEVNET_CURSOR_KEY = "rpc:relay:round-robin-cursor:devnet";
+const MAINNET_CURSOR_KEY = "rpc:relay:round-robin-cursor:mainnet-beta";
+const SANDBOX_SCOPE: ClusterScopeFacts = {
+  projectId: "prj_rpc_relay_sandbox",
+  environment: "sandbox",
+};
+const PRODUCTION_SCOPE: ClusterScopeFacts = {
+  projectId: "prj_rpc_relay_production",
+  environment: "production",
+};
+const kv = createKVStoreSet(env);
+
+function resolveTargetIn(facts: ClusterScopeFacts) {
+  return runInClusterScope(facts, () => resolveRpcTarget({ cache: kv.cache }));
 }
 
-async function resolveNextTarget() {
-  return resolveRpcTarget({ env, cache: kv.cache });
+function resolveNextTarget() {
+  return resolveTargetIn(SANDBOX_SCOPE);
 }
 
 describe("rpc-relay.service", () => {
   beforeEach(async () => {
-    await clearKvStore(kv.cache);
-    resetManagedRpcEnv();
+    await clearKVStores(env);
   });
 
-  it("resolves a query-string key into the endpoint and masks it in the label", async () => {
-    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test/?api-key={API_KEY}";
-    env.SOLANA_RPC_QUICKNODE_API_KEY = "qn_secret";
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
-    const target = await resolveNextTarget();
+  it("labels an endpoint by protocol and host only, whatever key its URL carries", async () => {
+    vi.stubEnv(
+      "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
+      "https://user:pass@solana-mainnet.example.test/v2/abcKEY123?api-key=xyz"
+    );
+
+    const target = await resolveTargetIn(PRODUCTION_SCOPE);
 
     expect(target).toEqual({
-      providerId: "quicknode",
-      endpoint: "https://rpc.quicknode.test/?api-key=qn_secret",
-      endpointLabel: "https://rpc.quicknode.test/?api-key=***",
+      cluster: "mainnet-beta",
+      providerId: "alchemy",
+      endpoint: "https://user:pass@solana-mainnet.example.test/v2/abcKEY123?api-key=xyz",
+      endpointLabel: "https://solana-mainnet.example.test",
     });
   });
 
-  it("resolves validationcloud, substitutes the path-segment key, and redacts it in the label", async () => {
-    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
-    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("validationcloud");
-    expect(target.endpoint).toContain("/v1/vc_secret");
-    expect(target.endpointLabel).not.toContain("vc_secret");
-    expect(target.endpointLabel).toContain("/v1/***");
-  });
-
-  it("masks overlapping provider keys without leaving remnants", async () => {
-    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
-    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret_long_123";
-    env.SOLANA_RPC_TRITON_API_KEY = "vc_secret";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("validationcloud");
-    expect(target.endpointLabel).toContain("/v1/***");
-    expect(target.endpointLabel).not.toContain("long_123");
-  });
-
-  it("redacts URL-encoded keys even when the endpoint URL is unparseable", async () => {
-    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "devnet.solana.validationcloud.io/v1/{API_KEY}";
-    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc+secret/with=chars";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("validationcloud");
-    expect(target.endpoint).toContain("/v1/vc%2Bsecret%2Fwith%3Dchars");
-    expect(target.endpointLabel).toContain("/v1/***");
-    expect(target.endpointLabel).not.toContain("vc+secret");
-    expect(target.endpointLabel).not.toContain("vc%2Bsecret");
-  });
-
-  it("resolves Nodit with URL-only authentication and a redacted endpoint label", async () => {
-    env.SOLANA_RPC_NODIT_URL = "https://solana-devnet.nodit.io/{API_KEY}";
-    env.SOLANA_RPC_NODIT_API_KEY = "nodit+secret/with=chars";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("nodit");
-    expect(target.endpoint).toBe("https://solana-devnet.nodit.io/nodit%2Bsecret%2Fwith%3Dchars");
-    expect(target.endpointLabel).toContain("/***");
-    expect(target.endpointLabel).not.toContain("nodit+secret");
-    expect(target.endpointLabel).not.toContain("nodit%2Bsecret");
-  });
-
-  it("resolves a complete Nodit URL without a separate key like other providers", async () => {
-    env.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/rpc";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("nodit");
-    expect(target.endpoint).toBe("https://rpc.nodit.test/rpc");
-  });
-
   it("rotates through the managed pool in provider order with the default last", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-    env.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
-    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
-    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://rpc.validationcloud.test";
-    env.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/{API_KEY}";
-    env.SOLANA_RPC_NODIT_API_KEY = "nodit-key";
-    env.SOLANA_RPC_URL = "https://rpc.default.test";
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test");
+    vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", "https://rpc.alchemy.test");
+    vi.stubEnv("SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL", "https://rpc.quicknode.test");
+    vi.stubEnv("SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL", "https://rpc.validationcloud.test");
+    vi.stubEnv("SOLANA_RPC_NODIT_DEVNET_API_KEY_URL", "https://rpc.nodit.test");
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "https://rpc.default.test");
 
     const providerIds: string[] = [];
     for (let request = 0; request < 7; request += 1) {
@@ -122,20 +77,9 @@ describe("rpc-relay.service", () => {
     ]);
   });
 
-  it("starts the rotation at SOLANA_RPC_DEFAULT_PROVIDER", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
-    env.SOLANA_RPC_DEFAULT_PROVIDER = "quicknode";
-
-    const target = await resolveNextTarget();
-
-    expect(target.providerId).toBe("quicknode");
-  });
-
   it("wraps back to the first provider after the last one", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test");
 
     const providerIds: string[] = [];
     for (let request = 0; request < 3; request += 1) {
@@ -143,11 +87,11 @@ describe("rpc-relay.service", () => {
     }
 
     expect(providerIds).toEqual(["triton", "helius", "triton"]);
-    expect(await kv.cache.get(ROUND_ROBIN_CURSOR_KEY)).toBe("1");
+    expect(await kv.cache.get(DEVNET_CURSOR_KEY)).toBe("1");
   });
 
   it("never writes the cursor for a single provider", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
 
     expect((await resolveNextTarget()).providerId).toBe("triton");
     expect((await resolveNextTarget()).providerId).toBe("triton");
@@ -157,54 +101,123 @@ describe("rpc-relay.service", () => {
   it.each(["not-a-number", "-3"])(
     "restarts the rotation at the first provider when the cursor reads %s",
     async (storedCursor) => {
-      env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-      await kv.cache.put(ROUND_ROBIN_CURSOR_KEY, storedCursor);
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+      vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test");
+      await kv.cache.put(DEVNET_CURSOR_KEY, storedCursor);
 
       const target = await resolveNextTarget();
 
       expect(target.providerId).toBe("triton");
-      expect(await kv.cache.get(ROUND_ROBIN_CURSOR_KEY)).toBe("1");
+      expect(await kv.cache.get(DEVNET_CURSOR_KEY)).toBe("1");
     }
   );
 
-  it("refuses to resolve a target when no managed provider is configured", async () => {
+  it("refuses to resolve a target when the scope's cluster has no endpoint configured", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://rpc.triton.test");
+
     await expect(resolveNextTarget()).rejects.toMatchObject({
       name: "SdpRpcError",
-      code: "SOLANA_RPC_ERROR",
+      code: "RPC_NOT_CONFIGURED",
     });
-    await expect(resolveRoundRobinRpcTargets({ env, cache: kv.cache })).rejects.toMatchObject({
+    await expect(
+      runInClusterScope(SANDBOX_SCOPE, () => resolveRoundRobinRpcTargets({ cache: kv.cache }))
+    ).rejects.toMatchObject({
       name: "SdpRpcError",
-      code: "SOLANA_RPC_ERROR",
+      code: "RPC_NOT_CONFIGURED",
     });
   });
 
-  it("lists every provider rotated to the selected one and advances the shared cursor", async () => {
-    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test/?api-key={API_KEY}";
-    env.SOLANA_RPC_HELIUS_API_KEY = "helius_secret";
-    env.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
+  it("refuses to resolve a target outside a cluster scope", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+
+    await expect(resolveRpcTarget({ cache: kv.cache })).rejects.toMatchObject({
+      name: "SdpRpcError",
+      code: "CLUSTER_SCOPE_MISSING",
+    });
+  });
+
+  it("lists every provider rotated to the selected one and advances the cluster's cursor", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test/?api-key=xyz");
+    vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", "https://rpc.alchemy.test");
     await resolveNextTarget();
 
-    const targets = await resolveRoundRobinRpcTargets({ env, cache: kv.cache });
+    const targets = await runInClusterScope(SANDBOX_SCOPE, () =>
+      resolveRoundRobinRpcTargets({ cache: kv.cache })
+    );
 
     expect(targets).toEqual([
       {
+        cluster: "devnet",
         providerId: "helius",
-        endpoint: "https://rpc.helius.test/?api-key=helius_secret",
-        endpointLabel: "https://rpc.helius.test/?api-key=***",
+        endpoint: "https://rpc.helius.test/?api-key=xyz",
+        endpointLabel: "https://rpc.helius.test",
       },
       {
+        cluster: "devnet",
         providerId: "alchemy",
         endpoint: "https://rpc.alchemy.test",
-        endpointLabel: "https://rpc.alchemy.test/",
+        endpointLabel: "https://rpc.alchemy.test",
       },
       {
+        cluster: "devnet",
         providerId: "triton",
         endpoint: "https://rpc.triton.test",
-        endpointLabel: "https://rpc.triton.test/",
+        endpointLabel: "https://rpc.triton.test",
       },
     ]);
     expect((await resolveNextTarget()).providerId).toBe("alchemy");
+  });
+
+  it("keeps an unparseable pool URL as one target labelled by its provider", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "not a url");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test/?api-key=xyz");
+
+    const targets = await runInClusterScope(SANDBOX_SCOPE, () =>
+      resolveRoundRobinRpcTargets({ cache: kv.cache })
+    );
+
+    expect(targets).toEqual([
+      {
+        cluster: "devnet",
+        providerId: "triton",
+        endpoint: "not a url",
+        endpointLabel: "unparseable triton URL",
+      },
+      {
+        cluster: "devnet",
+        providerId: "helius",
+        endpoint: "https://rpc.helius.test/?api-key=xyz",
+        endpointLabel: "https://rpc.helius.test",
+      },
+    ]);
+  });
+
+  it("serves a Production scope from the mainnet-beta pool, each cluster on its own cursor", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://devnet.triton.test");
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "https://devnet.default.test");
+    vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://mainnet.triton.test");
+    vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "https://mainnet.default.test");
+
+    const endpoints: string[] = [];
+    for (const facts of [
+      SANDBOX_SCOPE,
+      PRODUCTION_SCOPE,
+      SANDBOX_SCOPE,
+      PRODUCTION_SCOPE,
+      PRODUCTION_SCOPE,
+    ]) {
+      endpoints.push((await resolveTargetIn(facts)).endpoint);
+    }
+
+    expect(endpoints).toEqual([
+      "https://devnet.triton.test",
+      "https://mainnet.triton.test",
+      "https://devnet.default.test",
+      "https://mainnet.default.test",
+      "https://mainnet.triton.test",
+    ]);
+    expect(await kv.cache.get(DEVNET_CURSOR_KEY)).toBe("0");
+    expect(await kv.cache.get(MAINNET_CURSOR_KEY)).toBe("1");
   });
 });

@@ -7,6 +7,7 @@ import {
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   EarnDepositSwap,
   EarnExternalWalletDepositResponse,
@@ -26,7 +27,6 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
-  SdpEnvironment,
 } from "@sdp/types";
 import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
@@ -62,7 +62,7 @@ import {
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import type { AppContext } from "../context";
-import { requireEarnStrategyForCaller, resolveSdpEnvironment } from "../context";
+import { earnRuntime, requireEarnStrategyForCaller } from "../context";
 import {
   type earnExternalWalletDepositTransactionSchema,
   earnExternalWalletEarningsQuerySchema,
@@ -167,15 +167,10 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
     c,
     earnExternalWalletPositionSummaryQuerySchema
   );
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const portfolio = await observeExternalWalletPortfolio(
-    c,
-    auth.organizationId,
-    projectId,
-    environment
-  );
+  const portfolio = await observeExternalWalletPortfolio(c, auth.organizationId, projectId);
   const summary = summarizeExternalWalletPositions(portfolio.holdings, portfolio.live, {
     includeOwnerAddresses,
     includePositions,
@@ -202,14 +197,13 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
 function observeExternalWalletPortfolio(
   c: AppContext,
   organizationId: string,
-  projectId: string,
-  environment: SdpEnvironment
+  projectId: string
 ): Promise<ExternalWalletPortfolioObservation> {
-  const key = JSON.stringify([organizationId, projectId, environment]);
+  const key = JSON.stringify([organizationId, projectId, currentClusterScope().environment]);
   const existing = inFlightExternalWalletPortfolios.get(key);
   if (existing) return existing;
 
-  const observation = loadExternalWalletPortfolio(c, organizationId, projectId, environment);
+  const observation = loadExternalWalletPortfolio(c, organizationId, projectId);
   if (inFlightExternalWalletPortfolios.size >= MAX_IN_FLIGHT_EXTERNAL_PORTFOLIOS) {
     return observation;
   }
@@ -223,12 +217,22 @@ function observeExternalWalletPortfolio(
   return observation;
 }
 
+/**
+ * Every external-wallet claim of the project in the open cluster scope's environment, hydrated
+ * live, with empty claims closed.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param organizationId - The caller's organization.
+ * @param projectId - The caller's project.
+ * @returns The claims and their live values.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 async function loadExternalWalletPortfolio(
   c: AppContext,
   organizationId: string,
-  projectId: string,
-  environment: SdpEnvironment
+  projectId: string
 ): Promise<ExternalWalletPortfolioObservation> {
+  const { environment } = currentClusterScope();
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
   const rows = await collectAllExternalWalletPositionRows((before) =>
     repo.listExternalWalletPositions({
@@ -241,7 +245,7 @@ async function loadExternalWalletPortfolio(
   );
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -277,7 +281,7 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid external-wallet position pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -292,7 +296,7 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   });
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -376,7 +380,7 @@ export async function listEarnExternalWalletMovements(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid external-wallet movement pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -456,7 +460,7 @@ function requirePositionTokenMint(position: EarnPositionRow): string {
  */
 export async function getEarnExternalWalletMovement(c: AppContext) {
   const { movementId } = parseParams(c, earnExternalWalletMovementParamsSchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -523,7 +527,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  */
 export async function getEarnExternalWalletEarnings(c: AppContext) {
   const { ownerAddress } = parseQuery(c, earnExternalWalletEarningsQuerySchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -542,7 +546,7 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
   ]);
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -709,8 +713,6 @@ export type ExternalWalletExitLocator =
 
 interface ResolvedExternalWalletExitBase {
   buildContext: ExternalWalletBuildContext;
-  /** The tenant's environment, or the named strategy's for an anonymous exit. */
-  environment: ReturnType<typeof resolveSdpEnvironment>;
   provider: string;
   vaultAddress: string;
   tokenMint: string;
@@ -748,20 +750,18 @@ export async function resolveExternalWalletExit(
 ): Promise<ResolvedExternalWalletExit> {
   const authenticated = getAuthenticatedEarnRequest(c);
   if (authenticated) {
-    const environment = resolveSdpEnvironment(c);
     if (!("positionId" in locator)) {
       throw badRequest("positionId is required for an authenticated external-wallet exit");
     }
     const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
       organizationId: authenticated.auth.organizationId,
-      environment,
+      environment: currentClusterScope().environment,
       positionId: locator.positionId,
     });
     const position = toExternalWalletHolding(positionRow, authenticated.projectId);
     if (!position) throw notFound("Earn external-wallet position");
     return {
       buildContext: toExternalWalletBuildContext(authenticated),
-      environment,
       provider: position.provider,
       positionId: position.id,
       strategyId: null,
@@ -776,7 +776,7 @@ export async function resolveExternalWalletExit(
 
   if (!("strategyId" in locator)) throw anonymousExitNeedsStrategy();
   // The row names the shelf; an anonymous caller chose it (PRO-1998).
-  const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
+  const strategy = await requireEarnStrategyForCaller(c, locator.strategyId);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(`${strategy.provider} does not support external-wallet exits.`);
   }
@@ -785,7 +785,6 @@ export async function resolveExternalWalletExit(
   if (!strategy.share_mint) throw internalError(`Earn strategy ${strategy.id} has no share mint`);
   return {
     buildContext: {},
-    environment,
     provider: strategy.provider,
     positionId: null,
     strategyId: strategy.id,
@@ -818,7 +817,8 @@ export async function createEarnExternalWalletDepositTransaction(
   const authenticated = getAuthenticatedEarnRequest(c);
   // The row names the shelf: a tenant caller must own it, an anonymous caller
   // chose it (PRO-1998).
-  const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
+  const strategy = await requireEarnStrategyForCaller(c, body.strategyId);
+  const { environment } = currentClusterScope();
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {
     throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
@@ -845,7 +845,7 @@ export async function createEarnExternalWalletDepositTransaction(
   // provider's live quote and enforced by its on-chain instruction. A next-NAV
   // provider order publishes null because its later settlement cannot be
   // bounded by the on-chain payment leg.
-  assertDepositFloorPresent(provider, environment, body.minSharesOut, strategy.host_cluster);
+  assertDepositFloorPresent(provider, body.minSharesOut, strategy.host_cluster);
 
   // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap
   // (ADR 0004 layer 1), in the custody deposit's order and from the same
@@ -855,14 +855,13 @@ export async function createEarnExternalWalletDepositTransaction(
   // wording; the shared predicate re-checks them for free. `body.amount` is
   // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
   // dollar-for-dollar by design.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
+  await assertVaultDepositAdmissible(c, strategy, body.amount);
 
   const swap = resolveDepositSwapRequest(
     {
       sourceTokenMint: body.sourceTokenMint,
       swapSlippageBps: body.swapSlippageBps,
     },
-    environment,
     tokenMint
   );
 
@@ -975,7 +974,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 ) {
   const body: EarnExternalWalletWithdrawalTransactionBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const environment = target.environment;
+  const { environment } = currentClusterScope();
 
   // Same provider-policy exit floor as the custody withdrawal: a non-null
   // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
@@ -1040,7 +1039,6 @@ export async function createEarnExternalWalletWithdrawalPreview(
 ) {
   const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const environment = target.environment;
 
   const deadline = createVaultDeadline();
   const client = resolveVaultWithdrawClient(c.env, target.provider, deadline);
@@ -1050,13 +1048,10 @@ export async function createEarnExternalWalletWithdrawalPreview(
 
   let quote: EarnVaultWithdrawQuote;
   try {
-    quote = await client.quoteVaultWithdrawal(
-      { env: c.env, environment },
-      {
-        providerReference: target.vaultAddress,
-        shares: body.shares,
-      }
-    );
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+      providerReference: target.vaultAddress,
+      shares: body.shares,
+    });
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
@@ -1086,7 +1081,7 @@ export async function createEarnExternalWalletDeposit(
 ) {
   const body: EarnExternalWalletSubmitBody = c.req.valid("json");
   const requestId = requireExternalWalletIdempotencyKey(c, "external-wallet deposits");
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -1155,7 +1150,7 @@ export async function createEarnExternalWalletWithdrawal(
 ) {
   const body: EarnExternalWalletSubmitBody = c.req.valid("json");
   const requestId = requireExternalWalletIdempotencyKey(c, "external-wallet withdrawals");
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 

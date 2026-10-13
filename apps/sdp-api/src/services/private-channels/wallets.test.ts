@@ -34,7 +34,6 @@ const auth: ApiKeyContext = {
   apiKeyId: null,
   authType: "clerk",
   role: "admin",
-  environment: "sandbox",
   permissions: ["*"],
   signingWalletId: null,
   signingWalletIds: [],

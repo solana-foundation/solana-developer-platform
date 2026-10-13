@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
@@ -1618,13 +1619,16 @@ export function assertAnonymousEarnProviderOffered(provider: EarnProviderId): vo
  * provider is commercially disabled for an organization (entitlement off), so
  * funds can never be trapped behind a sales/tier decision. Only the
  * credential/mode check applies here — deposits use the full
- * assertProviderAvailable gate.
+ * assertProviderAvailable gate. The mode is the open cluster scope's
+ * environment, so only request paths under the project middleware may call it.
+ *
+ * @param env - Process bindings holding the provider credentials.
+ * @param providerId - The Earn provider to check.
+ * @throws AppError `PROVIDER_NOT_CONFIGURED` when the provider lacks credentials for the mode.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export function assertEarnProviderConfigured(
-  env: Env,
-  providerId: EarnProviderId,
-  testMode: boolean
-): void {
+export function assertEarnProviderConfigured(env: Env, providerId: EarnProviderId): void {
+  const testMode = currentClusterScope().environment === "sandbox";
   const def = PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId];
   if (!def?.isConfigured(env, testMode)) {
     const mode = testMode ? "sandbox" : "production";

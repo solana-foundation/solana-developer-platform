@@ -12,7 +12,6 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   rampRuntime: () => ({}),
-  resolveSdpEnvironment: () => "sandbox",
 }));
 vi.mock("../wallets", async (importOriginal) => ({
   ...(await importOriginal<object>()),

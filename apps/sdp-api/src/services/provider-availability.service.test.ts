@@ -1,10 +1,13 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type CustodyMode,
   type CustodyProvider,
   EARN_PROVIDERS,
+  type EarnProviderId,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
   SDP_RAMP_PROVIDER_STAGES,
+  type SdpEnvironment,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -44,6 +47,13 @@ const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
 
 const TEST_ORG_ID = "org_provider_availability_test";
 const TEST_USER_ID = "usr_provider_availability_test";
+
+function assertEarnProviderConfiguredIn(environment: SdpEnvironment, providerId: EarnProviderId) {
+  runInClusterScope({ projectId: "prj_provider_availability_test", environment }, () =>
+    assertEarnProviderConfigured(env, providerId)
+  );
+}
+
 const NOT_ENTITLED_REFUSAL = {
   code: "FORBIDDEN",
   statusCode: 403,
@@ -827,7 +837,7 @@ describe("provider-availability.service", () => {
       configured: false,
       enabled: false,
     });
-    expect(() => assertEarnProviderConfigured(env, "ondo", false)).toThrow(
+    expect(() => assertEarnProviderConfiguredIn("production", "ondo")).toThrow(
       "Ondo is not configured for production mode."
     );
 
@@ -839,7 +849,7 @@ describe("provider-availability.service", () => {
       enabled: true,
     });
     // One key serves both modes: Jupiter has no sandbox tenant to select.
-    expect(() => assertEarnProviderConfigured(env, "ondo", true)).not.toThrow();
+    expect(() => assertEarnProviderConfiguredIn("sandbox", "ondo")).not.toThrow();
   });
 
   it("keeps Hastra configured for keyless deposits and par redemption", async () => {
@@ -856,7 +866,7 @@ describe("provider-availability.service", () => {
       configured: true,
       enabled: true,
     });
-    expect(() => assertEarnProviderConfigured(env, "hastra", false)).not.toThrow();
+    expect(() => assertEarnProviderConfiguredIn("production", "hastra")).not.toThrow();
 
     // Enabling the optional DEX rail without its Jupiter prerequisite must not
     // disable the native provider. The rail's resolver fails closed instead.
@@ -880,17 +890,17 @@ describe("provider-availability.service", () => {
     // for the mode.
     env.UPSHIFT_API_KEY = "upshift_production_key";
 
-    expect(() => assertEarnProviderConfigured(env, "upshift", false)).not.toThrow();
+    expect(() => assertEarnProviderConfiguredIn("production", "upshift")).not.toThrow();
 
-    expect(() => assertEarnProviderConfigured(env, "upshift", true)).toThrow(
+    expect(() => assertEarnProviderConfiguredIn("sandbox", "upshift")).toThrow(
       "Upshift is not configured for sandbox mode."
     );
-    expect(() => assertEarnProviderConfigured(env, "perena", false)).toThrow(
+    expect(() => assertEarnProviderConfiguredIn("production", "perena")).toThrow(
       "Perena is not configured for production mode."
     );
     // Keyless, so the exit path is never blocked on a credential that does not
     // exist — the ADR 0002 "money out beats money off" half of the same rule.
-    expect(() => assertEarnProviderConfigured(env, "veda", true)).not.toThrow();
+    expect(() => assertEarnProviderConfiguredIn("sandbox", "veda")).not.toThrow();
   });
 
   describe("custody setup admission", () => {

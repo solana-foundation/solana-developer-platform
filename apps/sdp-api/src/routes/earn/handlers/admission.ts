@@ -1,5 +1,6 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { isVaultDirectDepositEnabled, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
 import {
   type EarnProviderId,
@@ -14,7 +15,7 @@ import {
   assertAnonymousEarnProviderOffered,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import { type AppContext, resolveSdpEnvironment } from "../context";
+import type { AppContext } from "../context";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.
@@ -109,16 +110,22 @@ export function assertVaultDepositEnvironmentOpen(
  *
  * Strategy RESOLUTION stays with the caller on purpose: the deposit route
  * resolves bare-by-id (browse policy never gates money).
+ *
+ * The environment is the open cluster scope's, read once here and fed to the
+ * pure rule helpers.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param strategy - The catalogue row the caller resolved.
+ * @param amount - The deposit amount; omitted only by callers not about to move money.
+ * @returns The vault-direct provider the row is fronted by.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function assertVaultDepositAdmissible(
   c: AppContext,
   strategy: EarnStrategyRow,
-  amount?: string,
-  options: {
-    environment?: SdpEnvironment;
-  } = {}
+  amount?: string
 ): Promise<EarnProviderId> {
-  const environment = options.environment ?? resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
 
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(
@@ -144,7 +151,7 @@ export async function assertVaultDepositAdmissible(
     // Deposits only. The withdrawal handlers never call this function, and
     // must not start to: refusing an exit over a platform cap traps funds
     // (ADR 0002), which is the one thing no cap may do.
-    await assertVaultExposureWithinCap(c, strategy, amount, { environment });
+    await assertVaultExposureWithinCap(c, strategy, amount);
   }
 
   return provider;
@@ -176,15 +183,22 @@ export function isStrategyDepositable(
  * subscription whose on-chain leg cannot encode a share floor, which
  * deliberately publishes null instead. The catalogue publishes that same
  * policy as `depositSlippage` (from the same `host_cluster`), so a caller who
- * follows the row they were shown never trips this.
+ * follows the row they were shown never trips this. The environment is the
+ * open cluster scope's.
+ *
+ * @param provider - The provider fronting the row.
+ * @param minSharesOut - The caller's share floor, if any.
+ * @param hostCluster - The row's `host_cluster`.
+ * @throws AppError `BAD_REQUEST` when the policy requires a floor and none was given.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export function assertDepositFloorPresent(
   provider: string,
-  environment: SdpEnvironment,
   minSharesOut: string | undefined,
   hostCluster?: SolanaCluster
 ): void {
   if (minSharesOut !== undefined) return;
+  const { environment } = currentClusterScope();
   if (earnDepositSlippagePolicy(provider, environment, hostCluster) === null) return;
   throw badRequest(
     environment === "production"

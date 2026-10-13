@@ -214,7 +214,6 @@ describe("sponsorship identity boundary", () => {
         signingWalletId: null,
       });
       c.set("projectId", "project_trusted");
-      c.set("projectEnvironment", "production");
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });
     return app;
@@ -250,7 +249,6 @@ describe("sponsorship identity boundary", () => {
     app.use("*", async (c, next) => {
       c.set("clerk", await testClerkContext(testEnv));
       c.set("projectId", "project_trusted");
-      c.set("projectEnvironment", "sandbox");
       await runInClusterScope({ projectId: "project_trusted", environment: "sandbox" }, next);
     });
     app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
@@ -259,7 +257,7 @@ describe("sponsorship identity boundary", () => {
       `sdp:v1:sandbox:${TEST_ORG.id}:project:project_trusted:user:${TEST_USER.id}`
     );
   });
-  it("rejects Clerk sponsorship without a project environment", async () => {
+  it("rejects Clerk sponsorship outside a cluster scope", async () => {
     const app = new Hono<{
       Bindings: Env;
     }>();
@@ -269,7 +267,7 @@ describe("sponsorship identity boundary", () => {
     });
     app.get("/probe", (c) => {
       expect(() => resolveRequestSponsorshipScope(c)).toThrow(
-        "Request environment could not be resolved"
+        "No cluster scope is open for this work"
       );
       return c.text("checked");
     });

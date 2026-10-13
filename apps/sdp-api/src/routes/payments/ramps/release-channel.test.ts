@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -31,9 +32,7 @@ function buildApp(stages: SdpRampProviderStages) {
       environment: "sandbox",
       signingWalletId: null,
     });
-    // projectContextMiddleware sets this for every actor in the real app.
-    c.set("projectEnvironment", "sandbox");
-    await next();
+    await runInClusterScope({ projectId: "prj_ramp_channel_test", environment: "sandbox" }, next);
   });
   app.get("/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
   app.get("/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
