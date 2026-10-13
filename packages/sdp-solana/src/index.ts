@@ -13,7 +13,6 @@ export {
   type BurnResult,
   type FeePaymentPort,
   type PreparedTransaction,
-  type Token2022Env,
   Token2022Service,
 } from "./token-2022";
 export { bigIntReplacer, safeStringify } from "./token-2022.utils";

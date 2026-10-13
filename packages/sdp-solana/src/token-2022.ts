@@ -4,12 +4,10 @@
  * Burn and unsigned burn transactions using the Mosaic SDK.
  */
 
-import type { RpcEnv } from "@sdp/rpc";
 import {
   confirmTransaction,
-  createRpcForSdk,
   type SimulationResult,
-  type SolanaRpcSdkBridge,
+  type SolanaRpc,
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import {
@@ -19,9 +17,7 @@ import {
   getBase64EncodedWireTransaction,
   getBase64Encoder,
   getTransactionEncoder,
-  type Rpc,
   type Signature,
-  type SolanaRpcApi,
   signTransactionMessageWithSigners,
   type TransactionSigner,
 } from "@solana/kit";
@@ -35,14 +31,6 @@ import { safeStringify } from "./token-2022.utils";
 // ═══════════════════════════════════════════════════════════════════════════
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
-
-/**
- * Environment bindings required by the Token-2022 service.
- *
- * Structural subset of the API app's `Env`; the package never reads
- * `process.env` directly.
- */
-export type Token2022Env = RpcEnv;
 
 /**
  * Structural port for gasless fee payment sponsorship.
@@ -93,12 +81,16 @@ export interface BurnResult {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class Token2022Service {
-  private env: Token2022Env;
+  private rpc: SolanaRpc & MosaicSdkRpc;
   private signer: TransactionSigner;
   private feePayment?: FeePaymentPort;
 
-  constructor(env: Token2022Env, signer: TransactionSigner, feePayment?: FeePaymentPort) {
-    this.env = env;
+  constructor(
+    rpc: SolanaRpc & MosaicSdkRpc,
+    signer: TransactionSigner,
+    feePayment?: FeePaymentPort
+  ) {
+    this.rpc = rpc;
     this.signer = signer;
     this.feePayment = feePayment;
   }
@@ -115,16 +107,14 @@ export class Token2022Service {
   }
 
   private async signAndSubmit(
-    fullTx: FullTransaction,
-    sdkRpc: SolanaRpcSdkBridge<MosaicSdkRpc>
+    fullTx: FullTransaction
   ): Promise<{ signature: Signature; slot: bigint }> {
-    const rpc = sdkRpc as unknown as Rpc<SolanaRpcApi>;
     if (this.feePayment) {
       const partiallySignedTx = await partiallySignTransactionMessageWithSigners(fullTx);
       const txEncoder = getTransactionEncoder();
       const txBytes = new Uint8Array(txEncoder.encode(partiallySignedTx));
       const signature = await this.feePayment.signAndSend(txBytes);
-      const confirmation = await confirmTransaction(rpc, signature);
+      const confirmation = await confirmTransaction(this.rpc, signature);
 
       if (confirmation.err) {
         throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
@@ -138,14 +128,14 @@ export class Token2022Service {
 
     const signedTransaction = await signTransactionMessageWithSigners(fullTx);
     const encodedTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    const signature = await rpc
+    const signature = await this.rpc
       .sendTransaction(encodedTransaction, {
         skipPreflight: false,
         encoding: "base64",
       })
       .send();
 
-    const confirmation = await confirmTransaction(rpc, signature);
+    const confirmation = await confirmTransaction(this.rpc, signature);
 
     if (confirmation.err) {
       throw new Error(`Burn failed: ${safeStringify(confirmation.err)}`);
@@ -165,9 +155,11 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
-    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
-
-    const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
+    const authorityAta = await resolveTokenAccount(
+      this.rpc,
+      options.authority.address,
+      options.mint
+    );
     const normalizedSource =
       options.source === options.authority.address ? authorityAta.tokenAccount : options.source;
 
@@ -179,14 +171,14 @@ export class Token2022Service {
 
     const feePayer = await this.resolveFeePayerSigner(options.authority);
     const fullTx = await createBurnTransaction(
-      rpc,
+      this.rpc,
       options.mint,
       options.authority,
       options.amount,
       feePayer
     );
 
-    const result = await this.signAndSubmit(fullTx, rpc);
+    const result = await this.signAndSubmit(fullTx);
 
     return {
       signature: result.signature,
@@ -201,10 +193,9 @@ export class Token2022Service {
     options: Omit<BurnOptions, "authority"> & { authority: Address },
     requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
-    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
     const authority = createNoopSigner(options.authority);
 
-    const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);
+    const authorityAta = await resolveTokenAccount(this.rpc, options.authority, options.mint);
     const normalizedSource =
       options.source === options.authority ? authorityAta.tokenAccount : options.source;
 
@@ -215,7 +206,7 @@ export class Token2022Service {
     }
 
     const fullTx = await createBurnTransaction(
-      rpc,
+      this.rpc,
       options.mint,
       authority,
       options.amount,
@@ -229,7 +220,7 @@ export class Token2022Service {
     let simulation: SimulationResult | undefined;
     if (requestSimulation) {
       const txBytes = new Uint8Array(getBase64Encoder().encode(serializedTx));
-      simulation = await simulateTransaction(rpc, txBytes);
+      simulation = await simulateTransaction(this.rpc, txBytes);
     }
 
     return {

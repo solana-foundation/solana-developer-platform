@@ -1,4 +1,5 @@
-import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
@@ -53,7 +54,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -86,7 +87,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   let simulation: unknown;
   if (body.options?.simulate) {
-    const rpc = createRpc(c.env);
+    const rpc = createClusterRpc();
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
   }
@@ -187,7 +188,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }

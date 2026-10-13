@@ -1,5 +1,6 @@
 import type { MosaicService } from "@sdp/issuance/mosaic/service";
-import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
 import { AuthorityType } from "@solana-program/token-2022";
@@ -210,8 +211,6 @@ export const prepareUpdateAuthority = async (
 
   const role = body.authority.role;
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
     token,
     role,
     body.authority.currentAuthority
@@ -246,7 +245,7 @@ export const prepareUpdateAuthority = async (
 
   let simulation: unknown;
   if (body.options?.simulate) {
-    const rpc = createRpc(c.env);
+    const rpc = createClusterRpc();
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
   }
@@ -344,8 +343,6 @@ export async function extractUpdateAuthorityRequest(
   }
 
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
     token,
     role,
     input.authority.currentAuthority
