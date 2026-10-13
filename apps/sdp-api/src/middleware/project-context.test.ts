@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -31,6 +32,7 @@ function buildApp() {
       projectEnvironment: c.get("projectEnvironment"),
     })
   );
+  app.get("/scope", (c) => c.json(currentClusterScope()));
   app.onError((error, c) => {
     if (error instanceof AppError) {
       return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403);
@@ -43,7 +45,16 @@ function buildApp() {
 
 describe("projectContextMiddleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+  const entitled = JSON.stringify({ enableProductionProject: true });
   let actor: Awaited<ReturnType<typeof authenticateTestClerkUser>>;
+
+  async function setOrganizationSettings(settings: string | null) {
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(settings, TEST_ORG.id)
+      .run();
+  }
 
   beforeEach(async () => {
     await issuerReady;
@@ -61,7 +72,7 @@ describe("projectContextMiddleware", () => {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
       members: [TEST_USER.id],
-      ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+      ids: { sandbox: TEST_PROJECT.id, production: PRODUCTION_PROJECT_ID },
       productionEntitled: false,
     });
     actor = await authenticateTestClerkUser(env, db, {
@@ -162,22 +173,79 @@ describe("projectContextMiddleware", () => {
       },
     });
   });
+
+  describe("cluster scope", () => {
+    const SANDBOX_SCOPE = {
+      projectId: TEST_PROJECT.id,
+      environment: "sandbox",
+      cluster: "devnet",
+    } satisfies ClusterScope;
+    const PRODUCTION_SCOPE = {
+      projectId: PRODUCTION_PROJECT_ID,
+      environment: "production",
+      cluster: "mainnet-beta",
+    } satisfies ClusterScope;
+
+    beforeEach(async () => {
+      await setOrganizationSettings(entitled);
+    });
+
+    it("runs a Sandbox project's handler on devnet", async () => {
+      const res = await buildApp().request(
+        "/scope",
+        { headers: actor.headers(TEST_PROJECT.id) },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(SANDBOX_SCOPE);
+    });
+
+    it("runs a Production project's handler on mainnet-beta", async () => {
+      const res = await buildApp().request(
+        "/scope",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(PRODUCTION_SCOPE);
+    });
+
+    it("keeps concurrent requests on their own project's facts across interleaved awaits", async () => {
+      const releases: Array<() => void> = [];
+      const bothEntered = new Promise<void>((resolve) => {
+        releases.push(resolve);
+      });
+      let entered = 0;
+      const app = buildApp();
+      app.get("/scope/interleaved", async (c) => {
+        const onEntry = currentClusterScope();
+        entered += 1;
+        if (entered === 2) {
+          for (const release of releases) release();
+        }
+        await bothEntered;
+        return c.json({ onEntry, afterAwait: currentClusterScope() });
+      });
+
+      const [sandbox, production] = await Promise.all([
+        app.request("/scope/interleaved", { headers: actor.headers(TEST_PROJECT.id) }, env),
+        app.request("/scope/interleaved", { headers: actor.headers(PRODUCTION_PROJECT_ID) }, env),
+      ]);
+
+      expect(await sandbox.json()).toEqual({ onEntry: SANDBOX_SCOPE, afterAwait: SANDBOX_SCOPE });
+      expect(await production.json()).toEqual({
+        onEntry: PRODUCTION_SCOPE,
+        afterAwait: PRODUCTION_SCOPE,
+      });
+    });
+  });
+
   describe("production entitlement (APE-351)", () => {
-    const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
     const PRODUCTION_CACHED_API_KEY = {
       ...TEST_CACHED_API_KEY,
       projectId: PRODUCTION_PROJECT_ID,
       environment: "production" as const,
     };
-
-    async function setOrganizationSettings(settings: string | null) {
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-        .bind(settings, TEST_ORG.id)
-        .run();
-    }
-
-    const entitled = JSON.stringify({ enableProductionProject: true });
 
     async function expectProductionNotEnabled(res: Response) {
       expect(res.status).toBe(403);
