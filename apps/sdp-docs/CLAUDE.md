@@ -156,29 +156,13 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 ## Creating a New Page
 
-1. Add an MDX file to `content/docs/<section>/my-page.mdx`
-2. Update `content/docs/meta.json` (and section `meta.json`) to include it
-3. Create a route in `src/app/docs/<section>/my-page/page.tsx`:
+1. Add an MDX file to `content/docs/<section>/my-page.mdx` with `title` and `description` frontmatter.
+2. List it in that section's `meta.json` (the root `content/docs/meta.json` only lists sections).
+3. That's it: the catch-all route `src/app/docs/[[...slug]]/page.tsx` renders every MDX page inside `<DocsPage>`/`<DocsTitle>`/`<DocsDescription>`/`<DocsBody>` and builds the TOC from its headings. Do not add per-page routes.
 
-```tsx
-import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/docs-shell/page";
-import { getMDXContent } from "@/lib/source"; // or use getPage() from fumadocs
+Optional frontmatter: `full: true` for a full-width page without the TOC column, `hideTitle: true` to render the body bare, `icon: <LucideName>` for a sidebar icon.
 
-export default function MyPage() {
-  return (
-    <DocsPage>
-      <DocsTitle>My Page</DocsTitle>
-      <DocsDescription>Brief subtitle here.</DocsDescription>
-      <DocsBody>
-        {/* content */}
-      </DocsBody>
-    </DocsPage>
-  );
-}
-```
-
-4. For full-width layout (no TOC): `<DocsPage full>`
-5. For TOC: pass `toc` array of `{ title, url, depth }` to `<DocsPage toc={toc}>`
+When you delete or rename a page, add a redirect for its old URL to `scripts/lib/redirects.mjs`.
 
 ## Unpublishing a Page
 
@@ -189,7 +173,9 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
-API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
+API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`. Keep the two in step: list a slug for every family the document publishes, and only for those.
+
+The root `meta.json` is hand-maintained. The generator writes only `reference/api/meta.json`, which the sidebar reaches through `"api"` in `reference/meta.json`, and `llms.txt` lists every page it names.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
@@ -213,4 +199,4 @@ When working on design or frontend changes:
 - When adding images, download and store a local copy in the project. Never reference external URLs directly.
 - Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
-- Run `npm run build` and check for errors before pushing to staging.
+- Run `pnpm --filter sdp-docs build` and check for errors before pushing.

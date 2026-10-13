@@ -16,7 +16,7 @@ The `Bearer` prefix is optional — a raw key in the `Authorization` header is a
 
 ## Key scope
 
-Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+Every key is scoped to exactly one **project** and inherits that project's environment: `sk_test_` keys belong to the sandbox project (devnet), `sk_live_` keys to the production project (mainnet-beta). A key can only reach the wallets, tokens, and payments of its own project; there is no cross-project or organization-wide key. Requests for another project's resources return `404`, and `GET /v1/projects` returns only the key's own project. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys#choose-the-project) for how a key ends up in the sandbox or production project.
 
 ## Authorization layers
 
@@ -25,16 +25,20 @@ A request must clear every layer that is configured on its key:
 | Layer | What it controls |
 | --- | --- |
 | **Role** | Baseline permission set — see the table below |
-| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
+| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A creator can only grant permissions it holds, unless it has `org:admin` (organization admins and `api_admin` keys do) |
 | **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
 | **Allowed operations** | Optional allow-list of operation families and types the key may perform on those wallets. Empty means unrestricted |
 | **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
 
 | Role | Description |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access to tokens, payments, counterparties, wallets, and webhooks; excludes custody administration |
-| `api_readonly` | Read-only access to all resources, including audit records |
+| `api_admin` | All permissions, including custody administration, token admin operations, and API-key and project management |
+| `api_developer` | Read and write access to tokens, payments, counterparties, and wallets, plus read access to compliance. Excludes token admin operations (pause, freeze, seize, force-burn, authority transfer), custody administration, and API-key and project management |
+| `api_readonly` | Read-only access to tokens, payments, counterparties, wallets, and compliance. No access to API keys or projects |
+
+Only an `api_admin` key can create or rotate another `api_admin` key.
+
+Allowed operations restrict only requests made with the key; dashboard sessions aren't API keys and aren't restricted by them. A key can only grant operations inside its own list. See [Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) for the families and how to set them.
 
 ## Errors
 
@@ -48,6 +52,8 @@ Authentication and authorization failures are always machine-distinguishable:
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
 | Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
 | Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |
+| Operation not in the key's allowed operations | 403 | `OPERATION_NOT_ALLOWED` |
+| Resource belongs to another project | 404 | `NOT_FOUND` |
 | Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
 
 Requests are rate limited per key; the standard tier allows 100 requests per minute.

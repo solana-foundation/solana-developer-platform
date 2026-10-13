@@ -1,16 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { stripMdxShell } from "@/lib/mdx-text";
 
 export const runtime = "nodejs";
-
-function stripMdxShell(source: string): string {
-  // Remove frontmatter
-  let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  // Remove import lines
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
-  // Collapse excessive blank lines
-  return content.replace(/\n{3,}/g, "\n\n").trim();
-}
 
 function isSafeSlugSegment(segment: string): boolean {
   return segment.length > 0 && segment !== ".." && segment !== "." && !/[/\\]/.test(segment);

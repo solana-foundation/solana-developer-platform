@@ -28,6 +28,25 @@ as `set POSTGRES_PASSWORD in .env`. Make sure a `.env` exists next to
 [configurator](/docs/self-hosting/configurator) produces a complete file; the
 [environment reference](/docs/self-hosting/env-reference) lists what is required.
 
+## A module or provider returns "not available in this release channel"
+
+A `403` with a message such as `The issuance module is not available in this
+release channel.` means `SDP_RELEASE_CHANNEL` excludes that module.
+
+Custody and ramp providers have release stages of their own, so the channel can
+leave out a provider whose module it runs. The message then names the provider,
+for example `The privy custody provider is not available in this release
+channel for byok custody.`, and a custody refusal carries `details.reason`
+`custody_provider_not_in_release_channel`. To see which providers a project can
+use, and the first check that refused each of the others, call
+`GET /v1/projects/{projectId}/provider-availability`; see
+[Which providers a project can use](/docs/guides/setup-wallets#which-providers-a-project-can-use).
+
+The bundled `compose.yml` defaults to `experimental`, which runs every module
+and provider; a value of `beta` or `stable` turns less mature ones off. See
+[`SDP_RELEASE_CHANNEL`](/docs/self-hosting/env-reference#advanced) and restart
+the stack after changing it.
+
 ## Images won't pull
 
 If `docker compose pull` reports access denied or a missing manifest:

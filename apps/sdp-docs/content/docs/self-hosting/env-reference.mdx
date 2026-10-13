@@ -36,7 +36,6 @@ These must be set or the stack will refuse to start:
 | `CLERK_SECRET_KEY` | Clerk secret key for the API. |
 | `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |
 | `SOLANA_RPC_URL` | Solana RPC endpoint the API calls. |
-| `SIGNING_PROVIDER` | The default signing provider. Each non-local provider adds its own required credentials. |
 
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
 and can auto-generate `POSTGRES_PASSWORD`.
@@ -66,13 +65,26 @@ written to `.env`. To use an external cache, set `REDIS_URL` to your own
 
 ## Signing providers
 
-`SIGNING_PROVIDER` is the default signer written to `.env`. Supported values are
-`local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`.
-The configurator also tracks a `SIGNING_PROVIDERS` selection to decide which
-fields to show, but that key is configurator-only and is not written to `.env`.
-Each non-local provider requires its own credentials — for example Fireblocks
-needs an API key, secret, and vault ID — and the configurator only prompts for
-the providers you enable.
+The configurator's signing step selects the providers whose credentials this
+deployment holds: `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`,
+`turnkey`, and `utila`. It only prompts for the providers you enable. Each
+non-local provider requires its own credentials — for example Fireblocks needs
+an API key, secret, and vault ID — and the local signer needs
+`CUSTODY_PRIVATE_KEY`. The selection itself (`SIGNING_PROVIDERS`) is
+configurator-only and is not written to `.env`. `SIGNING_PROVIDER`, which is
+written, records one of the selected providers. It doesn't decide where wallets
+live: there is no default custody provider, and every wallet names its own.
+
+Providers configured here, the local signer included, are Managed custody: they
+run on the deployment's credentials, and only sandbox projects can use them.
+Each organization also needs access to a provider. Privy, Coinbase CDP, Para,
+and Turnkey are open to every organization; for the others, add
+`{"sdp": {"providerOverrides": {"custody": {"<provider>": true}}}}` to the
+organization's private metadata in the Clerk dashboard, as
+[First devnet deployment](/docs/self-hosting/first-devnet-deployment) does for
+the local signer. A production project can only create wallets in a custody
+connection, which you add from the dashboard with your own Privy app
+credentials. See [Custody connections](/docs/guides/integrations#custody-connections).
 
 For provider-managed co-signer runtimes that live outside the default stack, see
 [External co-signers](/docs/self-hosting/external-co-signers).
@@ -86,6 +98,7 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+| `SDP_RELEASE_CHANNEL` | `experimental` | Which product modules the API, its background jobs, and the dashboard run: `experimental` runs every module, `stable` runs custody, payments, recurring payments, and compliance, and `beta` adds modules in final validation to `stable`. A module outside the channel is off whatever its feature flag says: its API routes return `403` and the dashboard hides it. Custody and ramp providers also have stages of their own, custody separately for Managed custody and custody connections, so a channel can leave out a provider whose module it runs. Sandbox and production projects get the same providers. `GET /health` reports the active channel as `releaseChannel`. `compose.yml` supplies the default; if you run the images another way, set it yourself, because the services refuse to start without a valid value. |
 | `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripMdxShell } from "../src/lib/mdx-text";
 import { canonicalSite } from "../src/lib/site";
 
 const {
@@ -87,12 +88,6 @@ function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function stripMdxContent(source: string): string {
-  let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
-  return content.replace(/\n{3,}/g, "\n\n").trim();
-}
-
 function parseFrontmatter(source: string): { title: string; description: string } {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
   const frontmatter = match?.[1] ?? "";
@@ -140,7 +135,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
-      content: stripMdxContent(source),
+      content: stripMdxShell(source),
     });
   }
 
