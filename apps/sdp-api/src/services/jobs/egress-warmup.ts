@@ -9,20 +9,35 @@ export async function waitForEgress(params: {
   probe: () => Promise<unknown>;
   deadlineMs: number;
   intervalMs: number;
-}): Promise<{ ready: boolean; elapsedMs: number; attempts: number }> {
+  stopSignal: AbortSignal;
+}): Promise<{ outcome: "ready" | "deadline" | "stopped"; elapsedMs: number; attempts: number }> {
   const startedAt = Date.now();
   let attempts = 0;
 
   for (;;) {
+    if (params.stopSignal.aborted) {
+      return { outcome: "stopped", elapsedMs: Date.now() - startedAt, attempts };
+    }
     attempts += 1;
     try {
       await params.probe();
-      return { ready: true, elapsedMs: Date.now() - startedAt, attempts };
+      return { outcome: "ready", elapsedMs: Date.now() - startedAt, attempts };
     } catch {
       if (Date.now() - startedAt >= params.deadlineMs) {
-        return { ready: false, elapsedMs: Date.now() - startedAt, attempts };
+        return { outcome: "deadline", elapsedMs: Date.now() - startedAt, attempts };
       }
-      await new Promise((resolve) => setTimeout(resolve, params.intervalMs));
+      if (params.stopSignal.aborted) {
+        return { outcome: "stopped", elapsedMs: Date.now() - startedAt, attempts };
+      }
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          params.stopSignal.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, params.intervalMs);
+        params.stopSignal.addEventListener("abort", finish, { once: true });
+      });
     }
   }
 }

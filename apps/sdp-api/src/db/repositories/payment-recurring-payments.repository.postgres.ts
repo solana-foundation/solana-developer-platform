@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
@@ -337,10 +338,16 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       const result = await db
         .prepare(
           `SELECT * FROM payment_recurring_payments
-          WHERE status = ANY(?::text[])
+          WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+            AND status = ANY(?::text[])
             AND updated_at <= ? ORDER BY updated_at ASC LIMIT ?`
         )
-        .bind([...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
+        .bind(
+          currentClusterScope().environment,
+          [...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON],
+          staleBefore,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecurringPaymentRow);
     },
@@ -349,10 +356,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `SELECT organization_id, project_id, id, updated_at,
                 COUNT(*) OVER () AS stale_count, MIN(updated_at) OVER () AS oldest_updated_at
-           FROM payment_recurring_payments WHERE status = 'updating' AND updated_at <= ?
+           FROM payment_recurring_payments
+          WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+            AND status = 'updating' AND updated_at <= ?
           ORDER BY updated_at DESC, id DESC LIMIT ?`
         )
-        .bind(staleBefore, limit)
+        .bind(currentClusterScope().environment, staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(
         (row): StalePaymentRecurringPaymentUpdateRow => staleUpdateRowSchema.parse(row)
@@ -368,13 +377,15 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              JOIN payment_subscription_collection_attempts a
                ON a.organization_id = rp.organization_id AND a.project_id = rp.project_id
               AND a.subscription_id = rp.subscription_id AND a.due_at = rp.next_collection_due_at
-            WHERE rp.status = ANY(?::text[])
+            WHERE rp.project_id IN (SELECT id FROM projects WHERE environment = ?)
+              AND rp.status = ANY(?::text[])
               AND rp.next_collection_due_at IS NOT NULL
               AND a.status = ANY(?::text[])
               AND ((a.status = 'processing' AND a.updated_at <= ?) OR (rp.status = 'active' AND a.status = 'confirmed'))
          ) recoverable_attempts WHERE attempt_rank = 1 ORDER BY attempt_updated_at ASC LIMIT ?`
         )
         .bind(
+          currentClusterScope().environment,
           [...RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION],
           [...COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER],
           staleBefore,
@@ -387,7 +398,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       const result = await db
         .prepare(
           `SELECT rp.* FROM payment_recurring_payments rp
-          WHERE rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
+          WHERE rp.project_id IN (SELECT id FROM projects WHERE environment = ?)
+            AND rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
             AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts active_attempt
               WHERE active_attempt.organization_id = rp.organization_id AND active_attempt.project_id = rp.project_id
                 AND active_attempt.subscription_id = rp.subscription_id AND active_attempt.due_at = rp.next_collection_due_at
@@ -398,7 +410,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                 AND failed_attempt.status = 'failed' AND failed_attempt.updated_at > ?)
           ORDER BY rp.next_collection_due_at ASC LIMIT ?`
         )
-        .bind(dueBefore, [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE], retryBefore, limit)
+        .bind(
+          currentClusterScope().environment,
+          dueBefore,
+          [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE],
+          retryBefore,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.rows.map(mapCollectibleRecurringPaymentRow);
     },
