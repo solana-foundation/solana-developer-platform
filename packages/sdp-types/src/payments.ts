@@ -180,6 +180,60 @@ export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
   (status) => RAMP_TRANSFER_STATUS_FUNDABLE[status]
 );
 
+/** One legal ramp transfer status change: where it may start, where it lands, and the ramp types it applies to. */
+export interface RampTransferTransition {
+  readonly from: readonly PaymentTransferStatus[];
+  readonly to: PaymentTransferStatus;
+  readonly types: readonly RampTransferType[];
+}
+
+/** Any open status, plus `expired`, which a provider observation proves was premature. */
+export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
+  ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  "expired",
+] as const satisfies readonly PaymentTransferStatus[];
+
+/**
+ * Legal ramp transfer status changes, by name. `transitionRampTransfer` reads
+ * the source statuses from here, never from its caller, so an illegal
+ * transition matches zero rows, the same answer a lost race gives. No terminal
+ * status is a source except `expired`. Writers that still set the status
+ * themselves are listed in the API's `ramp-transfer-transitions.test.ts`.
+ */
+export const RAMP_TRANSFER_TRANSITIONS = {
+  // A provider may issue a new deposit wallet while still awaiting payment
+  // (MoonPay does on sale re-confirmation), so the self-transition must land.
+  provider_awaiting_payment: {
+    from: ["pending", "awaiting_payment", "expired"],
+    to: "awaiting_payment",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  provider_settling: {
+    from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "settling",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  provider_settled: {
+    from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "completed",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  provider_failed: {
+    from: PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+    to: "failed",
+    types: RAMP_TRANSFER_TYPES,
+  },
+  // Not from `settling`: a stale redelivered expiry must not undo a transfer
+  // another event already revived.
+  provider_expired: {
+    from: ["pending", "awaiting_payment"],
+    to: "expired",
+    types: RAMP_TRANSFER_TYPES,
+  },
+} as const satisfies Record<string, RampTransferTransition>;
+
+export type RampTransferTransitionId = keyof typeof RAMP_TRANSFER_TRANSITIONS;
+
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [
   "pending",

@@ -202,6 +202,17 @@ describe("Payments routes — transfer wallet access", () => {
     const replayBody = await readTransferResponse(replay);
     expect(replayBody.data).toEqual(firstBody.data);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+
+    // The binding still reaches the deactivated wallet (wallet status is state,
+    // not access), so new work is refused by runtime admission, not the binding.
+    const fresh = await postTransfer(JSON.parse(body), {
+      idempotencyKey: "deactivated-wallet-transfer-fresh",
+    });
+    expect(fresh.status).toBe(409);
+    expect(await fresh.json()).toMatchObject({
+      error: { details: { reason: "runtime_execution_unavailable" } },
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
   it("denies a completed transfer replay for a duplicate exact wallet outside the key binding", async () => {
     await seedConfigOwnedDuplicateProviderWallet();

@@ -1,3 +1,4 @@
+import type { RampProviderId, SdpModule } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { isGatePublished, isModulePublished } from "@/lib/release-channel";
 import { HomePageClass } from "./home-page-class";
 import { HOME_SECTIONS } from "./home-sections";
 import {
@@ -76,9 +78,21 @@ function HomeCardLink({ card }: { card: HomeCard }) {
   );
 }
 
-type Partner = { name: string; src: string; h: number };
+type Partner = {
+  name: string;
+  src: string;
+  h: number;
+  /** A ramp partner shows only when the build publishes that ramp provider. */
+  rampProvider?: RampProviderId;
+};
 
-const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[] = [
+const PARTNER_ROWS: {
+  category: string;
+  Icon: LucideIcon;
+  partners: Partner[];
+  /** Shown only when the deployment's release channel runs this module. */
+  module?: SdpModule;
+}[] = [
   {
     category: "Institutional Custody",
     Icon: LandmarkIcon,
@@ -97,11 +111,17 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
   {
     category: "Ramps",
     Icon: ArrowLeftRightIcon,
+    module: "ramps",
     partners: [
-      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg" },
-      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg" },
-      { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
-      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
+      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg", rampProvider: "moonpay" },
+      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg", rampProvider: "bvnk" },
+      {
+        name: "Coinbase",
+        h: 22,
+        src: "/docs/images/partners/coinbase.svg",
+        rampProvider: "coinbase",
+      },
+      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg", rampProvider: "stripe" },
     ],
   },
   {
@@ -136,6 +156,8 @@ type HomeCard = {
   name: string;
   desc: string;
   badge?: string;
+  /** Shown only when the deployment's release channel runs this module. */
+  module?: SdpModule;
 } & ({ Icon: LucideIcon } | { graphic: ReactNode }) &
   ({ href: string } | { disabled: true });
 
@@ -157,12 +179,14 @@ const modelSteps: HomeCard[] = [
     desc: "Create and deploy Token-2022 assets with compliance controls.",
     href: "/docs/tokens/create-a-token",
     graphic: <IssuanceSketch />,
+    module: "issuance",
   },
   {
     name: "Ramps",
     desc: "Move between fiat and crypto through our onramp and offramp partners.",
     href: "/docs/payments/ramps",
     graphic: <RampsSketch />,
+    module: "ramps",
   },
   {
     name: "Onchain Transfers",
@@ -175,6 +199,7 @@ const modelSteps: HomeCard[] = [
     desc: "Enable secondary market activity for your issued assets.",
     graphic: <MarketsSketch />,
     badge: "Coming soon",
+    module: "markets",
     disabled: true,
   },
 ];
@@ -185,6 +210,7 @@ const tutorials: HomeCard[] = [
     desc: "Build a GENIUS-compliant digital dollar on Solana with institutional custody and integrated compliance.",
     href: "/docs/tutorials/issue-a-regulated-stablecoin",
     Icon: CircleDollarSignIcon,
+    module: "issuance",
   },
   {
     name: "Manage Payroll with Recurring Payments",
@@ -197,6 +223,7 @@ const tutorials: HomeCard[] = [
     desc: "Move between fiat and crypto through our onramp and offramp partners.",
     href: "/docs/payments/ramps",
     Icon: ArrowLeftRightIcon,
+    module: "ramps",
   },
   {
     name: "Batch Payments",
@@ -239,6 +266,10 @@ const aiResources: HomeCard[] = [
   },
 ];
 
+function inChannel<T extends { module?: SdpModule }>(items: T[]): T[] {
+  return items.filter((item) => isModulePublished(item.module));
+}
+
 export function DocsHome() {
   return (
     <div className="launch-home">
@@ -255,7 +286,7 @@ export function DocsHome() {
       <section className="launch-home-section">
         <SectionHeading {...HOME_SECTIONS.gettingStarted} />
         <div className="launch-home-outcomes launch-home-model-cards">
-          {modelSteps.map((step) => (
+          {inChannel(modelSteps).map((step) => (
             <HomeCardLink key={step.name} card={step} />
           ))}
         </div>
@@ -265,7 +296,7 @@ export function DocsHome() {
       <section className="launch-home-section">
         <SectionHeading {...HOME_SECTIONS.tutorials} />
         <div className="launch-home-outcomes launch-home-model-cards">
-          {tutorials.map((tutorial) => (
+          {inChannel(tutorials).map((tutorial) => (
             <HomeCardLink key={tutorial.name} card={tutorial} />
           ))}
         </div>
@@ -289,23 +320,29 @@ export function DocsHome() {
           consistent API and dashboard to utilize these providers according to your requirements.
         </p>
         <div className="launch-home-partners">
-          {PARTNER_ROWS.map((row) => (
+          {inChannel(PARTNER_ROWS).map((row) => (
             <div key={row.category} className="launch-home-partners-row">
               <div className="launch-home-partners-category">
                 <row.Icon size={17} aria-hidden="true" />
                 {row.category}
               </div>
               <div className="launch-home-partners-logos">
-                {row.partners.map((p) => (
-                  <img
-                    key={p.name}
-                    src={p.src}
-                    alt={p.name}
-                    style={{ height: p.h }}
-                    loading="lazy"
-                    className="launch-home-partners-wordmark"
-                  />
-                ))}
+                {row.partners
+                  .filter(
+                    (p) =>
+                      p.rampProvider === undefined ||
+                      isGatePublished({ rampProvider: p.rampProvider })
+                  )
+                  .map((p) => (
+                    <img
+                      key={p.name}
+                      src={p.src}
+                      alt={p.name}
+                      style={{ height: p.h }}
+                      loading="lazy"
+                      className="launch-home-partners-wordmark"
+                    />
+                  ))}
               </div>
             </div>
           ))}
@@ -327,8 +364,7 @@ export function ProviderCallout() {
         Interested in being a provider?
       </p>
       <p className="launch-docs-toc-card-desc">
-        We onboard custody, RPC, compliance, and ramp integrations through a self-service
-        contribution process.
+        We onboard infrastructure integrations through a self-service contribution process.
       </p>
       <Link href="/docs/reference/provider-onboarding" className="launch-docs-toc-card-link">
         Visit our guide <ArrowRightIcon size={12} aria-hidden="true" />

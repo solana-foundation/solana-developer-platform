@@ -36,6 +36,7 @@ const DASHBOARD_FLAGS = vi.hoisted(
       markets: false,
       payments: false,
       privateChannels: false,
+      releaseChannel: "experimental",
       ramps: false,
     }) as const satisfies DashboardFlags
 );

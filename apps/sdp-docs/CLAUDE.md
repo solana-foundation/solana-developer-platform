@@ -189,6 +189,19 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
+## Release Channels
+
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and API-key operations, Earn's hold included); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+
+Gates follow module declarations, never sentences:
+
+- A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
+- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<AllowedOperationsTable />`. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
+- `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
+- Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
+- `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
+- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
+
 API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.

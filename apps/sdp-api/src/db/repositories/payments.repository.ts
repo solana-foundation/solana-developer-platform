@@ -4,7 +4,9 @@ import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
   type PaymentTransferType,
+  RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
+  type RampTransferTransitionId,
   type RampTransferType,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types";
@@ -12,7 +14,12 @@ import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provide
 import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export { isRampTransferType, RAMP_TRANSFER_TYPES, WALLET_TRANSFER_TYPES };
+export {
+  isRampTransferType,
+  RAMP_TRANSFER_TRANSITIONS,
+  RAMP_TRANSFER_TYPES,
+  WALLET_TRANSFER_TYPES,
+};
 export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 
@@ -117,6 +124,25 @@ export interface UpdatePaymentTransferInput {
   deliveryMode?: PaymentTransferDeliveryMode | null;
   providerData?: Record<string, unknown>;
   error?: string | null;
+  updatedAt: string;
+}
+
+/** Row fields a guarded status change may write alongside the status. */
+export interface TransferStatusChangeFields {
+  sourceAddress?: string | null;
+  destinationAddress?: string | null;
+  signature?: string | null;
+  amount?: string | null;
+  fiatAmount?: string | null;
+  providerData?: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface RampTransferTransitionInput extends TransferStatusChangeFields {
+  transferId: string;
+  organizationId: string;
+  projectId: string | null;
+  transition: RampTransferTransitionId;
   updatedAt: string;
 }
 
@@ -225,21 +251,24 @@ export interface PaymentsRepository {
    * `fromStatuses`, scoped to org/project. Returns the updated row, or null when
    * no row matched (wrong owner, missing, or status changed concurrently).
    */
-  updateTransferStatusGuarded(input: {
-    transferId: string;
-    organizationId: string;
-    projectId: string | null;
-    fromStatuses: readonly PaymentTransferStatus[];
-    toStatus: PaymentTransferStatus;
-    updatedAt: string;
-    sourceAddress?: string | null;
-    destinationAddress?: string | null;
-    signature?: string | null;
-    amount?: string | null;
-    fiatAmount?: string | null;
-    providerData?: Record<string, unknown>;
-    error?: string | null;
-  }): Promise<PaymentTransferRow | null>;
+  updateTransferStatusGuarded(
+    input: TransferStatusChangeFields & {
+      transferId: string;
+      organizationId: string;
+      projectId: string | null;
+      fromStatuses: readonly PaymentTransferStatus[];
+      toStatus: PaymentTransferStatus;
+      updatedAt: string;
+    }
+  ): Promise<PaymentTransferRow | null>;
+  /**
+   * Applies one `RAMP_TRANSFER_TRANSITIONS` entry as a compare-and-swap: the
+   * row must be a ramp transfer of one of the transition's types, in one of its
+   * source statuses, scoped to org/project. Returns the updated row, or null
+   * when no row matched (illegal source, lost race, missing, wrong owner, or
+   * not a ramp transfer of those types).
+   */
+  transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
   /**
    * Merges `providerData` into the row only while `claimPath` inside
    * provider_data is still unset and the status is unchanged, so concurrent
