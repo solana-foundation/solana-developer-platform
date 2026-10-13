@@ -15,7 +15,7 @@ Transfers are available through the Payments dashboard and the API.
 
 ## Prerequisites
 
-- A deployed token with minted supply
+- A token balance in the source wallet
 - A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
 - An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
 
@@ -37,7 +37,7 @@ Go to **Payments** in the sidebar. The overview shows your total SDP balance, re
 
 Click **Send** and select **Wallet transfer** to send from an SDP wallet to a Solana address.
 
-![Send page showing Wallet transfer and Off-ramp options](/images/tokens/transfer-send-options.png)
+![Send page showing the transfer options](/images/tokens/transfer-send-options.png)
 
 On the **Enter transfer details** form, select a source wallet from the dropdown.
 
@@ -68,7 +68,7 @@ const body = {
 };
 ```
 
-`token` is the mint address returned by the deploy step, not the SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
+`token` is the token's on-chain mint address, not an SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
 
 </Tab>
 </Tabs>
@@ -206,6 +206,4 @@ See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) f
 
 - [Payment with memo](/docs/payments/send-payment-with-memo) — using the `memo` field to carry order references
 - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound flows
-- [Mint and Burn](/docs/tokens/mint-and-burn) — create or destroy token supply
-- [Allowlists](/docs/tokens/allowlists) — define approved destinations for allowlist-enabled issuance flows
-- [Freeze and Compliance](/docs/tokens/freeze-and-compliance) — halt transfers for compliance
+- [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality

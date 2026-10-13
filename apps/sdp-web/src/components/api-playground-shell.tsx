@@ -16,8 +16,10 @@ import {
 import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
@@ -1206,13 +1208,21 @@ export function ApiPlaygroundShell({
   apiKeySelector,
   createApiKeyHref,
   defaultEndpointId,
-  endpoints,
+  endpoints: offeredEndpoints,
   leftMessages = [],
   requiresApiKey = false,
   productName,
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
+  const releaseChannel = useOptionalDashboardWorkspace()?.flags.releaseChannel;
+  const endpoints = useMemo(
+    () =>
+      releaseChannel === undefined
+        ? offeredEndpoints
+        : filterPlaygroundEndpointsToReleaseChannel(offeredEndpoints, releaseChannel),
+    [offeredEndpoints, releaseChannel]
+  );
   const refresh = useThemeScope() === "refresh";
   const {
     activeEndpoint,

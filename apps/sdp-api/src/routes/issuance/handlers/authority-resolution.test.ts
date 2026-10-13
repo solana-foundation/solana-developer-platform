@@ -699,7 +699,9 @@ describe("authority-resolution", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
-  it("revalidates selected API-key access for a persisted direct-action replay", async () => {
+  // The request's bindings were read fresh by authentication; the replay checks
+  // them, so a key no longer bound to the pinned wallet replays nothing.
+  it("checks the request's bindings for a persisted direct-action replay", async () => {
     await resetScope();
     await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
     const auth = await seedSelectedApiKey("wal_authority");
@@ -714,10 +716,10 @@ describe("authority-resolution", () => {
     const tokenService = {
       findTransactionByIdempotency: vi.fn().mockResolvedValue(transaction),
     };
-    const replay = () =>
+    const replay = (requestAuth: ApiKeyContext) =>
       resolveDirectIssuanceReplay({
         env: testEnv,
-        auth,
+        auth: requestAuth,
         tokenService: tokenService as never,
         tokenId: "tok_replay",
         type: "burn",
@@ -727,14 +729,16 @@ describe("authority-resolution", () => {
         fingerprintForCustodyWalletId: () => "fingerprint",
       });
 
-    await expect(replay()).resolves.toBe(transaction);
-    await getDb(testEnv).batch([
-      getDb(testEnv).prepare(
-        "DELETE FROM api_key_wallet_permissions WHERE api_key_id = 'key_test'"
-      ),
-      getDb(testEnv).prepare("UPDATE api_keys SET signing_wallet_id = NULL WHERE id = 'key_test'"),
-    ]);
-    await expect(replay()).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
+    await expect(replay(auth)).resolves.toBe(transaction);
+    const rebound: ApiKeyContext = {
+      ...auth,
+      signingWalletId: "wal_other",
+      signingWalletIds: ["wal_other"],
+      walletBindings: [
+        { walletId: "wal_other", custodyWalletId: "cwlt_other", permissions: ["*"] },
+      ],
+    };
+    await expect(replay(rebound)).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
   it("rejects a requested replay wallet that differs from the persisted pin", async () => {

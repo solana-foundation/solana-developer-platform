@@ -2,8 +2,8 @@
  * Resolving what a DvP write acts on, in one place, because the leg handlers
  * (fund, reclaim) share the same answer.
  *
- * The resolution re-reads the binding from the database before anything is
- * broadcast: the auth context can be an hour stale.
+ * The wallet check runs against the bindings authentication read fresh for
+ * this request, before anything is broadcast.
  */
 
 import type { Context } from "hono";
@@ -12,8 +12,7 @@ import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
 import {
-  assertFreshApiKeyActive,
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
@@ -99,10 +98,7 @@ export async function resolveLegAction(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
-    "payments:write",
-  ]);
+  assertApiKeyCustodyWalletAccess(auth, custodyWalletId, ["payments:write"]);
 
   return {
     trade,
@@ -153,10 +149,7 @@ export async function resolveCloseAction(
     throw notFound("DvP settlement wallet not found for this trade's project");
   }
 
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, settlement.custodyWalletId, [
-    "payments:write",
-  ]);
+  assertApiKeyCustodyWalletAccess(auth, settlement.custodyWalletId, ["payments:write"]);
 
   return { trade, actor: dvpTradeAuditActor(auth), settlement, projectId };
 }

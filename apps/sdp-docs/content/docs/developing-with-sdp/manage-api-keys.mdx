@@ -118,13 +118,7 @@ Optional fields: `description`, `permissions` (fine-grained overrides), `allowed
 
 A key can carry a list of the operation families and types it may perform on the wallets it can access. The list is an allow-list. An empty or missing list places no restriction. An operation that is not in a non-empty list is refused with `OPERATION_NOT_ALLOWED` before anything executes. Nothing is recorded on refusal, like a missing permission.
 
-| Family | Covers |
-| --- | --- |
-| `payment` | Transfers, transfer batches, and recurring payment creation, updates and collections |
-| `ramp` | On-ramp and off-ramp quotes |
-| `issuance` | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions |
-| `program` | Earn vault deposits and withdrawals, Earn program withdrawals, DvP fund and settle |
-| `privacy` | Private operations through Helius Rings |
+<AllowedOperationsTable />
 
 Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
 
@@ -136,11 +130,11 @@ curl -X POST https://api.solana.com/v1/api-keys \
     "name": "Payouts worker",
     "walletScope": "selected",
     "signingWalletIds": ["wal_123"],
-    "allowedOperations": ["payment", "ramp_offramp_quote"]
+    "allowedOperations": ["payment_transfer_execute", "payment_transfer_batch_execute"]
   }'
 ```
 
-Use `null` or an empty list on update to remove the restriction. Actions that get funds back out, such as a DvP cancel or reclaim, are never restricted by this list.
+Use `null` or an empty list on update to remove the restriction. Actions that get funds back out are never restricted by this list.
 
 ## Rotate a key
 

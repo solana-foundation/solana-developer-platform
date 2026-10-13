@@ -127,9 +127,9 @@ export async function seedApiKeyRowFor(
     .prepare(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-          role, permissions, status, expires_at, rotation_deadline)
+          role, permissions, status, expires_at, rotation_deadline, signing_wallet_id)
        SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
-              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?
          FROM projects p
         WHERE p.organization_id = ? AND p.id IN (?, ?)
         ORDER BY (p.id = ?) DESC
@@ -144,12 +144,46 @@ export async function seedApiKeyRowFor(
       data.status,
       data.expiresAt,
       data.rotationDeadline === undefined ? null : data.rotationDeadline,
+      data.signingWalletId,
       data.organizationId,
       data.projectId,
       placeholderProjectId,
       data.projectId
     )
     .run();
+
+  // Authentication reads wallet bindings from Postgres on every request
+  // (HOO-2048), so an entry that names bindings replaces the key's rows with
+  // them. One that names none leaves rows a test inserted itself.
+  if (data.walletBindings === undefined && data.signingWalletIds === undefined) {
+    return;
+  }
+  const bindings = [
+    ...(data.walletBindings ?? []).map((binding) => ({
+      walletId: binding.walletId,
+      permissions: binding.permissions,
+    })),
+    ...(data.signingWalletIds ?? [])
+      .filter((walletId) => !data.walletBindings?.some((binding) => binding.walletId === walletId))
+      .map((walletId) => ({ walletId, permissions: ["*"] })),
+  ];
+  // One replacement: a failed insert must not leave the key partly unbound.
+  await db.transaction(async (tx) => {
+    await tx.execute("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?", [data.id]);
+    for (const binding of bindings) {
+      await tx.execute(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         SELECT ?, ak.id, ?, ? FROM api_keys ak WHERE ak.id = ?
+         ON CONFLICT DO NOTHING`,
+        [
+          `akw_${crypto.randomUUID()}`,
+          binding.walletId,
+          JSON.stringify(binding.permissions),
+          data.id,
+        ]
+      );
+    }
+  });
 }
 
 /**
