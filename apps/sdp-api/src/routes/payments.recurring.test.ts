@@ -875,27 +875,6 @@ describe("Payments routes — recurring", () => {
     expect(activateBody.data.recurringPayment.subscriptionAuthorityAddress).toBeTruthy();
     expect(activateBody.data.recurringPayment.nextCollectionDueAt).toBeTruthy();
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
-    const links = await getDb(env)
-      .prepare(`SELECT message_key, reservation_id, accounting_identity
-                  FROM payment_recurring_sponsorship_links
-                 WHERE recurring_payment_id = ? AND accounting_identity IS NOT NULL
-                 ORDER BY message_key`)
-      .bind(created.id)
-      .all<{
-        message_key: string;
-        reservation_id: string;
-        accounting_identity: { actor: { id: string } };
-      }>();
-    expect(links.results).toEqual([
-      expect.objectContaining({
-        message_key: "authorize_subscription",
-        reservation_id: expect.any(String),
-      }),
-      expect.objectContaining({ message_key: "create_plan", reservation_id: expect.any(String) }),
-    ]);
-    expect(
-      links.results.every((link) => link.accounting_identity.actor.id === TEST_WALLET_ID)
-    ).toBe(true);
     const confirmedAttempts = await getDb(env)
       .prepare(
         `SELECT status, stage, plan_creation_signature, authorization_signature
@@ -978,7 +957,7 @@ describe("Payments routes — recurring", () => {
     });
   });
 
-  it("refuses an unlinked legacy activation outcome before a new sponsorship admission", async () => {
+  it("preserves legacy activation retry without a recurring sponsorship ledger", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await paymentRecurringPaymentsRepositoryPostgres
       .createPostgresPaymentRecurringPaymentsRepository(getDb(env))
@@ -1007,161 +986,11 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(response.status).toBe(409);
-    expect(recurringExecution.signAndSendMock()).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    const body = await parseRecurringResponse(response);
+    expect(body.data.recurringPayment.status).toBe("active");
+    expect(recurringExecution.signAndSendMock()).toHaveBeenCalledTimes(2);
   });
-
-  it("blocks sponsor effects when the durable recurring accounting write fails", async () => {
-    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const db = getDb(env);
-    await db
-      .prepare(`CREATE OR REPLACE FUNCTION pr4_fail_accounting_link() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN RAISE EXCEPTION 'Accounting link unavailable'; END; $$`)
-      .run();
-    await db
-      .prepare(`CREATE TRIGGER pr4_fail_accounting_link BEFORE UPDATE ON payment_recurring_sponsorship_links
-      FOR EACH ROW EXECUTE FUNCTION pr4_fail_accounting_link()`)
-      .run();
-    onTestFinished(async () => {
-      await db
-        .prepare("DROP TRIGGER pr4_fail_accounting_link ON payment_recurring_sponsorship_links")
-        .run();
-      await db.prepare("DROP FUNCTION pr4_fail_accounting_link()").run();
-    });
-
-    const response = await app.request(
-      `/v1/payments/recurring-payments/${created.id}/activate`,
-      {
-        method: "POST",
-        headers: RECURRING_HEADERS,
-        body: "{}",
-      },
-      env
-    );
-
-    expect(response.status).toBe(500);
-    expect(recurringExecution.signAndSendMock()).not.toHaveBeenCalled();
-  });
-
-  it("retains separate setup and subscribe accounting after interrupted activation without repeating setup", async () => {
-    mockRecurringActivationRpc({ tokenAccounts: [] });
-    mockDistinctRecentBlockhashes();
-    const sourceSigner = recurringExecution.sourceSigner();
-    const [sourceAta] = await findAssociatedTokenPda({
-      owner: sourceSigner.address,
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
-    getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-      accountAddress === sourceAta
-        ? null
-        : ({
-            lamports: 4200000000n,
-            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-    );
-    const sponsor = recurringExecution.signAndSendMock();
-    sponsor.mockRejectedValueOnce(new Error("Subscribe outcome unknown"));
-    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const activate = () =>
-      app.request(
-        `/v1/payments/recurring-payments/${created.id}/activate`,
-        {
-          method: "POST",
-          headers: RECURRING_HEADERS,
-          body: "{}",
-        },
-        env
-      );
-
-    expect((await activate()).status).toBeGreaterThanOrEqual(500);
-    expect(sponsor).toHaveBeenCalledTimes(3);
-    const links = await getDb(env)
-      .prepare(`SELECT message_key, reservation_id FROM payment_recurring_sponsorship_links
-      WHERE recurring_payment_id = ? AND accounting_identity IS NOT NULL ORDER BY message_key`)
-      .bind(created.id)
-      .all<{ message_key: string; reservation_id: string }>();
-    expect(links.results.map((link) => link.message_key)).toEqual([
-      "authorization_setup",
-      "authorize_subscription",
-      "create_plan",
-    ]);
-    expect(new Set(links.results.map((link) => link.reservation_id)).size).toBe(3);
-    const setup = await getDb(env)
-      .prepare(`SELECT metadata->>'authorizationSetupSignature' AS signature
-      FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?`)
-      .bind(created.id)
-      .first<{ signature: string }>();
-    expect(setup?.signature).toBe(testSignature(2));
-
-    expect((await activate()).status).toBeGreaterThanOrEqual(400);
-    expect(sponsor).toHaveBeenCalledTimes(3);
-  });
-
-  it.each([true, false])(
-    "retains successful self-hosted setup while retrying failed subscribe (setup exists=%s)",
-    async (setupExists) => {
-      const originalMode = env.SDP_DEPLOYMENT_MODE;
-      env.SDP_DEPLOYMENT_MODE = "self_hosted";
-      onTestFinished(() => {
-        env.SDP_DEPLOYMENT_MODE = originalMode;
-      });
-      mockRecurringActivationRpc({ tokenAccounts: [] });
-      mockDistinctRecentBlockhashes();
-      const [sourceAta] = await findAssociatedTokenPda({
-        owner: recurringExecution.sourceSigner().address,
-        tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        mint: address(DEVNET_USDC_MINT),
-      });
-      const tokenAccount = {
-        lamports: 4200000000n,
-        owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>;
-      getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-        accountAddress === sourceAta ? null : tokenAccount
-      );
-      const sponsor = recurringExecution
-        .signAndSendMock()
-        .mockReset()
-        .mockResolvedValueOnce(testSignature(1))
-        .mockResolvedValueOnce(testSignature(2))
-        .mockResolvedValueOnce(testSignature(3))
-        .mockResolvedValueOnce(testSignature(4));
-      confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-        signature,
-        slot: 100n,
-        confirmationStatus: "confirmed",
-        err: signature === testSignature(3) ? { InstructionError: [0, "Custom"] } : null,
-      }));
-      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const activate = () =>
-        app.request(
-          `/v1/payments/recurring-payments/${created.id}/activate`,
-          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-          env
-        );
-      expect((await activate()).status).toBe(400);
-      if (setupExists) getAccountInfoMock.mockResolvedValue(tokenAccount);
-      expect((await activate()).status).toBe(setupExists ? 200 : 409);
-      expect(sponsor).toHaveBeenCalledTimes(setupExists ? 4 : 3);
-      expect(
-        await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations")
-          .first()
-      ).toEqual({ count: 0 });
-      const setups = await getDb(env)
-        .prepare(`SELECT submission_signature, admission_started_at IS NOT NULL AS started
-          FROM payment_recurring_sponsorship_links
-          WHERE recurring_payment_id = ? AND message_key = 'authorization_setup'`)
-        .bind(created.id)
-        .all();
-      expect(setups.results).toHaveLength(2);
-      expect(setups.results).toEqual([
-        { submission_signature: testSignature(2), started: true },
-        { submission_signature: testSignature(2), started: true },
-      ]);
-    }
-  );
 
   it("keeps supported self-hosted recurring activation free of SDP reservations", async () => {
     const originalMode = env.SDP_DEPLOYMENT_MODE;
@@ -1170,17 +999,7 @@ describe("Payments routes — recurring", () => {
       env.SDP_DEPLOYMENT_MODE = originalMode;
     });
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const links = await getDb(env)
-      .prepare(`SELECT deployment_mode, reservation_id FROM payment_recurring_sponsorship_links
-      WHERE recurring_payment_id = ?`)
-      .bind(activated.id)
-      .all<{ deployment_mode: string; reservation_id: string | null }>();
-    expect(links.results).toHaveLength(3);
-    expect(
-      links.results.every(
-        (link) => link.deployment_mode === "self_hosted" && link.reservation_id === null
-      )
-    ).toBe(true);
+    expect(activated.status).toBe("active");
     expect(
       await getDb(env)
         .prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations")
@@ -1188,89 +1007,122 @@ describe("Payments routes — recurring", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("keeps an interrupted replacement on its original attempt and distinct setup/subscribe reservations", async () => {
-    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    mockRecurringActivationRpc({ tokenAccounts: [] });
-    mockDistinctRecentBlockhashes();
-    const [sourceAta] = await findAssociatedTokenPda({
-      owner: recurringExecution.sourceSigner().address,
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
-    getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-      accountAddress === sourceAta
-        ? null
-        : ({
-            lamports: 4200000000n,
-            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-    );
-    const sponsor = recurringExecution.signAndSendMock();
-    sponsor
-      .mockResolvedValueOnce(testSignature(3))
-      .mockResolvedValueOnce(testSignature(4))
-      .mockRejectedValueOnce(new Error("Replacement subscribe outcome unknown"));
-    const patch = (amount: string) =>
-      app.request(
-        `/v1/payments/recurring-payments/${activated.id}`,
-        {
-          method: "PATCH",
-          headers: RECURRING_HEADERS,
-          body: JSON.stringify({ amount }),
-        },
-        env
-      );
-
-    expect((await patch("26.00")).status).toBeGreaterThanOrEqual(500);
-    const attempt = await getDb(env)
-      .prepare(`SELECT a.id, a.status, a.new_plan_id, a.new_subscription_id,
-      a.authorization_setup_signature, p.status AS recurring_status
-      FROM payment_recurring_payment_update_attempts a JOIN payment_recurring_payments p ON p.id = a.recurring_payment_id
-      WHERE p.id = ?`)
-      .bind(activated.id)
-      .first<{
-        id: string;
-        status: string;
-        new_plan_id: string;
-        new_subscription_id: string;
-        authorization_setup_signature: string;
-        recurring_status: string;
-      }>();
-    expect(attempt).toMatchObject({
-      status: "processing",
-      recurring_status: "updating",
-      authorization_setup_signature: testSignature(4),
-    });
-    expect(attempt?.new_plan_id).toBeTruthy();
-    expect(attempt?.new_subscription_id).toBeTruthy();
-    const links = await getDb(env)
-      .prepare(`SELECT message_key, reservation_id FROM payment_recurring_sponsorship_links
-      WHERE recurring_payment_id = ? AND attempt_kind = 'update' AND accounting_identity IS NOT NULL ORDER BY message_key`)
-      .bind(activated.id)
-      .all<{ message_key: string; reservation_id: string }>();
-    expect(links.results.map((link) => link.message_key)).toEqual([
-      "authorization_setup",
-      "authorize_subscription",
-      "create_plan",
-    ]);
-    expect(new Set(links.results.map((link) => link.reservation_id)).size).toBe(3);
-    const effects = sponsor.mock.calls.length;
+  it("keeps the saved fee actor after the exact source wallet provider reference changes", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await getDb(env)
-      .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id = ?")
+      .bind("provider_alias_after_identity_migration", TEST_CUSTODY_WALLET_ID)
       .run();
 
-    expect((await patch("27.00")).status).toBe(409);
-    expect((await patch("26.00")).status).toBeGreaterThanOrEqual(400);
-    expect(sponsor).toHaveBeenCalledTimes(effects);
-    expect(
-      await getDb(env)
-        .prepare(
-          "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
-        )
-        .bind(activated.id)
-        .first()
-    ).toEqual({ count: 1 });
+    const activate = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(activate.status).toBe(200);
+    const activated = (await parseRecurringResponse(activate)).data.recurringPayment;
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
+
+    if (!activated.subscriptionId) throw new Error("Expected activated subscription");
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(collect.status).toBe(200);
+    expect((await parseCollectionResponse(collect)).data.collectionAttempt.status).toBe(
+      "confirmed"
+    );
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
+  });
+
+  it("preserves the fee actor through pending edits and active term replacement after provider alias drift", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id = ?")
+      .bind("provider_alias_after_identity_migration", TEST_CUSTODY_WALLET_ID)
+      .run();
+    const metadataUri = "https://example.com/recurring/identity-migration.json";
+    const pendingEdit = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ metadataUri }),
+      },
+      env
+    );
+    expect(pendingEdit.status).toBe(200);
+    expect((await parseRecurringResponse(pendingEdit)).data.recurringPayment).toMatchObject({
+      id: created.id,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      metadataUri,
+    });
+    const activate = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(activate.status).toBe(200);
+    const activated = (await parseRecurringResponse(activate)).data.recurringPayment;
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValueOnce(testSignature(3))
+      .mockResolvedValueOnce(testSignature(4))
+      .mockResolvedValueOnce(testSignature(5));
+    const replaceTerms = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "35.00" }),
+      },
+      env
+    );
+    expect(replaceTerms.status).toBe(200);
+    const replaced = (await parseRecurringResponse(replaceTerms)).data.recurringPayment;
+    expect(replaced).toMatchObject({
+      id: created.id,
+      status: "active",
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      sourceAddress: activated.sourceAddress,
+      amount: "35.00",
+      metadataUri,
+    });
+    expect(replaced.planId).not.toBe(activated.planId);
+    if (!replaced.subscriptionId) throw new Error("Expected replacement subscription");
+    await setRecurringCollectionDue({
+      recurringPaymentId: replaced.id,
+      subscriptionId: replaced.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(collect.status).toBe(200);
+    expect((await parseCollectionResponse(collect)).data.collectionAttempt.status).toBe(
+      "confirmed"
+    );
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
   });
 
   it("refuses partial activation with a saved plan signature when current money admission fails", async () => {
@@ -1339,62 +1191,6 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(sent);
   });
 
-  it("does not readmit a legacy linked collection with missing signature and accounting evidence", async () => {
-    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
-    const transferId = `xfr_${crypto.randomUUID()}`;
-    const attemptId = `psca_${crypto.randomUUID()}`;
-    await setRecurringCollectionDue({
-      recurringPaymentId: activated.id,
-      subscriptionId: activated.subscriptionId,
-      dueAt,
-    });
-    await seedRecurringCollectionJournal({
-      stage: "submitted",
-      attemptId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      recurringPaymentId: activated.id,
-      subscriptionId: activated.subscriptionId,
-      collectionDueAt: dueAt,
-      token: DEVNET_USDC_MINT,
-      amount: "25.00",
-      attemptedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-      transfer: {
-        id: transferId,
-        walletId: TEST_WALLET_ID,
-        counterpartyId: activated.counterpartyId,
-        sourceAddress: recurringExecution.sourceSigner().address,
-        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        signature: testSignature(3),
-      },
-    });
-    await getDb(env)
-      .prepare("UPDATE payment_subscription_collection_attempts SET signature = NULL WHERE id = ?")
-      .bind(attemptId)
-      .run();
-    await getDb(env)
-      .prepare("UPDATE payment_transfers SET signature = NULL WHERE id = ?")
-      .bind(transferId)
-      .run();
-    const sponsor = recurringExecution.signAsFeePayerMock().mock.calls.length;
-    const sent = sendTransactionMock.mock.calls.length;
-
-    const response = await app.request(
-      `/v1/payments/recurring-payments/${activated.id}/collect`,
-      {
-        method: "POST",
-        headers: RECURRING_HEADERS,
-        body: "{}",
-      },
-      env
-    );
-
-    expect(response.status).toBe(409);
-    expect(recurringExecution.signAsFeePayerMock()).toHaveBeenCalledTimes(sponsor);
-    expect(sendTransactionMock).toHaveBeenCalledTimes(sent);
-  });
-
   it("retains stale role revision through signed activation recovery and refuses new collection", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await getDb(env)
@@ -1442,241 +1238,6 @@ describe("Payments routes — recurring", () => {
     expect(recurringExecution.signAsFeePayerMock()).toHaveBeenCalledTimes(signed);
   });
 
-  it("blocks an interrupted managed reservation before linkage without admitting another message", async () => {
-    mockDistinctRecentBlockhashes();
-    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const db = getDb(env);
-    await db
-      .prepare(`CREATE FUNCTION pr4_interrupt_link() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN IF NEW.accounting_identity IS NOT NULL THEN RAISE EXCEPTION 'Process interrupted before link'; END IF; RETURN NEW; END; $$`)
-      .run();
-    await db
-      .prepare(`CREATE TRIGGER pr4_interrupt_link BEFORE UPDATE ON payment_recurring_sponsorship_links
-      FOR EACH ROW EXECUTE FUNCTION pr4_interrupt_link()`)
-      .run();
-    const activate = () =>
-      app.request(
-        `/v1/payments/recurring-payments/${created.id}/activate`,
-        {
-          method: "POST",
-          headers: RECURRING_HEADERS,
-          body: "{}",
-        },
-        env
-      );
-    try {
-      expect((await activate()).status).toBe(500);
-    } finally {
-      await db
-        .prepare("DROP TRIGGER pr4_interrupt_link ON payment_recurring_sponsorship_links")
-        .run();
-      await db.prepare("DROP FUNCTION pr4_interrupt_link()").run();
-    }
-    const reservation = await db
-      .prepare("SELECT id FROM sponsorship_budget_reservations")
-      .first<{ id: string }>();
-    if (!reservation) throw new Error("Expected reserved sponsorship fixture");
-    await db
-      .prepare("UPDATE sponsorship_budget_reservations SET status = 'reserved' WHERE id = ?")
-      .bind(reservation.id)
-      .run();
-    await db
-      .prepare(
-        "UPDATE payment_recurring_sponsorship_links SET admission_started_at = NOW() WHERE recurring_payment_id = ? AND message_key = 'create_plan'"
-      )
-      .bind(created.id)
-      .run();
-
-    expect((await activate()).status).toBe(409);
-    expect(recurringExecution.signAndSendMock()).not.toHaveBeenCalled();
-    expect(
-      (await db.prepare("SELECT id, status FROM sponsorship_budget_reservations").all()).results
-    ).toEqual([{ id: reservation.id, status: "reserved" }]);
-  });
-
-  it.each([
-    { mode: "managed", corrupt: false },
-    { mode: "managed", corrupt: true },
-    { mode: "self_hosted", corrupt: true },
-  ] as const)(
-    "retries only a confirmed failed setup after reconciliation and coherent accounting ($mode, corrupt=$corrupt)",
-    async ({ mode, corrupt }) => {
-      const originalMode = env.SDP_DEPLOYMENT_MODE;
-      env.SDP_DEPLOYMENT_MODE = mode;
-      onTestFinished(() => {
-        env.SDP_DEPLOYMENT_MODE = originalMode;
-      });
-      mockRecurringActivationRpc({ tokenAccounts: [] });
-      mockDistinctRecentBlockhashes();
-      const [sourceAta] = await findAssociatedTokenPda({
-        owner: recurringExecution.sourceSigner().address,
-        tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        mint: address(DEVNET_USDC_MINT),
-      });
-      getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-        accountAddress === sourceAta
-          ? null
-          : ({
-              lamports: 4200000000n,
-              owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-            } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-      );
-      const sponsor = recurringExecution
-        .signAndSendMock()
-        .mockReset()
-        .mockResolvedValueOnce(testSignature(1))
-        .mockResolvedValueOnce(testSignature(2))
-        .mockResolvedValueOnce(testSignature(3))
-        .mockResolvedValueOnce(testSignature(4));
-      confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-        signature,
-        slot: 100n,
-        confirmationStatus: "confirmed",
-        err: signature === testSignature(2) ? { InstructionError: [0, "Custom"] } : null,
-      }));
-      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const activate = () =>
-        app.request(
-          `/v1/payments/recurring-payments/${created.id}/activate`,
-          {
-            method: "POST",
-            headers: RECURRING_HEADERS,
-            body: "{}",
-          },
-          env
-        );
-      expect((await activate()).status).toBe(400);
-      const failed = await getDb(env)
-        .prepare(`SELECT message_key, confirmed_failure_signature FROM payment_recurring_sponsorship_links
-      WHERE recurring_payment_id = ? AND confirmed_failure_signature IS NOT NULL`)
-        .bind(created.id)
-        .all();
-      expect(failed.results).toEqual([
-        { message_key: "authorization_setup", confirmed_failure_signature: testSignature(2) },
-      ]);
-      await getDb(env)
-        .prepare(
-          "UPDATE sponsorship_budget_reservations SET status = 'committed', actual_lamports = 5000 WHERE signature = ?"
-        )
-        .bind(testSignature(2))
-        .run();
-
-      if (corrupt) {
-        await getDb(env)
-          .prepare(
-            mode === "self_hosted"
-              ? "UPDATE payment_recurring_sponsorship_links SET submission_signature = 'unrelated_signature' WHERE recurring_payment_id = ? AND message_key = 'authorization_setup'"
-              : "UPDATE payment_recurring_sponsorship_links SET accounting_identity = jsonb_set(accounting_identity, '{transactionDigest}', '\"corrupt_digest\"'::jsonb) WHERE recurring_payment_id = ? AND message_key = 'authorization_setup'"
-          )
-          .bind(created.id)
-          .run();
-        const priorLinks = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_sponsorship_links")
-          .first();
-        expect((await activate()).status).toBe(mode === "self_hosted" ? 409 : 503);
-        expect(sponsor).toHaveBeenCalledTimes(2);
-        expect(
-          await getDb(env)
-            .prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations")
-            .first()
-        ).toEqual({ count: mode === "self_hosted" ? 0 : 2 });
-        if (mode === "self_hosted") {
-          expect(
-            await getDb(env)
-              .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_sponsorship_links")
-              .first()
-          ).toEqual(priorLinks);
-        }
-        return;
-      }
-      await getDb(env)
-        .prepare(
-          "UPDATE payment_recurring_sponsorship_links SET submission_signature = NULL WHERE recurring_payment_id = ? AND message_key = 'authorization_setup'"
-        )
-        .bind(created.id)
-        .run();
-      expect((await activate()).status).toBe(200);
-      expect(sponsor).toHaveBeenCalledTimes(4);
-      expect(
-        await getDb(env)
-          .prepare(
-            "SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations WHERE signature = ?"
-          )
-          .bind(testSignature(2))
-          .first()
-      ).toEqual({ count: 1 });
-    }
-  );
-
-  it.each(["coherent", "corrupt", "wrong_scope"] as const)(
-    "retries a released sponsorship message only with coherent retained accounting (%s)",
-    async (evidence) => {
-      mockDistinctRecentBlockhashes();
-      const sponsor = recurringExecution
-        .signAndSendMock()
-        .mockReset()
-        .mockRejectedValueOnce(new Error("Original provider outcome awaiting reconciliation"))
-        .mockResolvedValueOnce(testSignature(1))
-        .mockResolvedValueOnce(testSignature(2));
-      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const activate = () =>
-        app.request(
-          `/v1/payments/recurring-payments/${created.id}/activate`,
-          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-          env
-        );
-      expect((await activate()).status).toBeGreaterThanOrEqual(500);
-      const db = getDb(env);
-      const original = await db
-        .prepare(
-          "SELECT reservation_id FROM payment_recurring_sponsorship_links WHERE recurring_payment_id = ? AND message_key = 'create_plan'"
-        )
-        .bind(created.id)
-        .first<{ reservation_id: string }>();
-      if (!original) throw new Error("Expected retained sponsorship accounting");
-      await db
-        .prepare("UPDATE sponsorship_budget_reservations SET status = 'released' WHERE id = ?")
-        .bind(original.reservation_id)
-        .run();
-      if (evidence === "corrupt") {
-        await db
-          .prepare(
-            "UPDATE payment_recurring_sponsorship_links SET accounting_identity = jsonb_set(accounting_identity, '{transactionDigest}', '\"corrupt_digest\"'::jsonb) WHERE recurring_payment_id = ? AND message_key = 'create_plan'"
-          )
-          .bind(created.id)
-          .run();
-      } else if (evidence === "wrong_scope") {
-        await db
-          .prepare("UPDATE sponsorship_budget_reservations SET project_id = NULL WHERE id = ?")
-          .bind(original.reservation_id)
-          .run();
-      }
-      const priorLinks = await db
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_sponsorship_links")
-        .first();
-      expect((await activate()).status).toBe(evidence === "coherent" ? 200 : 409);
-      expect(sponsor).toHaveBeenCalledTimes(evidence === "coherent" ? 3 : 1);
-      expect(
-        await db
-          .prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations")
-          .first()
-      ).toEqual({ count: evidence === "coherent" ? 3 : 1 });
-      expect(
-        await db
-          .prepare("SELECT id, status FROM sponsorship_budget_reservations WHERE id = ?")
-          .bind(original.reservation_id)
-          .first()
-      ).toEqual({ id: original.reservation_id, status: "released" });
-      if (evidence !== "coherent") {
-        expect(
-          await db
-            .prepare("SELECT COUNT(*)::int AS count FROM payment_recurring_sponsorship_links")
-            .first()
-        ).toEqual(priorLinks);
-      }
-    }
-  );
-
   it("keeps plan roles required for a new resume while cancellation remains an exit", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await createPostgresPaymentSubscriptionsRepository(getDb(env)).updatePlan({
@@ -1709,179 +1270,6 @@ describe("Payments routes — recurring", () => {
     expect(resume.status).toBe(409);
     expect(sponsor).toHaveBeenCalledTimes(3);
   });
-
-  it("blocks an uncertain qualified setup when its original failed base message is reconciled", async () => {
-    mockRecurringActivationRpc({ tokenAccounts: [] });
-    mockDistinctRecentBlockhashes();
-    const [sourceAta] = await findAssociatedTokenPda({
-      owner: recurringExecution.sourceSigner().address,
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
-    getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-      accountAddress === sourceAta
-        ? null
-        : ({
-            lamports: 4200000000n,
-            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-    );
-    confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-      signature,
-      slot: 100n,
-      confirmationStatus: "confirmed",
-      err: signature === testSignature(2) ? { InstructionError: [0, "Custom"] } : null,
-    }));
-    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    const activate = () =>
-      app.request(
-        `/v1/payments/recurring-payments/${created.id}/activate`,
-        {
-          method: "POST",
-          headers: RECURRING_HEADERS,
-          body: "{}",
-        },
-        env
-      );
-    expect((await activate()).status).toBe(400);
-    const db = getDb(env);
-    await db
-      .prepare(
-        "UPDATE sponsorship_budget_reservations SET status = 'committed', actual_lamports = 5000 WHERE signature = ?"
-      )
-      .bind(testSignature(2))
-      .run();
-    await db
-      .prepare(`INSERT INTO payment_recurring_sponsorship_links
-      (recurring_payment_id, organization_id, project_id, attempt_kind, attempt_id, message_key,
-       deployment_mode, legacy_actor_id, custody_wallet_id, admission_started_at)
-      SELECT recurring_payment_id, organization_id, project_id, attempt_kind, attempt_id, ?,
-        deployment_mode, legacy_actor_id, custody_wallet_id, NOW()
-      FROM payment_recurring_sponsorship_links WHERE recurring_payment_id = ? AND message_key = 'authorization_setup'`)
-      .bind(`authorization_setup:${testSignature(2)}`, created.id)
-      .run();
-
-    expect((await activate()).status).toBe(409);
-    expect(recurringExecution.signAndSendMock()).toHaveBeenCalledTimes(2);
-    expect(
-      await db.prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations").first()
-    ).toEqual({ count: 2 });
-  });
-
-  it.each(["managed", "self_hosted"] as const)(
-    "retries confirmed replacement setup failures on the same attempt (%s)",
-    async (mode) => {
-      const originalMode = env.SDP_DEPLOYMENT_MODE;
-      env.SDP_DEPLOYMENT_MODE = mode;
-      onTestFinished(() => {
-        env.SDP_DEPLOYMENT_MODE = originalMode;
-      });
-      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      mockRecurringActivationRpc({ tokenAccounts: [] });
-      mockDistinctRecentBlockhashes();
-      const [sourceAta] = await findAssociatedTokenPda({
-        owner: recurringExecution.sourceSigner().address,
-        tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        mint: address(DEVNET_USDC_MINT),
-      });
-      getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-        accountAddress === sourceAta
-          ? null
-          : ({
-              lamports: 4200000000n,
-              owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-            } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-      );
-      const sponsor = recurringExecution
-        .signAndSendMock()
-        .mockResolvedValueOnce(testSignature(3))
-        .mockResolvedValueOnce(testSignature(4))
-        .mockResolvedValueOnce(testSignature(5))
-        .mockResolvedValueOnce(testSignature(6))
-        .mockResolvedValueOnce(testSignature(7))
-        .mockResolvedValueOnce(testSignature(8));
-      confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-        signature,
-        slot: 100n,
-        confirmationStatus: "confirmed",
-        err:
-          signature === testSignature(4) ||
-          (mode === "self_hosted" && signature === testSignature(5))
-            ? { InstructionError: [0, "Custom"] }
-            : null,
-      }));
-      const patch = () =>
-        app.request(
-          `/v1/payments/recurring-payments/${activated.id}`,
-          {
-            method: "PATCH",
-            headers: RECURRING_HEADERS,
-            body: JSON.stringify({ amount: "26.00" }),
-          },
-          env
-        );
-      expect((await patch()).status).toBe(400);
-      const original = await getDb(env)
-        .prepare(
-          "SELECT id, new_plan_id FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
-        )
-        .bind(activated.id)
-        .first<{ id: string; new_plan_id: string }>();
-      if (!original) throw new Error("Expected replacement attempt");
-      await getDb(env)
-        .prepare(
-          "UPDATE sponsorship_budget_reservations SET status = 'committed', actual_lamports = 5000 WHERE signature = ?"
-        )
-        .bind(testSignature(4))
-        .run();
-      await getDb(env)
-        .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-        .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
-        .run();
-
-      if (mode === "self_hosted") {
-        expect((await patch()).status).toBe(400);
-        const failures = await getDb(env)
-          .prepare(
-            "SELECT confirmed_failure_signature FROM payment_recurring_sponsorship_links WHERE attempt_id = ? AND confirmed_failure_signature IS NOT NULL ORDER BY created_at"
-          )
-          .bind(original.id)
-          .all();
-        expect(failures.results).toEqual([
-          { confirmed_failure_signature: testSignature(4) },
-          { confirmed_failure_signature: testSignature(5) },
-        ]);
-        await getDb(env)
-          .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
-          .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
-          .run();
-      }
-      expect((await patch()).status).toBe(200);
-      expect(sponsor).toHaveBeenCalledTimes(mode === "managed" ? 7 : 8);
-      expect(
-        (
-          await getDb(env)
-            .prepare(
-              "SELECT id, new_plan_id FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
-            )
-            .bind(activated.id)
-            .all()
-        ).results
-      ).toEqual([original]);
-      const links = await getDb(env)
-        .prepare(
-          "SELECT message_key FROM payment_recurring_sponsorship_links WHERE attempt_id = ? AND message_key LIKE 'authorization_setup:%'"
-        )
-        .bind(original.id)
-        .all();
-      expect(links.results).toEqual([
-        { message_key: `authorization_setup:${testSignature(4)}` },
-        ...(mode === "self_hosted"
-          ? [{ message_key: `authorization_setup:${testSignature(5)}` }]
-          : []),
-      ]);
-    }
-  );
 
   it("rolls back subscription and recurring activation finalization together", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
@@ -3133,103 +2521,6 @@ describe("Payments routes — recurring", () => {
     expect(submission?.submission_started_at).toBeTruthy();
   });
 
-  it("retries a reconciled failed collection after optional link signature persistence failed", async () => {
-    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    mockDistinctRecentBlockhashes();
-    await setRecurringCollectionDue({
-      recurringPaymentId: activated.id,
-      subscriptionId: activated.subscriptionId,
-      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
-    });
-    const db = getDb(env);
-    await db
-      .prepare(`CREATE FUNCTION pr4_fail_submission_link() RETURNS trigger LANGUAGE plpgsql AS $$
-        BEGIN IF NEW.attempt_kind = 'collection' THEN RAISE EXCEPTION 'submission projection unavailable'; END IF;
-          RETURN NEW; END $$`)
-      .run();
-    await db
-      .prepare(`CREATE TRIGGER pr4_fail_submission_link BEFORE UPDATE OF submission_signature
-        ON payment_recurring_sponsorship_links FOR EACH ROW EXECUTE FUNCTION pr4_fail_submission_link()`)
-      .run();
-    onTestFinished(async () => {
-      await db
-        .prepare(
-          "DROP TRIGGER IF EXISTS pr4_fail_submission_link ON payment_recurring_sponsorship_links"
-        )
-        .run();
-      await db.prepare("DROP FUNCTION IF EXISTS pr4_fail_submission_link()").run();
-    });
-    const collect = () =>
-      app.request(
-        `/v1/payments/recurring-payments/${activated.id}/collect`,
-        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-        env
-      );
-    const unresolved = await collect();
-    expect(unresolved.status).toBe(200);
-    expect((await parseCollectionResponse(unresolved)).data.collectionAttempt.status).toBe(
-      "processing"
-    );
-    await db
-      .prepare("DROP TRIGGER pr4_fail_submission_link ON payment_recurring_sponsorship_links")
-      .run();
-    const original = await db
-      .prepare(`SELECT l.attempt_id, l.reservation_id, l.submission_signature, a.signature
-        FROM payment_recurring_sponsorship_links l
-        JOIN payment_subscription_collection_attempts a ON a.id = l.attempt_id
-        WHERE l.recurring_payment_id = ? AND l.message_key = 'collect'`)
-      .bind(activated.id)
-      .first<{
-        attempt_id: string;
-        reservation_id: string;
-        submission_signature: string | null;
-        signature: string;
-      }>();
-    if (!original) throw new Error("Expected retained collection submission");
-    expect(original.submission_signature).toBeNull();
-    expect(original.signature).toBeTruthy();
-    await db
-      .prepare(
-        "UPDATE sponsorship_budget_reservations SET status = 'committed', actual_lamports = 5000 WHERE id = ?"
-      )
-      .bind(original.reservation_id)
-      .run();
-    confirmTransactionMock.mockImplementation(async (_rpc, signature) => ({
-      signature,
-      slot: 100n,
-      confirmationStatus: "confirmed",
-      err: signature === original.signature ? { InstructionError: [0, "Custom"] } : null,
-    }));
-    const retried = await collect();
-    expect(retried.status).toBe(200);
-    expect((await parseCollectionResponse(retried)).data.collectionAttempt).toMatchObject({
-      status: "confirmed",
-    });
-    expect(
-      await db
-        .prepare(
-          "SELECT confirmed_failure_signature FROM payment_recurring_sponsorship_links WHERE attempt_id = ?"
-        )
-        .bind(original.attempt_id)
-        .first()
-    ).toEqual({ confirmed_failure_signature: original.signature });
-    expect(sendTransactionMock).toHaveBeenCalledTimes(2);
-    expect(
-      await db
-        .prepare("SELECT id, status FROM sponsorship_budget_reservations WHERE id = ?")
-        .bind(original.reservation_id)
-        .first()
-    ).toEqual({ id: original.reservation_id, status: "committed" });
-    expect(
-      await db
-        .prepare(
-          "SELECT COUNT(*)::int AS count FROM payment_recurring_sponsorship_links WHERE recurring_payment_id = ? AND attempt_kind = 'collection'"
-        )
-        .bind(activated.id)
-        .first()
-    ).toEqual({ count: 2 });
-  });
-
   it("admits one collection for two concurrent requests for the same due cycle", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
@@ -4121,7 +3412,7 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
-  it("retains a confirmed legacy collection failure until its missing accounting evidence is reconciled", async () => {
+  it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const submittedSignature = signature(
       "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
@@ -4170,7 +3461,8 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(collectRes.status).toBe(409);
+    expect(collectRes.status).toBe(200);
+    const collectBody = await parseCollectionResponse(collectRes);
     const failedAttempt = await getDb(env)
       .prepare(
         `SELECT status, error, metadata
@@ -4191,6 +3483,15 @@ describe("Payments routes — recurring", () => {
       signature: submittedSignature,
     });
     expect(failedTransfer?.error).toContain("collection failed on-chain");
+    expect(collectBody.data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+    });
+    expect(collectBody.data.collectionAttempt.signature).toBeTruthy();
+    expect(collectBody.data.collectionAttempt.id).not.toBe(attemptId);
+    expect(collectBody.data.transfer).toMatchObject({
+      status: "confirmed",
+      signature: collectBody.data.collectionAttempt.signature,
+    });
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
@@ -5277,13 +4578,6 @@ describe("Payments routes — recurring", () => {
       error: "Recurring payment activation failed on-chain",
     });
 
-    await getDb(env)
-      .prepare(
-        "UPDATE sponsorship_budget_reservations SET status = 'committed', actual_lamports = 5000 WHERE signature = ?"
-      )
-      .bind(failedPlanSignature)
-      .run();
-
     const retryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
       { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -5299,7 +4593,7 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
-  it("does not rebuild uncertain authorization merely because its account is missing", async () => {
+  it("clears failed authorization signatures when finalization cannot find the subscription", async () => {
     const _sourceSigner = recurringExecution.sourceSigner();
     mockDistinctRecentBlockhashes();
     fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
@@ -5357,8 +4651,14 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expect(retryRes.status).toBe(503);
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(retryRes.status).toBe(200);
+    const retryBody = await parseRecurringResponse(retryRes);
+    expect(retryBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      planCreationSignature: planSignature,
+      authorizationSignature: retryAuthorizationSignature,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
   });
 
   it.each(unboundWalletCases)(

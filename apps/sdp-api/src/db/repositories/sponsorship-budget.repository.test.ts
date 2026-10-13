@@ -48,7 +48,7 @@ describe("SponsorshipBudgetRepository", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.execute(
-      "TRUNCATE payment_recurring_sponsorship_links, sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
+      "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
     );
     await insertPolicy({ id: "global", scopeType: "global", scopeId: null });
     await insertPolicy({ id: "org_default", scopeType: "organization", scopeId: null });

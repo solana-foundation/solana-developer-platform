@@ -108,6 +108,10 @@ vi.mock(
       }
     )
 );
+// Deployment availability follows the demo's all-on flags, independent of the host's channel.
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: () => true,
+}));
 
 const harness = vi.hoisted(() => {
   const state = {

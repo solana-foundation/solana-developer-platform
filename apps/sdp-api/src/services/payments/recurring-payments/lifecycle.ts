@@ -12,7 +12,7 @@ import {
 } from "@sdp/types";
 import type { Address, Instruction, Signature, TransactionSigner } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { type DatabaseExecutor, getDb } from "@/db";
+import { getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -26,7 +26,6 @@ import {
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
-import { getDeploymentMode, type SdpDeploymentMode } from "@/lib/runtime-env";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -43,10 +42,6 @@ import {
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
-import {
-  initializeRecurringSponsorshipMessages,
-  recordConfirmedRecurringSponsorshipFailure,
-} from "./sponsorship";
 
 function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperation) {
   return operation === "cancel"
@@ -118,8 +113,6 @@ function assertLifecyclePreconditions(input: {
 }
 
 async function getOrCreateLifecycleAttempt(input: {
-  db: DatabaseExecutor;
-  deploymentMode: SdpDeploymentMode;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   operation: RecurringPaymentLifecycleOperation;
@@ -182,23 +175,6 @@ async function getOrCreateLifecycleAttempt(input: {
     throw internalError("Failed to journal recurring payment lifecycle");
   }
 
-  if (!input.claimed.source_custody_wallet_id)
-    throw conflict("Recurring payment source wallet is unresolved");
-  await initializeRecurringSponsorshipMessages(input.db, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.claimed.id,
-    attemptKind: "lifecycle",
-    attemptId: attempt.id,
-    deploymentMode: input.deploymentMode,
-    messages: [
-      {
-        key: input.operation,
-        custodyWalletId: input.claimed.source_custody_wallet_id,
-        providerWalletId: input.claimed.source_wallet_id,
-      },
-    ],
-  });
   return attempt;
 }
 
@@ -215,11 +191,6 @@ async function recordLifecycleFailure(input: {
 }): Promise<void> {
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    await recordConfirmedRecurringSponsorshipFailure(tx, {
-      ...input,
-      attemptKind: "lifecycle",
-      attemptId: input.attempt.id,
-    });
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
       attemptId: input.attempt.id,
       organizationId: input.organizationId,
@@ -444,8 +415,6 @@ async function runRecurringPaymentLifecycle(
     });
     if (!claimed) return null;
     const attempt = await getOrCreateLifecycleAttempt({
-      db: tx,
-      deploymentMode: getDeploymentMode(input.env),
       recurringRepo: transactionRepo,
       claimed,
       operation: input.operation,
@@ -552,12 +521,7 @@ async function runRecurringPaymentLifecycle(
       });
 
       signature = await sendSubscriptionInstructions({
-        sponsorshipMessage: {
-          attemptKind: "lifecycle",
-          attemptId: attempt.id,
-          recurringPaymentId: claimed.id,
-          messageKey: input.operation,
-        },
+        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -584,8 +548,7 @@ async function runRecurringPaymentLifecycle(
     await confirmSubscriptionSignature(
       input.env,
       signature,
-      lifecycleConfirmationMessage(input.operation),
-      input.operation
+      lifecycleConfirmationMessage(input.operation)
     );
     confirmedOnChain = true;
 

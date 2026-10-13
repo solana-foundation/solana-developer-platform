@@ -33,6 +33,7 @@ import {
   conflict,
   internalError,
   PUBLIC_INTERNAL_ERROR_MESSAGE,
+  transactionFailed,
 } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
@@ -50,13 +51,6 @@ import {
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import {
-  ConfirmedSubscriptionFailure,
-  persistRecurringSponsorshipSubmission,
-  type RecurringSponsorshipMessage,
-  recurringSponsorshipContinuity,
-  startRecurringSponsorshipAdmission,
-} from "./sponsorship";
 
 const RECURRING_PAYMENT_TOKEN_ERROR =
   "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";
@@ -246,11 +240,11 @@ export async function sendSubscriptionInstructions(input: {
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
+  sponsorshipActorWalletId: string;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
   submissionStore?: SignedSubmissionStore;
-  sponsorshipMessage: RecurringSponsorshipMessage;
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
@@ -267,15 +261,10 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const continuity = await recurringSponsorshipContinuity({
-    ...input,
-    ...input.sponsorshipMessage,
-  });
   const feePayment = await createProjectSponsorshipFeePayment(input.env, {
     organizationId: input.organizationId,
     projectId: input.projectId,
-    actor: continuity.legacyActor,
-    continuity,
+    actor: { type: "wallet", id: input.sponsorshipActorWalletId },
   });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
   const message = pipe(
@@ -287,35 +276,21 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  await startRecurringSponsorshipAdmission({
-    ...input,
-    ...input.sponsorshipMessage,
-    messageKey: continuity.messageKey,
-    reservationId: continuity.reservationId,
-  });
-  const signature = input.submissionStore
-    ? await submitSponsoredTransaction({
+  return input.submissionStore
+    ? submitSponsoredTransaction({
         feePayment,
         rpc,
         transaction: txBytes,
         lastValidBlockHeight,
         store: input.submissionStore,
       })
-    : await feePayment.signAndSend(txBytes);
-  await persistRecurringSponsorshipSubmission({
-    ...input,
-    ...input.sponsorshipMessage,
-    messageKey: continuity.messageKey,
-    signature,
-  });
-  return signature;
+    : feePayment.signAndSend(txBytes);
 }
 
 export async function confirmSubscriptionSignature(
   env: Env,
   signature: Signature,
-  message: string,
-  messageKey?: string
+  message: string
 ): Promise<void> {
   const rpc = solanaRpc.createRpc(env);
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
@@ -323,7 +298,7 @@ export async function confirmSubscriptionSignature(
   });
 
   if (confirmation.err) {
-    throw new ConfirmedSubscriptionFailure(signature, message, messageKey);
+    throw transactionFailed(message);
   }
 }
 

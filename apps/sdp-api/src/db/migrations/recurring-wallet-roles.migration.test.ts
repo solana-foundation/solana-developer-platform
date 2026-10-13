@@ -10,18 +10,14 @@ const migration = path.join(
   "postgres/0130_recurring_wallet_roles_and_sponsorship.sql"
 );
 
-it("retains nullable exact plan roles with non-destructive wallet relationships", async () => {
+it("migrates exact plan roles independently of commission accounting and retains wallet relationships", async () => {
   const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
   try {
     await client.query("BEGIN");
     await client.query("CREATE SCHEMA recurring_roles_test");
-    await client.query("SET LOCAL search_path = recurring_roles_test, public");
+    await client.query("SET LOCAL search_path = recurring_roles_test");
     await client.query(`CREATE TABLE custody_wallets (id text PRIMARY KEY)`);
-    await client.query(`CREATE TABLE organizations (id text PRIMARY KEY)`);
-    await client.query(`CREATE TABLE projects (id text PRIMARY KEY)`);
-    await client.query(`CREATE TABLE payment_recurring_payments (id text PRIMARY KEY)`);
-    await client.query(`CREATE TABLE sponsorship_budget_reservations (id text PRIMARY KEY)`);
     await client.query(`CREATE TABLE payment_subscription_plans (
       id text PRIMARY KEY, owner_wallet_id text NOT NULL, owner_address text NOT NULL,
       puller_wallet_id text, puller_address text
@@ -98,38 +94,6 @@ it("retains nullable exact plan roles with non-destructive wallet relationships"
       role_projection_revision=role_projection_revision+1 WHERE id='unfenced'`)
     ).rejects.toMatchObject({ code: "23514" });
     await client.query("ROLLBACK TO SAVEPOINT unfenced_role");
-    expect(
-      (
-        await client.query(
-          `SELECT to_regclass('recurring_roles_test.payment_recurring_sponsorship_links') IS NOT NULL AS exists`
-        )
-      ).rows
-    ).toEqual([{ exists: true }]);
-    await client.query("INSERT INTO organizations VALUES ('org')");
-    await client.query("INSERT INTO projects VALUES ('project')");
-    await client.query("INSERT INTO payment_recurring_payments VALUES ('recurring')");
-    await client.query(
-      "INSERT INTO sponsorship_budget_reservations VALUES ('setup_reservation'),('subscribe_reservation')"
-    );
-    await client.query(`INSERT INTO payment_recurring_sponsorship_links
-      (recurring_payment_id,organization_id,project_id,attempt_kind,attempt_id,
-       message_key,deployment_mode,legacy_actor_id,custody_wallet_id,reservation_id,accounting_identity)
-      VALUES ('recurring','org','project','activation','attempt','authorization_setup',
-        'managed','shared','wallet_a','setup_reservation','{"reservationId":"setup_reservation"}'),
-        ('recurring','org','project','activation','attempt','authorize',
-        'managed','shared','wallet_a','subscribe_reservation','{"reservationId":"subscribe_reservation"}'),
-        ('recurring','org','project','lifecycle','self_hosted_attempt','cancel',
-        'self_hosted','shared','wallet_a',NULL,NULL)`);
-    expect(
-      (
-        await client.query(`SELECT message_key,reservation_id
-      FROM payment_recurring_sponsorship_links ORDER BY message_key`)
-      ).rows
-    ).toEqual([
-      { message_key: "authorization_setup", reservation_id: "setup_reservation" },
-      { message_key: "authorize", reservation_id: "subscribe_reservation" },
-      { message_key: "cancel", reservation_id: null },
-    ]);
   } finally {
     await client.query("ROLLBACK");
     await client.end();

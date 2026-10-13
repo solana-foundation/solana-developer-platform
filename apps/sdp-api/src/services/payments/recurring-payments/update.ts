@@ -42,7 +42,6 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
-import type { UpdatePaymentRecurringPaymentUpdateAttemptInput } from "@/db/repositories/payment-recurring-payments.repository";
 import {
   AppError,
   badRequest,
@@ -51,7 +50,6 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
-import { getDeploymentMode, type SdpDeploymentMode } from "@/lib/runtime-env";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -79,12 +77,6 @@ import {
   sendSubscriptionInstructions,
   subscriptionProgramMetadataUri,
 } from "./shared";
-import {
-  findConfirmedRecurringSponsorshipFailures,
-  hasPendingRecurringSponsorship,
-  initializeRecurringSponsorshipMessages,
-  recordConfirmedRecurringSponsorshipFailure,
-} from "./sponsorship";
 
 type RecurringPaymentUpdateSnapshot = {
   sourceCustodyWalletId: string | null;
@@ -96,27 +88,6 @@ type RecurringPaymentUpdateSnapshot = {
   firstCollectionAt: string | null;
   nextCollectionDueAt: string | null;
   metadataUri: string | null;
-};
-type RetrySignaturePatch = Pick<
-  UpdatePaymentRecurringPaymentUpdateAttemptInput,
-  | "planUpdateSignature"
-  | "planCreationSignature"
-  | "authorizationSetupSignature"
-  | "authorizationSignature"
-  | "oldCancelSignature"
->;
-const retrySignatureFields: Record<
-  string,
-  { input: keyof RetrySignaturePatch; row: keyof PaymentRecurringPaymentUpdateAttemptRow }
-> = {
-  update_plan: { input: "planUpdateSignature", row: "plan_update_signature" },
-  create_plan: { input: "planCreationSignature", row: "plan_creation_signature" },
-  authorization_setup: {
-    input: "authorizationSetupSignature",
-    row: "authorization_setup_signature",
-  },
-  authorize_subscription: { input: "authorizationSignature", row: "authorization_signature" },
-  cancel_old: { input: "oldCancelSignature", row: "old_cancel_signature" },
 };
 
 const RECURRING_PAYMENT_UPDATE_FIELDS = [
@@ -134,6 +105,7 @@ type RecurringPaymentUpdateField = (typeof RECURRING_PAYMENT_UPDATE_FIELDS)[numb
 
 type ResolvedRecurringPaymentUpdate = {
   sourceWallet: CustodyWallet;
+  sourceProviderWalletId: string;
   counterpartyId: string;
   counterpartyAccountId: string;
   destinationAddress: string;
@@ -350,6 +322,10 @@ async function resolveRecurringPaymentUpdate(input: {
 
   return {
     sourceWallet: finalSourceWallet,
+    sourceProviderWalletId:
+      finalSourceWallet.id === input.recurringPayment.source_custody_wallet_id
+        ? input.recurringPayment.source_wallet_id
+        : finalSourceWallet.walletId,
     counterpartyId,
     counterpartyAccountId,
     destinationAddress: destination.destinationAddress,
@@ -418,7 +394,7 @@ async function updatePendingRecurringPayment(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceCustodyWalletId: input.resolved.sourceWallet.id,
-    sourceWalletId: input.resolved.sourceWallet.walletId,
+    sourceWalletId: input.resolved.sourceProviderWalletId,
     sourceAddress: input.resolved.sourceWallet.publicKey,
     counterpartyId: input.resolved.counterpartyId,
     counterpartyAccountId: input.resolved.counterpartyAccountId,
@@ -455,9 +431,6 @@ async function updatePendingRecurringPayment(input: {
 }
 
 async function getOrCreateRecurringPaymentUpdateAttempt(input: {
-  db: DatabaseExecutor;
-  deploymentMode: SdpDeploymentMode;
-  replacementSourceWallet: CustodyWallet;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
@@ -490,23 +463,11 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
       ) {
         throw conflict("Recurring payment update recovery must retry the same update");
       }
-      const failures = await findConfirmedRecurringSponsorshipFailures(input.db, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        attemptId: existing.id,
-      });
-      const retrySignatures: RetrySignaturePatch = {};
-      for (const failure of failures) {
-        const field = retrySignatureFields[failure.message_key];
-        if (field && existing[field.row] === failure.confirmed_failure_signature)
-          retrySignatures[field.input] = null;
-      }
       return requireUpdatedAttempt(
         await input.recurringRepo.updateUpdateAttempt({
           attemptId: existing.id,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          ...retrySignatures,
           error: null,
           updatedAt: input.nowIso,
         })
@@ -553,37 +514,6 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     throw internalError("Failed to journal recurring payment update");
   }
 
-  if (!input.claimed.source_custody_wallet_id)
-    throw conflict("Recurring payment source wallet is unresolved");
-  await initializeRecurringSponsorshipMessages(input.db, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.claimed.id,
-    attemptKind: "update",
-    attemptId: attempt.id,
-    deploymentMode: input.deploymentMode,
-    messages:
-      input.mode === "metadata_schedule"
-        ? [
-            {
-              key: "update_plan",
-              custodyWalletId: input.claimed.source_custody_wallet_id,
-              providerWalletId: input.claimed.source_wallet_id,
-            },
-          ]
-        : [
-            ...["create_plan", "authorization_setup", "authorize_subscription"].map((key) => ({
-              key,
-              custodyWalletId: input.replacementSourceWallet.id,
-              providerWalletId: input.replacementSourceWallet.walletId,
-            })),
-            {
-              key: "cancel_old",
-              custodyWalletId: input.claimed.source_custody_wallet_id,
-              providerWalletId: input.claimed.source_wallet_id,
-            },
-          ],
-  });
   return attempt;
 }
 
@@ -835,12 +765,7 @@ async function runMetadataScheduleUpdate(input: {
         status: parsePlanStatus(onChainPlan.data.status),
       });
       planUpdateSignature = await sendSubscriptionInstructions({
-        sponsorshipMessage: {
-          attemptKind: "update",
-          attemptId: attempt.id,
-          recurringPaymentId: input.claimed.id,
-          messageKey: "update_plan",
-        },
+        sponsorshipActorWalletId: input.claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -862,8 +787,7 @@ async function runMetadataScheduleUpdate(input: {
     await confirmSubscriptionSignature(
       input.env,
       planUpdateSignature,
-      "Recurring payment update failed on-chain",
-      "update_plan"
+      "Recurring payment update failed on-chain"
     );
   }
 
@@ -888,6 +812,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   projectId: string;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   sourceWallet: CustodyWallet;
+  sponsorshipActorWalletId: string;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
   subscriptionAuthority: Awaited<
@@ -923,12 +848,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
-    sponsorshipMessage: {
-      attemptKind: "update",
-      attemptId: input.attempt.id,
-      recurringPaymentId: input.attempt.recurring_payment_id,
-      messageKey: "authorization_setup",
-    },
+    sponsorshipActorWalletId: input.sponsorshipActorWalletId,
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -950,8 +870,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   await confirmSubscriptionSignature(
     input.env,
     initSignature,
-    "Recurring payment update failed on-chain",
-    "authorization_setup"
+    "Recurring payment update failed on-chain"
   );
 
   if (!initAuthorityInstruction) {
@@ -994,7 +913,7 @@ async function getOrCreateReplacementPlan(input: {
     id: `psp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    ownerWalletId: input.sourceWallet.walletId,
+    ownerWalletId: input.resolved.sourceProviderWalletId,
     ownerCustodyWalletId: input.sourceWallet.id,
     ownerAddress: input.sourceWallet.publicKey,
     token: input.resolved.token,
@@ -1003,7 +922,7 @@ async function getOrCreateReplacementPlan(input: {
     programPlanId: generateProgramPlanId(),
     planPda: null,
     destinationAddress: input.resolved.destinationAddress,
-    pullerWalletId: input.sourceWallet.walletId,
+    pullerWalletId: input.resolved.sourceProviderWalletId,
     pullerCustodyWalletId: input.sourceWallet.id,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.resolved.metadataUri,
@@ -1145,7 +1064,7 @@ async function finalizeReplacementUpdate(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       sourceCustodyWalletId: input.resolved.sourceWallet.id,
-      sourceWalletId: input.resolved.sourceWallet.walletId,
+      sourceWalletId: input.plan.owner_wallet_id,
       sourceAddress: input.resolved.sourceWallet.publicKey,
       counterpartyId: input.resolved.counterpartyId,
       counterpartyAccountId: input.resolved.counterpartyAccountId,
@@ -1354,12 +1273,7 @@ async function runReplacementUpdate(input: {
       tokenProgram,
     });
     planCreationSignature = await sendSubscriptionInstructions({
-      sponsorshipMessage: {
-        attemptKind: "update",
-        attemptId: attempt.id,
-        recurringPaymentId: input.claimed.id,
-        messageKey: "create_plan",
-      },
+      sponsorshipActorWalletId: plan.owner_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1381,8 +1295,7 @@ async function runReplacementUpdate(input: {
   await confirmSubscriptionSignature(
     input.env,
     planCreationSignature,
-    "Recurring payment replacement plan creation failed on-chain",
-    "create_plan"
+    "Recurring payment replacement plan creation failed on-chain"
   );
   const onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
     commitment: "confirmed",
@@ -1451,11 +1364,12 @@ async function runReplacementUpdate(input: {
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+      actor: { type: "wallet", id: plan.owner_wallet_id },
     });
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
+      sponsorshipActorWalletId: plan.owner_wallet_id,
       env: input.env,
       recurringRepo,
       attempt,
@@ -1488,12 +1402,7 @@ async function runReplacementUpdate(input: {
       tokenMint: mint,
     });
     authorizationSignature = await sendSubscriptionInstructions({
-      sponsorshipMessage: {
-        attemptKind: "update",
-        attemptId: attempt.id,
-        recurringPaymentId: input.claimed.id,
-        messageKey: "authorize_subscription",
-      },
+      sponsorshipActorWalletId: plan.owner_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1516,8 +1425,7 @@ async function runReplacementUpdate(input: {
   await confirmSubscriptionSignature(
     input.env,
     authorizationSignature,
-    "Recurring payment replacement authorization failed on-chain",
-    "authorize_subscription"
+    "Recurring payment replacement authorization failed on-chain"
   );
 
   if (!oldCancelSignature) {
@@ -1546,12 +1454,7 @@ async function runReplacementUpdate(input: {
         subscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
       });
     oldCancelSignature = await sendSubscriptionInstructions({
-      sponsorshipMessage: {
-        attemptKind: "update",
-        attemptId: attempt.id,
-        recurringPaymentId: input.claimed.id,
-        messageKey: "cancel_old",
-      },
+      sponsorshipActorWalletId: input.claimed.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1573,8 +1476,7 @@ async function runReplacementUpdate(input: {
   await confirmSubscriptionSignature(
     input.env,
     oldCancelSignature,
-    "Recurring payment old subscription cancellation failed on-chain",
-    "cancel_old"
+    "Recurring payment old subscription cancellation failed on-chain"
   );
 
   const finalizedAt = new Date().toISOString();
@@ -1620,11 +1522,6 @@ async function recordRecurringPaymentUpdateFailure(input: {
   const failedAt = new Date().toISOString();
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    await recordConfirmedRecurringSponsorshipFailure(tx, {
-      ...input,
-      attemptKind: "update",
-      attemptId: input.attempt.id,
-    });
     requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: input.attempt.id,
@@ -1823,9 +1720,6 @@ export async function updateRecurringPayment(input: {
         });
     if (!claimed) return null;
     const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
-      db: tx,
-      deploymentMode: getDeploymentMode(input.env),
-      replacementSourceWallet: resolved.sourceWallet,
       recurringRepo: transactionRepo,
       claimed,
       organizationId: input.organizationId,
@@ -1899,28 +1793,14 @@ export async function updateRecurringPayment(input: {
         throw internalError("Recurring payment update attempt was not found");
       }
       currentAttempt = latest;
-      const hasReplacementProgress =
-        currentAttempt.mode === "replacement" &&
-        [
-          currentAttempt.plan_creation_signature,
-          currentAttempt.authorization_setup_signature,
-          currentAttempt.authorization_signature,
-        ].some(Boolean);
+      const hasReplacementAuthorization =
+        currentAttempt.mode === "replacement" && Boolean(currentAttempt.authorization_signature);
       const hasSubmittedMetadataUpdate =
         currentAttempt.mode === "metadata_schedule" &&
         Boolean(currentAttempt.plan_update_signature);
       const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
-      resetToActive = !hasReplacementProgress && (!hasSubmittedMetadataUpdate || transactionFailed);
-      if (
-        resetToActive &&
-        (await hasPendingRecurringSponsorship({
-          env: input.env,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          attemptId: currentAttempt.id,
-        }))
-      )
-        resetToActive = false;
+      resetToActive =
+        !hasReplacementAuthorization && (!hasSubmittedMetadataUpdate || transactionFailed);
 
       await recordRecurringPaymentUpdateFailure({
         env: input.env,
