@@ -1,5 +1,6 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
-import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
@@ -11,6 +12,7 @@ import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
+import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
@@ -26,18 +28,18 @@ export interface ResolvedIssuanceWallet {
 }
 
 /** Shared live list authority for both signer selection and execution. */
-export async function resolveAllowlistAuthority(env: Env, listAddress: string): Promise<string> {
+export async function resolveAllowlistAuthority(listAddress: string): Promise<string> {
   const { authority } = await getListConfig({
-    rpc: createRpcForSdk<Parameters<typeof getListConfig>[0]["rpc"]>(env),
+    rpc: createMosaicSdkRpc(),
     listConfig: assertValidAddress(listAddress, "ablListAddress"),
   });
   return authority;
 }
 
 /** Resolve the live Token-2022 pausable authority used for pause/unpause signing. */
-export async function resolvePauseAuthority(env: Env, mintAddress: string): Promise<string | null> {
+export async function resolvePauseAuthority(mintAddress: string): Promise<string | null> {
   const token = await inspectToken(
-    createRpcForSdk<Parameters<typeof inspectToken>[0]>(env),
+    createMosaicSdkRpc(),
     assertValidAddress(mintAddress, "mintAddress")
   );
   return token.authorities.pausableAuthority ?? null;
@@ -127,17 +129,14 @@ function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
   return templateInfo?.requiredExtensions?.includes("permanentDelegate") ?? false;
 }
 
-async function fetchMintAuthorities(
-  env: Env,
-  mintAddress: string
-): Promise<{
+async function fetchMintAuthorities(mintAddress: string): Promise<{
   mintAuthority: string | null;
   freezeAuthority: string | null;
   permanentDelegate: string | null;
   metadataAuthority: string | null;
 }> {
   const mint = await fetchMaybeMint(
-    createRpc(env),
+    createClusterRpc(),
     assertValidAddress(mintAddress, "mintAddress"),
     { commitment: "confirmed" }
   );
@@ -164,8 +163,6 @@ async function fetchMintAuthorities(
 }
 
 export async function resolvePermanentDelegateAuthority(
-  env: Env,
-  _tokenService: TokenService,
   token: TokenRecord
 ): Promise<string | null> {
   if (!token) {
@@ -177,22 +174,15 @@ export async function resolvePermanentDelegateAuthority(
   }
 
   try {
-    const { permanentDelegate } = await fetchMintAuthorities(env, token.mintAddress);
+    const { permanentDelegate } = await fetchMintAuthorities(token.mintAddress);
 
     return permanentDelegate;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve permanent delegate authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve permanent delegate authority");
   }
 }
 
-export async function resolveMetadataAuthority(
-  env: Env,
-  _tokenService: TokenService,
-  token: TokenRecord
-): Promise<string | null> {
+export async function resolveMetadataAuthority(token: TokenRecord): Promise<string | null> {
   if (!token) {
     return null;
   }
@@ -202,24 +192,18 @@ export async function resolveMetadataAuthority(
   }
 
   try {
-    const { metadataAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+    const { metadataAuthority } = await fetchMintAuthorities(token.mintAddress);
 
     // The typed mint decoder distinguishes a revoked/absent authority from a
     // failed read. Do not restore stale stored authority after revocation.
     return metadataAuthority;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve metadata authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve metadata authority");
   }
 }
 
 /** Resolve the wallet authority that can execute freeze/thaw, including Token ACL mints. */
-export async function resolveFreezeOperationAuthority(
-  env: Env,
-  token: TokenRecord
-): Promise<string | null> {
+export async function resolveFreezeOperationAuthority(token: TokenRecord): Promise<string | null> {
   if (!token) {
     return null;
   }
@@ -230,27 +214,19 @@ export async function resolveFreezeOperationAuthority(
 
   try {
     const mint = assertValidAddress(token.mintAddress, "mintAddress");
-    const mintConfig = await getTokenAclMintConfig(
-      createRpcForSdk<Parameters<typeof getTokenAclMintConfig>[0]>(env),
-      mint
-    );
+    const mintConfig = await getTokenAclMintConfig(createMosaicSdkRpc(), mint);
     if (mintConfig.exists) {
       return mintConfig.data.freezeAuthority;
     }
 
-    const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+    const { freezeAuthority } = await fetchMintAuthorities(token.mintAddress);
     return freezeAuthority;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve freeze authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve freeze authority");
   }
 }
 
 export async function resolveCurrentAuthorityForRole(
-  env: Env,
-  tokenService: TokenService,
   token: TokenRecord,
   role: AuthorityRole,
   override?: string
@@ -267,25 +243,22 @@ export async function resolveCurrentAuthorityForRole(
         break;
       }
       try {
-        const { mintAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+        const { mintAuthority } = await fetchMintAuthorities(token.mintAddress);
         currentAuthority = mintAuthority;
       } catch (error) {
-        throw new AppError(
-          "SOLANA_RPC_ERROR",
-          error instanceof Error ? error.message : "Failed to resolve mint authority"
-        );
+        throwAuthorityReadError(error, "Failed to resolve mint authority");
       }
       break;
     }
     case "freeze": {
-      currentAuthority = await resolveFreezeOperationAuthority(env, token);
+      currentAuthority = await resolveFreezeOperationAuthority(token);
       break;
     }
     case "permanentDelegate":
-      currentAuthority = await resolvePermanentDelegateAuthority(env, tokenService, token);
+      currentAuthority = await resolvePermanentDelegateAuthority(token);
       break;
     case "metadata":
-      currentAuthority = await resolveMetadataAuthority(env, tokenService, token);
+      currentAuthority = await resolveMetadataAuthority(token);
       break;
   }
 
@@ -551,4 +524,21 @@ export function getInitialPermanentDelegateAuthority(
   }
 
   return undefined;
+}
+
+/**
+ * Rethrows a failed on-chain authority read: a cluster-scope or pool error (`RPC_NOT_CONFIGURED`,
+ * `RPC_CLUSTER_MISMATCH`, `CLUSTER_SCOPE_MISSING`) keeps its own code and status; anything else
+ * becomes `SOLANA_RPC_ERROR`.
+ *
+ * @param error - What the read threw.
+ * @param fallbackMessage - The message when `error` is not an `Error`.
+ * @throws SdpRpcError the original error when it carries its own code.
+ * @throws AppError `SOLANA_RPC_ERROR` otherwise.
+ */
+function throwAuthorityReadError(error: unknown, fallbackMessage: string): never {
+  if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+    throw error;
+  }
+  throw new AppError("SOLANA_RPC_ERROR", error instanceof Error ? error.message : fallbackMessage);
 }

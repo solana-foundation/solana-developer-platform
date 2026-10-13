@@ -1,11 +1,17 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as RpcModule from "@sdp/rpc/solana";
 import { type FeePaymentPort, Token2022Service } from "@sdp/solana/token-2022";
 import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { getBurnCheckedInstruction } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 
-const env = { SOLANA_RPC_URL: "http://localhost:8899", SOLANA_NETWORK: "devnet" } as const;
+function sandboxMosaicRpc() {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, createMosaicSdkRpc);
+}
+
 const lifetime = {
   blockhash: Kit.blockhash("11111111111111111111111111111111"),
   lastValidBlockHeight: 100n,
@@ -14,12 +20,16 @@ const signature = Kit.signature("1".repeat(64));
 
 // Namespace spies rely on mosaic-sdk being in server.deps.inline in vitest.config.ts.
 describe("Token2022Service burn", () => {
+  const clusterRpc = installClusterRpcStub();
   let authority: Kit.KeyPairSigner;
   let mint: Kit.Address;
   let tokenAccount: Kit.Address;
   let sponsor: Kit.Address;
   let feePayment: FeePaymentPort;
-  const send = vi.fn().mockResolvedValue(signature);
+
+  function sentTransactions() {
+    return clusterRpc.calls.filter((call) => call.method === "sendTransaction");
+  }
 
   beforeEach(async () => {
     authority = await Kit.generateKeyPairSigner();
@@ -32,11 +42,7 @@ describe("Token2022Service burn", () => {
       signAsFeePayer: vi.fn(),
       signAndSend: vi.fn().mockResolvedValue(signature),
     };
-    // Keep real Kit compilation/signing and stub only the RPC boundary and
-    // Mosaic's network-dependent mint/account lookup.
-    vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
-      sendTransaction: () => ({ send }),
-    } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
+    clusterRpc.answer("sendTransaction", signature);
     vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
       signature,
       slot: 42n,
@@ -79,11 +85,10 @@ describe("Token2022Service burn", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    send.mockClear();
   });
 
   it.each(["wallet", "token account"])("burns from the authority's %s", async (source) => {
-    const service = new Token2022Service(env, authority);
+    const service = new Token2022Service(sandboxMosaicRpc(), authority);
     await expect(
       service.burn({
         mint,
@@ -99,11 +104,11 @@ describe("Token2022Service burn", () => {
       1.25,
       authority
     );
-    expect(send).toHaveBeenCalledOnce();
+    expect(sentTransactions()).toEqual([{ cluster: "devnet", method: "sendTransaction" }]);
   });
 
   it("rejects unrelated sources before building or submitting a burn", async () => {
-    const service = new Token2022Service(env, authority, feePayment);
+    const service = new Token2022Service(sandboxMosaicRpc(), authority, feePayment);
     const invalid = { mint, source: sponsor, amount: 1.25 };
     await expect(service.burn({ ...invalid, authority })).rejects.toThrow("Burn source must be");
     await expect(service.prepareBurn({ ...invalid, authority: authority.address })).rejects.toThrow(
@@ -111,11 +116,11 @@ describe("Token2022Service burn", () => {
     );
     expect(MosaicSdk.createBurnTransaction).not.toHaveBeenCalled();
     expect(feePayment.signAndSend).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+    expect(sentTransactions()).toEqual([]);
   });
 
   it("keeps the authority signature when handing a sponsored burn to the relay", async () => {
-    const service = new Token2022Service(env, authority, feePayment);
+    const service = new Token2022Service(sandboxMosaicRpc(), authority, feePayment);
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
     ).resolves.toEqual({ signature, slot: 42n });
@@ -123,7 +128,7 @@ describe("Token2022Service burn", () => {
     const transaction = Kit.getTransactionDecoder().decode(bytes);
     expect(transaction.signatures[authority.address]).toBeInstanceOf(Uint8Array);
     expect(transaction.signatures[sponsor]).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(sentTransactions()).toEqual([]);
     expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), signature);
   });
 
@@ -135,7 +140,7 @@ describe("Token2022Service burn", () => {
       err: { InstructionError: [0, { Custom: 6000n }] },
     });
     const service = new Token2022Service(
-      env,
+      sandboxMosaicRpc(),
       authority,
       mode === "sponsored" ? feePayment : undefined
     );
@@ -144,13 +149,13 @@ describe("Token2022Service burn", () => {
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
     ).rejects.toThrow(new Error('Burn failed: {"InstructionError":[0,{"Custom":"6000"}]}'));
     expect(feePayment.signAndSend).toHaveBeenCalledTimes(mode === "sponsored" ? 1 : 0);
-    expect(send).toHaveBeenCalledTimes(mode === "direct" ? 1 : 0);
+    expect(sentTransactions()).toHaveLength(mode === "direct" ? 1 : 0);
   });
 
   it.each([false, true])("prepares unsigned burns with simulation=%s", async (simulate) => {
     const simulation = { success: true, logs: [], unitsConsumed: 123n, error: null };
     vi.spyOn(RpcModule, "simulateTransaction").mockResolvedValue(simulation);
-    const service = new Token2022Service(env, authority, feePayment);
+    const service = new Token2022Service(sandboxMosaicRpc(), authority, feePayment);
     const prepared = await service.prepareBurn(
       { mint, source: tokenAccount, amount: 1.25, authority: authority.address },
       simulate
@@ -163,6 +168,6 @@ describe("Token2022Service burn", () => {
     expect(prepared.simulation).toEqual(simulate ? simulation : undefined);
     expect(RpcModule.simulateTransaction).toHaveBeenCalledTimes(simulate ? 1 : 0);
     expect(feePayment.signAndSend).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+    expect(sentTransactions()).toEqual([]);
   });
 });

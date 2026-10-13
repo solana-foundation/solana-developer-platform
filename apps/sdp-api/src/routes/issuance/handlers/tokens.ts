@@ -86,12 +86,7 @@ async function resolveMetadataUpdate(params: {
     return null;
   }
 
-  const currentAuthority = await resolveCurrentAuthorityForRole(
-    params.c.env,
-    params.tokenService,
-    params.token,
-    "metadata"
-  );
+  const currentAuthority = await resolveCurrentAuthorityForRole(params.token, "metadata");
   if (!currentAuthority) {
     throw badRequest("Metadata authority is not available for this token");
   }
@@ -284,18 +279,18 @@ export const getToken = async (c: AppContext) => {
   } = {};
   if (parsed.data.includeAllowlistAuthority === "true") {
     authorities.allowlistAuthority = token.ablListAddress
-      ? await resolveAllowlistAuthority(c.env, token.ablListAddress)
+      ? await resolveAllowlistAuthority(token.ablListAddress)
       : null;
   }
   if (parsed.data.includeFreezeAuthority === "true") {
-    authorities.freezeAuthority = await resolveFreezeOperationAuthority(c.env, token);
+    authorities.freezeAuthority = await resolveFreezeOperationAuthority(token);
   }
   if (parsed.data.includeMetadataAuthority === "true") {
-    authorities.metadataAuthority = await resolveMetadataAuthority(c.env, tokenService, token);
+    authorities.metadataAuthority = await resolveMetadataAuthority(token);
   }
   if (parsed.data.includePauseAuthority === "true") {
     authorities.pauseAuthority = token.mintAddress
-      ? await resolvePauseAuthority(c.env, token.mintAddress)
+      ? await resolvePauseAuthority(token.mintAddress)
       : (token.extensions?.pausable?.authority ?? token.mintAuthority);
   }
   return success(c, { token: toPublicToken(token), ...authorities });

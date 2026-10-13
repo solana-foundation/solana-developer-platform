@@ -5,6 +5,7 @@
  */
 
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -143,12 +144,16 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
         TEST_PROJECT.id,
         custodyWallet.id
       );
-      const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
-        environment: TEST_PROJECT.environment,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        actor: { type: "project", id: TEST_PROJECT.id },
-      });
+      const mosaic = runInClusterScope(
+        { projectId: TEST_PROJECT.id, environment: TEST_PROJECT.environment },
+        () =>
+          createMosaicService(env as ApiTestEnv, signer, "sponsored", {
+            environment: TEST_PROJECT.environment,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            actor: { type: "project", id: TEST_PROJECT.id },
+          })
+      );
 
       const wallet =
         localPartyWallet ??

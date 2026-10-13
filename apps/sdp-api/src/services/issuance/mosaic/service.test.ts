@@ -12,6 +12,7 @@
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
 import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as RpcModule from "@sdp/rpc/solana";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";
@@ -20,6 +21,8 @@ import * as Signers from "@solana/signers";
 import { findMintConfigPda, parseSetAuthorityInstruction } from "@solana/token-acl-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError, transactionFailed } from "@/lib/errors";
+import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
@@ -102,7 +105,12 @@ function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateT
   };
 }
 
+function sandboxMosaicRpc() {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, createMosaicSdkRpc);
+}
+
 describe("MosaicService.createToken — Kora sponsorship", () => {
+  const clusterRpc = installClusterRpcStub();
   let signer: TransactionSigner;
   let koraAddress: Address;
   let service: MosaicService;
@@ -115,6 +123,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     fee = makeFeePayment(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      sandboxMosaicRpc(),
       signer,
       fee.port,
       // Mirror the createMosaicService factory wiring so on-chain failures
@@ -292,6 +301,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const ownFeePayer = await Kit.generateKeyPairSigner();
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        sandboxMosaicRpc(),
         signer
       );
       vi.spyOn(
@@ -411,14 +421,10 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
 
     it("throws TRANSACTION_FAILED carrying the on-chain error on the direct-submit path", async () => {
       const directSignature = "direct-sig" as Signature;
-      const sendTransaction = vi.fn().mockReturnValue({
-        send: vi.fn().mockResolvedValue(directSignature),
-      });
-      vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
-        sendTransaction,
-      } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
+      clusterRpc.answer("sendTransaction", directSignature);
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        sandboxMosaicRpc(),
         signer,
         undefined,
         // Mirror the createMosaicService factory wiring so on-chain failures
@@ -445,7 +451,9 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         (e: unknown) => e
       );
 
-      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(clusterRpc.calls.filter((call) => call.method === "sendTransaction")).toEqual([
+        { cluster: "devnet", method: "sendTransaction" },
+      ]);
       expect(error).toBeInstanceOf(AppError);
       const appError = error as AppError;
       expect(appError.code).toBe("TRANSACTION_FAILED");
@@ -542,6 +550,8 @@ describe("MosaicService mint and transfer — fee payer", () => {
   let transferSpy: ReturnType<typeof vi.spyOn>;
   let submitSpy: ReturnType<typeof vi.spyOn>;
 
+  installClusterRpcStub();
+
   beforeEach(async () => {
     signer = await Kit.generateKeyPairSigner();
     clientAddress = (await Kit.generateKeyPairSigner()).address;
@@ -551,6 +561,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     fee = makeFeePayment(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      sandboxMosaicRpc(),
       signer,
       fee.port,
       {
