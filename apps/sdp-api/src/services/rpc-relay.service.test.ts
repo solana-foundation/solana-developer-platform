@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { clearKVStores } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
 
 type ClusterScopeFacts = Parameters<typeof runInClusterScope>[0];
 
@@ -20,12 +19,12 @@ const PRODUCTION_SCOPE: ClusterScopeFacts = {
 };
 const kv = createKVStoreSet(env);
 
-function resolveTargetIn(facts: ClusterScopeFacts, rpcEnv: Env) {
-  return runInClusterScope(facts, () => resolveRpcTarget({ env: rpcEnv, cache: kv.cache }));
+function resolveTargetIn(facts: ClusterScopeFacts) {
+  return runInClusterScope(facts, () => resolveRpcTarget({ cache: kv.cache }));
 }
 
 function resolveNextTarget() {
-  return resolveTargetIn(SANDBOX_SCOPE, env);
+  return resolveTargetIn(SANDBOX_SCOPE);
 }
 
 describe("rpc-relay.service", () => {
@@ -37,52 +36,20 @@ describe("rpc-relay.service", () => {
     vi.unstubAllEnvs();
   });
 
-  it("answers the configured endpoint and masks its query-string key in the label", async () => {
+  it("labels an endpoint by protocol and host only, whatever key its URL carries", async () => {
     vi.stubEnv(
-      "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
-      "https://rpc.quicknode.test/?api-key=qn_secret"
+      "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
+      "https://user:pass@solana-mainnet.example.test/v2/abcKEY123?api-key=xyz"
     );
 
-    const target = await resolveNextTarget();
+    const target = await resolveTargetIn(PRODUCTION_SCOPE);
 
     expect(target).toEqual({
-      providerId: "quicknode",
-      endpoint: "https://rpc.quicknode.test/?api-key=qn_secret",
-      endpointLabel: "https://rpc.quicknode.test/?api-key=***",
+      cluster: "mainnet-beta",
+      providerId: "alchemy",
+      endpoint: "https://user:pass@solana-mainnet.example.test/v2/abcKEY123?api-key=xyz",
+      endpointLabel: "https://solana-mainnet.example.test",
     });
-  });
-
-  it("masks overlapping provider keys without leaving remnants", async () => {
-    vi.stubEnv(
-      "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
-      "https://devnet.solana.validationcloud.io/v1/vc_secret_long_123"
-    );
-
-    const target = await resolveTargetIn(SANDBOX_SCOPE, {
-      ...env,
-      SOLANA_RPC_VALIDATIONCLOUD_API_KEY: "vc_secret_long_123",
-      SOLANA_RPC_TRITON_API_KEY: "vc_secret",
-    });
-
-    expect(target.providerId).toBe("validationcloud");
-    expect(target.endpointLabel).toContain("/v1/***");
-    expect(target.endpointLabel).not.toContain("long_123");
-  });
-
-  it("redacts URL-encoded keys even when the endpoint URL is unparseable", async () => {
-    vi.stubEnv(
-      "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
-      "devnet.solana.validationcloud.io/v1/vc%2Bsecret%2Fwith%3Dchars"
-    );
-
-    const target = await resolveTargetIn(SANDBOX_SCOPE, {
-      ...env,
-      SOLANA_RPC_VALIDATIONCLOUD_API_KEY: "vc+secret/with=chars",
-    });
-
-    expect(target.providerId).toBe("validationcloud");
-    expect(target.endpoint).toBe("devnet.solana.validationcloud.io/v1/vc%2Bsecret%2Fwith%3Dchars");
-    expect(target.endpointLabel).toBe("devnet.solana.validationcloud.io/v1/***");
   });
 
   it("rotates through the managed pool in provider order with the default last", async () => {
@@ -153,7 +120,7 @@ describe("rpc-relay.service", () => {
       code: "RPC_NOT_CONFIGURED",
     });
     await expect(
-      runInClusterScope(SANDBOX_SCOPE, () => resolveRoundRobinRpcTargets({ env, cache: kv.cache }))
+      runInClusterScope(SANDBOX_SCOPE, () => resolveRoundRobinRpcTargets({ cache: kv.cache }))
     ).rejects.toMatchObject({
       name: "SdpRpcError",
       code: "RPC_NOT_CONFIGURED",
@@ -163,7 +130,7 @@ describe("rpc-relay.service", () => {
   it("refuses to resolve a target outside a cluster scope", async () => {
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
 
-    await expect(resolveRpcTarget({ env, cache: kv.cache })).rejects.toMatchObject({
+    await expect(resolveRpcTarget({ cache: kv.cache })).rejects.toMatchObject({
       name: "SdpRpcError",
       code: "CLUSTER_SCOPE_MISSING",
     });
@@ -171,32 +138,32 @@ describe("rpc-relay.service", () => {
 
   it("lists every provider rotated to the selected one and advances the cluster's cursor", async () => {
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
-    vi.stubEnv(
-      "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL",
-      "https://rpc.helius.test/?api-key=helius_secret"
-    );
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test/?api-key=xyz");
     vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", "https://rpc.alchemy.test");
     await resolveNextTarget();
 
     const targets = await runInClusterScope(SANDBOX_SCOPE, () =>
-      resolveRoundRobinRpcTargets({ env, cache: kv.cache })
+      resolveRoundRobinRpcTargets({ cache: kv.cache })
     );
 
     expect(targets).toEqual([
       {
+        cluster: "devnet",
         providerId: "helius",
-        endpoint: "https://rpc.helius.test/?api-key=helius_secret",
-        endpointLabel: "https://rpc.helius.test/?api-key=***",
+        endpoint: "https://rpc.helius.test/?api-key=xyz",
+        endpointLabel: "https://rpc.helius.test",
       },
       {
+        cluster: "devnet",
         providerId: "alchemy",
         endpoint: "https://rpc.alchemy.test",
-        endpointLabel: "https://rpc.alchemy.test/",
+        endpointLabel: "https://rpc.alchemy.test",
       },
       {
+        cluster: "devnet",
         providerId: "triton",
         endpoint: "https://rpc.triton.test",
-        endpointLabel: "https://rpc.triton.test/",
+        endpointLabel: "https://rpc.triton.test",
       },
     ]);
     expect((await resolveNextTarget()).providerId).toBe("alchemy");
@@ -216,7 +183,7 @@ describe("rpc-relay.service", () => {
       PRODUCTION_SCOPE,
       PRODUCTION_SCOPE,
     ]) {
-      endpoints.push((await resolveTargetIn(facts, env)).endpoint);
+      endpoints.push((await resolveTargetIn(facts)).endpoint);
     }
 
     expect(endpoints).toEqual([
