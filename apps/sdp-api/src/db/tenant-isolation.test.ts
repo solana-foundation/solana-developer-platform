@@ -15,11 +15,7 @@ import {
   runWithTenantDatabaseIdentity,
 } from "@/db/identity";
 import { runWithOperatorDatabaseAccess } from "@/db/operator-access";
-import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import {
-  createCounterpartiesRepository,
-  createSystemCounterpartiesRepository,
-} from "@/db/repositories/repository-factory";
+import { createCounterpartiesRepository } from "@/db/repositories/repository-factory";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
@@ -246,7 +242,7 @@ describe("database-enforced tenant isolation", () => {
     ).rejects.toThrow(/actor and reason/);
   });
 
-  describe("counterparty provider lookup integrity", () => {
+  describe("counterparty provider data", () => {
     it("lets the scoped repository path write provider data for its own tenant only", async () => {
       const scope = createTenantScope({ organizationId: ORG_A, projectId: PROJECT_A });
       const repository = createCounterpartiesRepository(env, scope);
@@ -256,21 +252,20 @@ describe("database-enforced tenant isolation", () => {
           counterpartyId: COUNTERPARTY_A,
           organizationId: ORG_A,
           projectId: PROJECT_A,
-          mutate: (current) => ({
-            ...current,
-            mural: { organization: { id: "tenant-written-ref" } },
-          }),
+          mutate: (current) => ({ ...current, provider: { reference: "tenant-written-ref" } }),
         })
       );
       expect(updated).not.toBeNull();
 
       const persisted = await runWithSystemDatabaseIdentity("test", () =>
-        getDb(env).queryOne<{ mural_organization_id: string | null }>(
-          "SELECT mural_organization_id FROM counterparties WHERE id = ?",
+        getDb(env).queryOne<{ provider_data: Record<string, unknown> }>(
+          "SELECT provider_data FROM counterparties WHERE id = ?",
           [COUNTERPARTY_A]
         )
       );
-      expect(persisted?.mural_organization_id).toBe("tenant-written-ref");
+      expect(persisted?.provider_data).toMatchObject({
+        provider: { reference: "tenant-written-ref" },
+      });
 
       // The same scoped path aimed at another tenant's row resolves nothing.
       const crossTenant = await runWithTenantDatabaseIdentity(scope, () =>
@@ -278,73 +273,10 @@ describe("database-enforced tenant isolation", () => {
           counterpartyId: COUNTERPARTY_B,
           organizationId: ORG_A,
           projectId: PROJECT_A,
-          mutate: (current) => ({
-            ...current,
-            mural: { organization: { id: "smuggled-ref" } },
-          }),
+          mutate: (current) => ({ ...current, provider: { reference: "smuggled-ref" } }),
         })
       );
       expect(crossTenant).toBeNull();
-    });
-
-    it("rejects two tenants racing to claim the same provider reference", async () => {
-      const repository = createSystemCounterpartiesRepository(env);
-      const claim = (counterpartyId: string, organizationId: string, projectId: string) =>
-        runWithSystemDatabaseIdentity("test", () =>
-          repository.mutateProviderData({
-            counterpartyId,
-            organizationId,
-            projectId,
-            mutate: (current) => ({
-              ...current,
-              mural: { organization: { id: "shared-provider-ref" } },
-            }),
-          })
-        );
-
-      const outcomes = await Promise.allSettled([
-        claim(COUNTERPARTY_A, ORG_A, PROJECT_A),
-        claim(COUNTERPARTY_B, ORG_B, PROJECT_B),
-      ]);
-
-      const rejected = outcomes.filter(
-        (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected"
-      );
-      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
-      expect(rejected).toHaveLength(1);
-      expect(isPostgresUniqueViolation(rejected[0].reason)).toBe(true);
-
-      // Exactly one row holds the reference afterwards.
-      const holders = await runWithSystemDatabaseIdentity("test", () =>
-        getDb(env).queryMany<{ id: string }>(
-          "SELECT id FROM counterparties WHERE mural_organization_id = ?",
-          ["shared-provider-ref"]
-        )
-      );
-      expect(holders).toHaveLength(1);
-    });
-
-    it("rejects a JSON-only claim that collides with another tenant's column value", async () => {
-      await runWithSystemDatabaseIdentity("test", () =>
-        getDb(env).execute("UPDATE counterparties SET mural_organization_id = ? WHERE id = ?", [
-          "dual-write-ref",
-          COUNTERPARTY_A,
-        ])
-      );
-
-      // A row whose reference lives only in provider_data JSON (the dual-write
-      // fallback the lookup still honours) must not be able to shadow another
-      // tenant's denormalized claim.
-      await expect(
-        runWithSystemDatabaseIdentity("test", () =>
-          getDb(env).execute(
-            `UPDATE counterparties
-             SET provider_data = '{"mural":{"organization":{"id":"dual-write-ref"}}}'::jsonb
-             WHERE id = ?`,
-            [COUNTERPARTY_B]
-          )
-        )
-      ).rejects.toSatisfy(isPostgresUniqueViolation);
     });
   });
 });

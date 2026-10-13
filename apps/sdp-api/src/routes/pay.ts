@@ -113,7 +113,7 @@ pay.post(
     await assertMoneyStartAdmitted(
       c.env,
       { organizationId: request.organization_id, projectId: request.project_id },
-      { surface: "http", operation: "pay_request.sponsor", subjectId: request.id }
+      { surface: "http", movement: "payments.pay_request", subjectId: request.id }
     );
 
     const payer = assertValidAddress(c.req.valid("json").account, "account");
@@ -156,6 +156,7 @@ pay.post(
       null;
     const getFeePayment = async () => {
       feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
+        movement: "payments.pay_request",
         organizationId: request.organization_id,
         projectId: request.project_id as string,
         actor: { type: "wallet", id: request.wallet_id },

@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
@@ -15,6 +16,10 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
+// The route is the design switch; this test is about the previous design's page.
+vi.mock("@/flags/new-design", () => ({
+  withLegacyDesign: (_current: unknown, legacy: unknown) => legacy,
+}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));
@@ -66,7 +71,9 @@ describe("custody setup page", () => {
       })
     );
 
-    const page = await CustodySetupPage({ searchParams: Promise.resolve({ provider: "privy" }) });
+    const page = (await CustodySetupPage({
+      searchParams: Promise.resolve({ provider: "privy" }),
+    })) as ReactElement;
 
     expect(page.type).toBe(WalletSetupFlow);
     expect(page.props).toEqual({

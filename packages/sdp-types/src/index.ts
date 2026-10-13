@@ -19,6 +19,7 @@ export * from "./idempotency";
 export * from "./jupiter-lend-programs";
 export * from "./kamino-programs";
 export * from "./kyc";
+export * from "./movements";
 export * from "./organization-entitlements";
 export * from "./organizations";
 export * from "./pagination";

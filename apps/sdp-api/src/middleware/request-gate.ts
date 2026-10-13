@@ -85,5 +85,5 @@ export function getRequestGateContext<TBody, TResolved>(
   if (context === undefined) {
     throw internalError("Request gate context is unavailable");
   }
-  return context as unknown as RequestGateContext<TBody, TResolved>;
+  return context as RequestGateContext<TBody, TResolved>;
 }

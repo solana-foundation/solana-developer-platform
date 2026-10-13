@@ -371,13 +371,16 @@ async function createDeployMetadataSigner(
 ): Promise<TransactionSigner> {
   if (!metadataWallet || metadataWallet.custodyWalletId === deploymentWallet.custodyWalletId)
     return signer;
-  return createResolvedAuthoritySigner({
+  // A signer for the metadata authority only; its sponsor is the deployment's.
+  const metadataAuthority = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env,
     auth,
     custodyWalletId: metadataWallet.custodyWalletId,
     currentAuthority: metadataWallet.publicKey,
     requiredWalletPermissions: ["tokens:write"],
   });
+  return metadataAuthority.signer;
 }
 
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
@@ -562,13 +565,15 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
     // `deploying`, uneditable and un-redeployable.
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: deploymentWallet.custodyWalletId,
       currentAuthority: deploymentWallet.publicKey,
       requiredWalletPermissions: ["tokens:write"],
     });
+    const signer = authority.signer;
     custodyAddress = signer.address;
     const metadataSigner = await createDeployMetadataSigner(
       c.env,
@@ -593,7 +598,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     }
 
     // Create Mosaic service for template-based token deployment
-    const mosaic = createIssuanceMosaicService(c, signer, feePayment);
+    const mosaic = createIssuanceMosaicService(c, authority, feePayment);
 
     const result = await mosaic.createToken({
       template: token.template,
@@ -773,12 +778,14 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
 
   // This legacy client-signed flow intentionally remains Config-only. Validate
   // the exact pin and load the Config signer before mutating the provider mirror.
-  const signer = await createLegacyResolvedAuthoritySigner({
+  const authority = await createLegacyResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });
+  const signer = authority.signer;
 
   // Pin the resolved signing wallet on the token so confirmDeploy derives the
   // SAME custody address — and thus the same mint/metadata authorities and ABL
@@ -793,7 +800,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
@@ -1006,12 +1013,14 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // Recompute the authorities the deploy used (custody signer === mint &
     // metadata authority, matching prepareDeploy) rather than trusting the
     // request, so a recorded mint can't claim authorities the caller lacks.
-    const signer = await createLegacyResolvedAuthoritySigner({
+    const authority = await createLegacyResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       walletId: signingWalletId,
       expectedCustodyWalletId: claimed.signingCustodyWalletId,
     });
+    const signer = authority.signer;
     const custodyAddress = signer.address;
     const freezeAuthority = claimed.isFreezable ? custodyAddress : null;
 
@@ -1136,13 +1145,16 @@ export const prepareDeployMetadata = async (
     "tokens:write",
   ]);
 
-  const signer = await createLegacyResolvedAuthoritySigner({
+  const authority = await createLegacyResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+  const signer = authority.signer;
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.

@@ -49,7 +49,7 @@ vi.mock("@/services/solana", async (importOriginal) => ({
 
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createAuthenticatedSponsorshipFeePayment: signerCheckMocks.createSponsorship,
+  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
 }));
 
 const SEEDED_PUBLIC_KEYS = {
@@ -330,12 +330,8 @@ describe("Custody wallet scope routes", () => {
     const signer = await generateKeyPairSigner();
     signerCheckMocks.createExactSigner.mockResolvedValue(signer);
     signerCheckMocks.signAndSend.mockResolvedValue(TEST_SIGNATURE);
-    signerCheckMocks.createSponsorship.mockReturnValue({
-      providerId: "test",
-      getFeePayer: vi.fn().mockResolvedValue(address(TEST_SOLANA_ADDRESSES.wallet3)),
-      signAsFeePayer: vi.fn(),
-      signAndSend: signerCheckMocks.signAndSend,
-    });
+    // The signer check only names the sponsor; it never gets a way to sponsor-sign.
+    signerCheckMocks.createSponsorship.mockResolvedValue(address(TEST_SOLANA_ADDRESSES.wallet3));
     createSigningServiceMock.mockImplementation((envArg, scope) => {
       const service = actualCreateSigningService(envArg, scope);
       service.getPublicKey = vi.fn(async (_organizationId, _projectId, walletId) => {
@@ -419,7 +415,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_signer_check"
+      "cwlt_scope_signer_check",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
     expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "devnet");
@@ -603,7 +600,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
   });
 
@@ -637,7 +635,9 @@ describe("Custody wallet scope routes", () => {
 
       const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "api_key");
 
-      expect(response.status).toBe(403);
+      // Authentication reads the key's row fresh, so a revoked or expired key is
+      // refused there (401); a narrowed binding reaches the route's check (403).
+      expect(response.status).toBe(state === "read-only" ? 403 : 401);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
       expect(createClusterRpcMock).not.toHaveBeenCalled();
@@ -698,7 +698,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
 
     expect(simulateTransactionMock).toHaveBeenCalledOnce();
@@ -765,7 +766,8 @@ describe("Custody wallet scope routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          recordId
+          recordId,
+          "custody.signer_check"
         );
       } else {
         expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
@@ -829,7 +831,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
   });

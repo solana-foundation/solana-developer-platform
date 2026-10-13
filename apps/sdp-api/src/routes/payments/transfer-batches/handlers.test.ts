@@ -881,7 +881,8 @@ describe("payment transfer batches", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "payments.transfer_batch"
     );
   });
 

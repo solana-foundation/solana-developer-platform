@@ -34,6 +34,13 @@ import type { Env } from "@/types/env";
 
 const projectMocks = { getProject: vi.fn() };
 
+const readMoneyAdmissionFacts = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  readMoneyAdmissionFacts,
+}));
+
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
@@ -66,6 +73,11 @@ function otherTransaction(): Uint8Array {
 
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "active",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
     vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
       providerId: "kora",
       getFeePayer: vi.fn(),
@@ -100,6 +112,7 @@ describe("sponsorship identity boundary", () => {
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -114,6 +127,7 @@ describe("sponsorship identity boundary", () => {
   it("selects the paymaster by the scope's cluster when a flow names one", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "production",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -135,12 +149,28 @@ describe("sponsorship identity boundary", () => {
     };
     vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
     return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
       actor: { type: "user", id: "usr_test_sponsorship" },
     });
   }
+  it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "deleted",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
+    const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
+    const feePayment = selfHostedFeePayment(signAsFeePayer);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "organization_inactive",
+    });
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
     const feePayment = selfHostedFeePayment(async (transaction) => transaction);
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
@@ -182,6 +212,7 @@ describe("sponsorship identity boundary", () => {
       hasStarted: vi.fn(),
     };
     const feePayment = createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -268,6 +299,7 @@ describe("sponsorship identity boundary", () => {
     });
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     await createProjectSponsorshipFeePayment(env, {
+      movement: "recurring.collect",
       organizationId: "org_stored",
       projectId: "project_stored",
       actor: { type: "wallet", id: "wallet_stored" },
@@ -287,6 +319,7 @@ describe("sponsorship identity boundary", () => {
     });
     await expect(
       createProjectSponsorshipFeePayment(testEnv, {
+        movement: "recurring.collect",
         organizationId: "org_claimed",
         projectId: "project_stored",
         actor: { type: "wallet", id: "wallet_stored" },

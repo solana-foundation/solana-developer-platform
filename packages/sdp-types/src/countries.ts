@@ -257,7 +257,3 @@ export const COUNTRY_CODES = COUNTRIES.map((c) => c.code) as unknown as readonly
   CountryCode,
   ...CountryCode[],
 ];
-
-export function isCountryCode(value: string): value is CountryCode {
-  return (COUNTRY_CODES as readonly string[]).includes(value);
-}

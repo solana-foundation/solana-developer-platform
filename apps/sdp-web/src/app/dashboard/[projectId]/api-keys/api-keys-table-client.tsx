@@ -114,7 +114,7 @@ function AccessSummary({
 }) {
   const t = useTranslations();
   const walletSummary = getWalletNames(apiKey, walletLabelById, t);
-  const operationsSummary = operationsSummaryLabel(apiKey.allowedOperations ?? [], t);
+  const operationsSummary = operationsSummaryLabel(apiKey.allowedOperations, t);
 
   return (
     <div className="min-w-0">

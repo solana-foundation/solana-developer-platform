@@ -195,15 +195,7 @@ FROM issued_tokens
 WHERE status = 'deploying'
 ORDER BY organization_id, project_id, id;
 
-\echo '=== 6. Unfinished Issuance approvals (must be zero before rollback) ==='
-SELECT id, organization_id, project_id, operation_type, status,
-       custody_wallet_id, created_at
-FROM wallet_operations
-WHERE operation_type IN ('issuance_mint_execute', 'issuance_update_authority_execute')
-  AND status IN ('pending_approval', 'executing')
-ORDER BY organization_id, id;
-
-\echo '=== 7. Terminal legacy Issuance transaction history without an exact ID (informational) ==='
+\echo '=== 6. Terminal legacy Issuance transaction history without an exact ID (informational) ==='
 SELECT id, token_id, organization_id, type, status, created_at
 FROM issuance_transactions
 WHERE custody_wallet_id IS NULL

@@ -109,14 +109,15 @@ async function resolveMetadataUpdate(params: {
     custodyWalletId: authorityWallet.custodyWalletId,
     tokenService: params.tokenService,
   });
-  const signer = await createResolvedAuthoritySigner({
+  const issuanceAuthority = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: params.c.env,
     auth: params.auth,
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority,
     requiredWalletPermissions: ["tokens:write"],
   });
-  const authority = { ...authorityWallet, signer };
+  const authority = { ...authorityWallet, ...issuanceAuthority };
   return { authority, patch: params.patch };
 }
 
@@ -416,7 +417,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     if (metadataUpdate) {
       const { signer } = metadataUpdate.authority;
 
-      const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+      const mosaic = createIssuanceMosaicService(c, metadataUpdate.authority, "sponsored");
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
         ...metadataUpdate.patch,

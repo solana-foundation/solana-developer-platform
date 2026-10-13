@@ -91,7 +91,8 @@ export async function createPrivateChannelWithdrawal(
       c.env,
       context.auth.organizationId,
       context.projectId,
-      context.wallet
+      context.wallet,
+      "private_channels.withdraw"
     );
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 

@@ -906,9 +906,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .prepare("UPDATE api_keys SET status = 'revoked', permissions = NULL WHERE id = ?")
       .bind(API_KEY.id)
       .run();
+    // Authentication reads the key's row fresh, so it refuses before the route's own check.
     expect(
       (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
-    ).toBe(403);
+    ).toBe(401);
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 

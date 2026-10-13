@@ -263,7 +263,7 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "compliance"],
+      beta: ["custody", "payments", "recurring_payments", "compliance", "markets", "earn"],
       stable: ["custody", "payments", "recurring_payments", "compliance"],
     });
   });
@@ -296,11 +296,8 @@ describe("release channels", () => {
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
     const bvnkInBeta: SdpRampProviderStages = {
       moonpay: "experimental",
-      lightspark: "experimental",
       bvnk: "beta",
-      moneygram: "experimental",
       coinbase: "experimental",
-      mural: "experimental",
       stripe: "experimental",
     };
     expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);

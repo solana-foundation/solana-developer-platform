@@ -12,13 +12,18 @@ import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 /**
- * Seeds a cached API key into KV for testing auth
+ * Seeds a cached API key into KV for testing auth, and its `api_keys` row when
+ * the suite has not inserted one: authentication re-reads the key's live row
+ * on every request and refuses a cached key that has none (HOO-1955). A row
+ * the suite already inserted is left as it is, so a test can still make the
+ * cache and the row disagree on purpose.
  */
 export async function seedCachedApiKey(
   env: Env,
   keyHash: string,
   data: CachedApiKey
 ): Promise<void> {
+  await seedApiKeyRowFor(env, keyHash, data);
   const kv = createKVStoreSet(env);
   const walletBindings = await Promise.all(
     (data.walletBindings ?? []).map(async (binding) => {
@@ -72,6 +77,79 @@ export async function seedCachedApiKey(
       expirationTtl: 3600,
     }
   );
+}
+
+/** Creates the user a seeded key row needs when the suite has none. */
+const SEEDED_KEY_CREATOR_ID = "usr_seeded_key_creator";
+
+/**
+ * Inserts the `api_keys` row a cached key stands for, mirroring the cached
+ * lifecycle columns. Authentication matches the row by key and organization
+ * only, so when the suite has not seeded the key's project the row hangs off
+ * an inactive placeholder project, which the one-active-project-per-
+ * environment rule ignores and no request ever selects. Skipped when the row
+ * (or its hash) already exists, or when the organization does not.
+ */
+export async function seedApiKeyRowFor(
+  env: Env,
+  keyHash: string,
+  data: CachedApiKey
+): Promise<void> {
+  const db = getDb(env);
+  const placeholderProjectId = `${data.organizationId}_seeded_key_project`;
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       SELECT ?, 'seeded-key-creator@example.test', 1, 'active'
+        WHERE NOT EXISTS (SELECT 1 FROM users)
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(SEEDED_KEY_CREATOR_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       SELECT ?, o.id, 'Seeded key project', ?, ?, 'inactive', (SELECT id FROM users ORDER BY id LIMIT 1)
+         FROM organizations o
+        WHERE o.id = ?
+          AND NOT EXISTS (SELECT 1 FROM projects WHERE id = ? AND organization_id = o.id)
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(
+      placeholderProjectId,
+      placeholderProjectId,
+      data.environment,
+      data.organizationId,
+      data.projectId
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO api_keys
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+          role, permissions, status, expires_at, rotation_deadline)
+       SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?
+         FROM projects p
+        WHERE p.organization_id = ? AND p.id IN (?, ?)
+        ORDER BY (p.id = ?) DESC
+        LIMIT 1
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(
+      data.id,
+      keyHash,
+      data.role,
+      JSON.stringify(data.permissions),
+      data.status,
+      data.expiresAt,
+      data.rotationDeadline === undefined ? null : data.rotationDeadline,
+      data.organizationId,
+      data.projectId,
+      placeholderProjectId,
+      data.projectId
+    )
+    .run();
 }
 
 /**

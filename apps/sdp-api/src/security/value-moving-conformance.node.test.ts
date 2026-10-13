@@ -51,7 +51,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
-      before: "authorize(authorizeTransferBatch)",
+      before:
+        'requireAllowedOperation("payment_transfer_batch_execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
       through: "replayFromRecord(findTransferBatchRecordReplay),\n  admit(",
       after: "\n  createTransferBatch\n",
     },
@@ -125,7 +126,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/freeze",',
       before: 'requireAllowedOperation("issuance_freeze_execute")',
-      through: "requestGate(",
       after: "freezeAccount",
     },
     replay: [
@@ -147,7 +147,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unfreeze",',
       before: 'requireAllowedOperation("issuance_unfreeze_execute")',
-      through: "requestGate(",
       after: "unfreezeAccount",
     },
     replay: [
@@ -168,7 +167,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/pause",',
       before: 'requireAllowedOperation("issuance_pause_execute")',
-      through: "requestGate(",
       after: "  pauseToken",
     },
     replay: [
@@ -189,7 +187,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unpause",',
       before: 'requireAllowedOperation("issuance_unpause_execute")',
-      through: "requestGate(",
       after: "unpauseToken",
     },
     replay: [
@@ -210,7 +207,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/seize",',
       before: 'requireAllowedOperation("issuance_seize_execute")',
-      through: "requestGate(",
       after: "executeSeize",
     },
     replay: [
@@ -231,7 +227,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/force-burn",',
       before: 'requireAllowedOperation("issuance_force_burn_execute")',
-      through: "requestGate(",
       after: "executeForceBurn",
     },
     replay: [
@@ -252,7 +247,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/burn",',
       before: 'requireAllowedOperation("issuance_burn_execute")',
-      through: "requestGate(",
       after: "executeBurn",
     },
     replay: [
@@ -267,12 +261,13 @@ const contracts: ValueMovingContract[] = [
     family: "payments",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/context.ts",
-      evidence: "createRequestSponsorshipFeePayment(c)",
+      evidence: "createRequestSponsorshipFeePayment(c, movement)",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
-      before: "authorize(authorizeTransfer)",
+      before:
+        'requireAllowedOperation("payment_transfer_execute"),\n  validateBody(createTransferSchema),\n  authorize(authorizeTransfer)',
       through: "replayFromRecord(findTransferRecordReplay),\n  admit(",
       after: "\n  createTransfer\n",
     },
@@ -299,7 +294,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId",',
       before: 'requireAllowedOperation("issuance_metadata_update_execute")',
-      through: "requestGate(",
       after: "  updateToken",
     },
     replay: [
@@ -320,7 +314,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/deploy",',
       before: 'requireAllowedOperation("issuance_deploy_execute")',
-      through: "requestGate(",
       after: "  deployToken",
     },
     replay: [
@@ -341,7 +334,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist",',
       before: 'requireAllowedOperation("issuance_allowlist_add_execute")',
-      through: "requestGate(",
       after: "addAllowlistEntry",
     },
     replay: [
@@ -362,7 +354,6 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist/:entryId",',
       before: 'requireAllowedOperation("issuance_allowlist_remove_execute")',
-      through: "requestGate(",
       after: "removeAllowlistEntry",
     },
     replay: [
@@ -382,7 +373,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
       section: '"/quote",',
-      before: "requestGate(",
+      before: 'requireAllowedOperation("ramp_onramp_quote")',
+      through: "requestGate(",
       after: "\n  createOnrampQuote\n",
     },
     replay: [
@@ -725,12 +717,39 @@ describe("value-moving authorization and replay conformance", () => {
     }
   });
 
-  it("declares an allowed operation on every value-moving issuance route and gates it", () => {
+  it("declares an allowed operation on every value-moving issuance route", () => {
     const issuanceContracts = contracts.filter((contract) => contract.family === "issuance");
     expect(issuanceContracts).toHaveLength(12);
     for (const contract of issuanceContracts) {
       expect(contract.authorization.before).toContain("requireAllowedOperation(");
+    }
+  });
+
+  it("gates only the issuance routes whose handler reads the gate context", () => {
+    // Authority and mint replay an Idempotency-Key and admit new work through the
+    // gate. No other issuance handler reads the gate context, so no other
+    // issuance route mounts it.
+    const gated = readSource("apps/sdp-api/src/routes/issuance/index.ts").match(/requestGate\(/g);
+    expect(gated).toHaveLength(2);
+  });
+
+  it("pins the allowed operation and the gate on payments, batch and ramp routes", () => {
+    for (const family of ["payments", "batch", "ramps"] as const) {
+      for (const contract of contracts.filter((candidate) => candidate.family === family)) {
+        expect(contract.authorization.before).toContain("requireAllowedOperation(");
+      }
+    }
+    // Ramps still admit through the request gate. Transfers and batches run
+    // authorize -> idempotent -> replayFromRecord -> admit instead (ADR 0008):
+    // access before the key is claimed, a replay before admission.
+    for (const contract of contracts.filter((candidate) => candidate.family === "ramps")) {
       expect(contract.authorization.through).toBe("requestGate(");
+    }
+    for (const family of ["payments", "batch"] as const) {
+      for (const contract of contracts.filter((candidate) => candidate.family === family)) {
+        expect(contract.authorization.before).toContain("authorize(");
+        expect(contract.authorization.through).toMatch(/^replayFromRecord\(.*\n {2}admit\($/s);
+      }
     }
   });
 

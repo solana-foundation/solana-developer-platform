@@ -7,7 +7,7 @@ import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
-import { getFeePayment } from "../context";
+import { getSponsoredFeePayer } from "../context";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
 import {
@@ -93,10 +93,9 @@ export async function estimateTransferBatch(
     resolved.sourceWallet.id,
     ["payments:read"]
   );
-  const feePayment = getFeePayment(c);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
   const [feePayer, lifetime] = await Promise.all([
-    feePayment.getFeePayer(),
+    getSponsoredFeePayer(c),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   const groups = await buildInstructionGroups({

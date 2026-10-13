@@ -3,7 +3,6 @@ import {
   type CounterpartyAccount,
   type CounterpartyAccountSummary,
   type CounterpartyEntityType,
-  type CounterpartyProviderAccount,
   type CustodyProvider,
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
@@ -775,12 +774,6 @@ export interface DemoBatch {
   recipients: PaymentTransferRecipient[];
 }
 
-/** A payout account a provider holds for a contact. */
-export interface DemoProviderAccount {
-  counterpartyId: string;
-  account: CounterpartyProviderAccount;
-}
-
 /**
  * The fixtures, then whatever the visitor did in demo mode on top: contacts and addresses are
  * keyed by fixture key for the seeded ones and by id for the ones added since.
@@ -789,7 +782,6 @@ export interface DemoWorld {
   wallets: Record<string, DemoWallet>;
   contacts: Record<string, Counterparty>;
   accounts: Record<string, CounterpartyAccount>;
-  providerAccounts: DemoProviderAccount[];
   transfers: DemoTransferRow[];
   batches: DemoBatch[];
   requests: PaymentRequest[];
@@ -1210,7 +1202,6 @@ export function buildWorld(now: Date, rampProviders: readonly RampProviderId[]):
   transfers.sort((left, right) => right.transfer.createdAt.localeCompare(left.transfer.createdAt));
   return {
     ...base,
-    providerAccounts: buildProviderAccounts(base),
     transfers,
     batches: BATCH_SPECS.map((spec) => buildBatch(spec, base, clock)).sort((left, right) =>
       right.batch.createdAt.localeCompare(left.batch.createdAt)
@@ -1628,114 +1619,9 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
 
 // ─── Counterparties ──────────────────────────────────────────────────────────
 
-/** Payout accounts providers hold for a few contacts, so a contact's page has rows to show. */
-const PROVIDER_ACCOUNT_SPECS: Partial<
-  Record<
-    ContactKey,
-    readonly Pick<
-      CounterpartyProviderAccount,
-      | "provider"
-      | "fiatCurrency"
-      | "destinationCountry"
-      | "paymentRail"
-      | "bankName"
-      | "accountNumberLast4"
-    >[]
-  >
-> = {
-  jane: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Chase Bank",
-      accountNumberLast4: "3321",
-    },
-  ],
-  acme: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "EUR",
-      destinationCountry: "DE",
-      paymentRail: "SEPA",
-      bankName: "Deutsche Bank",
-      accountNumberLast4: "8841",
-    },
-  ],
-  northwind: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "GBP",
-      destinationCountry: "GB",
-      paymentRail: "FPS",
-      bankName: "Barclays",
-      accountNumberLast4: "5307",
-    },
-  ],
-  lumen: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "WIRE",
-      bankName: "Silicon Valley Bank",
-      accountNumberLast4: "1188",
-    },
-  ],
-  orbit: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "EUR",
-      destinationCountry: "IE",
-      paymentRail: "SEPA",
-      bankName: "Bank of Ireland",
-      accountNumberLast4: "6620",
-    },
-  ],
-  kai: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Wells Fargo",
-      accountNumberLast4: "4472",
-    },
-  ],
-  priya: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Bank of America",
-      accountNumberLast4: "9015",
-    },
-  ],
-};
-
-function buildProviderAccounts(base: WorldBase): DemoProviderAccount[] {
-  return (Object.keys(PROVIDER_ACCOUNT_SPECS) as ContactKey[]).flatMap((key) =>
-    (PROVIDER_ACCOUNT_SPECS[key] ?? []).map((spec, index) => ({
-      counterpartyId: base.contacts[key].id,
-      account: {
-        ...spec,
-        id: `demo_cppa_${key}_${index}`,
-        kind: "payout_account" as const,
-        status: "active" as const,
-        providerStatus: "VERIFIED",
-        createdAt: base.contacts[key].createdAt,
-      },
-    }))
-  );
-}
-
-function providerAccountsBody(world: DemoWorld, counterparty: Counterparty) {
-  const accounts = world.providerAccounts
-    .filter((entry) => entry.counterpartyId === counterparty.id)
-    .map((entry) => entry.account);
-  return { data: { accounts } };
+/** No provider holds an account for a demo contact. */
+function providerAccountsBody() {
+  return { data: { accounts: [] } };
 }
 
 function counterpartiesBody(world: DemoWorld, params: URLSearchParams) {
@@ -1810,7 +1696,7 @@ function counterpartiesRoute(rest: string[], params: URLSearchParams, world: Dem
     case "accounts":
       return counterpartyAccountsBody(world, counterparty, params);
     case "provider-accounts":
-      return providerAccountsBody(world, counterparty);
+      return providerAccountsBody();
     default:
       return undefined;
   }

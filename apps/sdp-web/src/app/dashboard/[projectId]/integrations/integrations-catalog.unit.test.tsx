@@ -34,7 +34,7 @@ const AVAILABILITY = projectProviderAvailability({
     { provider: "para", modes: ["managed"] },
   ],
   compliance: ["range"],
-  ramps: ["moonpay", "lightspark"],
+  ramps: ["moonpay", "stripe"],
   earn: [],
 });
 
@@ -88,7 +88,7 @@ describe("IntegrationsCatalog", () => {
     urlState.tab = "ramps";
     renderCatalog({});
 
-    expect(visibleRowLabels()).toEqual(["MoonPay", "Lightspark"]);
+    expect(visibleRowLabels()).toEqual(["MoonPay", "Stripe"]);
     expect(document.querySelector("[data-integrations-hub='true']")).toBeNull();
     expect(screen.getByRole("searchbox")).toBeTruthy();
   });
@@ -117,11 +117,11 @@ describe("IntegrationsCatalog", () => {
     urlState.tab = "ramps";
     renderCatalog({});
 
-    await user.type(screen.getByRole("searchbox"), "lightspark");
-    expect(visibleRowLabels()).toEqual(["Lightspark"]);
+    await user.type(screen.getByRole("searchbox"), "stripe");
+    expect(visibleRowLabels()).toEqual(["Stripe"]);
 
     await user.clear(screen.getByRole("searchbox"));
-    expect(visibleRowLabels()).toEqual(["MoonPay", "Lightspark"]);
+    expect(visibleRowLabels()).toEqual(["MoonPay", "Stripe"]);
   });
 
   it("offers an empty state with a reset when nothing matches", async () => {
