@@ -54,7 +54,7 @@
 -- its parent. lock_timeout bounds each wait: a long-running transaction on any
 -- of these tables fails the migration instead of queueing all traffic on them
 -- behind it.
-SET LOCAL lock_timeout = '5s';
+SET LOCAL lock_timeout = '60s';
 
 LOCK TABLE organizations, projects, custody_configs, custody_connections,
     custody_wallets, custody_scope_defaults
