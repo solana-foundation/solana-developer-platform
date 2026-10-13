@@ -8,6 +8,7 @@ import {
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
+  setIdempotencyKeyScope,
 } from "./idempotency-key-store";
 
 describe("claimReportingReuse", () => {
@@ -243,5 +244,39 @@ describe("createActionMemo", () => {
     resetIdempotencyKeyStoresForTests();
 
     expect(strict.valueFor("a", () => "rebuilt")).toBe("rebuilt");
+  });
+});
+
+describe("user and org scope", () => {
+  const store = createIdempotencyKeyStore("test:key-scope:v1");
+  const memo = createActionMemo("test:action-memo-scope:v1", z.string());
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  afterEach(() => {
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  it("never hands user A's unanswered key to user B, or to A in another org", () => {
+    setIdempotencyKeyScope("user_a:org_1");
+    const keyA = store.claim("same-payment");
+    expect(store.markUncertain("same-payment")).toBe(true);
+    const actionKeyA = memo.valueFor("same-label", () => "key-a");
+
+    setIdempotencyKeyScope("user_b:org_1");
+    expect(store.isUncertain("same-payment")).toBe(false);
+    expect(store.claim("same-payment")).not.toBe(keyA);
+    expect(memo.valueFor("same-label", () => "key-b")).toBe("key-b");
+
+    setIdempotencyKeyScope("user_a:org_2");
+    expect(store.claim("same-payment")).not.toBe(keyA);
+    expect(memo.valueFor("same-label", () => "key-a-org-2")).toBe("key-a-org-2");
+
+    setIdempotencyKeyScope("user_a:org_1");
+    expect(store.claim("same-payment")).toBe(keyA);
+    expect(memo.valueFor("same-label", () => "rebuilt")).toBe(actionKeyA);
   });
 });

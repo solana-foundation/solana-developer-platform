@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { formatDate, formatDateTime } from "../../payments/payments-presentation";
 import { updateWalletLabelAction } from "../actions";
 import { useWalletActions } from "../use-wallet-actions";
@@ -24,6 +25,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
   const [pending, startTransition] = useTransition();
+  const actionKey = useActionIdempotencyKey();
   const changed = draft.trim() !== saved.trim();
 
   function save(event: FormEvent) {
@@ -32,12 +34,18 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
     const toastId = toast.loading(t("DashboardCustody.updatingWalletLabel"), {
       position: "bottom-right",
     });
+    const input = JSON.stringify([wallet.walletId, draft.trim()]);
     startTransition(async () => {
-      const result = await updateWalletLabelAction(wallet.walletId, draft).catch((error) => ({
+      const result = await updateWalletLabelAction(
+        wallet.walletId,
+        draft,
+        actionKey.keyFor(input)
+      ).catch((error) => ({
         status: "error" as const,
         message:
           error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),
       }));
+      actionKey.settled(input, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

@@ -122,6 +122,29 @@ function withinStorageBound(entries: readonly StoredEntry[]): StoredEntry[] {
   return entries.filter((entry) => kept.has(entry));
 }
 
+/**
+ * The signed-in user and organization every store's entries belong to. A key
+ * minted by one user is refused (422) when another user sends it, and an
+ * unanswered key is kept until answered, so a second user in the same tab
+ * would be stuck on the first user's key. Namespacing keeps each user's and
+ * org's entries apart, and keeps the first user's unanswered keys for when
+ * they sign back in.
+ */
+let keyScope = "";
+
+/**
+ * Sets the scope from the dashboard's signed-in user and org
+ * (`getDashboardCacheScopeKey`). The dashboard workspace provider calls it as
+ * it renders, before any child reads a key.
+ */
+export function setIdempotencyKeyScope(scope: string): void {
+  keyScope = scope;
+}
+
+function scopedKey(storeKey: string): string {
+  return keyScope ? `${storeKey}:${keyScope}` : storeKey;
+}
+
 function storage(): Storage | null {
   try {
     // Both the property access and the availability check can throw: some
@@ -193,7 +216,8 @@ function readStoredText(
   }
 }
 
-function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
+function readEntries(unscopedKey: string, ttlMs: number): StoredEntry[] {
+  const storeKey = scopedKey(unscopedKey);
   let parsed: unknown;
   if (storageDivergedKeys.has(storeKey)) {
     // Storage is behind memory for this key (a write failed after the page
@@ -230,7 +254,8 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
   });
 }
 
-function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
+function writeEntries(unscopedKey: string, entries: readonly StoredEntry[]): boolean {
+  const storeKey = scopedKey(unscopedKey);
   const bounded = withinStorageBound(entries);
   // Memory first and unconditionally: it is the tier that cannot fail, and it
   // has to already hold the value if the store refuses the very next write.
@@ -264,6 +289,7 @@ export function resetIdempotencyKeyStoresForTests(): void {
   memoryEntries.clear();
   storageDivergedKeys.clear();
   inFlightEarlierUnanswered.clear();
+  keyScope = "";
 }
 
 export interface IdempotencyKeyStore {
@@ -436,11 +462,13 @@ const FLOOR_MEMO_BOUND = 32;
  * a later write lands and re-synchronizes the full snapshot — including
  * `forget()`, whose removal must not resurface from stale storage.
  */
-export function createFloorMemo(storageKey: string): FloorMemo {
+export function createFloorMemo(unscopedKey: string): FloorMemo {
   type Entries = Record<string, string | null>;
-  let memory: Entries = {};
+  const memories = new Map<string, Entries>();
 
   function read(): Entries {
+    const storageKey = scopedKey(unscopedKey);
+    const memory = memories.get(storageKey) ?? {};
     if (storageDivergedKeys.has(storageKey)) {
       // Storage is behind memory for this key (a write failed after the page
       // loaded), so the readable state is stale by construction.
@@ -462,7 +490,8 @@ export function createFloorMemo(storageKey: string): FloorMemo {
   }
 
   function write(entries: Entries): void {
-    memory = { ...entries };
+    const storageKey = scopedKey(unscopedKey);
+    memories.set(storageKey, { ...entries });
     try {
       window.sessionStorage.setItem(storageKey, JSON.stringify(entries));
       // Storage has caught up with memory; it is the authority again.
@@ -497,7 +526,8 @@ export function createFloorMemo(storageKey: string): FloorMemo {
       write(entries);
     },
     resetForTests() {
-      memory = {};
+      const storageKey = scopedKey(unscopedKey);
+      memories.clear();
       storageDivergedKeys.delete(storageKey);
       try {
         window.sessionStorage.removeItem(storageKey);
@@ -645,14 +675,17 @@ export function createActionMemo<T>(storeKey: string, schema: z.ZodType<T>): Act
       }
       if (!remembered) throw new Error(`${storeKey}: build() made a value its schema rejects`);
       store.markUncertain(fingerprint);
-      inFlightEarlierUnanswered.set(`${storeKey}:${fingerprint}`, earlierAttemptUnanswered);
+      inFlightEarlierUnanswered.set(
+        `${scopedKey(storeKey)}:${fingerprint}`,
+        earlierAttemptUnanswered
+      );
       return remembered.data;
     },
 
     settle(input, answer) {
       const fingerprint = storageFingerprint(input);
       if (!store.isUncertain(fingerprint)) return;
-      const slot = `${storeKey}:${fingerprint}`;
+      const slot = `${scopedKey(storeKey)}:${fingerprint}`;
       if (answerRetiresKey(answer, inFlightEarlierUnanswered.get(slot) ?? true)) {
         store.release(fingerprint);
         inFlightEarlierUnanswered.delete(slot);
