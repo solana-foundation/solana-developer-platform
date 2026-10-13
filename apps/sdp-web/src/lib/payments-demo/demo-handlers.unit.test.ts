@@ -1,5 +1,7 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { paymentRequestSchema } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { buildWorld, DEMO_TOKENS, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
@@ -595,6 +597,9 @@ describe("transfers and batches", () => {
 });
 
 describe("requests", () => {
+  const requestsResponseSchema = z.object({
+    data: z.object({ paymentRequests: z.array(paymentRequestSchema) }),
+  });
   const request = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/requests", {
       custodyWalletId: TREASURY,
@@ -639,9 +644,7 @@ describe("requests", () => {
       expires: "2026-10-28T00:00:00.000Z",
     };
     ops = decodeDemoOps(encodeDemoOps([recorded]));
-    const response = demoWorldBody(world(), "/v1/payments/requests") as {
-      data: { paymentRequests: Record<string, unknown>[] };
-    };
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
     const saved = response.data.paymentRequests.find(({ id }) => id === recorded.id);
     expect(saved).toMatchObject({
       id: recorded.id,
@@ -694,9 +697,7 @@ describe("requests", () => {
       expires: null,
     };
     ops = decodeDemoOps(encodeDemoOps([recorded]));
-    const response = demoWorldBody(world(), "/v1/payments/requests") as {
-      data: { paymentRequests: { id: string }[] };
-    };
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
     expect(response.data.paymentRequests.some(({ id }) => id === recorded.id)).toBe(false);
     expect(ops).toEqual([recorded]);
   });
@@ -718,7 +719,10 @@ describe("requests", () => {
         now,
       });
     const refused = attempt({ walletId: wallet.walletId });
-    expect(refused?.answer(aliasedWorld).status).toBe(400);
+    expect(refused?.answer(aliasedWorld)).toMatchObject({
+      status: 409,
+      body: { error: { code: "conflict" } },
+    });
     expect(refused?.ops).toEqual([]);
     const exact = attempt({ custodyWalletId: aliasedWorld.wallets.settlement.id });
     expect(exact?.ops).toMatchObject([{ wallet: "demo_cwlt_settlement" }]);

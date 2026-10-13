@@ -177,6 +177,7 @@ pay.post(
       continuity = {
         deploymentMode: claim?.deploymentMode ?? deploymentMode,
         legacyActor: { type: "wallet", id: request.wallet_id },
+        // SAFETY: required-state reconciliation rejects null pins; payable checks above reject rows it skipped.
         exactActor: { type: "wallet", id: request.custody_wallet_id as string },
         admission: fresh ? "legacy_new" : "continue_only",
         reservationId: claim?.accountingIdentity?.reservationId,

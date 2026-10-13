@@ -1,8 +1,8 @@
 import type { createRpc } from "@sdp/rpc/solana";
-import type { PaymentRequest } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { errorResponseSchema, successResponseSchema, z } from "@/openapi/schemas/base";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -22,6 +22,27 @@ import {
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+
+const requestFieldsSchema = z.object({
+  id: z.string().min(1),
+  publicToken: z.string().min(1),
+  reference: z.string().min(1),
+  custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
+  walletId: z.string().min(1),
+  destinationAddress: z.string().min(1),
+  token: z.string().min(1),
+  amount: z.string().min(1),
+  counterpartyId: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  status: z.string().min(1),
+});
+const requestResponseSchema = successResponseSchema(requestFieldsSchema);
+const requestsResponseSchema = successResponseSchema(
+  z.object({
+    paymentRequests: z.array(requestFieldsSchema),
+    total: z.number().int().nonnegative(),
+  })
+);
 
 const HEADERS = {
   Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -107,7 +128,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
   it("creates and lists the exact recipient without changing Request terms", async () => {
     const response = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
     expect(response.status).toBe(201);
-    const created: { data: PaymentRequest } = await response.json();
+    const created = requestResponseSchema.parse(await response.json());
     expect(created.data).toMatchObject({
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
@@ -118,7 +139,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
 
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(list.status).toBe(200);
-    expect(await list.json()).toMatchObject({
+    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
       data: {
         total: 1,
         paymentRequests: [
@@ -177,7 +198,9 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     for (const custodyWalletId of [TEST_CUSTODY_WALLET_ID, "cwlt_requests_duplicate"]) {
       const response = await createRequest({ custodyWalletId });
       expect(response.status).toBe(201);
-      expect(await response.json()).toMatchObject({ data: { custodyWalletId } });
+      expect(requestResponseSchema.parse(await response.json())).toMatchObject({
+        data: { custodyWalletId },
+      });
     }
     expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(409);
     await selectWallet(["payments:write"]);
@@ -201,13 +224,15 @@ describe("Payments routes — Payment Requests exact recipient", () => {
   ])("rejects missing, conflicting, malformed or unknown fields: %j", async (selector) => {
     expect((await createRequest(selector)).status).toBe(400);
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(await list.json()).toMatchObject({ data: { total: 0, paymentRequests: [] } });
+    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
+      data: { total: 0, paymentRequests: [] },
+    });
   });
 
   it("retains the unambiguous legacy selector and response fields", async () => {
     const response = await createRequest({ walletId: TEST_WALLET_ID });
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
+    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
       data: {
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
         walletId: TEST_WALLET_ID,
@@ -228,7 +253,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     ]) {
       const response = await createRequest({ ...selector, [field]: value });
       expect(response.status).toBe(400);
-      const body: { error: { message: string } } = await response.json();
+      const body = errorResponseSchema.parse(await response.json());
       expect(body.error.message).toContain(`→ at ${field}`);
     }
   });
@@ -244,7 +269,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       env
     );
     expect(response.status).toBe(400);
-    const body: { error: { message: string } } = await response.json();
+    const body = errorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain("__proto__");
   });
 
@@ -256,7 +281,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     await seedConnectionWallet();
     const response = await createRequest({ custodyWalletId: "cwlt_requests_connection" });
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
+    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
       data: {
         custodyWalletId: "cwlt_requests_connection",
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
@@ -338,7 +363,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       .run();
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
-    expect(await list.json()).toMatchObject({ data: { total: 1 } });
+    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({ data: { total: 1 } });
   });
 
   it("preserves the wallets:read route permission", async () => {
@@ -355,7 +380,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       amount: "0.125",
     });
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
+    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
       data: {
         counterpartyId,
         expiresAt: "2000-01-01T00:00:00.000Z",
@@ -368,7 +393,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
   it("lists project history across wallet grants including nullable terminal recipients", async () => {
     const first = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
     expect(first.status).toBe(201);
-    const created: { data: PaymentRequest } = await first.json();
+    const created = requestResponseSchema.parse(await first.json());
     await seedConnectionWallet();
     expect((await createRequest({ custodyWalletId: "cwlt_requests_connection" })).status).toBe(201);
     await getDb(env)
@@ -381,8 +406,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
 
     const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(list.status).toBe(200);
-    const listed: { data: { paymentRequests: PaymentRequest[]; total: number } } =
-      await list.json();
+    const listed = requestsResponseSchema.parse(await list.json());
     expect(listed.data.total).toBe(2);
     expect(listed.data.paymentRequests).toContainEqual(
       expect.objectContaining({
@@ -406,6 +430,8 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     });
     const otherProject = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
     expect(otherProject.status).toBe(200);
-    expect(await otherProject.json()).toMatchObject({ data: { total: 0, paymentRequests: [] } });
+    expect(requestsResponseSchema.parse(await otherProject.json())).toMatchObject({
+      data: { total: 0, paymentRequests: [] },
+    });
   });
 });

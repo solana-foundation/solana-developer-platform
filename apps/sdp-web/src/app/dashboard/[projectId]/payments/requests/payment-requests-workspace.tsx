@@ -273,20 +273,20 @@ function CreateRequestModal({
       },
     });
     setSubmitting(false);
-    if (!res.ok) {
+    if (!res.ok && (res.status === null || res.status < 200 || res.status >= 300)) {
       toast.error(res.error);
       return;
     }
 
+    const created = paymentRequestSchema.safeParse(res.ok ? res.data?.data : undefined);
+    if (!created.success) {
+      // A successful POST may already be committed; refresh instead of inviting another create.
+      toast.warning(t("DashboardPayments.requests.createdLinkUnavailable"));
+      onCreated(null);
+      return;
+    }
     toast.success(t("DashboardPayments.requests.paymentLinkCreated"));
-
-    // The create response is the full request, so the details view can open straight
-    // away. Without this the link was only reachable by waiting for the table to
-    // repopulate and then reopening the row. A response without a `publicToken` still
-    // means the request was created, so fall back to closing rather than reporting a
-    // failure that did not happen — the row will arrive with the refresh.
-    const created = paymentRequestSchema.safeParse(res.data?.data);
-    onCreated(created.success ? created.data : null);
+    onCreated(created.data);
   }
 
   return (

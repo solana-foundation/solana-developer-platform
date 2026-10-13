@@ -4,6 +4,7 @@ import type { Counterparty, PaymentRequest, PaymentsDashboardWallet } from "@sdp
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { Toaster, toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -58,6 +59,7 @@ function readsAs(): string {
 }
 
 afterEach(() => {
+  toast.dismiss();
   cleanup();
   vi.unstubAllGlobals();
   resetDashboardNavigation();
@@ -212,11 +214,78 @@ describe("New request page", () => {
 });
 
 describe("Previous design requests", () => {
+  it.each(["invalid DTO", "invalid JSON"] as const)(
+    "warns after a successful creation with %s and refreshes without another POST",
+    async (responseKind) => {
+      let writes = 0;
+      vi.stubGlobal("fetch", async () => {
+        writes += 1;
+        return responseKind === "invalid DTO"
+          ? Response.json({ data: {} }, { status: 201 })
+          : new Response("{", { status: 201 });
+      });
+      render(
+        <>
+          <Toaster />
+          <LegacyPaymentRequestsWorkspace
+            initialPaymentRequests={[]}
+            apiBaseUrl={null}
+            apiKeys={[]}
+            wallets={[wallet]}
+            counterparties={[]}
+          />
+        </>,
+        { wrapper }
+      );
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Create" }));
+      const form = within(screen.getByRole("dialog", { name: "Create payment request" }));
+      await user.type(form.getByRole("spinbutton", { name: "Amount" }), "25");
+      await user.click(form.getAllByRole("combobox")[0]);
+      await user.click(await screen.findByRole("option", { name: "SOL" }));
+      await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+      await user.click(form.getAllByRole("combobox")[1]);
+      await user.click(await screen.findByRole("option", { name: "Treasury" }));
+      await user.click(form.getByRole("button", { name: "Create link" }));
+
+      expect(
+        await screen.findByText(
+          "Request created, but its payment link could not be loaded. Check the refreshed list before creating another request."
+        )
+      ).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "Create payment request" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Payment request details" })).toBeNull();
+      expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+      expect(writes).toBe(1);
+    }
+  );
+
   it("sends the exact selected recipient when provider references and addresses coincide", async () => {
     const writes: unknown[] = [];
+    const created: PaymentRequest = {
+      id: "preq_settlement",
+      publicToken: "tok_settlement",
+      organizationId: "org_test",
+      projectId: "proj_test",
+      counterpartyId: null,
+      custodyWalletId: "cwlt_settlement",
+      walletId: wallet.walletId,
+      destinationAddress: wallet.publicKey,
+      token: "So11111111111111111111111111111111111111112",
+      amount: "25",
+      reference: "reference",
+      status: "awaiting_payment",
+      expiresAt: null,
+      fulfilledByTransferId: null,
+      canceledBy: null,
+      lifecycle: [],
+      createdBy: null,
+      createdAt: "2026-10-12T00:00:00.000Z",
+      updatedAt: "2026-10-12T00:00:00.000Z",
+    };
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ data: {} });
+      return Response.json({ data: created });
     });
     render(
       <LegacyPaymentRequestsWorkspace
@@ -233,7 +302,7 @@ describe("Previous design requests", () => {
     const form = within(screen.getByRole("dialog", { name: "Create payment request" }));
     await user.type(form.getByRole("spinbutton", { name: "Amount" }), "25");
     await user.click(form.getAllByRole("combobox")[0]);
-    await user.click(screen.getByRole("option", { name: "SOL" }));
+    await user.click(await screen.findByRole("option", { name: "SOL" }));
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
     await user.click(form.getAllByRole("combobox")[1]);
     await user.click(await screen.findByRole("option", { name: "Settlement" }));
@@ -245,6 +314,9 @@ describe("Previous design requests", () => {
       expect(screen.queryByRole("dialog", { name: "Create payment request" })).toBeNull()
     );
     expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
+    const detail = within(screen.getByRole("dialog", { name: "Payment request details" }));
+    expect(detail.getByText("Settlement")).toBeTruthy();
+    expect(detail.getByText(`${window.location.origin}/pay/tok_settlement`)).toBeTruthy();
   });
 
   it.each([

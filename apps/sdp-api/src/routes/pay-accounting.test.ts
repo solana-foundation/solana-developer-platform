@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
+import { base64Schema, z } from "@/openapi/schemas/base";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -17,6 +18,8 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+
+const transactionResponseSchema = z.object({ transaction: base64Schema });
 
 describe("Public payment sponsorship accounting continuity", () => {
   installPaymentsRouteTestHooks();
@@ -80,7 +83,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     const request = await createRequest();
     const response = await post(request.public_token);
     expect(response.status).toBe(200);
-    const originalBytes = ((await response.json()) as { transaction: string }).transaction;
+    const originalBytes = transactionResponseSchema.parse(await response.json()).transaction;
     const claim = await repository().getSponsoredTransactionClaim(request.id);
     expect(claim).toMatchObject({
       unsignedTransaction: expect.any(String),
@@ -106,7 +109,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     });
     const replay = await post(request.public_token);
     expect(replay.status).toBe(200);
-    expect(((await replay.json()) as { transaction: string }).transaction).toBe(originalBytes);
+    expect(transactionResponseSchema.parse(await replay.json()).transaction).toBe(originalBytes);
     expect(await reservations()).toEqual(originalReservations);
     expect(getRecentBlockhashMock).toHaveBeenCalledOnce();
     expect(getFeeForMessage).toHaveBeenCalledOnce();
@@ -124,7 +127,7 @@ describe("Public payment sponsorship accounting continuity", () => {
       const request = await createRequest();
       const first = await post(request.public_token);
       expect(first.status).toBe(200);
-      const bytes = ((await first.json()) as { transaction: string }).transaction;
+      const bytes = transactionResponseSchema.parse(await first.json()).transaction;
       await getDb(env).execute(
         "UPDATE sponsorship_budget_reservations SET status = ? WHERE organization_id = ? AND project_id = ?",
         [status, TEST_ORG.id, TEST_PROJECT.id]
@@ -136,7 +139,7 @@ describe("Public payment sponsorship accounting continuity", () => {
       const original = await reservations();
       const replay = await post(request.public_token);
       expect(replay.status).toBe(200);
-      expect(((await replay.json()) as { transaction: string }).transaction).toBe(bytes);
+      expect(transactionResponseSchema.parse(await replay.json()).transaction).toBe(bytes);
       expect(await reservations()).toEqual(original);
       expect(
         (await repository().getSponsoredTransactionClaim(request.id))?.accountingIdentity

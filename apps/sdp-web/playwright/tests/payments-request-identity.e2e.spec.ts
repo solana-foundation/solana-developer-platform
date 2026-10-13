@@ -1,6 +1,11 @@
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import type { PaymentRequest, PaymentsDashboardWallet } from "@sdp/types";
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Client } from "pg";
+import { z } from "zod";
+import {
+  type DashboardPaymentRequest,
+  paymentRequestSchema,
+} from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "../env";
 import { getPlaywrightAdminSession, type PlaywrightAdminSession } from "../support/auth-session";
@@ -14,6 +19,7 @@ import {
 
 const expect = playwrightExpect.configure({ timeout: 120_000 });
 const REQUESTS_PATH = "/dashboard/payments/requests";
+type LabeledWallet = PaymentsDashboardWallet & { label: string };
 
 function isolatedDatabaseUrl(): string {
   const value = process.env.DATABASE_URL;
@@ -43,10 +49,10 @@ test.describe
     let api: LocalApiClient;
     let projectId: string;
     let otherProjectId: string;
-    let wallets: PaymentsDashboardWallet[];
+    let wallets: LabeledWallet[];
     let connectionId: string;
     let credentialId: string;
-    const requests: PaymentRequest[] = [];
+    const requests: DashboardPaymentRequest[] = [];
 
     async function database<T>(run: (db: Client) => Promise<T>): Promise<T> {
       const db = new Client({ connectionString: isolatedDatabaseUrl() });
@@ -116,9 +122,9 @@ test.describe
         }
       });
       const inventory = await api.get<{ wallets: PaymentsDashboardWallet[] }>("/v1/wallets");
-      wallets = [first, inventory.wallets.find(({ id }) => id === secondId)].filter(
-        (wallet): wallet is PaymentsDashboardWallet => wallet !== undefined
-      );
+      wallets = [first, inventory.wallets.find(({ id }) => id === secondId)]
+        .filter((wallet): wallet is PaymentsDashboardWallet => wallet !== undefined)
+        .map((wallet) => ({ ...wallet, label: z.string().min(1).regex(/\S/).parse(wallet.label) }));
       expect(wallets).toHaveLength(2);
       expect(wallets[1].walletId).toBe(wallets[0].walletId);
       expect(wallets[1].publicKey).toBe(wallets[0].publicKey);
@@ -143,7 +149,7 @@ test.describe
       });
     });
 
-    async function createRequest(page: Page, wallet: PaymentsDashboardWallet, amount: string) {
+    async function createRequest(page: Page, wallet: LabeledWallet, amount: string) {
       const redesigned = process.env.SDP_FLAG_NEW_DESIGN_ACTIVITY !== "0";
       const createPath = redesigned ? `${REQUESTS_PATH}/new` : REQUESTS_PATH;
       await gotoProjectPage(page, projectId, createPath);
@@ -159,7 +165,7 @@ test.describe
         await form.getByRole("combobox").nth(0).click();
         await page.getByRole("option", { name: "SOL", exact: true }).click();
         await form.getByRole("combobox").nth(1).click();
-        await page.getByRole("option", { name: wallet.label ?? "", exact: true }).click();
+        await page.getByRole("option", { name: wallet.label, exact: true }).click();
       }
       const responsePromise = page.waitForResponse(
         (response) =>
@@ -176,7 +182,7 @@ test.describe
       expect(response.request().postDataJSON()).toMatchObject({ custodyWalletId: wallet.id });
       expect(response.request().postDataJSON()).not.toHaveProperty("walletId");
       expect(response.ok()).toBe(true);
-      const { data } = (await response.json()) as { data: PaymentRequest };
+      const { data } = z.object({ data: paymentRequestSchema }).parse(await response.json());
       requests.push(data);
       expect(data).toMatchObject({
         custodyWalletId: wallet.id,
@@ -185,12 +191,12 @@ test.describe
       });
       if (redesigned) {
         await expect(page).toHaveURL(projectHref(projectId, `${REQUESTS_PATH}/${data.id}`));
-        await expect(page.locator("dd").filter({ hasText: wallet.label ?? "" })).toBeVisible();
+        await expect(page.locator("dd").filter({ hasText: wallet.label })).toBeVisible();
       } else {
         await expect(
           page
             .getByRole("dialog", { name: "Payment request details", exact: true })
-            .getByText(wallet.label ?? "", { exact: true })
+            .getByText(wallet.label, { exact: true })
         ).toBeVisible();
       }
       return { data, redesigned };
@@ -255,9 +261,7 @@ test.describe
         const selector = page.getByLabel(/^custodyWalletId(?:\s+\*)?$/);
         await expect(selector).toBeVisible();
         for (const wallet of wallets) {
-          await expect(selector.locator(`option[value="${wallet.id}"]`)).toHaveText(
-            wallet.label ?? ""
-          );
+          await expect(selector.locator(`option[value="${wallet.id}"]`)).toHaveText(wallet.label);
         }
         await expect(page.getByLabel(/^walletId(?:\s+\*)?$/)).toHaveCount(0);
       }
@@ -334,7 +338,7 @@ test.describe
             .click();
         }
         for (const wallet of wallets)
-          await expect(page.getByText(wallet.label ?? "", { exact: false })).toHaveCount(0);
+          await expect(page.getByText(wallet.label, { exact: false })).toHaveCount(0);
         await expect(
           page
             .getByText(request.destinationAddress, { exact: true })

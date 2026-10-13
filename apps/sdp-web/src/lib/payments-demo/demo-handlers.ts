@@ -1282,7 +1282,7 @@ function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
       ? candidate.id === input.data.custodyWalletId
       : candidate.walletId === input.data.walletId
   );
-  if (matches.length > 1) return error(400, "Choose an exact SDP wallet ID.");
+  if (matches.length > 1) return error(409, "Choose an exact SDP wallet ID.", "conflict");
   const wallet = matches[0];
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
   const counterpartyId = input.data.counterpartyId ?? null;

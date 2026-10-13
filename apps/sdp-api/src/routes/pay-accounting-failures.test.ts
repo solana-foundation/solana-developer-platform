@@ -20,6 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
+import { base64Schema, z } from "@/openapi/schemas/base";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import {
@@ -35,6 +36,8 @@ import {
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+const transactionResponseSchema = z.object({ transaction: base64Schema });
 
 describe("Public payment Request accounting failure recovery", () => {
   installPaymentsRouteTestHooks();
@@ -174,7 +177,7 @@ describe("Public payment Request accounting failure recovery", () => {
     await clearWriteFailure();
     const retry = await post(request.public_token);
     expect(retry.status).toBe(200);
-    const bytes = ((await retry.json()) as { transaction: string }).transaction;
+    const bytes = transactionResponseSchema.parse(await retry.json()).transaction;
     expect(await reservations()).toEqual([
       { id: released[0].id, status: "signed", attempt: 2, signed_transaction: bytes },
     ]);
@@ -206,7 +209,7 @@ describe("Public payment Request accounting failure recovery", () => {
 
     const retry = await post(request.public_token);
     expect(retry.status).toBe(200);
-    const bytes = ((await retry.json()) as { transaction: string }).transaction;
+    const bytes = transactionResponseSchema.parse(await retry.json()).transaction;
     const updated = await reservations();
     expect(updated).toHaveLength(2);
     expect(updated).toContainEqual(released[0]);
@@ -259,7 +262,7 @@ describe("Public payment Request accounting failure recovery", () => {
       await clearWriteFailure();
       const retry = await post(request.public_token);
       expect(retry.status).toBe(200);
-      expect(((await retry.json()) as { transaction: string }).transaction).toBe(
+      expect(transactionResponseSchema.parse(await retry.json()).transaction).toBe(
         original[0].signed_transaction
       );
       expect(await reservations()).toEqual(original);
@@ -303,7 +306,7 @@ describe("Public payment Request accounting failure recovery", () => {
 
       const retry = await post(request.public_token);
       expect(retry.status).toBe(200);
-      const bytes = ((await retry.json()) as { transaction: string }).transaction;
+      const bytes = transactionResponseSchema.parse(await retry.json()).transaction;
       expect(bytes).not.toBe(original[0].signed_transaction);
       const updated = await reservations();
       expect(updated).toHaveLength(2);
@@ -415,13 +418,13 @@ describe("Public payment Request accounting failure recovery", () => {
       ownerResponse = await owner;
     }
     expect(ownerResponse.status).toBe(200);
-    const signedBytes = ((await ownerResponse.json()) as { transaction: string }).transaction;
+    const signedBytes = transactionResponseSchema.parse(await ownerResponse.json()).transaction;
     expect(await reservations()).toEqual([
       { id: ownedReservationId, status: "signed", attempt: 1, signed_transaction: signedBytes },
     ]);
     const replay = await post(request.public_token);
     expect(replay.status).toBe(200);
-    expect(((await replay.json()) as { transaction: string }).transaction).toBe(signedBytes);
+    expect(transactionResponseSchema.parse(await replay.json()).transaction).toBe(signedBytes);
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
   });
 
