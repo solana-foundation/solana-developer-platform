@@ -212,7 +212,7 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
 type RampStatusWriterRoute =
   /** Writes go through `transitionRampTransfer`. */
   | "table"
-  /** Still sets the status itself; moves onto the table in HOO-2033's second PR. */
+  /** Still sets the status itself; moves onto the table in HOO-2087. */
   | "direct"
   /** Still sets the status itself; deleted with BVNK (HOO-2037). */
   | "direct_until_bvnk_removal";
