@@ -27,6 +27,7 @@ const FEE_UNAVAILABLE_PATH = "/__fee_unavailable_test_throw";
 const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
+const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
 
 function makeObservability(): {
   obs: Observability;
@@ -107,6 +108,9 @@ function buildApp(observability: Observability) {
       "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1",
       "SIGNING_FAILED"
     );
+  });
+  app.all(IDEMPOTENCY_REUSED_PATH, () => {
+    throw new AppError("IDEMPOTENCY_KEY_REUSED");
   });
   app.all(FEE_REJECTED_PATH, () => {
     throw new FeePaymentError(
@@ -266,6 +270,20 @@ describe("createApp onError capture", () => {
     );
     expect(body.error.message).not.toContain("custom program error");
     expect(withScope).not.toHaveBeenCalled();
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  // HOO-1918: the IETF draft's 422 for a reused Idempotency-Key must reach the
+  // client as 422, not fall through the status whitelist to 500.
+  it("answers an AppError's 422 as 422", async () => {
+    const { obs, captureException } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await app.request(IDEMPOTENCY_REUSED_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
     expect(captureException).not.toHaveBeenCalled();
   });
 
