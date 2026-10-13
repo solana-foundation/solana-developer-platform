@@ -988,6 +988,33 @@ describe("createClusterJsonRpcFetch", () => {
     assert.deepEqual(calls, [genesisProbe(devnet), slotRead(devnet)]);
   });
 
+  it("sends a request integer beyond 2^53 to the pool endpoint exactly and keeps the id a plain number", async () => {
+    const devnet = "https://devnet-json-rpc-request-precision.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const sentBodies: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request = readRequest(input, init);
+      if (request.method === "getGenesisHash") {
+        return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+      }
+      assert.ok(init !== undefined && typeof init.body === "string");
+      sentBodies.push(init.body);
+      return respond(request.id, { result: null });
+    };
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    await jsonRpcFetch("https://door.invalid", {
+      method: "POST",
+      body: '{"jsonrpc":"2.0","id":1,"method":"getBlock","params":[9007199254740993,{"commitment":"finalized"}]}',
+    });
+
+    assert.deepEqual(sentBodies, [
+      '{"jsonrpc":"2.0","id":1,"method":"getBlock","params":[9007199254740993,{"commitment":"finalized"}]}',
+    ]);
+  });
+
   it("keeps a sandbox scope on the devnet pool and a production scope on mainnet", async () => {
     const devnet = "https://devnet-json-rpc-clusters.example.test";
     const mainnet = "https://mainnet-json-rpc-clusters.example.test";
