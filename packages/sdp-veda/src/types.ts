@@ -1,3 +1,4 @@
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import type { Address, Instruction } from "@solana/kit";
 
@@ -19,16 +20,13 @@ import type { Address, Instruction } from "@solana/kit";
  *    own copy, so a leaked type would put two kit majors in one signature.
  */
 
-/** Which cluster a call runs against, and how to reach it. */
+/** Which cluster a call runs against, and the door clients that reach it. */
 export interface VedaRuntime {
   cluster: SolanaCluster;
-  /**
-   * RPC endpoint for `cluster`. Supplied by the caller rather than read from
-   * env: one API process serves BOTH SDP environments, so a process-level
-   * `SOLANA_RPC_URL` cannot be trusted to match the cluster being served. The
-   * API proves the endpoint's genesis before handing it over.
-   */
-  rpcUrl: string;
+  /** Builds and quotes: every request, the SDK's own included, bounded at the transport. */
+  rpc: SolanaRpc;
+  /** Position reads only, never a build: concurrent identical reads go out once. */
+  readRpc: SolanaRpc;
 }
 
 /**

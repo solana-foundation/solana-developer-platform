@@ -1,11 +1,4 @@
-import { withRpcReadContext } from "@sdp/rpc/read-context";
-import { withReadSocketRetry } from "@sdp/rpc/solana";
-import type { Address } from "@solana/kit";
-import {
-  createDefaultRpcTransport,
-  createSolanaRpcFromTransport,
-  type RpcTransport,
-} from "@solana/kit";
+import type { Address, GetAccountInfoApi, GetMultipleAccountsApi, Rpc } from "@solana/kit";
 import { SdpWisdomTreeError } from "./errors";
 
 /**
@@ -25,40 +18,17 @@ export interface WisdomTreeChainAccount {
   data: Uint8Array;
 }
 
-export const WISDOMTREE_RPC_REQUEST_TIMEOUT_MS = 30_000;
+/** The reads a `WisdomTreeChainReader` sends. */
+export type WisdomTreeChainRpc = Rpc<GetAccountInfoApi & GetMultipleAccountsApi>;
 
-/** Same transport-boundary deadline pattern as `@sdp/kamino`'s rpc.ts. */
-function withTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
-  const scopedTransport = withRpcReadContext(transport);
-  return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
-    const controller = new AbortController();
-    const deadlineReason = new Error("WisdomTree RPC deadline elapsed");
-    const timer = setTimeout(() => controller.abort(deadlineReason), timeoutMs);
-    const signal = config.signal
-      ? AbortSignal.any([config.signal, controller.signal])
-      : controller.signal;
-    try {
-      return await scopedTransport<TResponse>({ ...config, signal });
-    } catch (cause) {
-      if (signal.aborted && signal.reason === deadlineReason) {
-        throw new Error(`WisdomTree RPC request timed out after ${timeoutMs}ms`, { cause });
-      }
-      throw cause;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-}
-
-export function createWisdomTreeChainReader(
-  rpcUrl: string,
-  timeoutMs = WISDOMTREE_RPC_REQUEST_TIMEOUT_MS
-): WisdomTreeChainReader {
-  // A read whose pooled socket died is re-sent below the read context, so a
-  // minimum-slot scope only sees the attempt that answered.
-  const rpc = createSolanaRpcFromTransport(
-    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl })), timeoutMs)
-  );
+/**
+ * The chain reader over `rpc`, mapping every read failure and unrecognized account shape to
+ * `VAULT_UNREADABLE`.
+ *
+ * @param rpc - A client for the fund's cluster.
+ * @returns The reader the builders and position reads consume.
+ */
+export function createWisdomTreeChainReader(rpc: WisdomTreeChainRpc): WisdomTreeChainReader {
   return {
     async getAccount(accountAddress) {
       let value: { owner: unknown; data: unknown } | null;

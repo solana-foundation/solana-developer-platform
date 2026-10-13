@@ -1,7 +1,6 @@
-import type { Address } from "@solana/kit";
+import type { Address, GetAccountInfoApi, Rpc } from "@solana/kit";
 import { mintDecimals } from "./amounts";
 import { SdpVedaError } from "./errors";
-import { createVedaRpc } from "./rpc";
 
 /**
  * A mint's decimals, read from the chain.
@@ -15,9 +14,16 @@ import { createVedaRpc } from "./rpc";
  *
  * Outside `./sdk.ts` because it needs no Veda SDK — just this repo's kit — so
  * it stays unit-testable without loading the SDK or its nested `@solana/kit` 7.
+ *
+ * @param rpc - A client for the mint's cluster.
+ * @param mint - The mint to read.
+ * @returns The mint's decimals.
+ * @throws SdpVedaError `VAULT_UNREADABLE` when the mint is unreadable, missing or unparsed.
  */
-export async function readMintDecimals(rpcUrl: string, mint: Address): Promise<number> {
-  const rpc = createVedaRpc(rpcUrl);
+export async function readMintDecimals(
+  rpc: Rpc<GetAccountInfoApi>,
+  mint: Address
+): Promise<number> {
   let account: unknown;
   try {
     account = (await rpc.getAccountInfo(mint, { encoding: "jsonParsed" }).send())?.value;
