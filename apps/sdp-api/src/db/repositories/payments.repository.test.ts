@@ -852,6 +852,35 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await expect(listProcessingIds("sandbox")).resolves.toEqual(["xfr_by_status_sandbox"]);
   });
 
+  it("finds a transfer by provider reference without a tenant only in the open cluster scope's environment", async () => {
+    const seedRampTransfer = async (id: string, projectId: string, providerReference: string) => {
+      await seedTransfer({ id, status: "awaiting_payment", projectId });
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_transfers SET provider = 'moonpay', provider_reference = ? WHERE id = ?"
+        )
+        .bind(providerReference, id)
+        .run();
+    };
+    await seedRampTransfer("xfr_by_reference_sandbox", projects.sandbox.id, "ref_sandbox");
+    await seedRampTransfer("xfr_by_reference_production", projects.production.id, "ref_production");
+    const findTransferId = async (environment: SdpEnvironment, providerReference: string) => {
+      const row = await runInClusterScope({ projectId: null, environment }, () =>
+        repo.getTransferByProviderReference({ provider: "moonpay", providerReference })
+      );
+      return row === null ? null : row.id;
+    };
+
+    await expect(findTransferId("sandbox", "ref_sandbox")).resolves.toBe(
+      "xfr_by_reference_sandbox"
+    );
+    await expect(findTransferId("sandbox", "ref_production")).resolves.toBeNull();
+    await expect(findTransferId("production", "ref_production")).resolves.toBe(
+      "xfr_by_reference_production"
+    );
+    await expect(findTransferId("production", "ref_sandbox")).resolves.toBeNull();
+  });
+
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const created = await repo.createTransfer({
