@@ -1,5 +1,9 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { Project } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProjectService } from "@/services/project.service";
+import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
@@ -10,6 +14,11 @@ vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   createProjectSponsorshipFeePayment,
 }));
 
+const { createProjectSponsorshipFeePayment: createRealProjectSponsorshipFeePayment } =
+  await vi.importActual<typeof import("@/services/sponsorship.service")>(
+    "@/services/sponsorship.service"
+  );
+
 const { resolveVaultSponsorship, vaultRentPayer } = await import("./vault-sponsorship");
 
 const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q" as Address;
@@ -19,7 +28,7 @@ function scope(env: Partial<Env> = {}) {
     env: {
       EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
       SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet.example",
+      KORA_RPC_URL_DEVNET: "https://kora-devnet.example",
       ...env,
     } as Env,
     input: {
@@ -42,7 +51,7 @@ describe("resolveVaultSponsorship", () => {
   it("sponsors devnet when the flag is on, resolving the sponsor once", async () => {
     const { env, input } = scope();
 
-    const fee = await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
+    const fee = await resolveVaultSponsorship(env, input);
 
     expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
     expect(vaultRentPayer(fee)).toBe(SPONSOR);
@@ -53,7 +62,7 @@ describe("resolveVaultSponsorship", () => {
     async (flag) => {
       const { env, input } = scope({ EARN_VAULT_FEE_SPONSORSHIP_ENABLED: flag });
 
-      const fee = await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
+      const fee = await resolveVaultSponsorship(env, input);
 
       expect(fee).toEqual({ kind: "wallet-pays" });
       expect(vaultRentPayer(fee)).toBeUndefined();
@@ -63,57 +72,18 @@ describe("resolveVaultSponsorship", () => {
     }
   );
 
-  /**
-   * The exit-safety guard, and the reason the predicate takes a cluster at all.
-   *
-   * One API process serves both clusters, and withdrawals are deliberately NOT
-   * environment-gated (ADR 0002 forbids money-out inheriting a money-in gate).
-   * A deployment-global flag would therefore sponsor mainnet withdrawals the
-   * instant devnet deposits were enabled, against a paymaster this deployment
-   * may not even have for that cluster: a 5xx on a customer's exit. Which
-   * clusters sponsor is configuration: a cluster with no Kora endpoint answers
-   * wallet-pays, flag or no flag.
-   */
-  it("keeps mainnet at wallet-pays while no mainnet paymaster is configured, flag on", async () => {
-    const { env, input } = scope({ SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet" });
-
-    const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
-
-    expect(fee).toEqual({ kind: "wallet-pays" });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
-  });
-
-  it("sponsors mainnet once its own paymaster is wired (PRO-1738)", async () => {
-    const { env, input } = scope({
-      SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet",
-      KORA_RPC_URL_MAINNET: "https://kora-mainnet",
-    });
-
-    const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
-
-    expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
-    // The cluster rides the scope so the mainnet Kora signs and the mainnet
-    // budget is charged, not the process default's.
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ cluster: "mainnet-beta" })
-    );
-  });
-
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
     // Not a raw fee-payment adapter: that boundary is what applies the budget
     // reservation and the Kora usage identity in managed deployments, so
     // bypassing it would spend the fee payer without any budget seeing it.
     const { env, input } = scope();
 
-    await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
+    await resolveVaultSponsorship(env, input);
 
     expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
       organizationId: "org_1",
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "devnet",
     });
   });
 
@@ -124,11 +94,7 @@ describe("resolveVaultSponsorship", () => {
     });
     const { env, input } = scope();
 
-    const pending = resolveVaultSponsorship(env, {
-      ...input,
-      cluster: "devnet",
-      deadline: createVaultDeadline(25),
-    });
+    const pending = resolveVaultSponsorship(env, { ...input, deadline: createVaultDeadline(25) });
     const rejection = expect(pending).rejects.toThrow(
       "Resolving the sponsored fee payer timed out after 25ms"
     );
@@ -136,5 +102,60 @@ describe("resolveVaultSponsorship", () => {
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
     vi.useRealTimers();
+  });
+});
+
+describe("resolveVaultSponsorship on a cluster without Kora", () => {
+  const productionProject: Project = {
+    id: "prj_vault_sponsorship_no_kora",
+    organizationId: "org_vault_sponsorship_no_kora",
+    name: "Vault Sponsorship Without Kora",
+    slug: "vault-sponsorship-no-kora",
+    description: null,
+    environment: "production",
+    settings: null,
+    status: "active",
+    createdBy: "usr_vault_sponsorship_no_kora",
+    createdAt: "2026-10-13T00:00:00.000Z",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const movement = {
+    organizationId: productionProject.organizationId,
+    projectId: productionProject.id,
+    walletId: "cwlt_vault_sponsorship_no_kora",
+    deadline: createVaultDeadline(),
+  };
+
+  function resolveInProduction(flag: string | undefined) {
+    const env: Env = {
+      ...testEnv,
+      EARN_VAULT_FEE_SPONSORSHIP_ENABLED: flag,
+      KORA_RPC_URL_MAINNET: undefined,
+    };
+    return runInClusterScope({ projectId: productionProject.id, environment: "production" }, () =>
+      resolveVaultSponsorship(env, movement)
+    );
+  }
+
+  beforeEach(() => {
+    vi.spyOn(ProjectService.prototype, "getProject").mockResolvedValue(productionProject);
+    createProjectSponsorshipFeePayment.mockImplementation(createRealProjectSponsorshipFeePayment);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("refuses the movement with PROVIDER_NOT_AVAILABLE when the flag is on", async () => {
+    await expect(resolveInProduction("true")).rejects.toMatchObject({
+      name: "FeePaymentError",
+      code: "PROVIDER_NOT_AVAILABLE",
+      message: "Kora is not configured for mainnet-beta: set KORA_RPC_URL_MAINNET",
+    });
+  });
+
+  it("lets the wallet pay when the flag is off", async () => {
+    await expect(resolveInProduction(undefined)).resolves.toEqual({ kind: "wallet-pays" });
+    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
   });
 });
