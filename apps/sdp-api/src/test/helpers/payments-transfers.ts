@@ -85,14 +85,14 @@ export async function readErrorResponse(
   return errorResponseSchema.parse(await response.json());
 }
 
-function paymentsRepository() {
+function paymentsRepository(projectId: string) {
   const db = getDb(env);
-  const scope = createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id });
+  const scope = createTenantScope({ organizationId: TEST_ORG.id, projectId });
   return createPostgresPaymentsRepository(db, scope);
 }
 
 export async function findTransferRow(id: string): Promise<PaymentTransferRow | null> {
-  return paymentsRepository().getTransferById({
+  return paymentsRepository(TEST_PROJECT.id).getTransferById({
     transferId: id,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -110,9 +110,19 @@ export async function countTransferRows(): Promise<number> {
 }
 
 export async function listTransferRows(): Promise<PaymentTransferRow[]> {
-  const result = await paymentsRepository().listTransfers({
+  return listProjectTransferRows(TEST_PROJECT.id);
+}
+
+/**
+ * The test organization's transfer rows in one of its projects, newest first.
+ *
+ * @param projectId - The project whose rows are read, under its own tenant scope.
+ * @returns Up to 100 rows.
+ */
+export async function listProjectTransferRows(projectId: string): Promise<PaymentTransferRow[]> {
+  const result = await paymentsRepository(projectId).listTransfers({
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
+    projectId,
     sortBy: "createdAt",
     sortDirection: "desc",
     limit: 100,

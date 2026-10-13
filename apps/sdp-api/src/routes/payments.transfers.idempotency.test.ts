@@ -3,6 +3,7 @@ import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   createFeePaymentAdapterMock,
   getRecentBlockhashMock,
@@ -22,6 +23,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
+  installClusterRpcStub();
   it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
     const signAndSendMock = vi
       .fn()

@@ -34,8 +34,9 @@ interface Pending<T> {
  */
 function heldRpc() {
   const accountReads: Array<{ addresses: string[] } & Pending<{ value: unknown[] }>> = [];
-  const tokenReads: Array<{ owner: string; programId: string } & Pending<{ value: unknown[] }>> =
-    [];
+  const tokenReads: Array<
+    { owner: string; programId: string } & Pending<{ context: { slot: bigint }; value: unknown[] }>
+  > = [];
   const rpc = {
     getMultipleAccounts: (addresses: string[]) => ({
       send: () =>
@@ -51,7 +52,7 @@ function heldRpc() {
 
 /** Answers every token-program read with no token accounts. */
 function answerTokenReadsEmpty(tokenReads: ReturnType<typeof heldRpc>["tokenReads"]) {
-  for (const read of tokenReads) read.resolve({ value: [] });
+  for (const read of tokenReads) read.resolve({ context: { slot: 1n }, value: [] });
 }
 
 function usdcAccount(amount: string) {
@@ -103,7 +104,7 @@ describe("readWalletBalances", () => {
     for (const read of tokenReads) {
       const holdsUsdc =
         read.owner === ownerAddress(1) && read.programId === SPL_TOKEN_PROGRAMS["spl-token"];
-      read.resolve({ value: holdsUsdc ? [usdcAccount("1500000")] : [] });
+      read.resolve({ context: { slot: 1n }, value: holdsUsdc ? [usdcAccount("1500000")] : [] });
     }
 
     const balances = await result;
@@ -190,7 +191,7 @@ describe("readWalletBalances", () => {
     const result = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_test");
     await flush();
     accountReads[0]?.resolve({ value: [{ lamports: 9n }] });
-    tokenReads[0]?.resolve({ value: [] });
+    tokenReads[0]?.resolve({ context: { slot: 1n }, value: [] });
     tokenReads[1]?.reject(new Error("rpc unavailable"));
 
     expect((await result).has("cwlt_1")).toBe(false);

@@ -133,7 +133,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
         destinationAddress: null,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail),
         amount: input.cryptoAmount,
         memo: null,
         type: "offramp",

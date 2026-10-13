@@ -1,4 +1,5 @@
 import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   ListPaymentSubscriptionPlansResponse,
@@ -122,7 +123,7 @@ export const createSubscriptionPlan = async (
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token, c.env),
+    token: normalizePaymentToken(body.token, currentClusterScope().cluster),
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),
@@ -250,7 +251,7 @@ export const prepareCreateSubscriptionPlan = async (
   const pullers = (
     body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
   ).map((value) => assertValidAddress(value, "pullers entry"));
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
   const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
 
@@ -268,7 +269,6 @@ export const prepareCreateSubscriptionPlan = async (
   });
   const updatedPlan = await persistPlanPda(c, plan, planPda);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     await getSponsoredFeePayer(c),
     [instruction],
     [owner]

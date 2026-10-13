@@ -36,11 +36,9 @@ import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import {
-  seedTestPrivyConnection,
-  writeTestPrivyCredentialSecret,
-} from "@/test/helpers/custody-connections";
+import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -53,19 +51,22 @@ import {
   getTransactionMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
-  mockTokenSupplyDecimalsOnce,
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
+  seedProductionPrivyWalletUnderTestKey,
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PRIVY_CREDENTIAL_ID,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
+  USDC_TOKEN_SUPPLY_RESULT,
 } from "@/test/helpers/payments-routes";
 import { seedConfigOwnedDuplicateProviderWallet } from "@/test/helpers/payments-transfers";
 import {
@@ -491,6 +492,7 @@ const unboundWalletCases: Array<{
 
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
   const recurringExecution = installRecurringExecutionHooks();
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
@@ -2617,7 +2619,7 @@ describe("Payments routes — recurring", () => {
       await mintLookupReleased;
       return getAccountInfo(...args);
     });
-    mockTokenSupplyDecimalsOnce();
+    rpc.answer("getTokenSupply", USDC_TOKEN_SUPPLY_RESULT);
 
     const preparePromise = app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
@@ -3280,52 +3282,28 @@ describe("Payments routes — recurring", () => {
     });
 
     it("skips a production project's due period once its organization loses production access", async () => {
-      // Production custody is BYOK only (HOO-1970), so the payment runs from a
-      // Privy wallet in the organization's production project, under a key
-      // re-homed there. The wallet carries the address the source signer signs as.
-      const productionProjectId = `${TEST_PROJECT.id}_production`;
       const productionWalletId = "cwlt_recurring_production";
       const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
       env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
       onTestFinished(() => {
         env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
       });
-      await seedTestPrivyConnection(getDb(env), {
-        organizationId: TEST_ORG.id,
-        projectId: productionProjectId,
-        connectionId: "cconn_recurring_production",
-        credentialId: "pcred_recurring_production",
-        createdBy: TEST_USER.id,
+      await seedProductionPrivyWalletUnderTestKey({
+        custodyWalletId: productionWalletId,
+        walletId: "privy_recurring_production",
+        publicKey: recurringExecution.sourceSigner().address,
         stored: await writeTestPrivyCredentialSecret(env, {
           organizationId: TEST_ORG.id,
-          credentialId: "pcred_recurring_production",
+          credentialId: TEST_PRODUCTION_PRIVY_CREDENTIAL_ID,
           appId: "recurring-production-app",
           appSecret: "recurring-production-secret",
         }),
-        providerAccountFingerprint: "sha256:recurring-production",
-        wallets: [
-          {
-            id: productionWalletId,
-            walletId: "privy_recurring_production",
-            publicKey: recurringExecution.sourceSigner().address,
-            label: "Production Recurring Wallet",
-            purpose: "transfer",
-            status: "active",
-          },
-        ],
-        lastCheckStatus: "success",
-        defaultCustodyWalletId: productionWalletId,
       });
-      await getDb(env)
-        .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
-        .bind(productionProjectId, TEST_API_KEY.id)
-        .run();
-      await seedCachedKey({ projectId: productionProjectId, environment: "production" });
 
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await activateRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,
-        projectId: productionProjectId,
+        projectId: TEST_PRODUCTION_PROJECT_ID,
         sourceCustodyWalletId: productionWalletId,
       });
       const signaturesBefore = signAndSendMock.mock.calls.length;

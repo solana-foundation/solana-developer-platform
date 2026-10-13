@@ -119,7 +119,7 @@ export async function createPendingBvnkOfframpTransfer(
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,
     destinationAddress: null,
-    token: rampTransferTokenMint(input.assetRail, c.env),
+    token: rampTransferTokenMint(input.assetRail),
     amount: input.cryptoAmount,
     memo: null,
     type: "offramp",
