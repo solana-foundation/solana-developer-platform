@@ -26,12 +26,12 @@ import {
   toProbeResultDto,
   verifyInstanceConnection,
 } from "@/services/private-channels";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { AppContext } from "../context";
 import {
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
   getPrivateChannelUserRepository,
-  loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
 import type {
@@ -63,7 +63,7 @@ export const connectPrivateChannelInstance = async (
 
   const body = c.req.valid("json");
   const { confirmReactivate, ...input } = body;
-  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const projectRpc = loadProjectRpcClient();
 
   const repo = getPrivateChannelInstanceRepository(c);
   const scope = { organizationId: auth.organizationId, projectId };
@@ -250,7 +250,7 @@ export const updatePrivateChannelInstance = async (
     authUrl: input.authUrl,
   });
 
-  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const projectRpc = loadProjectRpcClient();
   const probe = await verifyInstanceConnection(c.env, {
     gatewayUrl: input.gatewayUrl,
     authUrl: input.authUrl,

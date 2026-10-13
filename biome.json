@@ -356,8 +356,6 @@
         "**/apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.ts",
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
-        "**/apps/sdp-api/src/services/jobs/track-pending-withdrawals.ts",
-        "**/apps/sdp-api/src/services/private-channels/project-rpc.ts",
         "**/apps/sdp-api/src/services/sponsorship-budget.service.ts",
         "**/packages/sdp-api-integration/src/helpers/integration.ts",
         "**/packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts",

@@ -1,4 +1,5 @@
 import { HeliusRingsError } from "@sdp/helius-rings";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { AppDb } from "@/db";
 import {
   DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT,
@@ -389,13 +390,18 @@ export function createPostgresHeliusRingsOperationRepository(
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE signed_transaction IS NOT NULL
+            WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+              AND signed_transaction IS NOT NULL
               AND last_valid_block_height < ?
               AND state IN ('submitted', 'indexing')
             ORDER BY last_valid_block_height ASC
             LIMIT ?`
         )
-        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .bind(
+          currentClusterScope().environment,
+          input.blockHeight,
+          input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -474,12 +480,13 @@ export function createPostgresHeliusRingsOperationRepository(
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE state = 'failed'
+            WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+              AND state = 'failed'
               AND signed_transaction IS NOT NULL
             ORDER BY updated_at ASC
             LIMIT ?`
         )
-        .bind(input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .bind(currentClusterScope().environment, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -491,7 +498,8 @@ export function createPostgresHeliusRingsOperationRepository(
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE state = 'failed'
+            WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+              AND state = 'failed'
               AND signed_transaction IS NOT NULL
               AND failure_code IS NOT NULL
               AND failure_code <> 'manual_reconciliation_required'
@@ -500,7 +508,11 @@ export function createPostgresHeliusRingsOperationRepository(
             ORDER BY last_valid_block_height ASC
             LIMIT ?`
         )
-        .bind(input.blockHeight, input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT)
+        .bind(
+          currentClusterScope().environment,
+          input.blockHeight,
+          input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -581,12 +593,14 @@ export function createPostgresHeliusRingsOperationRepository(
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
-            WHERE state IN (${placeholders})
+            WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+              AND state IN (${placeholders})
               AND updated_at < ?
             ORDER BY updated_at ASC, id ASC
             LIMIT ?`
         )
         .bind(
+          currentClusterScope().environment,
           ...IN_FLIGHT_STATES,
           input.staleBefore,
           input.limit ?? DEFAULT_RINGS_IN_FLIGHT_SWEEP_LIMIT

@@ -14,13 +14,11 @@ import {
   mapPrivateChannelError,
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import { resolveAbandonedWithdrawalReservation } from "@/services/private-channels/withdraw";
 import type { AppContext } from "../context";
-import {
-  getPrivateChannelWithdrawalRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
+import { getPrivateChannelWithdrawalRepository } from "../context";
 import { requireIdempotencyKey } from "../helpers";
 import { authorizeMovementReplay, matchesWithdrawalReplay, requireMovementWrite } from "../replay";
 import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
@@ -93,7 +91,7 @@ export async function createPrivateChannelWithdrawal(
       context.projectId,
       context.wallet
     );
-    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+    const projectRpc = loadProjectRpcClient();
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).
     const gatewayAuth = await resolveGatewayAuth(c.env, {
