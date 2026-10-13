@@ -19,6 +19,7 @@ import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
 import { getDb } from "@/db";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import type { StoredCredentialSecret } from "@/services/credential-secret-store";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -26,6 +27,8 @@ import {
   restoreBvnkSandboxEnv,
   stubBvnkSandboxEnv,
 } from "@/test/helpers/bvnk";
+import type { JsonRpcResult } from "@/test/helpers/cluster-rpc";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
@@ -303,6 +306,53 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
   });
 }
 
+export const TEST_PRODUCTION_PRIVY_CREDENTIAL_ID = "pcred_payments_production";
+
+/**
+ * Seed an active BYOK Privy wallet in the Production project and re-home the test API key
+ * there, since Production custody is BYOK only.
+ *
+ * @param params - The wallet and the secret of its credential.
+ * @param params.custodyWalletId - The wallet record id.
+ * @param params.walletId - The provider wallet id.
+ * @param params.publicKey - The address the wallet's signer signs as.
+ * @param params.stored - The secret location of {@link TEST_PRODUCTION_PRIVY_CREDENTIAL_ID}.
+ * @returns Resolves once the wallet is seeded and the key serves the Production project.
+ */
+export async function seedProductionPrivyWalletUnderTestKey(params: {
+  custodyWalletId: string;
+  walletId: string;
+  publicKey: string;
+  stored: StoredCredentialSecret;
+}): Promise<void> {
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    connectionId: "cconn_payments_production",
+    credentialId: TEST_PRODUCTION_PRIVY_CREDENTIAL_ID,
+    createdBy: TEST_USER.id,
+    stored: params.stored,
+    providerAccountFingerprint: "sha256:payments-production",
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        walletId: params.walletId,
+        publicKey: params.publicKey,
+        label: "Production Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: params.custodyWalletId,
+  });
+  await getDb(env)
+    .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+    .bind(TEST_PRODUCTION_PROJECT_ID, TEST_API_KEY.id)
+    .run();
+  await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+}
+
 export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
@@ -341,16 +391,11 @@ export async function seedCounterparty(params?: {
   return id;
 }
 
-export function mockTokenSupplyDecimalsOnce(decimals = 6): void {
-  createRpcMock.mockReturnValueOnce({
-    getTokenSupply: () => ({
-      send: async () => ({ value: { decimals } }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-}
+/** A stubbed `getTokenSupply` result for a six-decimal USDC mint. */
+export const USDC_TOKEN_SUPPLY_RESULT = {
+  context: { slot: 1 },
+  value: { amount: "1000000000000", decimals: 6, uiAmount: 1000000, uiAmountString: "1000000" },
+} as const satisfies JsonRpcResult;
 
 export function mockRecurringActivationRpc(options: {
   tokenAccounts?: Array<{

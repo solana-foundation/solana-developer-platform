@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { solanaRpcError } from "@sdp/rpc/errors";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -22,7 +24,6 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const attachUsdValuesMock = vi.spyOn(heliusDasService, "attachUsdValuesToBalances");
 
@@ -151,14 +152,14 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 }
 
 describe("Custody wallet by ID route", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
-    createRpcMock.mockReset();
     getAccountInfoMock.mockReset();
     attachUsdValuesMock.mockReset();
 
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
@@ -368,7 +369,6 @@ describe("Custody wallet by ID route", () => {
       amount: "4200000000",
       decimals: 9,
     });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
@@ -433,7 +433,6 @@ describe("Custody wallet by ID route", () => {
       publicKey: TEST_SOLANA_ADDRESSES.wallet2,
     });
     expect(body.data.wallet).not.toHaveProperty("balance");
-    expect(createRpcMock).not.toHaveBeenCalled();
     expect(getAccountInfoMock).not.toHaveBeenCalled();
     expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
@@ -459,7 +458,6 @@ describe("Custody wallet by ID route", () => {
       };
     };
     expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
@@ -485,7 +483,6 @@ describe("Custody wallet by ID route", () => {
       };
     };
     expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
@@ -595,6 +592,45 @@ describe("Custody wallet by ID route", () => {
       uiAmount: "0",
       decimals: 9,
     });
+  });
+
+  it("keeps the zero SOL balance when the RPC read itself fails", async () => {
+    getAccountInfoMock.mockRejectedValueOnce(
+      solanaRpcError("RPC request timed out after 10000ms", { timedOut: true })
+    );
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: { wallet: { balance: { token: "SOL", amount: "0", uiAmount: "0", decimals: 9 } } },
+    });
+  });
+
+  it("answers RPC_NOT_CONFIGURED instead of a zero balance when the cluster has no pool", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "RPC_NOT_CONFIGURED",
+        message: "No RPC endpoint is configured for devnet",
+        details: { cluster: "devnet" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
 });
 
