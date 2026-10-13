@@ -1,3 +1,4 @@
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -11,7 +12,8 @@ export function runEarnVaultMovementsReconciliation(deps: {
   bg: BackgroundRunner;
   observability?: Observability;
 }): void {
-  const work = () => reconcileEarnVaultMovements(deps.env);
+  const work = () =>
+    runPerCluster("reconcile-earn-vault-movements", () => reconcileEarnVaultMovements(deps.env));
   const promise = deps.observability
     ? deps.observability.withMonitor(EARN_VAULT_MOVEMENTS_MONITOR, work, {
         schedule: { type: "crontab", value: EARN_VAULT_MOVEMENTS_CRON },

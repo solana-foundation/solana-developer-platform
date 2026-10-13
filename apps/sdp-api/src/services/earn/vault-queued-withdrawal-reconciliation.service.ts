@@ -6,7 +6,14 @@ import type {
   EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawProvider,
 } from "@sdp/earn";
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import {
+  createRpc,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
+import type { SdpEnvironment } from "@sdp/types";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -134,85 +141,25 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
  */
 export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+  const { environment } = currentClusterScope();
+  const rpcUrl = resolveClusterRpcUrl(env, earnClusterFor(environment));
   await ledger.cleanupExpiredReservations();
-  for (const environment of ["sandbox", "production"] as const) {
-    try {
-      const rpc = createRpc(env, {
-        rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(environment)),
-      });
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each environment has an independent confirmed block-height lease.
-      const height = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- cleanup is environment-scoped and bounded to two clusters.
-      await ledger.cleanupExpiredExternalBuilds({
-        environment,
-        currentBlockHeight: height.toString(),
-      });
-    } catch (error) {
-      getLogger().warn(
-        { environment, error },
-        "earn queued withdrawal reconciliation: abandoned-build cleanup deferred"
-      );
-    }
+  try {
+    const height = await createRpc(env, { rpcUrl })
+      .getBlockHeight({ commitment: "confirmed" })
+      .send();
+    await ledger.cleanupExpiredExternalBuilds({ currentBlockHeight: height.toString() });
+  } catch (error) {
+    getLogger().warn(
+      { environment, error },
+      "earn queued withdrawal reconciliation: abandoned-build cleanup deferred"
+    );
   }
   const actions = await ledger.claimUnsettledActions(ACTION_BATCH_SIZE);
   const stats = emptyStats(actions.length, 0);
-
-  for (const [environment, rows] of groupBy(actions, (row) => row.environment)) {
-    const cluster = earnClusterFor(environment);
-    const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  if (actions.length > 0) {
     const rpc = createRpc(env, { rpcUrl });
-    let statuses: Array<SignatureStatusInfo | null>;
-    try {
-      statuses = await getSignatureStatuses(
-        rpc,
-        rows.map((row) => row.signature as Signature),
-        { searchTransactionHistory: true }
-      );
-    } catch (error) {
-      stats.errors += rows.length;
-      getLogger().error(
-        { environment, actions: rows.length, error },
-        "earn queued withdrawal reconciliation: signature batch unreadable"
-      );
-      continue;
-    }
-
-    const needsHeight = rows.some(
-      (row, index) =>
-        statuses[index] === null && (row.status === "requested" || row.status === "submitted")
-    );
-    let currentHeight: bigint | null = null;
-    if (needsHeight) {
-      try {
-        currentHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
-      } catch (error) {
-        stats.errors += 1;
-        getLogger().error(
-          { environment, error },
-          "earn queued withdrawal reconciliation: block height unreadable"
-        );
-      }
-    }
-
-    for (const [index, actionRow] of rows.entries()) {
-      try {
-        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
-        const outcome = await reconcileAction(env, ledger, actionRow, statuses[index] ?? null, {
-          rpc: rpc as unknown as RawHistoryRpc,
-          rpcUrl,
-          currentHeight,
-        });
-        if (outcome === "advanced") stats.actionsAdvanced += 1;
-        else if (outcome === "failed") stats.actionsFailed += 1;
-        else if (outcome === "rebroadcast") stats.actionsRebroadcast += 1;
-      } catch (error) {
-        stats.errors += 1;
-        getLogger().error(
-          { actionId: actionRow.id, requestId: actionRow.withdrawal_request_id, error },
-          "earn queued withdrawal reconciliation: action remains unsettled"
-        );
-      }
-    }
+    await reconcileActionBatch(env, ledger, actions, { rpc, rpcUrl, environment }, stats);
   }
 
   stats.requestsClaimed = await visitOpenRequestsJustInTime(
@@ -240,6 +187,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
 
   logEvent(stats.errors > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_queued_withdrawal_reconciliation_tick",
+    environment,
     actions_claimed: stats.actionsClaimed,
     actions_advanced: stats.actionsAdvanced,
     actions_failed: stats.actionsFailed,
@@ -278,15 +226,81 @@ export async function visitOpenRequestsJustInTime(
   return claimed;
 }
 
-function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
-  const grouped = new Map<K, T[]>();
-  for (const row of rows) {
-    const value = key(row);
-    const bucket = grouped.get(value);
-    if (bucket) bucket.push(row);
-    else grouped.set(value, [row]);
+/**
+ * Reconcile one claimed batch of request/cancel actions against the scope's cluster: one
+ * signature-status read for the batch, one block height when an unseen signature needs it, then
+ * each action in order. A batch-wide read failure counts every action as an error.
+ *
+ * @param env - The process env.
+ * @param ledger - The queue ledger.
+ * @param actions - The claimed actions, all in `chain.environment`.
+ * @param chain - The scope cluster's client and identity.
+ * @param chain.rpc - The client for the scope's cluster.
+ * @param chain.rpcUrl - The endpoint behind `chain.rpc`, for rebroadcast.
+ * @param chain.environment - The scope's environment, for logs.
+ * @param stats - The tick's counters, updated in place.
+ * @returns Resolves once every action was attempted.
+ */
+async function reconcileActionBatch(
+  env: Env,
+  ledger: QueueLedger,
+  actions: readonly EarnVaultWithdrawalRequestActionRow[],
+  chain: { rpc: SolanaRpc; rpcUrl: string; environment: SdpEnvironment },
+  stats: QueueReconciliationStats
+): Promise<void> {
+  const { rpc, rpcUrl, environment } = chain;
+  let statuses: Array<SignatureStatusInfo | null>;
+  try {
+    statuses = await getSignatureStatuses(
+      rpc,
+      actions.map((row) => row.signature as Signature),
+      { searchTransactionHistory: true }
+    );
+  } catch (error) {
+    stats.errors += actions.length;
+    getLogger().error(
+      { environment, actions: actions.length, error },
+      "earn queued withdrawal reconciliation: signature batch unreadable"
+    );
+    return;
   }
-  return grouped;
+
+  const needsHeight = actions.some(
+    (row, index) =>
+      statuses[index] === null && (row.status === "requested" || row.status === "submitted")
+  );
+  let currentHeight: bigint | null = null;
+  if (needsHeight) {
+    try {
+      currentHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+    } catch (error) {
+      stats.errors += 1;
+      getLogger().error(
+        { environment, error },
+        "earn queued withdrawal reconciliation: block height unreadable"
+      );
+    }
+  }
+
+  for (const [index, actionRow] of actions.entries()) {
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
+      const outcome = await reconcileAction(env, ledger, actionRow, statuses[index] ?? null, {
+        rpc: rpc as unknown as RawHistoryRpc,
+        rpcUrl,
+        currentHeight,
+      });
+      if (outcome === "advanced") stats.actionsAdvanced += 1;
+      else if (outcome === "failed") stats.actionsFailed += 1;
+      else if (outcome === "rebroadcast") stats.actionsRebroadcast += 1;
+    } catch (error) {
+      stats.errors += 1;
+      getLogger().error(
+        { actionId: actionRow.id, requestId: actionRow.withdrawal_request_id, error },
+        "earn queued withdrawal reconciliation: action remains unsettled"
+      );
+    }
+  }
 }
 
 export async function reconcileAction(

@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
@@ -43,6 +44,9 @@ const OUTBOX_BATCH_SIZE = 256;
  * (actively harmful: it reads as a drained queue and would CLEAR a firing
  * backlog alert mid-incident). Alert on the absence of the tick, never on a
  * fabricated one.
+ *
+ * Runs once per cluster inside `runPerCluster`: every claim reads only the
+ * scope's environment, and each tick carries that `environment`.
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // Start the independent queue/PDA projection before touching the instant
@@ -93,6 +97,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     depositRepair.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
+    environment: currentClusterScope().environment,
     claimed: stats.claimed,
     settled: stats.settled,
     failed: stats.failed,

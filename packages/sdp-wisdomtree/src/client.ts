@@ -1,5 +1,5 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
-import { badRequest } from "@sdp/earn/errors";
+import { badRequest, internalError } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
 import type {
@@ -13,6 +13,7 @@ import type {
   EarnVaultWithdrawInput,
 } from "@sdp/earn/types";
 import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type SolanaCluster,
@@ -38,6 +39,24 @@ import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
 
 /** Maximum time a single WisdomTree RPC request may hold a worker open. */
 export const WISDOMTREE_RPC_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Refuse a runtime whose environment differs from the open cluster scope's: program ids come from
+ * `ctx.environment` and clients from the scope, so a mismatch would read one cluster with the
+ * other cluster's programs.
+ *
+ * @param ctx - The request's runtime context.
+ * @throws SdpEarnError `INTERNAL_ERROR` when the two environments differ.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+function assertContextMatchesScope(ctx: EarnRuntimeContext): void {
+  const scopeEnvironment = currentClusterScope().environment;
+  if (scopeEnvironment !== ctx.environment) {
+    throw internalError(
+      `WisdomTree was asked to run on ${ctx.environment} inside a ${scopeEnvironment} cluster scope`
+    );
+  }
+}
 
 /** Same API-owned execution guard shape as `KaminoVaultOperationRunner`. */
 export type WisdomTreeVaultOperationRunner = <T>(
@@ -109,10 +128,12 @@ export class WisdomTreeVaultDirectClient
    *
    * @param ctx - The request's runtime context.
    * @returns The runtime every chain capability receives.
+   * @throws SdpEarnError `INTERNAL_ERROR` when `ctx.environment` differs from the scope's.
    * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
    */
   private runtime(ctx: EarnRuntimeContext): WisdomTreeRuntime {
+    assertContextMatchesScope(ctx);
     return {
       cluster: CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment],
       rpc: createClusterBoundedRpc({ timeoutMs: WISDOMTREE_RPC_REQUEST_TIMEOUT_MS }),
