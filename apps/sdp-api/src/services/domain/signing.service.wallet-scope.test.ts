@@ -4,8 +4,8 @@ import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type * as MoneyPathEvents from "@/runtime/money-path-events";
-import { SigningService } from "@/services/domain/signing.service";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { createSigningService } from "@/services/domain/signing.service";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -54,7 +54,7 @@ function scopeRefusals() {
   );
 }
 
-describe("createOrgSignerForCustodyWallet cluster scope guard", () => {
+describe("SigningService wallet cluster scope guard", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).execute(
@@ -75,13 +75,15 @@ describe("createOrgSignerForCustodyWallet cluster scope guard", () => {
     vi.restoreAllMocks();
   });
 
-  it("refuses another project's wallet in a request scope before any provider call", async () => {
-    const resolveSigner = vi.spyOn(SigningService.prototype, "getTransactionSignerForWalletRecord");
+  it("refuses another project's wallet in a request scope before the runtime target", async () => {
+    const resolveSigner = vi.spyOn(
+      CustodyRuntimeTargets.prototype,
+      "getTransactionSignerForWalletRecord"
+    );
 
     await expect(
       runInClusterScope({ projectId: PROJECT_IDS.sandbox, environment: "sandbox" }, () =>
-        createOrgSignerForCustodyWallet(
-          env,
+        createSigningService(env).getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
           PROJECT_IDS.production,
           CUSTODY_WALLET_ID
@@ -108,12 +110,14 @@ describe("createOrgSignerForCustodyWallet cluster scope guard", () => {
   });
 
   it("refuses a wallet whose project is in the other environment in a job scope", async () => {
-    const resolveSigner = vi.spyOn(SigningService.prototype, "getTransactionSignerForWalletRecord");
+    const resolveSigner = vi.spyOn(
+      CustodyRuntimeTargets.prototype,
+      "getTransactionSignerForWalletRecord"
+    );
 
     await expect(
       runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        createOrgSignerForCustodyWallet(
-          env,
+        createSigningService(env).getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
           PROJECT_IDS.production,
           CUSTODY_WALLET_ID
@@ -140,12 +144,14 @@ describe("createOrgSignerForCustodyWallet cluster scope guard", () => {
   });
 
   it("refuses a wallet whose project belongs to another organization in a job scope", async () => {
-    const resolveSigner = vi.spyOn(SigningService.prototype, "getTransactionSignerForWalletRecord");
+    const resolveSigner = vi.spyOn(
+      CustodyRuntimeTargets.prototype,
+      "getTransactionSignerForWalletRecord"
+    );
 
     await expect(
       runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        createOrgSignerForCustodyWallet(
-          env,
+        createSigningService(env).getTransactionSignerForWalletRecord(
           ORGANIZATION_ID,
           OTHER_ORGANIZATION_PROJECT_IDS.sandbox,
           CUSTODY_WALLET_ID
