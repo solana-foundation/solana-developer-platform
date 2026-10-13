@@ -57,6 +57,18 @@ describe("withReadSocketRetry", () => {
     });
   }
 
+  for (const method of ["searchAssets", "getAssetBatch"]) {
+    it(`re-sends the DAS read ${method} once after its socket died`, async () => {
+      const { sent, transport } = scriptedTransport([
+        socketDeath("UND_ERR_SOCKET", "other side closed"),
+        ANSWER,
+      ]);
+      const response = await withReadSocketRetry(transport)({ payload: payload(method) });
+      assert.deepEqual(response, ANSWER);
+      assert.equal(sent.length, 2);
+    });
+  }
+
   for (const method of [...NEVER_RESENT, "custom"]) {
     it(`never re-sends ${method}`, async () => {
       const error = socketDeath("UND_ERR_SOCKET", "other side closed");

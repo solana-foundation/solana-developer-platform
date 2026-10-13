@@ -1,9 +1,9 @@
-import { getSolanaConfig } from "@sdp/rpc";
-import { withHeliusApiKey } from "@sdp/rpc/relay";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import type { Address, Signature } from "@solana/kit";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
@@ -12,7 +12,6 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
 import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
 
@@ -35,50 +34,14 @@ interface ParsedInstructionRecord {
   program?: string;
 }
 
-interface ParsedInstructionGroup {
-  instructions?: ParsedInstructionRecord[];
-}
-
 interface ParsedAccountKey {
   pubkey?: string;
 }
 
 interface RpcTokenBalanceAmount {
   amount?: string;
-  decimals?: number;
+  decimals?: bigint;
   uiAmountString?: string | null;
-}
-
-interface RpcTokenBalanceRecord {
-  accountIndex?: number;
-  mint?: string;
-  owner?: string;
-  uiTokenAmount?: RpcTokenBalanceAmount;
-}
-
-interface ParsedTransactionResponse {
-  error?: {
-    message?: string;
-  };
-  result?: {
-    blockTime?: number | null;
-    meta?: {
-      err?: unknown;
-      fee?: number;
-      innerInstructions?: ParsedInstructionGroup[];
-      postBalances?: number[];
-      postTokenBalances?: RpcTokenBalanceRecord[];
-      preBalances?: number[];
-      preTokenBalances?: RpcTokenBalanceRecord[];
-    } | null;
-    slot?: number;
-    transaction?: {
-      message?: {
-        accountKeys?: Array<string | ParsedAccountKey>;
-        instructions?: ParsedInstructionRecord[];
-      };
-    };
-  } | null;
 }
 
 interface ObservedTransferContext {
@@ -102,25 +65,6 @@ function resolveWalletIdForTokenAccount(
   return context.walletIdsByAddress.get(tokenAccountAddress) ?? null;
 }
 
-export function createSignatureHistoryRpc(env: Env) {
-  // Prefer Helius when configured for richer signature history (getSignaturesForAddress).
-  // Falls back to the default RPC URL if Helius is not configured.
-  //
-  // TODO: Replace getSignaturesForAddress with a dedicated indexer (Helius webhooks,
-  // Triton stream, or similar) for production-scale history and comprehensive inbound
-  // transfer tracking. The current approach is limited to the most recent ~200 signatures.
-  const url = env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
-  return solanaRpc.createRpc(env, { rpcUrl: url });
-}
-
-function resolveSignatureHistoryRpcUrl(env: Env): string {
-  return env.SOLANA_RPC_HELIUS_URL
-    ? withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY)
-    : getSolanaConfig(env).rpcUrl;
-}
-
 function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefined): string | null {
   if (typeof accountKey === "string" && accountKey.trim()) {
     return accountKey;
@@ -138,12 +82,34 @@ function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefin
   return null;
 }
 
-function flattenParsedInstructions(payload: ParsedTransactionResponse): ParsedInstructionRecord[] {
-  const topLevel = payload.result?.transaction?.message?.instructions ?? [];
-  const inner = (payload.result?.meta?.innerInstructions ?? []).flatMap(
-    (group) => group.instructions ?? []
+/**
+ * A transaction's top-level and inner instructions that the RPC parsed, with each parsed
+ * `info` as a plain record; instructions the RPC couldn't parse are dropped.
+ *
+ * @param parsedTransaction - The `jsonParsed` transaction.
+ * @returns The parsed instructions, top-level first.
+ */
+function flattenParsedInstructions(
+  parsedTransaction: ParsedTransaction
+): ParsedInstructionRecord[] {
+  const inner = (parsedTransaction.meta?.innerInstructions ?? []).flatMap(
+    (group) => group.instructions
   );
-  return [...topLevel, ...inner];
+  return [...parsedTransaction.transaction.message.instructions, ...inner].flatMap((instruction) =>
+    "parsed" in instruction
+      ? [
+          {
+            program: instruction.program,
+            parsed: {
+              type: instruction.parsed.type,
+              info: instruction.parsed.info
+                ? Object.fromEntries(Object.entries(instruction.parsed.info))
+                : undefined,
+            },
+          },
+        ]
+      : []
+  );
 }
 
 function resolveObservedTimestamp(blockTime: bigint | number | null | undefined): string {
@@ -156,17 +122,6 @@ function resolveObservedTimestamp(blockTime: bigint | number | null | undefined)
   }
 
   return new Date().toISOString();
-}
-
-function resolveObservedSlot(
-  freshSlot: bigint | null | undefined,
-  cachedSlot: number | null | undefined
-): number | null {
-  if (typeof freshSlot === "bigint") {
-    return Number(freshSlot);
-  }
-
-  return typeof cachedSlot === "number" && Number.isFinite(cachedSlot) ? cachedSlot : null;
 }
 
 function readInstructionInfoString(
@@ -183,20 +138,26 @@ function readInstructionInfoInteger(
 ): bigint | null {
   const value = info?.[key];
 
+  if (typeof value === "bigint") {
+    return value >= 0n ? value : null;
+  }
+
   if (typeof value === "string" && /^\d+$/.test(value.trim())) {
     return BigInt(value.trim());
   }
 
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    Number.isInteger(value) &&
-    value >= 0
-  ) {
-    return BigInt(value);
-  }
-
   return null;
+}
+
+/**
+ * A parsed instruction's token decimals, which kit always upcasts to a `bigint` (its
+ * `getTransaction` numeric allow-list never covers instruction `info`).
+ *
+ * @param value - The raw decimals value.
+ * @returns The decimals, or `null` when `value` isn't a `bigint`.
+ */
+function readDecimals(value: unknown): number | null {
+  return typeof value === "bigint" ? Number(value) : null;
 }
 
 function readTokenAmountInfo(
@@ -205,13 +166,8 @@ function readTokenAmountInfo(
   const rawTokenAmount = info?.tokenAmount;
   if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
     const rawAmount = readInstructionInfoInteger(info, "amount");
-    const decimalsValue = info?.decimals;
-    if (
-      rawAmount === null ||
-      typeof decimalsValue !== "number" ||
-      !Number.isFinite(decimalsValue) ||
-      !Number.isInteger(decimalsValue)
-    ) {
+    const decimalsValue = readDecimals(info?.decimals);
+    if (rawAmount === null || decimalsValue === null) {
       return null;
     }
 
@@ -228,12 +184,7 @@ function readTokenAmountInfo(
     typeof tokenAmountRecord.amount === "string" && /^\d+$/.test(tokenAmountRecord.amount)
       ? BigInt(tokenAmountRecord.amount)
       : null;
-  const decimalsValue =
-    typeof tokenAmountRecord.decimals === "number" &&
-    Number.isFinite(tokenAmountRecord.decimals) &&
-    Number.isInteger(tokenAmountRecord.decimals)
-      ? tokenAmountRecord.decimals
-      : null;
+  const decimalsValue = readDecimals(tokenAmountRecord.decimals);
 
   if (amountValue === null || decimalsValue === null) {
     return null;
@@ -283,7 +234,7 @@ export function dedupeSignatureHistory(
 
 export async function resolveWalletTokenAccountAddresses(
   c: AppContext,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: solanaRpc.SolanaRpc,
   owner: Address,
   walletId: string
 ): Promise<Address[]> {
@@ -303,7 +254,7 @@ export async function resolveWalletTokenAccountAddresses(
   }
 }
 
-type ParsedTransaction = NonNullable<ParsedTransactionResponse["result"]>;
+type ParsedTransaction = NonNullable<Awaited<ReturnType<typeof fetchParsedTransactionFromRpc>>>;
 
 /**
  * Cap on cached parsed transactions. Only finalized transaction bodies are
@@ -324,12 +275,12 @@ interface ParsedTransactionCacheEntry {
 }
 
 const parsedTransactionCache = new Map<string, ParsedTransactionCacheEntry>();
-const inFlightParsedTransactions = new Map<string, Promise<ParsedTransactionResponse["result"]>>();
+const inFlightParsedTransactions = new Map<string, Promise<ParsedTransaction | null>>();
 
 /**
  * Drops every cached parsed transaction and in-flight lookup. Cache entries
- * are keyed by signature alone and shared across tenants (a parsed body is
- * tenant-independent), so callers that stub the RPC must clear the cache to
+ * are keyed by cluster and signature and shared across tenants (a parsed body
+ * is tenant-independent), so callers that stub the RPC must clear the cache to
  * stay isolated.
  */
 export function clearObservedTransferCaches() {
@@ -337,22 +288,22 @@ export function clearObservedTransferCaches() {
   inFlightParsedTransactions.clear();
 }
 
-function readCachedParsedTransaction(signature: string): ParsedTransaction | null {
-  const entry = parsedTransactionCache.get(signature);
+function readCachedParsedTransaction(cacheKey: string): ParsedTransaction | null {
+  const entry = parsedTransactionCache.get(cacheKey);
   if (!entry) {
     return null;
   }
 
   if (entry.expiresAt <= Date.now()) {
-    parsedTransactionCache.delete(signature);
+    parsedTransactionCache.delete(cacheKey);
     return null;
   }
 
   return entry.value;
 }
 
-function writeParsedTransactionCache(signature: string, parsed: ParsedTransaction): void {
-  if (!parsedTransactionCache.has(signature)) {
+function writeParsedTransactionCache(cacheKey: string, parsed: ParsedTransaction): void {
+  if (!parsedTransactionCache.has(cacheKey)) {
     while (parsedTransactionCache.size >= PARSED_TRANSACTION_CACHE_MAX_ENTRIES) {
       const oldest = parsedTransactionCache.keys().next();
       if (oldest.done) {
@@ -362,7 +313,7 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
     }
   }
 
-  parsedTransactionCache.set(signature, {
+  parsedTransactionCache.set(cacheKey, {
     value: parsed,
     expiresAt: Date.now() + PARSED_TRANSACTION_CACHE_TTL_MS,
   });
@@ -377,54 +328,32 @@ function writeParsedTransactionCache(signature: string, parsed: ParsedTransactio
  * of "finalized" keeps the body uncached: a fork can still drop and re-land a
  * merely-confirmed transaction with different metadata.
  */
-async function fetchParsedTransactionFromRpc(
-  env: Env,
-  signature: string
-): Promise<ParsedTransactionResponse["result"]> {
-  const rpcResponse = await fetch(resolveSignatureHistoryRpcUrl(env), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTransaction",
-      params: [
-        signature,
-        { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 },
-      ],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as ParsedTransactionResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  return payload.result ?? null;
+async function fetchParsedTransactionFromRpc(signature: Signature) {
+  return await createClusterRpc()
+    .getTransaction(signature, {
+      commitment: "confirmed",
+      encoding: "jsonParsed",
+      maxSupportedTransactionVersion: 0,
+    })
+    .send();
 }
 
 async function fetchParsedTransaction(
-  env: Env,
-  signature: string,
+  signature: Signature,
   isFinalized: boolean
-): Promise<ParsedTransactionResponse["result"]> {
-  const cached = readCachedParsedTransaction(signature);
+): Promise<ParsedTransaction | null> {
+  const cacheKey = `${currentClusterScope().cluster} ${signature}`;
+  const cached = readCachedParsedTransaction(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const inFlight = inFlightParsedTransactions.get(signature);
+  const inFlight = inFlightParsedTransactions.get(cacheKey);
   if (inFlight) {
     return inFlight;
   }
 
-  const pending = fetchParsedTransactionFromRpc(env, signature)
+  const pending = fetchParsedTransactionFromRpc(signature)
     .then((parsedTransaction) => {
       // Cache a body only once the fresh signature history reports the
       // signature finalized. A null means the transaction is not yet indexed
@@ -436,21 +365,21 @@ async function fetchParsedTransaction(
       // is never traded for the cache). Failures stay uncached so the next
       // read retries.
       if (parsedTransaction && isFinalized) {
-        writeParsedTransactionCache(signature, parsedTransaction);
+        writeParsedTransactionCache(cacheKey, parsedTransaction);
       }
       return parsedTransaction;
     })
     .finally(() => {
-      inFlightParsedTransactions.delete(signature);
+      inFlightParsedTransactions.delete(cacheKey);
     });
-  inFlightParsedTransactions.set(signature, pending);
+  inFlightParsedTransactions.set(cacheKey, pending);
 
   return pending;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
 function buildObservedTransferRows(
-  parsedTransaction: ParsedTransactionResponse["result"],
+  parsedTransaction: ParsedTransaction | null,
   signatureInfo: SignatureHistoryEntry,
   context: ObservedTransferContext
 ): TransferRow[] {
@@ -461,15 +390,16 @@ function buildObservedTransferRows(
   const signature = String(signatureInfo.signature);
   // A transaction confirmed on a minority fork can be dropped and re-land in a
   // different slot, so slot and blockTime always come from the fresh
-  // signature-history entry; the cached body's copy is only a fallback for
-  // history entries that lack the metadata.
+  // signature-history entry; the cached body's blockTime is only a fallback for
+  // history entries that lack one.
   const timestamp = resolveObservedTimestamp(
     signatureInfo.blockTime ?? parsedTransaction.blockTime
   );
-  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
+  const slot = Number(signatureInfo.slot);
   const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
+  const fee = parsedTransaction.meta === null ? null : Number(parsedTransaction.meta.fee);
 
-  const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
+  const accountKeys = parsedTransaction.transaction.message.accountKeys
     .map((accountKey) => resolveParsedAccountKey(accountKey))
     .filter((accountKey): accountKey is string => Boolean(accountKey));
   const tokenAccountMetadata = new Map<
@@ -481,10 +411,6 @@ function buildObservedTransferRows(
   const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
 
   for (const balance of [...preTokenBalances, ...postTokenBalances]) {
-    if (typeof balance.accountIndex !== "number") {
-      continue;
-    }
-
     const accountAddress = accountKeys[balance.accountIndex];
     if (!accountAddress) {
       continue;
@@ -509,7 +435,7 @@ function buildObservedTransferRows(
     });
   }
 
-  for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
+  for (const instruction of flattenParsedInstructions(parsedTransaction)) {
     const parsedType = instruction.parsed?.type;
     const info = instruction.parsed?.info;
 
@@ -572,7 +498,7 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
+        fee,
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
@@ -660,7 +586,7 @@ function buildObservedTransferRows(
         submission_started_at: null,
         slot,
         block_time: timestamp,
-        fee: parsedTransaction.meta?.fee ?? null,
+        fee,
         error: null,
         initiated_by_key_id: null,
         idempotency_key: null,
@@ -756,7 +682,7 @@ function buildObservedTransferRows(
       submission_started_at: null,
       slot,
       block_time: timestamp,
-      fee: parsedTransaction.meta?.fee ?? null,
+      fee,
       error: null,
       initiated_by_key_id: null,
       idempotency_key: null,
@@ -772,7 +698,6 @@ function buildObservedTransferRows(
 }
 
 export async function buildObservedTransfersForSignatures(
-  env: Env,
   signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
@@ -790,11 +715,7 @@ export async function buildObservedTransfersForSignatures(
       // The history entry was fetched fresh for this request, so its
       // confirmationStatus is the current finality signal for the body gate.
       const isFinalized = signatureInfo.confirmationStatus === "finalized";
-      const parsedTransaction = await fetchParsedTransaction(
-        env,
-        String(signatureInfo.signature),
-        isFinalized
-      );
+      const parsedTransaction = await fetchParsedTransaction(signatureInfo.signature, isFinalized);
       return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );

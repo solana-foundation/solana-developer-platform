@@ -161,6 +161,65 @@ export function installClusterRpcStub(): ClusterRpcStub {
   };
 }
 
+interface ClusterRpcRawAnswers extends ClusterRpcStub {
+  /**
+   * Answer `method` on both clusters for the rest of the current test with `rawResultJson`
+   * spliced verbatim into the response body as its `result`, ahead of any
+   * {@link ClusterRpcStub.answer} for it, so the result can carry integers beyond 2^53 that kit
+   * decodes as exact bigints.
+   *
+   * @param method - The JSON-RPC method name.
+   * @param rawResultJson - The JSON text of the `result` the endpoint returns.
+   */
+  answerRawJson(method: string, rawResultJson: string): void;
+}
+
+/**
+ * {@link installClusterRpcStub}, also answering the methods a test registers with
+ * {@link ClusterRpcRawAnswers.answerRawJson} from raw JSON text; methods without a raw answer fall
+ * through to the stub. Register at `describe` level.
+ *
+ * @returns The current test's calls, and the answer and raw answer registries.
+ */
+export function installClusterRpcRawAnswers(): ClusterRpcRawAnswers {
+  const stub = installClusterRpcStub();
+  const calls: ClusterRpcCall[] = [];
+  const rawResults = new Map<string, string>();
+
+  beforeEach(() => {
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (isLoopbackRequest(input)) {
+        return stubbedFetch(input, init);
+      }
+      const { cluster, body } = readJsonRpcFetch(input, init);
+      const { id, method } = jsonRpcRequestSchema.parse(body);
+      calls.push({ cluster, method });
+      const rawResultJson = rawResults.get(method);
+      if (rawResultJson === undefined) {
+        return stubbedFetch(input, init);
+      }
+      return new Response(
+        `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":${rawResultJson}}`,
+        { headers: { "content-type": "application/json" } }
+      );
+    };
+  });
+
+  afterEach(() => {
+    calls.length = 0;
+    rawResults.clear();
+  });
+
+  return {
+    calls,
+    answer: stub.answer,
+    answerRawJson(method, rawResultJson) {
+      rawResults.set(method, rawResultJson);
+    },
+  };
+}
+
 const jsonRpcParamsSchema = z.object({
   method: z.string(),
   params: z.array(z.unknown()),
