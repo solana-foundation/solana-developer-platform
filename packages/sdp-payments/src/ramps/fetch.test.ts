@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 import {
   extractProviderErrorMessage,
@@ -123,9 +124,12 @@ describe("providerFetchJson failures", () => {
 
   async function failure(): Promise<SdpPaymentsError> {
     try {
-      await providerFetchJson<unknown>("moonpay", "https://api.example.test/quote", {
-        method: "GET",
-      });
+      await providerFetchJson(
+        "moonpay",
+        "https://api.example.test/quote",
+        { method: "GET" },
+        z.object({ quoteCurrencyAmount: z.number() })
+      );
     } catch (error) {
       assert.ok(error instanceof SdpPaymentsError);
       return error;
@@ -157,5 +161,50 @@ describe("providerFetchJson failures", () => {
     assert.equal(error.code, "PROVIDER_UNAVAILABLE");
     assert.equal(error.message, "moonpay request failed with status 503");
     assert.equal(error.diagnostics, undefined);
+  });
+});
+
+describe("providerFetchJson response schema", () => {
+  const quoteSchema = z.object({ quoteCurrencyAmount: z.number() });
+
+  function respondOk(body: unknown): void {
+    globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 200 });
+  }
+
+  it("returns the fields the schema names", async () => {
+    respondOk({ quoteCurrencyAmount: 0.3, internalField: "dropped" });
+
+    const quote = await providerFetchJson(
+      "moonpay",
+      "https://api.example.test/quote",
+      { method: "GET" },
+      quoteSchema
+    );
+
+    assert.deepEqual(quote, { quoteCurrencyAmount: 0.3 });
+  });
+
+  it("fails closed on a response that does not match, naming only the field", async () => {
+    respondOk({ quoteCurrencyAmount: "0.3 for jane.doe@example.com" });
+
+    await assert.rejects(
+      providerFetchJson(
+        "moonpay",
+        "https://api.example.test/quote",
+        { method: "GET" },
+        quoteSchema
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SdpPaymentsError);
+        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(error.message, "moonpay returned an unexpected response");
+        assert.deepEqual(error.details, { provider: "moonpay" });
+        assert.deepEqual(error.diagnostics, {
+          issues: [{ path: "quoteCurrencyAmount", code: "invalid_type" }],
+        });
+        assert.ok(!JSON.stringify(error.diagnostics).includes("jane.doe"));
+        return true;
+      }
+    );
   });
 });

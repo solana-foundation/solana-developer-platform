@@ -1,5 +1,6 @@
 import { scrubTelemetryString } from "@sdp/redaction";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { z } from "zod";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 
 export interface ProviderRequestInit<TBody> {
@@ -146,11 +147,25 @@ export async function providerFetch<TBody = never>(
   return { response, raw, parsed };
 }
 
-export async function providerFetchJson<TResponse, TBody = never>(
+/**
+ * Performs a provider request and validates its JSON body against `schema`.
+ * A non-2xx answer becomes the classified error; an unparseable body, or one
+ * that does not match the schema, is PROVIDER_UNAVAILABLE. A schema requires
+ * exactly the fields the adapter reads, so a mismatch names a field the
+ * adapter could not have used, and its issue paths ride in diagnostics.
+ *
+ * @param provider - Ramp provider id, used in errors and telemetry.
+ * @param url - Request URL.
+ * @param init - Method, headers, body, and optional abort signal.
+ * @param schema - The fields the adapter reads from the response.
+ * @returns The validated response body.
+ */
+export async function providerFetchJson<TSchema extends z.ZodType, TBody = never>(
   provider: RampProviderId,
   url: string,
-  init: ProviderRequestInit<TBody>
-): Promise<TResponse> {
+  init: ProviderRequestInit<TBody>,
+  schema: TSchema
+): Promise<z.output<TSchema>> {
   const { response, parsed } = await providerFetch(provider, url, init);
 
   if (!response.ok) {
@@ -175,5 +190,19 @@ export async function providerFetchJson<TResponse, TBody = never>(
     );
   }
 
-  return parsed as TResponse;
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    throw new SdpPaymentsError(
+      "PROVIDER_UNAVAILABLE",
+      `${provider} returned an unexpected response`,
+      { provider },
+      {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.map(String).join("."),
+          code: issue.code,
+        })),
+      }
+    );
+  }
+  return result.data;
 }

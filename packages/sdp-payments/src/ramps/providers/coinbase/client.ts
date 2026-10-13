@@ -133,38 +133,31 @@ export function distillCoinbaseRailSupport(raw: unknown): ProviderRailSupportDis
   };
 }
 
-interface CoinbaseAmount {
-  value: string;
-}
+const coinbaseAmountSchema = z.object({ value: z.string() });
 
-interface CoinbaseBuyQuoteResponse {
-  purchase_amount: CoinbaseAmount;
-  payment_subtotal: CoinbaseAmount;
-  payment_total: CoinbaseAmount;
-  coinbase_fee: CoinbaseAmount;
-  network_fee: CoinbaseAmount;
-}
+/** The fields `estimateOnramp` reads from a Coinbase buy quote. */
+const coinbaseBuyQuoteSchema = z.object({
+  purchase_amount: coinbaseAmountSchema,
+  payment_subtotal: coinbaseAmountSchema,
+  payment_total: coinbaseAmountSchema,
+  coinbase_fee: coinbaseAmountSchema,
+  network_fee: coinbaseAmountSchema,
+});
 
-interface CoinbaseOrderFee {
-  amount: string;
-  currency: string;
-  type: string;
-}
-
-interface CoinbaseCreateOrderResponse {
-  order: {
-    orderId: string;
-    status: string;
-    paymentCurrency: string;
-    paymentSubtotal: string;
-    paymentTotal: string;
-    purchaseCurrency: string;
-    purchaseAmount: string;
-    exchangeRate: string;
-    fees: CoinbaseOrderFee[];
-  };
-  paymentLink: { url: string; paymentLinkType: string };
-}
+/** The fields `createOnrampQuote` reads from a Coinbase order. */
+const coinbaseCreateOrderSchema = z.object({
+  order: z.object({
+    orderId: z.string(),
+    paymentCurrency: z.string(),
+    paymentSubtotal: z.string(),
+    paymentTotal: z.string(),
+    purchaseCurrency: z.string(),
+    purchaseAmount: z.string(),
+    exchangeRate: z.string(),
+    fees: z.array(z.object({ amount: z.string(), currency: z.string(), type: z.string() })),
+  }),
+  paymentLink: z.object({ url: z.string(), paymentLinkType: z.string() }),
+});
 
 export class CoinbaseRampClient implements RampProvider {
   readonly id = "coinbase";
@@ -220,10 +213,11 @@ export class CoinbaseRampClient implements RampProvider {
     { env }: RampRuntimeContext,
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const quote = await this.request<CoinbaseBuyQuoteResponse>(
+    const quote = await this.request(
       env,
       "POST",
       `${CDP_V1_API_BASE_URL}/onramp/v1/buy/quote`,
+      coinbaseBuyQuoteSchema,
       {
         purchase_currency: getCryptoRailAssetLabel(input.assetRail),
         purchase_network: SOLANA_NETWORK,
@@ -312,10 +306,11 @@ export class CoinbaseRampClient implements RampProvider {
     const partnerUserRef = `sandbox-${input.externalCustomerId}`;
     const phoneNumber = input.phone.replace(/[\s()-]/g, "");
 
-    const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(
+    const { order, paymentLink } = await this.request(
       env,
       "POST",
       CDP_V2_ORDERS_URL,
+      coinbaseCreateOrderSchema,
       {
         paymentCurrency: input.fiatCurrency ?? "USD",
         purchaseCurrency: getCryptoRailAssetLabel(input.assetRail),
@@ -375,12 +370,13 @@ export class CoinbaseRampClient implements RampProvider {
     throw badRequest("Coinbase Onramp does not support off-ramp.", { provider: this.id });
   }
 
-  private async request<TResponse>(
+  private async request<TSchema extends z.ZodType>(
     env: Record<string, string | undefined>,
     method: "GET" | "POST",
     url: string,
+    schema: TSchema,
     body?: Record<string, unknown>
-  ): Promise<TResponse> {
+  ): Promise<z.output<TSchema>> {
     const { apiKeyName, apiKeySecret } = readCoinbaseConfig(env);
     const parsed = new URL(url);
     const jwt = await generateJwt({
@@ -391,10 +387,11 @@ export class CoinbaseRampClient implements RampProvider {
       requestPath: parsed.pathname,
     });
 
-    return providerFetchJson<TResponse, Record<string, unknown>>(this.id, url, {
-      method,
-      ...(body === undefined ? {} : { body }),
-      headers: { Authorization: `Bearer ${jwt}` },
-    });
+    return providerFetchJson(
+      this.id,
+      url,
+      { method, body, headers: { Authorization: `Bearer ${jwt}` } },
+      schema
+    );
   }
 }
