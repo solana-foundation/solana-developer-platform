@@ -20,9 +20,36 @@ it("migrates exact plan roles independently of commission accounting and retains
     await client.query(`CREATE TABLE custody_wallets (id text PRIMARY KEY)`);
     await client.query(`CREATE TABLE payment_subscription_plans (
       id text PRIMARY KEY, owner_wallet_id text NOT NULL, owner_address text NOT NULL,
-      puller_wallet_id text, puller_address text
+      puller_wallet_id text, puller_address text, plan_pda text, status text
     )`);
     await client.query(readFileSync(migration, "utf8"));
+    await client.query("INSERT INTO custody_wallets VALUES ('wallet_a'), ('wallet_b')");
+    await client.query(`INSERT INTO payment_subscription_plans
+      (id,owner_wallet_id,owner_address,puller_wallet_id,puller_address,
+       owner_custody_wallet_id,puller_custody_wallet_id)
+      VALUES ('plan','shared','address','shared','address','wallet_a','wallet_a')`);
+    // Preserve the preceding writer's status/PDA update, including unchanged role columns.
+    await client.query(`UPDATE payment_subscription_plans SET
+      plan_pda = 'retained_plan_pda', status = 'active',
+      puller_wallet_id = CASE WHEN FALSE THEN NULL ELSE puller_wallet_id END,
+      puller_address = CASE WHEN FALSE THEN NULL ELSE puller_address END
+      WHERE id = 'plan'`);
+    expect(
+      (
+        await client.query(`SELECT owner_custody_wallet_id,puller_custody_wallet_id,
+          puller_wallet_id,puller_address,plan_pda,status
+          FROM payment_subscription_plans WHERE id='plan'`)
+      ).rows
+    ).toEqual([
+      {
+        owner_custody_wallet_id: "wallet_a",
+        puller_custody_wallet_id: "wallet_a",
+        puller_wallet_id: "shared",
+        puller_address: "address",
+        plan_pda: "retained_plan_pda",
+        status: "active",
+      },
+    ]);
     const columns = await client.query(`SELECT attname FROM pg_attribute
       WHERE attrelid = 'recurring_roles_test.payment_subscription_plans'::regclass
       AND attname IN ('owner_custody_wallet_id','puller_custody_wallet_id','role_projection_revision')
@@ -30,40 +57,20 @@ it("migrates exact plan roles independently of commission accounting and retains
     expect(columns.rows).toEqual([
       { attname: "owner_custody_wallet_id" },
       { attname: "puller_custody_wallet_id" },
-      { attname: "role_projection_revision" },
     ]);
-    await client.query("INSERT INTO custody_wallets VALUES ('wallet_a'), ('wallet_b')");
-    await client.query(`INSERT INTO payment_subscription_plans
-      (id,owner_wallet_id,owner_address,puller_wallet_id,puller_address,
-       owner_custody_wallet_id,puller_custody_wallet_id,role_projection_revision)
-      VALUES ('plan','shared','address','shared','address','wallet_a','wallet_a',1)`);
-    // This is the preceding writer's actual projection-only PATCH shape.
-    await client.query("SAVEPOINT legacy_patch");
-    await expect(
-      client.query(`UPDATE payment_subscription_plans SET
-      puller_wallet_id = 'shared', puller_address = 'address' WHERE id = 'plan'`)
-    ).rejects.toMatchObject({ code: "23514" });
-    await client.query("ROLLBACK TO SAVEPOINT legacy_patch");
-    await client.query("SAVEPOINT legacy_clear");
-    await expect(
-      client.query(`UPDATE payment_subscription_plans SET
-      puller_wallet_id = NULL, puller_address = NULL WHERE id = 'plan'`)
-    ).rejects.toMatchObject({ code: "23514" });
-    await client.query("ROLLBACK TO SAVEPOINT legacy_clear");
     await client.query(`UPDATE payment_subscription_plans SET
       puller_custody_wallet_id = 'wallet_b', puller_wallet_id = 'shared',
-      puller_address = 'address', role_projection_revision = role_projection_revision + 1
+      puller_address = 'address'
       WHERE id = 'plan'`);
     expect(
       (
-        await client.query(`SELECT owner_custody_wallet_id,puller_custody_wallet_id,
-      role_projection_revision FROM payment_subscription_plans WHERE id='plan'`)
+        await client.query(`SELECT owner_custody_wallet_id,puller_custody_wallet_id
+      FROM payment_subscription_plans WHERE id='plan'`)
       ).rows
     ).toEqual([
       {
         owner_custody_wallet_id: "wallet_a",
         puller_custody_wallet_id: "wallet_b",
-        role_projection_revision: 2,
       },
     ]);
     await client.query("SAVEPOINT retained_wallet");
@@ -72,8 +79,7 @@ it("migrates exact plan roles independently of commission accounting and retains
     ).rejects.toMatchObject({ code: "23503" });
     await client.query("ROLLBACK TO SAVEPOINT retained_wallet");
     await client.query(`UPDATE payment_subscription_plans SET
-      puller_custody_wallet_id=NULL,puller_wallet_id=NULL,puller_address=NULL,
-      role_projection_revision=role_projection_revision+1 WHERE id='plan'`);
+      puller_custody_wallet_id=NULL,puller_wallet_id=NULL,puller_address=NULL WHERE id='plan'`);
     expect(
       (
         await client.query(`SELECT puller_custody_wallet_id,puller_wallet_id,puller_address
@@ -84,16 +90,6 @@ it("migrates exact plan roles independently of commission accounting and retains
       VALUES ('legacy','legacy','legacy_address')`);
     await client.query(`UPDATE payment_subscription_plans SET puller_wallet_id='legacy_puller',
       puller_address='legacy_address' WHERE id='legacy'`);
-    await client.query(`INSERT INTO payment_subscription_plans
-      (id,owner_wallet_id,owner_address,owner_custody_wallet_id)
-      VALUES ('unfenced','shared','address','wallet_a')`);
-    await client.query("SAVEPOINT unfenced_role");
-    await expect(
-      client.query(`UPDATE payment_subscription_plans SET
-      puller_custody_wallet_id='wallet_b',puller_wallet_id='shared',puller_address='address',
-      role_projection_revision=role_projection_revision+1 WHERE id='unfenced'`)
-    ).rejects.toMatchObject({ code: "23514" });
-    await client.query("ROLLBACK TO SAVEPOINT unfenced_role");
   } finally {
     await client.query("ROLLBACK");
     await client.end();

@@ -484,21 +484,6 @@ describe("Payments routes — subscriptions", () => {
       pullerWalletId: null,
       pullerAddress: null,
     });
-    await getDb(env)
-      .prepare("UPDATE payment_subscription_plans SET role_projection_revision = 0 WHERE id = ?")
-      .bind(planId)
-      .run();
-    const stale = await app.request(
-      `/v1/payments/subscription-plans/${planId}/prepare-create`,
-      {
-        method: "POST",
-        headers: SUBSCRIPTION_HEADERS,
-        body: "{}",
-      },
-      env
-    );
-    expect(stale.status).toBe(409);
-    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {

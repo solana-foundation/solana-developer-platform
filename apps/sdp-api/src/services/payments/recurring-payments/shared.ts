@@ -216,7 +216,7 @@ export function assertRecurringPlanSourceWallet(
   plan: PaymentSubscriptionPlanRow,
   wallet: CustodyWallet
 ): void {
-  if (plan.owner_custody_wallet_id !== wallet.id || plan.role_projection_revision < 1) {
+  if (plan.owner_custody_wallet_id !== wallet.id) {
     throw conflict("Recurring payment plan owner is unresolved or does not match its exact source");
   }
   if (plan.owner_address !== wallet.publicKey)

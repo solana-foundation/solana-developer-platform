@@ -35,7 +35,7 @@ it("audits and catches up only proven retained recurring roles without rebinding
       id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT, status TEXT,
       owner_wallet_id TEXT, owner_address TEXT, owner_custody_wallet_id TEXT,
       puller_wallet_id TEXT, puller_address TEXT, puller_custody_wallet_id TEXT,
-      role_projection_revision BIGINT NOT NULL DEFAULT 0, plan_pda TEXT
+      plan_pda TEXT
     );
     CREATE TEMP TABLE payment_recurring_payments (
       id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT, status TEXT,
@@ -63,19 +63,21 @@ it("audits and catches up only proven retained recurring roles without rebinding
       ('foreign', 'moved', NULL, 'foreign_ref', 'foreign_address', 'active');
     INSERT INTO payment_subscription_plans VALUES
       ('old', 'org', 'project', 'active', 'owner_ref', 'owner_address', NULL,
-       'puller_ref', 'puller_address', NULL, 0, 'old_pda'),
+       'puller_ref', 'puller_address', NULL, 'old_pda'),
       ('new', 'org', 'project', 'active', 'replacement_ref', 'replacement_address', NULL,
-       NULL, NULL, NULL, 0, 'new_pda'),
+       NULL, NULL, NULL, 'new_pda'),
       ('ambiguous', 'org', 'project', 'draft', 'collision_ref', 'collision_address', NULL,
-       NULL, NULL, NULL, 0, 'ambiguous_pda'),
+       NULL, NULL, NULL, 'ambiguous_pda'),
       ('foreign_plan', 'org', 'project', 'draft', 'foreign_ref', 'foreign_address', NULL,
-       NULL, NULL, NULL, 0, 'foreign_pda'),
+       NULL, NULL, NULL, 'foreign_pda'),
       ('stale', 'org', 'project', 'active', 'puller_ref', 'puller_address', 'owner',
-       NULL, NULL, NULL, 1, 'stale_pda'),
+       NULL, NULL, NULL, 'stale_pda'),
       ('provider_drift', 'org', 'project', 'active', 'saved_provider_ref', 'drift_address', 'provider_drift',
-       NULL, NULL, NULL, 1, 'drift_pda'),
-      ('unfenced', 'org', 'project', 'active', 'owner_ref', 'owner_address', 'owner',
-       'puller_ref', 'puller_address', NULL, 0, 'unfenced_pda');
+       NULL, NULL, NULL, 'drift_pda'),
+      ('independent_owner', 'org', 'project', 'active', 'owner_ref', 'owner_address', NULL,
+       'puller_ref', 'puller_address', 'puller', 'independent_owner_pda'),
+      ('independent_puller', 'org', 'project', 'active', 'owner_ref', 'owner_address', 'owner',
+       'puller_ref', 'puller_address', NULL, 'independent_puller_pda');
     INSERT INTO payment_recurring_payments VALUES
       ('recurring', 'org', 'project', 'canceled', 'owner_ref', 'owner_address', NULL, 'old', 'sub'),
       ('ambiguous', 'org', 'project', 'active', 'collision_ref', 'collision_address', NULL, 'ambiguous', NULL),
@@ -127,8 +129,23 @@ it("audits and catches up only proven retained recurring roles without rebinding
         }),
         expect.objectContaining({
           resource: "plan_owner",
-          id: "unfenced",
-          classification: "unfenced_pin",
+          id: "independent_puller",
+          classification: "exact_pin",
+        }),
+        expect.objectContaining({
+          resource: "plan_puller",
+          id: "independent_puller",
+          classification: "resolvable_unique",
+        }),
+        expect.objectContaining({
+          resource: "plan_owner",
+          id: "independent_owner",
+          classification: "resolvable_unique",
+        }),
+        expect.objectContaining({
+          resource: "plan_puller",
+          id: "independent_owner",
+          classification: "exact_pin",
         }),
         expect.objectContaining({
           resource: "replacement_source",
@@ -179,10 +196,16 @@ it("audits and catches up only proven retained recurring roles without rebinding
         }),
         expect.objectContaining({ id: "stale", owner_custody_wallet_id: "owner" }),
         expect.objectContaining({
-          id: "unfenced",
+          id: "independent_owner",
           owner_custody_wallet_id: "owner",
-          puller_custody_wallet_id: null,
-          role_projection_revision: 0,
+          puller_custody_wallet_id: "puller",
+          plan_pda: "independent_owner_pda",
+        }),
+        expect.objectContaining({
+          id: "independent_puller",
+          owner_custody_wallet_id: "owner",
+          puller_custody_wallet_id: "puller",
+          plan_pda: "independent_puller_pda",
         }),
         expect.objectContaining({ id: "ambiguous", owner_custody_wallet_id: null }),
         expect.objectContaining({ id: "foreign_plan", owner_custody_wallet_id: null }),
@@ -235,8 +258,8 @@ it("audits and catches up only proven retained recurring roles without rebinding
         }),
         expect.objectContaining({
           resource: "plan_owner",
-          id: "unfenced",
-          classification: "unfenced_pin",
+          id: "independent_puller",
+          classification: "exact_pin",
         }),
       ])
     );

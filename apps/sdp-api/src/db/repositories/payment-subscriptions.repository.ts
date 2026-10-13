@@ -22,7 +22,6 @@ export interface PaymentSubscriptionPlanRow {
   puller_wallet_id: string | null;
   puller_custody_wallet_id: string | null;
   puller_address: string | null;
-  role_projection_revision: number;
   metadata_uri: string | null;
   status: PaymentSubscriptionPlanStatus;
   created_by: string | null;

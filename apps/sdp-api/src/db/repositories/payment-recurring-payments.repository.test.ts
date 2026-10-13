@@ -76,10 +76,10 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
   });
 
-  it("does not activate unfenced plan roles when updating metadata or on-chain identifiers", async () => {
+  it("preserves plan wallet identities when updating metadata or on-chain identifiers", async () => {
     const plans = createPostgresPaymentSubscriptionsRepository(getDb(env));
     const plan = await plans.createPlan({
-      id: "plan_unfenced_metadata",
+      id: "plan_metadata_identity",
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       ownerWalletId: TEST_PROVIDER_WALLET_ID,
@@ -101,10 +101,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       updatedAt: "2026-10-12T00:00:00Z",
     });
     if (!plan) throw new Error("Missing plan fixture");
-    await getDb(env)
-      .prepare("UPDATE payment_subscription_plans SET role_projection_revision=0 WHERE id=?")
-      .bind(plan.id)
-      .run();
     const updated = await plans.updatePlan({
       planId: plan.id,
       organizationId: TEST_ORG.id,
@@ -115,9 +111,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       updatedAt: "2026-10-12T01:00:00Z",
     });
     expect(updated).toMatchObject({
+      owner_wallet_id: TEST_PROVIDER_WALLET_ID,
       owner_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      owner_address: TEST_SOURCE_ADDRESS,
+      puller_wallet_id: TEST_PROVIDER_WALLET_ID,
       puller_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
-      role_projection_revision: 0,
+      puller_address: TEST_SOURCE_ADDRESS,
       metadata_uri: "https://example.com/metadata.json",
       plan_pda: "retained_plan_pda",
       status: "active",

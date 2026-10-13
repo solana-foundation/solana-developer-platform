@@ -39,7 +39,7 @@ export async function resolveSubscriptionPlanRole(
   const custodyWalletId =
     role === "owner" ? plan.owner_custody_wallet_id : plan.puller_custody_wallet_id;
   const savedAddress = role === "owner" ? plan.owner_address : plan.puller_address;
-  if (!custodyWalletId || plan.role_projection_revision < 1) {
+  if (!custodyWalletId) {
     throw new AppError("CONFLICT", `Subscription plan ${role} wallet identity is unresolved`);
   }
   const wallet = await resolveSubscriptionPlanWalletSelector(c, { custodyWalletId });

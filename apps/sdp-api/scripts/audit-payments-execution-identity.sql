@@ -265,25 +265,25 @@ WITH wallet_scope AS (
          plan.project_id, plan.status, plan.owner_custody_wallet_id AS custody_wallet_id,
          plan.owner_wallet_id AS provider_wallet_id, plan.owner_address AS saved_address,
          FALSE AS absent_optional_role, NULL::TEXT AS expected_custody_wallet_id,
-         NULL::TEXT AS linked_plan_pin, plan.role_projection_revision AS projection_revision
+         NULL::TEXT AS linked_plan_pin
   FROM payment_subscription_plans plan
   UNION ALL
   SELECT 'plan_puller', plan.id, plan.organization_id, plan.project_id, plan.status,
          plan.puller_custody_wallet_id, plan.puller_wallet_id, plan.puller_address,
          plan.puller_custody_wallet_id IS NULL
            AND plan.puller_wallet_id IS NULL AND plan.puller_address IS NULL,
-         NULL, NULL, plan.role_projection_revision
+         NULL, NULL
   FROM payment_subscription_plans plan
   UNION ALL
   SELECT 'recurring_source', recurring.id, recurring.organization_id,
          recurring.project_id, recurring.status, recurring.source_custody_wallet_id,
-         recurring.source_wallet_id, recurring.source_address, FALSE, NULL, NULL, NULL
+         recurring.source_wallet_id, recurring.source_address, FALSE, NULL, NULL
   FROM payment_recurring_payments recurring
   UNION ALL
   SELECT 'replacement_source', attempt.id, attempt.organization_id,
          attempt.project_id, attempt.status, attempt.new_source_custody_wallet_id,
          plan.owner_wallet_id, plan.owner_address, FALSE,
-         attempt.after_values ->> 'sourceCustodyWalletId', plan.owner_custody_wallet_id, plan.role_projection_revision
+         attempt.after_values ->> 'sourceCustodyWalletId', plan.owner_custody_wallet_id
   FROM payment_recurring_payment_update_attempts attempt
   LEFT JOIN payment_subscription_plans plan
     ON plan.id = attempt.new_plan_id
@@ -293,7 +293,7 @@ WITH wallet_scope AS (
   UNION ALL
   SELECT 'replacement_old_plan_owner', attempt.id, attempt.organization_id,
          attempt.project_id, attempt.status, plan.owner_custody_wallet_id,
-         plan.owner_wallet_id, plan.owner_address, FALSE, NULL, NULL, plan.role_projection_revision
+         plan.owner_wallet_id, plan.owner_address, FALSE, NULL, NULL
   FROM payment_recurring_payment_update_attempts attempt
   LEFT JOIN payment_subscription_plans plan
     ON plan.id = attempt.old_plan_id
@@ -303,7 +303,7 @@ WITH wallet_scope AS (
   UNION ALL
   SELECT 'replacement_old_plan_puller', attempt.id, attempt.organization_id,
          attempt.project_id, attempt.status, plan.puller_custody_wallet_id,
-         plan.puller_wallet_id, plan.puller_address, plan.id IS NOT NULL AND plan.puller_custody_wallet_id IS NULL AND plan.puller_wallet_id IS NULL AND plan.puller_address IS NULL, NULL, NULL, plan.role_projection_revision
+         plan.puller_wallet_id, plan.puller_address, plan.id IS NOT NULL AND plan.puller_custody_wallet_id IS NULL AND plan.puller_wallet_id IS NULL AND plan.puller_address IS NULL, NULL, NULL
   FROM payment_recurring_payment_update_attempts attempt
   LEFT JOIN payment_subscription_plans plan
     ON plan.id = attempt.old_plan_id
@@ -313,7 +313,7 @@ WITH wallet_scope AS (
   UNION ALL
   SELECT 'replacement_new_plan_owner', attempt.id, attempt.organization_id,
          attempt.project_id, attempt.status, plan.owner_custody_wallet_id,
-         plan.owner_wallet_id, plan.owner_address, FALSE, NULL, NULL, plan.role_projection_revision
+         plan.owner_wallet_id, plan.owner_address, FALSE, NULL, NULL
   FROM payment_recurring_payment_update_attempts attempt
   LEFT JOIN payment_subscription_plans plan
     ON plan.id = attempt.new_plan_id
@@ -323,7 +323,7 @@ WITH wallet_scope AS (
   UNION ALL
   SELECT 'replacement_new_plan_puller', attempt.id, attempt.organization_id,
          attempt.project_id, attempt.status, plan.puller_custody_wallet_id,
-         plan.puller_wallet_id, plan.puller_address, plan.id IS NOT NULL AND plan.puller_custody_wallet_id IS NULL AND plan.puller_wallet_id IS NULL AND plan.puller_address IS NULL, NULL, NULL, plan.role_projection_revision
+         plan.puller_wallet_id, plan.puller_address, plan.id IS NOT NULL AND plan.puller_custody_wallet_id IS NULL AND plan.puller_wallet_id IS NULL AND plan.puller_address IS NULL, NULL, NULL
   FROM payment_recurring_payment_update_attempts attempt
   LEFT JOIN payment_subscription_plans plan
     ON plan.id = attempt.new_plan_id
@@ -354,11 +354,10 @@ WITH wallet_scope AS (
   FROM roles
 )
 SELECT resource, id, organization_id, project_id, status, custody_wallet_id,
-       provider_wallet_id, saved_address, projection_revision, match_count,
+       provider_wallet_id, saved_address, match_count,
        CASE
          WHEN absent_optional_role THEN 'absent_optional_role'
          WHEN custody_wallet_id IS NOT NULL AND NOT pin_matches THEN 'inconsistent_pin'
-         WHEN custody_wallet_id IS NOT NULL AND projection_revision = 0 THEN 'unfenced_pin'
          WHEN custody_wallet_id IS NOT NULL THEN 'exact_pin'
          WHEN match_count = 1 THEN 'resolvable_unique'
          WHEN match_count > 1 THEN 'ambiguous_multi'

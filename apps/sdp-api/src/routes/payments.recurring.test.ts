@@ -1191,53 +1191,6 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(sent);
   });
 
-  it("retains stale role revision through signed activation recovery and refuses new collection", async () => {
-    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    await getDb(env)
-      .prepare("UPDATE payment_subscription_plans SET role_projection_revision = 0 WHERE id = ?")
-      .bind(activated.planId)
-      .run();
-    await getDb(env)
-      .prepare(
-        "UPDATE payment_recurring_payments SET status = 'activating', updated_at = ? WHERE id = ?"
-      )
-      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
-      .run();
-    const recovered = await app.request(
-      `/v1/payments/recurring-payments/${activated.id}/activate`,
-      {
-        method: "POST",
-        headers: RECURRING_HEADERS,
-        body: "{}",
-      },
-      env
-    );
-    expect(recovered.status).toBe(200);
-    expect(
-      await getDb(env)
-        .prepare("SELECT role_projection_revision FROM payment_subscription_plans WHERE id = ?")
-        .bind(activated.planId)
-        .first()
-    ).toEqual({ role_projection_revision: 0 });
-    await setRecurringCollectionDue({
-      recurringPaymentId: activated.id,
-      subscriptionId: activated.subscriptionId,
-      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
-    });
-    const signed = recurringExecution.signAsFeePayerMock().mock.calls.length;
-    const collected = await app.request(
-      `/v1/payments/recurring-payments/${activated.id}/collect`,
-      {
-        method: "POST",
-        headers: RECURRING_HEADERS,
-        body: "{}",
-      },
-      env
-    );
-    expect(collected.status).toBe(409);
-    expect(recurringExecution.signAsFeePayerMock()).toHaveBeenCalledTimes(signed);
-  });
-
   it("keeps plan roles required for a new resume while cancellation remains an exit", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await createPostgresPaymentSubscriptionsRepository(getDb(env)).updatePlan({
@@ -4274,8 +4227,7 @@ describe("Payments routes — recurring", () => {
       )
       .run();
     await getDb(env)
-      .prepare(`UPDATE payment_subscription_plans SET owner_custody_wallet_id = ?,
-      role_projection_revision = role_projection_revision + 1 WHERE id = ?`)
+      .prepare("UPDATE payment_subscription_plans SET owner_custody_wallet_id = ? WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID, planId)
       .run();
     await getDb(env)

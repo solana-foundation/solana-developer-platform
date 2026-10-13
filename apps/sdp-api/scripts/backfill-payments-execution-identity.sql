@@ -129,19 +129,16 @@ WITH matches AS (
    AND wallet.wallet_id = plan.owner_wallet_id
    AND wallet.public_key = plan.owner_address
   WHERE plan.owner_custody_wallet_id IS NULL
-    AND (plan.role_projection_revision > 0 OR plan.puller_custody_wallet_id IS NULL)
   GROUP BY plan.id, plan.organization_id, plan.project_id, plan.owner_wallet_id, plan.owner_address
   HAVING COUNT(*) = 1
 )
 UPDATE payment_subscription_plans plan
-SET owner_custody_wallet_id = matches.custody_wallet_id,
-    role_projection_revision = plan.role_projection_revision + 1
+SET owner_custody_wallet_id = matches.custody_wallet_id
 FROM matches
 WHERE plan.id = matches.id
   AND plan.organization_id = matches.organization_id
   AND plan.project_id = matches.project_id
   AND plan.owner_custody_wallet_id IS NULL
-  AND (plan.role_projection_revision > 0 OR plan.puller_custody_wallet_id IS NULL)
   AND plan.owner_wallet_id = matches.owner_wallet_id
   AND plan.owner_address = matches.owner_address;
 
@@ -155,19 +152,16 @@ WITH matches AS (
    AND wallet.wallet_id = plan.puller_wallet_id
    AND wallet.public_key = plan.puller_address
   WHERE plan.puller_custody_wallet_id IS NULL
-    AND (plan.role_projection_revision > 0 OR plan.owner_custody_wallet_id IS NULL)
   GROUP BY plan.id, plan.organization_id, plan.project_id, plan.puller_wallet_id, plan.puller_address
   HAVING COUNT(*) = 1
 )
 UPDATE payment_subscription_plans plan
-SET puller_custody_wallet_id = matches.custody_wallet_id,
-    role_projection_revision = plan.role_projection_revision + 1
+SET puller_custody_wallet_id = matches.custody_wallet_id
 FROM matches
 WHERE plan.id = matches.id
   AND plan.organization_id = matches.organization_id
   AND plan.project_id = matches.project_id
   AND plan.puller_custody_wallet_id IS NULL
-  AND (plan.role_projection_revision > 0 OR plan.owner_custody_wallet_id IS NULL)
   AND plan.puller_wallet_id = matches.puller_wallet_id
   AND plan.puller_address = matches.puller_address;
 

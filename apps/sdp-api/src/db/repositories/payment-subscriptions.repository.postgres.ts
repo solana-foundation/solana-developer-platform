@@ -42,7 +42,6 @@ const planRowSchema = z.object({
   puller_wallet_id: z.string().nullable(),
   puller_custody_wallet_id: z.string().nullable(),
   puller_address: z.string().nullable(),
-  role_projection_revision: z.coerce.number().int().nonnegative(),
   metadata_uri: z.string().nullable(),
   status: z.enum(PAYMENT_SUBSCRIPTION_PLAN_STATUSES),
   created_by: z.string().nullable(),
@@ -184,13 +183,12 @@ export function createPostgresPaymentSubscriptionsRepository(
              puller_wallet_id,
              puller_custody_wallet_id,
              puller_address,
-             role_projection_revision,
              metadata_uri,
              status,
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -209,7 +207,6 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.pullerWalletId,
           input.pullerCustodyWalletId ?? null,
           input.pullerAddress,
-          input.ownerCustodyWalletId || input.pullerCustodyWalletId ? 1 : 0,
           input.metadataUri,
           input.status,
           input.createdBy,
@@ -233,24 +230,14 @@ export function createPostgresPaymentSubscriptionsRepository(
       });
       if (!existing) return null;
 
-      const updatesPuller =
-        input.pullerWalletId !== undefined ||
-        input.pullerCustodyWalletId !== undefined ||
-        input.pullerAddress !== undefined;
-
       await db
         .prepare(
           `UPDATE payment_subscription_plans
               SET plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
                   destination_address = CASE WHEN ?::boolean THEN ? ELSE destination_address END,
-                  ${
-                    updatesPuller
-                      ? `puller_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_wallet_id END,
+                  puller_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_wallet_id END,
                   puller_custody_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_custody_wallet_id END,
                   puller_address = CASE WHEN ?::boolean THEN ? ELSE puller_address END,
-                  role_projection_revision = role_projection_revision + 1,`
-                      : ""
-                  }
                   metadata_uri = CASE WHEN ?::boolean THEN ? ELSE metadata_uri END,
                   status = COALESCE(?, status),
                   updated_at = ?
@@ -263,16 +250,12 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.planPda ?? null,
           input.destinationAddress !== undefined,
           input.destinationAddress ?? null,
-          ...(updatesPuller
-            ? [
-                input.pullerWalletId !== undefined,
-                input.pullerWalletId ?? null,
-                input.pullerCustodyWalletId !== undefined,
-                input.pullerCustodyWalletId ?? null,
-                input.pullerAddress !== undefined,
-                input.pullerAddress ?? null,
-              ]
-            : []),
+          input.pullerWalletId !== undefined,
+          input.pullerWalletId ?? null,
+          input.pullerCustodyWalletId !== undefined,
+          input.pullerCustodyWalletId ?? null,
+          input.pullerAddress !== undefined,
+          input.pullerAddress ?? null,
           input.metadataUri !== undefined,
           input.metadataUri ?? null,
           input.status ?? null,
