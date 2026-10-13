@@ -5,7 +5,12 @@ import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { SponsorshipNetwork } from "@/db/repositories/sponsorship-budget.repository";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
-import { FK_VIOLATION, NOT_NULL_VIOLATION, seedOrgProject } from "@/test/helpers/migration-db";
+import {
+  FK_VIOLATION,
+  NOT_NULL_VIOLATION,
+  seedDvpTrade,
+  seedOrgProject,
+} from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
 import {
@@ -57,26 +62,6 @@ async function seedRequest(request: {
        reference, public_token, status, fulfilled_by_transfer_id
      ) VALUES ($1, $2, $3, 'wlt_0129', 'OurWallet', 'USDC', '10', $1, $1, 'paid', $4)`,
     [request.id, request.organizationId, request.projectId, request.fulfilledByTransferId]
-  );
-}
-
-async function seedDvpTrade(trade: {
-  id: string;
-  organizationId: string;
-  projectId: string;
-}): Promise<void> {
-  await client.query(
-    `INSERT INTO dvp_trades (
-       id, organization_id, project_id, swap_dvp, settlement_authority,
-       user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
-       decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
-       user_a_settlement_destination, user_b_settlement_destination,
-       escrow_a, escrow_b, status
-     ) VALUES ($1, $2, $3, $1, 'authority_0129', 'user_a_0129', 'user_b_0129', 'mint_a_0129',
-               'mint_b_0129', '42', 'program_0129', 'program_0129', 6, 6, '1000', '2000',
-               '1900000000', 'destination_a_0129', 'destination_b_0129', 'escrow_a_0129',
-               'escrow_b_0129', 'created')`,
-    [trade.id, trade.organizationId, trade.projectId]
   );
 }
 
@@ -256,25 +241,27 @@ describe("0129 project_id NOT NULL migration", () => {
   it("deletes a Production project's transfer, request and DvP trade and keeps the Sandbox project's", async () => {
     const tenant = await seedOrgProject(client, "0129_production_rows");
     const productionProjectId = `${tenant.projectId}_production`;
-    for (const { suffix, projectId } of [
-      { suffix: "sandbox", projectId: tenant.projectId },
-      { suffix: "production", projectId: productionProjectId },
-    ]) {
+    const tenantProjects: { environment: SdpEnvironment; projectId: string }[] = [
+      { environment: "sandbox", projectId: tenant.projectId },
+      { environment: "production", projectId: productionProjectId },
+    ];
+    for (const { environment, projectId } of tenantProjects) {
       await seedTransfer({
-        id: `xfr_0129_${suffix}`,
+        id: `xfr_0129_${environment}`,
         organizationId: tenant.organizationId,
         projectId,
       });
       await seedRequest({
-        id: `preq_0129_${suffix}`,
+        id: `preq_0129_${environment}`,
         organizationId: tenant.organizationId,
         projectId,
-        fulfilledByTransferId: `xfr_0129_${suffix}`,
+        fulfilledByTransferId: `xfr_0129_${environment}`,
       });
-      await seedDvpTrade({
-        id: `dvp_0129_${suffix}`,
+      await seedDvpTrade(client, {
+        id: `dvp_0129_${environment}`,
         organizationId: tenant.organizationId,
         projectId,
+        environment,
       });
     }
 
