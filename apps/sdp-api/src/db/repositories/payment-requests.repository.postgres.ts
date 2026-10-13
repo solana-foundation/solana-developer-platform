@@ -1,5 +1,4 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
-import { z } from "zod";
 import type { AppDb } from "@/db";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
@@ -16,36 +15,8 @@ import {
   generatePaymentRequestId,
   generatePaymentRequestPublicToken,
   generatePaymentRequestReference,
+  sponsoredTransactionContinuitySchema,
 } from "./payment-requests.repository";
-
-const sponsoredTransactionContinuitySchema = z
-  .object({
-    account: z.string().min(1),
-    unsignedTransaction: z.string().min(1),
-    lastValidBlockHeight: z.string().regex(/^\d+$/),
-    deploymentMode: z.enum(["managed", "self_hosted"]),
-    accountingIdentity: z
-      .object({
-        reservationId: z.string().min(1),
-        attempt: z.number().int().positive(),
-        network: z.enum(["devnet", "mainnet"]),
-        environment: z.enum(["sandbox", "production"]),
-        organizationId: z.string().min(1),
-        projectId: z.string().min(1).nullable(),
-        actor: z.object({
-          type: z.enum(["api_key", "project", "user", "wallet"]),
-          id: z.string().min(1),
-        }),
-        transactionDigest: z.string().regex(/^[a-f0-9]{64}$/),
-        feePayer: z.string().min(1),
-        providerConfigFingerprint: z.string().min(1),
-      })
-      .nullable(),
-  })
-  .refine(
-    (continuity) =>
-      continuity.deploymentMode === "managed" || continuity.accountingIdentity === null
-  );
 
 function claimContinuity(claim: SponsoredTransactionClaim | null): string | null {
   if (!claim?.deploymentMode) return null;
@@ -259,7 +230,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       const row = await db
         .prepare(
           `SELECT sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
-                  sponsored_tx_last_valid_block_height, sponsored_tx_continuity
+                  sponsored_tx_last_valid_block_height::text AS sponsored_tx_last_valid_block_height,
+                  sponsored_tx_continuity
              FROM payment_requests
             WHERE id = ?`
         )
@@ -268,7 +240,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           sponsored_tx_account: string | null;
           sponsored_tx_unsigned: string | null;
           sponsored_tx_signed: string | null;
-          sponsored_tx_last_valid_block_height: string | number | null;
+          sponsored_tx_last_valid_block_height: string | null;
           sponsored_tx_continuity: unknown;
         }>();
       if (!row || row.sponsored_tx_account === null) {
@@ -286,20 +258,22 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         (!continuity.success ||
           continuity.data.account !== row.sponsored_tx_account ||
           continuity.data.unsignedTransaction !== row.sponsored_tx_unsigned ||
-          BigInt(continuity.data.lastValidBlockHeight) !==
-            BigInt(row.sponsored_tx_last_valid_block_height))
+          continuity.data.lastValidBlockHeight !== BigInt(row.sponsored_tx_last_valid_block_height))
       ) {
         throw internalError(
           "payment_requests sponsored continuity does not match the claimed window"
         );
+      }
+      if (continuity?.success) {
+        return { ...continuity.data, signedTransaction: row.sponsored_tx_signed };
       }
       return {
         account: row.sponsored_tx_account,
         unsignedTransaction: row.sponsored_tx_unsigned,
         signedTransaction: row.sponsored_tx_signed,
         lastValidBlockHeight: BigInt(row.sponsored_tx_last_valid_block_height),
-        deploymentMode: continuity?.success ? continuity.data.deploymentMode : null,
-        accountingIdentity: continuity?.success ? continuity.data.accountingIdentity : null,
+        deploymentMode: null,
+        accountingIdentity: null,
       };
     },
 

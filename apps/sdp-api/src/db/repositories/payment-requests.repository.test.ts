@@ -457,6 +457,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
         currentBlockHeight: 900n,
         deploymentMode: "managed",
       });
+      expect(await repo.getSponsoredTransactionClaim(request.id)).toMatchObject({
+        deploymentMode: "managed",
+        accountingIdentity: null,
+        lastValidBlockHeight: 1_000n,
+      });
       const identity = ACCOUNTING_IDENTITY;
 
       expect(
@@ -654,7 +659,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         requestId: request.id,
         account: ACCOUNT_A,
         unsignedTransaction: "dHhB",
-        lastValidBlockHeight: 1_000n,
+        lastValidBlockHeight: 9_007_199_254_740_993n,
       };
       await repo.claimSponsoredTransactionWindow({
         ...window,
@@ -664,6 +669,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(await repo.getSponsoredTransactionClaim(request.id)).toMatchObject({
         deploymentMode: "self_hosted",
         accountingIdentity: null,
+        lastValidBlockHeight: 9_007_199_254_740_993n,
       });
       expect(
         await repo.persistSponsoredTransactionAccountingIdentity({
@@ -732,6 +738,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect([ACCOUNT_A, ACCOUNT_B]).toContain(claim?.account);
       expect(claim?.signedTransaction).toBeNull();
       expect(claim?.lastValidBlockHeight).toBe(1_000n);
+      expect(claim).toMatchObject({ deploymentMode: null, accountingIdentity: null });
     });
 
     it("refuses a reclaim while the window is live and admits one after expiry", async () => {

@@ -1,4 +1,5 @@
 import {
+  PAYMENT_REQUEST_STATUSES,
   type PaginatedResponse,
   type PaymentRequest,
   type SolanaCluster,
@@ -21,13 +22,6 @@ export type DashboardPaymentRequest = PaymentRequest;
 export type PaymentRequestsResult = PaginatedResponse<DashboardPaymentRequest> & {
   localErrorCode?: PaymentRequestsLocalErrorCode;
 };
-
-const PAYMENT_REQUEST_STATUSES = [
-  "awaiting_payment",
-  "paid",
-  "canceled",
-  "expired",
-] as const satisfies readonly PaymentRequest["status"][];
 
 const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES);
 export const paymentRequestSchema = z.object({

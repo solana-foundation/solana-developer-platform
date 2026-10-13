@@ -16,6 +16,7 @@ import {
   type UnifiedTransaction,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import type { ComponentProps, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as counterpartyAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/accounts/route";
 import { GET as providerAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/provider-accounts/route";
@@ -67,6 +68,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data.redesign";
 import PaymentRequestDetailRoute from "@/app/dashboard/[projectId]/payments/requests/[requestId]/page";
 import PaymentRequestsPage from "@/app/dashboard/[projectId]/payments/requests/page";
+import type { PaymentRequestDetailWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
 import { fetchPaymentRequests } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
 import {
@@ -720,9 +722,11 @@ describe("Requests", () => {
   ])(
     "joins recipient $custodyWalletId only through its exact stored pin",
     async ({ custodyWalletId, expectedName }) => {
+      const fixture = demoData<{ paymentRequests: PaymentRequest[] }>("/v1/payments/requests")
+        .paymentRequests[0];
+      if (!fixture) throw new Error("Missing seeded Payment Request");
       const request = {
-        ...demoData<{ paymentRequests: PaymentRequest[] }>("/v1/payments/requests")
-          .paymentRequests[0],
+        ...fixture,
         custodyWalletId,
         walletId: "provider_shared",
         counterpartyId: null,
@@ -758,15 +762,15 @@ describe("Requests", () => {
         }
         return originalRequest(path, init);
       });
-      const detail = propsOf<{ children: unknown }>(
+      const detail = propsOf<{
+        children: ReactElement<ComponentProps<typeof PaymentRequestDetailWorkspace>>;
+      }>(
         await PaymentRequestDetailRoute({
-          params: Promise.resolve({ requestId: request.id as string }),
+          params: Promise.resolve({ requestId: request.id }),
         })
       );
-      expect(propsOf<{ walletName: string | null }>(detail.children).walletName).toBe(expectedName);
-      expect(propsOf<{ request: PaymentRequest }>(detail.children).request.destinationAddress).toBe(
-        request.destinationAddress
-      );
+      expect(detail.children.props.walletName).toBe(expectedName);
+      expect(detail.children.props.request?.destinationAddress).toBe(request.destinationAddress);
     }
   );
 });

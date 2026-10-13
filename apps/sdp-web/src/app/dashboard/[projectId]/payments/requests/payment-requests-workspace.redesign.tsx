@@ -3,6 +3,7 @@
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type Counterparty,
+  PAYMENT_REQUEST_STATUSES,
   type PaymentRequestStatus,
 } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
@@ -71,8 +72,6 @@ interface PaymentRequestsWorkspaceProps {
   hasNextPage: boolean;
   listState: PaymentRequestsListState;
 }
-
-const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
 
 /** The list's rows: status, amount, who pays, where to, when, and a copy of the link. */
 function PaymentRequestsTable({
@@ -294,12 +293,12 @@ function PaymentRequestsStatusFilter({
             <FilterMenuOptions
               value={value ?? undefined}
               anyLabel={t("Shared.SharedComponents.any")}
-              options={REQUEST_STATUSES.map((status) => ({
+              options={PAYMENT_REQUEST_STATUSES.map((status) => ({
                 value: status,
                 label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
               }))}
               onChange={(next) =>
-                onChange(REQUEST_STATUSES.find((status) => status === next) ?? null)
+                onChange(PAYMENT_REQUEST_STATUSES.find((status) => status === next) ?? null)
               }
             />
           ),

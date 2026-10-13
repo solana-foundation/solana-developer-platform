@@ -1,6 +1,7 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
+import { z } from "zod";
 import type { SponsorshipAccountingIdentity } from "@/services/sponsorship.service";
 
 // URL-safe, dash-only alphabet (nanoid's default also includes "_").
@@ -77,14 +78,56 @@ export interface ListPaymentRequestsResult {
   total: number;
 }
 
-export interface SponsoredTransactionClaim {
-  account: string;
-  unsignedTransaction: string;
+const sponsoredTransactionWindowFields = {
+  account: z.string().min(1),
+  unsignedTransaction: z.string().min(1),
+  lastValidBlockHeight: z
+    .string()
+    .regex(/^\d+$/)
+    .transform((height) => BigInt(height)),
+};
+
+export const sponsoredTransactionContinuitySchema = z.discriminatedUnion("deploymentMode", [
+  z.object({
+    ...sponsoredTransactionWindowFields,
+    deploymentMode: z.literal("managed"),
+    accountingIdentity: z
+      .object({
+        reservationId: z.string().min(1),
+        attempt: z.number().int().positive(),
+        network: z.enum(["devnet", "mainnet"]),
+        environment: z.enum(["sandbox", "production"]),
+        organizationId: z.string().min(1),
+        projectId: z.string().min(1).nullable(),
+        actor: z.object({
+          type: z.enum(["api_key", "project", "user", "wallet"]),
+          id: z.string().min(1),
+        }),
+        transactionDigest: z.string().regex(/^[a-f0-9]{64}$/),
+        feePayer: z.string().min(1),
+        providerConfigFingerprint: z.string().min(1),
+      })
+      .nullable(),
+  }),
+  z.object({
+    ...sponsoredTransactionWindowFields,
+    deploymentMode: z.literal("self_hosted"),
+    accountingIdentity: z.null(),
+  }),
+]);
+
+const sponsoredTransactionClaimSchema = z.discriminatedUnion("deploymentMode", [
+  ...sponsoredTransactionContinuitySchema.options,
+  z.object({
+    ...sponsoredTransactionWindowFields,
+    deploymentMode: z.null(),
+    accountingIdentity: z.null(),
+  }),
+]);
+
+export type SponsoredTransactionClaim = z.infer<typeof sponsoredTransactionClaimSchema> & {
   signedTransaction: string | null;
-  lastValidBlockHeight: bigint;
-  deploymentMode: "managed" | "self_hosted" | null;
-  accountingIdentity: SponsorshipAccountingIdentity | null;
-}
+};
 
 export interface PaymentRequestsRepository {
   createPaymentRequest(input: CreatePaymentRequestInput): Promise<PaymentRequestRow>;
