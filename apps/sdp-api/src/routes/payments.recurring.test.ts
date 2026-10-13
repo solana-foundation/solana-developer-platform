@@ -1010,6 +1010,56 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.amount).toBe("30.50");
   });
 
+  it("treats a respelled amount on an active schedule as no change, broadcasting nothing", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const sentBefore = signAndSendMock.mock.calls.length;
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "25.0" }) },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    expect(signAndSendMock.mock.calls.length).toBe(sentBefore);
+    const replacements = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::integer AS count FROM payment_recurring_payment_update_attempts
+          WHERE recurring_payment_id = ? AND 'amount' = ANY(changed_fields)`
+      )
+      .bind(activated.id)
+      .first<{ count: number }>();
+    expect(replacements).toEqual({ count: 0 });
+  });
+
+  it("links a pending schedule's update event to its attempt", async () => {
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.50" }) },
+      env
+    );
+    expect(updateRes.status).toBe(200);
+    const linked = await getDb(env)
+      .prepare(
+        `SELECT e.attempt_id = a.id AS linked
+           FROM payment_recurring_payment_update_events e
+           JOIN payment_recurring_payment_update_attempts a
+             ON a.recurring_payment_id = e.recurring_payment_id
+          WHERE e.recurring_payment_id = ?`
+      )
+      .bind(created.id)
+      .first<{ linked: boolean | null }>();
+    expect(linked).toEqual({ linked: true });
+  });
+
   it("updates active recurring payment metadata in place on the existing on-chain plan", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"

@@ -50,6 +50,7 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
+import { normalizeDecimalString } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -167,8 +168,12 @@ function buildUpdateDiff(
   beforeValues: Partial<RecurringPaymentUpdateSnapshot>;
   afterValues: Partial<RecurringPaymentUpdateSnapshot>;
 } {
-  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter(
-    (field) => before[field] !== after[field]
+  // An amount is compared by value, so a respelling ("1" and "1.0") is no change
+  // and never broadcasts a replacement.
+  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter((field) =>
+    field === "amount"
+      ? normalizeDecimalString(before.amount) !== normalizeDecimalString(after.amount)
+      : before[field] !== after[field]
   );
   const beforeValues: Partial<RecurringPaymentUpdateSnapshot> = { ...before };
   const afterValues: Partial<RecurringPaymentUpdateSnapshot> = { ...after };
@@ -438,7 +443,7 @@ async function updatePendingRecurringPayment(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.recurringPayment.id,
-      attemptId: null,
+      attemptId: attempt.id,
       changedFields: input.resolved.changedFields.map(String),
       beforeValues: input.resolved.beforeValues,
       afterValues: input.resolved.afterValues,
