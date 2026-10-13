@@ -1,6 +1,16 @@
 import { hashString } from "@sdp/payments/hash";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -78,6 +88,8 @@ function jsonRpcResponse(body: unknown, status: number): Response {
 }
 
 const LYING_DEVNET_ENDPOINT_URL = "https://lying-devnet.rpc.test";
+const STALLED_GENESIS_ENDPOINT_URL = "https://stalled-genesis.rpc.test";
+const GENESIS_PROBE_DEADLINE_MS = 10_000;
 
 const genesisProbeSchema = z.object({
   id: z.union([z.string(), z.number()]),
@@ -606,6 +618,42 @@ describe("RPC Relay Routes", () => {
       expect(response.status).toBe(504);
       const body = await response.json();
       expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
+    });
+
+    it("answers SOLANA_RPC_TIMEOUT when the endpoint's genesis proof outlasts its deadline", async () => {
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", STALLED_GENESIS_ENDPOINT_URL);
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const probeArrived = new Promise<void>((resolve) => {
+        fetchSpy.mockImplementation(async (_input, init) => {
+          if (init === undefined || !init.signal) {
+            throw new Error("Expected the genesis probe to carry the deadline signal");
+          }
+          const signal = init.signal;
+          resolve();
+          return new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        });
+      });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+      onTestFinished(() => {
+        vi.useRealTimers();
+      });
+
+      const pendingResponse = relayProxy({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: [],
+      });
+      await probeArrived;
+      await vi.advanceTimersByTimeAsync(GENESIS_PROBE_DEADLINE_MS);
+      const response = await pendingResponse;
+
+      expect(response.status).toBe(504);
+      const body = await response.json();
+      expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
+      expect(fetchSpy).toHaveBeenCalledOnce();
     });
 
     it("refuses an endpoint that serves another cluster before it sees the payload", async () => {
