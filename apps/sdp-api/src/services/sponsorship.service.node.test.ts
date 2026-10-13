@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/payments/fee-payment";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
   compileTransaction,
@@ -198,7 +199,7 @@ describe("sponsorship identity boundary", () => {
       undefined
     );
   });
-  it("derives request actors from authenticated middleware state, not request input", async () => {
+  function productionApiKeyApp() {
     const app = new Hono<{
       Bindings: Env;
     }>();
@@ -214,8 +215,12 @@ describe("sponsorship identity boundary", () => {
       });
       c.set("projectId", "project_trusted");
       c.set("projectEnvironment", "production");
-      await next();
+      await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });
+    return app;
+  }
+  it("derives request actors from authenticated middleware state, not request input", async () => {
+    const app = productionApiKeyApp();
     app.get("/probe", (c) => c.text(buildKoraUserId(resolveRequestSponsorshipScope(c))));
     const response = await app.request(
       "/probe?user_id=attacker",
@@ -226,6 +231,18 @@ describe("sponsorship identity boundary", () => {
       "sdp:v1:production:org_trusted:project:project_trusted:api_key:key_trusted"
     );
   });
+  it("sponsors a Production request on the open cluster scope's mainnet-beta", async () => {
+    const app = productionApiKeyApp();
+    app.get("/probe", (c) => c.json(resolveAuthenticatedSponsorshipScope(c)));
+    const response = await app.request("/probe", {}, testEnv);
+    expect(await response.json()).toEqual({
+      environment: "production",
+      cluster: "mainnet-beta",
+      organizationId: "org_trusted",
+      projectId: "project_trusted",
+      actor: { type: "api_key", id: "key_trusted" },
+    });
+  });
   it("derives a user-scoped identity for authenticated Clerk users", async () => {
     const app = new Hono<{
       Bindings: Env;
@@ -234,7 +251,7 @@ describe("sponsorship identity boundary", () => {
       c.set("clerk", await testClerkContext(testEnv));
       c.set("projectId", "project_trusted");
       c.set("projectEnvironment", "sandbox");
-      await next();
+      await runInClusterScope({ projectId: "project_trusted", environment: "sandbox" }, next);
     });
     app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
     const response = await app.request("/probe");
