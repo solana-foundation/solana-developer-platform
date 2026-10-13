@@ -66,4 +66,24 @@ describe("waitForEgress", () => {
     expect(result).toEqual({ outcome: "stopped", elapsedMs: expect.any(Number), attempts: 1 });
     expect(result.elapsedMs).toBeLessThan(1_000);
   });
+
+  it("returns stopped without sleeping when the stop signal aborts while a failing probe is in flight", async () => {
+    const stop = new AbortController();
+    let calls = 0;
+
+    const result = await waitForEgress({
+      probe: async () => {
+        calls += 1;
+        stop.abort();
+        throw new TypeError("fetch failed");
+      },
+      deadlineMs: 600_000,
+      intervalMs: 600_000,
+      stopSignal: stop.signal,
+    });
+
+    expect(calls).toBe(1);
+    expect(result).toEqual({ outcome: "stopped", elapsedMs: expect.any(Number), attempts: 1 });
+    expect(result.elapsedMs).toBeLessThan(1_000);
+  });
 });
