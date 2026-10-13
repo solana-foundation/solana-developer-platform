@@ -630,6 +630,9 @@ describe("requests", () => {
         expiresAt: "2026-10-28T00:00:00.000Z",
       })
     );
+    expect(created?.body.data).not.toHaveProperty("walletId");
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
+    expect(response.data.paymentRequests.some(({ id }) => id === created?.body.data.id)).toBe(true);
   });
 
   it("replays an existing recorded Request without replacing its terms or session entry", () => {
@@ -660,18 +663,35 @@ describe("requests", () => {
     expect(ops).toEqual([recorded]);
   });
 
-  it("accepts an unambiguous legacy reference, and rejects conflicting or malformed selectors", () => {
+  it("keeps seeded Request history without exposing provider wallet references", () => {
+    const body = demoWorldBody(world(), "/v1/payments/requests");
+    const response = requestsResponseSchema.parse(body);
+    expect(response.data.paymentRequests.length).toBeGreaterThan(0);
+    const rawRequests = z
+      .object({
+        data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }),
+      })
+      .parse(body).data.paymentRequests;
+    for (const request of rawRequests) {
+      expect(request).not.toHaveProperty("walletId");
+      expect(request).not.toHaveProperty("providerWalletId");
+    }
+    expect(world().wallets.treasury.walletId).toBe("demo_privy_treasury");
+    expect(ops).toEqual([]);
+  });
+
+  it("rejects legacy provider selectors, including when the exact selector is also present", () => {
     const providerReference = world().wallets.treasury.walletId;
-    expect(
-      write("POST", "/v1/payments/requests", {
-        walletId: providerReference,
-        token: USDC,
-        amount: "5",
-      })?.body.data.custodyWalletId
-    ).toBe(TREASURY);
     const priorOps = [...ops];
     for (const body of [
+      { walletId: providerReference },
       { custodyWalletId: TREASURY, walletId: providerReference },
+    ]) {
+      expect(
+        refusal(write("POST", "/v1/payments/requests", { token: USDC, amount: "5", ...body }))
+      ).toEqual([400, "invalid_request"]);
+    }
+    for (const body of [
       { custodyWalletId: providerReference },
       { custodyWalletId: null },
       { custodyWalletId: " " },
@@ -702,7 +722,7 @@ describe("requests", () => {
     expect(ops).toEqual([recorded]);
   });
 
-  it("refuses ambiguous legacy aliases while retaining each exact demo recipient", () => {
+  it("refuses legacy aliases while retaining each exact demo recipient", () => {
     const aliasedWorld = world();
     const wallet = aliasedWorld.wallets.treasury;
     aliasedWorld.wallets.settlement = {
@@ -720,8 +740,8 @@ describe("requests", () => {
       });
     const refused = attempt({ walletId: wallet.walletId });
     expect(refused?.answer(aliasedWorld)).toMatchObject({
-      status: 409,
-      body: { error: { code: "conflict" } },
+      status: 400,
+      body: { error: { code: "invalid_request" } },
     });
     expect(refused?.ops).toEqual([]);
     const exact = attempt({ custodyWalletId: aliasedWorld.wallets.settlement.id });

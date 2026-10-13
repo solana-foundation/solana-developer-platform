@@ -10,7 +10,6 @@ const exampleRequest = {
   id: "preq_abc123",
   publicToken: "example-public-token",
   custodyWalletId: "cwlt_example",
-  walletId: "provider-wallet-reference",
   status: "awaiting_payment",
   amount: "10.00",
   token: "EXAMPLE_TOKEN_MINT",

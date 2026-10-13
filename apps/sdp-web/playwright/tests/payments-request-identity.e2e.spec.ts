@@ -1,5 +1,5 @@
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import { type PaymentsDashboardWallet, SOL_MINT } from "@sdp/types";
 import { Client } from "pg";
 import { z } from "zod";
 import {
@@ -182,7 +182,10 @@ test.describe
       expect(response.request().postDataJSON()).toMatchObject({ custodyWalletId: wallet.id });
       expect(response.request().postDataJSON()).not.toHaveProperty("walletId");
       expect(response.ok()).toBe(true);
-      const { data } = z.object({ data: paymentRequestSchema }).parse(await response.json());
+      const raw = await response.json();
+      expect(raw.data).not.toHaveProperty("walletId");
+      expect(raw.data).not.toHaveProperty("providerWalletId");
+      const { data } = z.object({ data: paymentRequestSchema }).parse(raw);
       requests.push(data);
       expect(data).toMatchObject({
         custodyWalletId: wallet.id,
@@ -201,6 +204,35 @@ test.describe
       }
       return { data, redesigned };
     }
+
+    test("rejects legacy provider selectors through the dashboard without creating a Request", async ({
+      page,
+    }) => {
+      await gotoProjectPage(page, projectId, REQUESTS_PATH);
+      const before = await api.get<{ paymentRequests: DashboardPaymentRequest[]; total: number }>(
+        "/v1/payments/requests"
+      );
+      for (const selector of [
+        { walletId: wallets[0].walletId },
+        { custodyWalletId: wallets[0].id, walletId: wallets[0].walletId },
+      ]) {
+        const response = await page.request.post("/api/dashboard/payments/requests", {
+          headers: { "x-project-id": projectId },
+          data: {
+            ...selector,
+            token: SOL_MINT,
+            amount: "99",
+          },
+        });
+        expect(response.status()).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+      }
+      const after = await api.get<{ paymentRequests: DashboardPaymentRequest[]; total: number }>(
+        "/v1/payments/requests"
+      );
+      expect(after).toEqual(before);
+      await expect(page).toHaveURL(projectHref(projectId, REQUESTS_PATH));
+    });
 
     test("creates alias-equivalent recipients and retains links, QR terms and exact persisted pins", async ({
       page,
@@ -325,6 +357,24 @@ test.describe
           wallets[1].id,
         ]);
       });
+      const retained = await api.get<{ paymentRequests: DashboardPaymentRequest[] }>(
+        "/v1/payments/requests"
+      );
+      for (const request of requests) {
+        const row = retained.paymentRequests.find(({ id }) => id === request.id);
+        expect(row).toMatchObject({
+          id: request.id,
+          publicToken: request.publicToken,
+          destinationAddress: request.destinationAddress,
+          reference: request.reference,
+          status: "canceled",
+        });
+        expect(row).not.toHaveProperty("walletId");
+        expect(row).not.toHaveProperty("providerWalletId");
+      }
+      expect(
+        retained.paymentRequests.find(({ id }) => id === requests[0].id)?.custodyWalletId
+      ).toBeNull();
       for (const request of requests) {
         const redesigned = process.env.SDP_FLAG_NEW_DESIGN_ACTIVITY !== "0";
         const detailPath = redesigned ? `${REQUESTS_PATH}/${request.id}` : REQUESTS_PATH;

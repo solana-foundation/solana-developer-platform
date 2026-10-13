@@ -28,7 +28,7 @@ const requestFieldsSchema = z.object({
   publicToken: z.string().min(1),
   reference: z.string().min(1),
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
-  walletId: z.string().min(1),
+  walletId: z.never().optional(),
   destinationAddress: z.string().min(1),
   token: z.string().min(1),
   amount: z.string().min(1),
@@ -125,15 +125,16 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     } as unknown as ReturnType<typeof createRpc>);
   });
 
-  it("creates and lists the exact recipient without changing Request terms", async () => {
+  it("creates and lists the exact recipient without exposing its provider reference", async () => {
     const response = await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID });
     expect(response.status).toBe(201);
     const created = requestResponseSchema.parse(await response.json());
     expect(created.data).toMatchObject({
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
       token: DEVNET_USDC_MINT,
       amount: "25.00",
+      counterpartyId: null,
+      expiresAt: null,
       status: "awaiting_payment",
     });
 
@@ -154,7 +155,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     });
   });
 
-  it("counts retained aliases when proving a legacy selector without changing exact eligibility", async () => {
+  it("keeps retained aliases from changing exact creation eligibility", async () => {
     await getDb(env).batch([
       getDb(env)
         .prepare(
@@ -174,7 +175,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     ]);
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
     expect((await createRequest({ custodyWalletId: "cwlt_requests_retained" })).status).toBe(404);
-    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(409);
+    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(400);
   });
 
   it("keeps duplicate provider, address and label aliases distinct for exact creation", async () => {
@@ -202,7 +203,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         data: { custodyWalletId },
       });
     }
-    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(409);
+    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(400);
     await selectWallet(["payments:write"]);
     expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(403);
     expect((await createRequest({ custodyWalletId: "cwlt_requests_duplicate" })).status).toBe(403);
@@ -212,6 +213,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     {},
     { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
     { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: "wal_other" },
+    { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: null },
     { custodyWalletId: null },
     { custodyWalletId: 12 },
     { custodyWalletId: "" },
@@ -229,15 +231,12 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     });
   });
 
-  it("retains the unambiguous legacy selector and response fields", async () => {
+  it("rejects a provider wallet selector instead of creating a Request", async () => {
     const response = await createRequest({ walletId: TEST_WALLET_ID });
-    expect(response.status).toBe(201);
-    expect(requestResponseSchema.parse(await response.json())).toMatchObject({
-      data: {
-        custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        walletId: TEST_WALLET_ID,
-        destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      },
+    expect(response.status).toBe(400);
+    const list = await app.request("/v1/payments/requests", { headers: HEADERS }, env);
+    expect(requestsResponseSchema.parse(await list.json())).toMatchObject({
+      data: { total: 0, paymentRequests: [] },
     });
   });
 
@@ -246,17 +245,20 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     { field: "token", value: null },
     { field: "counterpartyId", value: 12 },
     { field: "expiresAt", value: 12 },
-  ])("identifies malformed $field terms for both creation selectors", async ({ field, value }) => {
-    for (const selector of [
-      { walletId: TEST_WALLET_ID },
-      { custodyWalletId: TEST_CUSTODY_WALLET_ID },
-    ]) {
-      const response = await createRequest({ ...selector, [field]: value });
-      expect(response.status).toBe(400);
-      const body = errorResponseSchema.parse(await response.json());
-      expect(body.error.message).toContain(`→ at ${field}`);
+  ])(
+    "identifies malformed $field terms even alongside a rejected legacy selector",
+    async ({ field, value }) => {
+      for (const selector of [
+        { walletId: TEST_WALLET_ID },
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID },
+      ]) {
+        const response = await createRequest({ ...selector, [field]: value });
+        expect(response.status).toBe(400);
+        const body = errorResponseSchema.parse(await response.json());
+        expect(body.error.message).toContain(`→ at ${field}`);
+      }
     }
-  });
+  );
 
   it("rejects unknown prototype fields from the original JSON body", async () => {
     const response = await app.request(
@@ -264,7 +266,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
       {
         method: "POST",
         headers: HEADERS,
-        body: `{"walletId":"${TEST_WALLET_ID}","token":"${DEVNET_USDC_MINT}","amount":"25.00","__proto__":{}}`,
+        body: `{"custodyWalletId":"${TEST_CUSTODY_WALLET_ID}","token":"${DEVNET_USDC_MINT}","amount":"25.00","__proto__":{}}`,
       },
       env
     );
@@ -335,7 +337,7 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         .bind(TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet1),
     ]);
     expect((await createRequest({ custodyWalletId: "cwlt_requests_other" })).status).toBe(404);
-    expect((await createRequest({ walletId: TEST_WALLET_ID })).status).toBe(201);
+    expect((await createRequest({ custodyWalletId: TEST_CUSTODY_WALLET_ID })).status).toBe(201);
   });
 
   it.each([
@@ -414,7 +416,6 @@ describe("Payments routes — Payment Requests exact recipient", () => {
         publicToken: created.data.publicToken,
         reference: created.data.reference,
         custodyWalletId: null,
-        walletId: TEST_WALLET_ID,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
         status: "canceled",
       })

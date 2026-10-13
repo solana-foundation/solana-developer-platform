@@ -20,7 +20,6 @@ function requestRow(id: string): PaymentRequest {
     projectId: "prj_test",
     counterpartyId: null,
     custodyWalletId: "cwlt_selected",
-    walletId: "provider_reference",
     destinationAddress: "saved_destination",
     token: "mint",
     amount: "12.5",
@@ -56,8 +55,7 @@ describe("Request response identity", () => {
   it.each(["cwlt_selected", null])(
     "keeps recipient %s without provider metadata",
     async (custodyWalletId) => {
-      const { walletId: _provider, ...withoutProvider } = requestRow("preq_1");
-      const row = { ...withoutProvider, custodyWalletId };
+      const row = { ...requestRow("preq_1"), custodyWalletId };
       expect(
         await fetchPaymentRequests(async () =>
           Response.json({
@@ -67,6 +65,23 @@ describe("Request response identity", () => {
       ).toMatchObject({ ok: true, data: [row], total: 1 });
     }
   );
+
+  it("does not pass legacy provider metadata to Request UI consumers", async () => {
+    const row = { ...requestRow("preq_retained"), walletId: "provider_reference" };
+    const result = await fetchPaymentRequests(async () =>
+      Response.json({ data: { paymentRequests: [row], total: 1 } })
+    );
+    expect(result).toMatchObject({ ok: true, total: 1 });
+    expect(result.data[0]).not.toHaveProperty("walletId");
+    expect(result.data[0]).toMatchObject({
+      id: "preq_retained",
+      custodyWalletId: "cwlt_selected",
+      publicToken: "token_preq_retained",
+      destinationAddress: "saved_destination",
+      amount: "12.5",
+      reference: "reference_preq_retained",
+    });
+  });
 });
 
 /** A list API over `total` requests, newest first, that records each page it serves. */

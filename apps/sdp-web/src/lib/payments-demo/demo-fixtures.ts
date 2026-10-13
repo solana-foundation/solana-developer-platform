@@ -1170,7 +1170,6 @@ function buildRequest(
     projectId: PROJECT_ID,
     counterpartyId: spec.contact ? world.contacts[spec.contact].id : null,
     custodyWalletId: wallet.id,
-    walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: DEMO_TOKENS.USDC.mint,
     amount: spec.amount,

@@ -388,7 +388,6 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     projectId: PROJECT_ID,
     counterpartyId: op.cp,
     custodyWalletId: wallet.id,
-    walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: op.token,
     amount: op.amount,

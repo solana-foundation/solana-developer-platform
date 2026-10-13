@@ -17,7 +17,7 @@ export interface PaymentRequestTokenOption {
 }
 
 export type PaymentRequestsLocalErrorCode = "paymentRequestsLoadFailed";
-export type DashboardPaymentRequest = Omit<PaymentRequest, "walletId"> & { walletId?: string };
+export type DashboardPaymentRequest = PaymentRequest;
 export type PaymentRequestsResult = PaginatedResponse<DashboardPaymentRequest> & {
   localErrorCode?: PaymentRequestsLocalErrorCode;
 };
@@ -37,7 +37,6 @@ export const paymentRequestSchema = z.object({
   projectId: z.string().nullable(),
   counterpartyId: z.string().nullable(),
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
-  walletId: z.string().optional(),
   destinationAddress: z.string(),
   token: z.string(),
   amount: z.string(),

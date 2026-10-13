@@ -27,5 +27,6 @@ describe("Request playground recipient selection", () => {
     });
     expect(create?.bodyFields.map(({ key }) => key)).not.toContain("walletId");
     expect(create?.expectedResponse).toMatchObject({ custodyWalletId: "cwlt_example" });
+    expect(create?.expectedResponse).not.toHaveProperty("walletId");
   });
 });
