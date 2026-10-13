@@ -9,7 +9,7 @@ import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
-import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
+import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
 import * as solanaServices from "@/services/solana";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -341,20 +341,6 @@ async function findIssuanceWallets(params: {
   }));
 }
 
-async function assertFreshIssuanceWalletAccess(
-  env: Env,
-  auth: ApiKeyContext,
-  custodyWalletId: string,
-  requiredWalletPermissions: Permission[]
-): Promise<void> {
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(env),
-    auth,
-    custodyWalletId,
-    requiredWalletPermissions
-  );
-}
-
 /** Resolve one exact tenant-scoped wallet for draft or direct-deploy selection. */
 export async function resolveIssuanceWallet(params: {
   env: Env;
@@ -367,8 +353,7 @@ export async function resolveIssuanceWallet(params: {
   if (!wallet) {
     throw walletNotFound();
   }
-  await assertFreshIssuanceWalletAccess(
-    params.env,
+  assertApiKeyCustodyWalletAccess(
     params.auth,
     wallet.custodyWalletId,
     params.requiredWalletPermissions
@@ -408,12 +393,7 @@ export async function resolveAuthorityWallet(params: {
   }
 
   const wallet = matches[0];
-  await assertFreshIssuanceWalletAccess(
-    env,
-    auth,
-    wallet.custodyWalletId,
-    requiredWalletPermissions
-  );
+  assertApiKeyCustodyWalletAccess(auth, wallet.custodyWalletId, requiredWalletPermissions);
   return wallet;
 }
 

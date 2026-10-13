@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
+  assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
-  assertFreshApiKeyCustodyWalletAccess,
   assertGrantableApiKeyPermissions,
   filterApiKeyWallets,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
@@ -193,138 +193,10 @@ describe("api key scope service", () => {
     expect(() => resolveApiKeySigningWalletId(auth, undefined)).toThrowError(AppError);
   });
 
-  it("revalidates a cached exact binding before selected-wallet work", async () => {
+  // Authentication reads the bindings fresh (HOO-2048), so the per-route check
+  // is a pure check against the request's snapshot.
+  it("refuses a custody wallet outside the key's bindings", () => {
     const auth = createApiKeyAuth({
-      projectId: "prj_scope_test",
-      walletScope: "selected",
-      signingWalletId: "wal_shared",
-      signingWalletIds: ["wal_shared"],
-      walletBindings: [
-        {
-          walletId: "wal_shared",
-          custodyWalletId: "cwlt_exact",
-          permissions: ["payments:write"],
-        },
-      ],
-    });
-    const allResponses = [
-      { results: [{ wallet_id: "wal_shared", permissions: '["payments:write"]' }] },
-      {
-        results: [
-          { custody_wallet_id: "cwlt_exact", wallet_id: "wal_shared" },
-          { custody_wallet_id: "cwlt_duplicate", wallet_id: "wal_shared" },
-        ],
-      },
-    ];
-    const db = {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => ({
-            signing_wallet_id: "wal_shared",
-            status: "active",
-            expires_at: null,
-          }),
-          all: async () => allResponses.shift(),
-        }),
-      }),
-    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
-
-    await expect(
-      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-
-  it("does not authorize an exact row through a colliding Provider wallet ID", async () => {
-    const auth = createApiKeyAuth({
-      projectId: "prj_scope_test",
-      walletScope: "selected",
-      signingWalletId: "cwlt_exact",
-      signingWalletIds: ["cwlt_exact"],
-      walletBindings: [
-        {
-          walletId: "cwlt_exact",
-          custodyWalletId: "cwlt_other",
-          permissions: ["payments:write"],
-        },
-      ],
-    });
-    const allResponses = [
-      { results: [{ wallet_id: "cwlt_exact", permissions: '["payments:write"]' }] },
-      { results: [{ custody_wallet_id: "cwlt_other", wallet_id: "cwlt_exact" }] },
-    ];
-    const db = {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => ({
-            signing_wallet_id: "cwlt_exact",
-            status: "active",
-            expires_at: null,
-          }),
-          all: async () => allResponses.shift(),
-        }),
-      }),
-    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
-
-    await expect(
-      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-
-  /**
-   * A db whose wallet-authorization reads GRANT `cwlt_exact`, so a refusal can
-   * only have come from the key row itself.
-   */
-  function grantingDb(keyRow: Record<string, unknown>) {
-    const allResponses = [
-      {
-        results: [
-          { wallet_id: "cwlt_exact", permissions: '["payments:write"]' },
-          { wallet_id: "wal_exact", permissions: '["payments:write"]' },
-        ],
-      },
-      { results: [{ custody_wallet_id: "cwlt_exact", wallet_id: "wal_exact" }] },
-    ];
-    return {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => keyRow,
-          all: async () => allResponses.shift(),
-        }),
-      }),
-    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
-  }
-
-  // The whole point of a FRESH check is that the request auth context may be a
-  // one-hour KV snapshot. A key deactivated inside that hour must stop moving
-  // money on the very next request, not when its cache entry happens to expire.
-  // Every non-active status, because "active" is the only one that grants.
-  it.each(["deactivated", "revoked", "expired"] as const)(
-    "refuses a %s key even though its cached snapshot still grants the wallet",
-    async (status) => {
-      const auth = createApiKeyAuth({
-        projectId: "prj_scope_test",
-        walletScope: "selected",
-        signingWalletId: "wal_exact",
-        signingWalletIds: ["wal_exact"],
-        walletBindings: [
-          { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:write"] },
-        ],
-      });
-      // The fresh authorization GRANTS the wallet, so status is the only thing
-      // that can refuse. An empty grant would pass this test without the fix.
-      const db = grantingDb({ signing_wallet_id: "wal_exact", status, expires_at: null });
-
-      await expect(
-        assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    }
-  );
-
-  // An expiry that has passed is a revocation the clock performed, and the
-  // status column will not have caught up until something writes to it.
-  it("refuses an active key whose expiry has passed", async () => {
-    const auth = createApiKeyAuth({
-      projectId: "prj_scope_test",
       walletScope: "selected",
       signingWalletId: "wal_exact",
       signingWalletIds: ["wal_exact"],
@@ -332,61 +204,51 @@ describe("api key scope service", () => {
         { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:write"] },
       ],
     });
-    const db = grantingDb({
-      signing_wallet_id: "wal_exact",
-      status: "active",
-      expires_at: "2020-01-01T00:00:00.000Z",
-    });
 
-    await expect(
-      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_other", ["payments:write"])).toThrow(
+      expect.objectContaining({ code: "FORBIDDEN" })
+    );
+    expect(() =>
+      assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])
+    ).not.toThrow();
   });
 
-  it("authorizes an exact row regardless of a preceding Provider wallet ID collision", async () => {
+  it("refuses a bound custody wallet without the required permission", () => {
     const auth = createApiKeyAuth({
-      projectId: "prj_scope_test",
       walletScope: "selected",
       signingWalletId: "wal_exact",
       signingWalletIds: ["wal_exact"],
       walletBindings: [
-        {
-          walletId: "wal_exact",
-          custodyWalletId: "cwlt_exact",
-          permissions: ["payments:write"],
-        },
+        { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:read"] },
       ],
     });
-    const allResponses = [
-      {
-        results: [
-          { wallet_id: "cwlt_exact", permissions: '["payments:write"]' },
-          { wallet_id: "wal_exact", permissions: '["payments:write"]' },
-        ],
-      },
-      {
-        results: [
-          { custody_wallet_id: "cwlt_other", wallet_id: "cwlt_exact" },
-          { custody_wallet_id: "cwlt_exact", wallet_id: "wal_exact" },
-        ],
-      },
-    ];
-    const db = {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => ({
-            signing_wallet_id: "wal_exact",
-            status: "active",
-            expires_at: null,
-          }),
-          all: async () => allResponses.shift(),
-        }),
-      }),
-    } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
 
-    await expect(
-      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-    ).resolves.toBeUndefined();
+    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])).toThrow(
+      expect.objectContaining({ code: "FORBIDDEN" })
+    );
+  });
+
+  it("does not authorize an exact row through a colliding Provider wallet ID", () => {
+    const auth = createApiKeyAuth({
+      walletScope: "selected",
+      signingWalletId: "cwlt_exact",
+      signingWalletIds: ["cwlt_exact"],
+      walletBindings: [
+        { walletId: "cwlt_exact", custodyWalletId: "cwlt_other", permissions: ["payments:write"] },
+      ],
+    });
+
+    expect(() => assertApiKeyCustodyWalletAccess(auth, "cwlt_exact", ["payments:write"])).toThrow(
+      expect.objectContaining({ code: "FORBIDDEN" })
+    );
+  });
+
+  it("leaves an all-wallet key unconstrained", () => {
+    const auth = createApiKeyAuth({ walletScope: "all", signingWalletId: null });
+
+    expect(() =>
+      assertApiKeyCustodyWalletAccess(auth, "cwlt_any", ["payments:write"])
+    ).not.toThrow();
   });
 
   it("requires an explicit wallet when the preferred binding is unresolved", () => {

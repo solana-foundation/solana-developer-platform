@@ -2,11 +2,10 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import type { TransactionMessageBytesBase64 } from "@solana/kit";
 import { compileTransaction, createNoopSigner } from "@solana/kit";
 import { getTokenSize } from "@solana-program/token-2022";
-import { getDb } from "@/db";
 import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
+import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { getSponsoredFeePayer } from "../context";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
@@ -87,12 +86,7 @@ export async function estimateTransferBatch(
 ) {
   const body = c.req.valid("json");
   const resolved = await resolveBatchRequest(c, body, ["payments:read"]);
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    resolved.scope.auth,
-    resolved.sourceWallet.id,
-    ["payments:read"]
-  );
+  assertApiKeyCustodyWalletAccess(resolved.scope.auth, resolved.sourceWallet.id, ["payments:read"]);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
   const [feePayer, lifetime] = await Promise.all([
     getSponsoredFeePayer(c),

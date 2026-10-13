@@ -51,7 +51,6 @@ import {
   resolveSdpEnvironment,
 } from "../context";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
@@ -218,7 +217,6 @@ export async function resolveRampQuoteRequest(
 
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 
