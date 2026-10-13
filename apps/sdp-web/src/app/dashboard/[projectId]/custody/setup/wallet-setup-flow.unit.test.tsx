@@ -238,6 +238,31 @@ describe("WalletSetupFlow", () => {
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
+  it("keeps the form and the key when the answer is lost, so Create wallet again resends the same key", async () => {
+    vi.mocked(initializeCustodySetupAction)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ status: "success" });
+    const user = userEvent.setup();
+    renderInteractiveFlow({
+      ...SANDBOX_FLOW,
+      connectedProviders: [],
+      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
+      initialProvider: "privy",
+    });
+
+    await user.type(screen.getByLabelText("Wallet label"), "Lost answer treasury");
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+    expect(await screen.findByText(/couldn't confirm whether the wallet was created/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalled());
+
+    const [first, retry] = vi.mocked(initializeCustodySetupAction).mock.calls.map(([form]) => form);
+    expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
+    expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
+    expect(createCustodySetupWalletAction).not.toHaveBeenCalled();
+  });
+
   it("explains why nothing can be selected when the project can use no provider", () => {
     const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [], custodyAvailability: [] });
 

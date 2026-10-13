@@ -870,11 +870,16 @@ function useCreateWallet({
 
     startTransition(async () => {
       try {
-        const result = await formAction(formData).catch((error: unknown) => {
-          // The call may have reached the server; the key stays for the retry.
+        let result: Awaited<ReturnType<typeof formAction>>;
+        try {
+          result = await formAction(formData);
+        } catch {
+          // No answer: the call may have reached the server. The key stays and the form stays,
+          // so Create wallet again resends the same request under the same key.
           setupKey.settled(input, { status: "error" });
-          throw error;
-        });
+          setErrorMessage(t("DashboardCustody.walletSetupOutcomeUnknown"));
+          return;
+        }
         setupKey.settled(input, result);
 
         switch (result.status) {
