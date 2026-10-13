@@ -332,6 +332,10 @@ describe("BvnkRampClient pay family", () => {
         if (!(error instanceof BvnkPayRequestError)) return false;
         assert.equal(error.bvnkCode, "MER-PAY-2010");
         assert.equal(error instanceof SdpPaymentsError, true);
+        // BVNK's wording, which names the transfer reference, stays out of the public message.
+        assert.equal(error.message, "BVNK request failed with status 400");
+        assert.equal(error.diagnostics?.providerCode, "MER-PAY-2010");
+        assert.match(String(error.diagnostics?.providerMessage), /already exists/);
         return true;
       }
     );
