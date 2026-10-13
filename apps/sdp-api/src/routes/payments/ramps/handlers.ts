@@ -4,6 +4,7 @@ import {
   bvnkOnrampRemittance,
   readBvnkOnrampTransferData,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { CANCELABLE_RAMP_TRANSFER_STATUSES, isCancelableRampTransferStatus } from "@sdp/types";
 import { getDb } from "@/db";
