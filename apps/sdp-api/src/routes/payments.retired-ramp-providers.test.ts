@@ -23,15 +23,17 @@ async function seedRampTransfer(input: {
   provider: string;
   type: "onramp" | "offramp";
   status: string;
+  deliveryMode?: string;
+  providerData?: Record<string, unknown>;
 }): Promise<void> {
   const now = new Date().toISOString();
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers (
          id, organization_id, project_id, wallet_id, custody_wallet_id, token, amount, type,
-         direction, status, provider, provider_reference, fiat_currency, fiat_amount,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         direction, status, provider, provider_reference, delivery_mode, provider_data,
+         fiat_currency, fiat_amount, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)`
     )
     .bind(
       input.id,
@@ -46,6 +48,8 @@ async function seedRampTransfer(input: {
       input.status,
       input.provider,
       `${input.provider}_reference`,
+      input.deliveryMode ?? null,
+      input.providerData ?? {},
       "USD",
       "10.00",
       now,
@@ -242,6 +246,37 @@ describe.each(RETIRED_RAMP_PROVIDERS)("retired ramp provider %s", (provider) => 
       }),
     ]);
     expect(body.data.accounts[0]).not.toHaveProperty("paymentRails");
+  });
+});
+
+describe("a retired provider's stored provider data", () => {
+  installPaymentsRouteTestHooks();
+
+  it("reads a MoneyGram widget transfer with base fields only", async () => {
+    const id = "xfr_retired_moneygram_widget";
+    await seedRampTransfer({
+      id,
+      provider: "moneygram",
+      type: "offramp",
+      status: "completed",
+      deliveryMode: "session_widget",
+      providerData: {
+        moneygram: { transactionId: "mg_tx_stored", referenceNumber: "12345678" },
+      },
+    });
+
+    const read = await app.request(`/v1/payments/transfers/${id}`, { headers: authorization }, env);
+
+    expect(read.status).toBe(200);
+    const body = (await read.json()) as { data: { transfer: Record<string, unknown> } };
+    expect(body.data.transfer).toMatchObject({
+      id,
+      provider: "moneygram",
+      status: "completed",
+      deliveryMode: "session_widget",
+      providerReference: "moneygram_reference",
+    });
+    expect(body.data.transfer).not.toHaveProperty("moneygram");
   });
 });
 

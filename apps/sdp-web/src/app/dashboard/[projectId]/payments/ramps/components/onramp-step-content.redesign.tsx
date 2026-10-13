@@ -16,7 +16,6 @@ import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { DepositTimeline } from "./deposit-timeline";
 import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
@@ -38,7 +37,6 @@ interface StepContentProps {
 type OnrampQuote = NonNullable<OnrampWizard["quote"]>;
 type ManualInstructionsQuoteRecord = Extract<OnrampQuote, { deliveryMode: "manual_instructions" }>;
 type HostedQuoteRecord = Extract<OnrampQuote, { deliveryMode: "hosted" }>;
-type MoneygramQuoteRecord = Extract<OnrampQuote, { provider: "moneygram" }>;
 
 /** The details step: the contact, then the amount, wallet, currency pair and provider. */
 function DepositStep({ wizard, contact }: StepContentProps) {
@@ -197,29 +195,6 @@ function ManualInstructionsStep({
   );
 }
 
-/** MoneyGram's widget, once the wallet it pays into and the transfer the quote records are known. */
-function MoneygramStep({ wizard, quote }: { wizard: OnrampWizard; quote: MoneygramQuoteRecord }) {
-  const { fields, selectedWallet, selectedRampPair, refreshQuote, quoteTransferId } = wizard;
-  if (!selectedWallet || quoteTransferId === null) {
-    return <RampQuoteSkeleton />;
-  }
-  return (
-    <MoneygramRampWidget
-      direction="onramp"
-      quote={quote}
-      transferId={quoteTransferId}
-      sourceWalletId={selectedWallet.id}
-      sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-      sourceWalletAddress={selectedWallet.publicKey}
-      sourceTokenMint={null}
-      cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-      cryptoAmount={fields.amount.trim()}
-      fiatCurrency={selectedRampPair.fiatCurrency}
-      onSessionExpiring={refreshQuote}
-    />
-  );
-}
-
 /** A provider's hosted checkout: Coinbase's order summary above its frame, or MoonPay's frame. */
 function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
   const t = useTranslations();
@@ -273,10 +248,6 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
     return (
       <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
     );
-  }
-
-  if (quote.provider === "moneygram") {
-    return <MoneygramStep wizard={wizard} quote={quote} />;
   }
 
   if (quote.deliveryMode === "hosted") {

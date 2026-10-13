@@ -66,7 +66,7 @@ The response contains:
       {
         "source": "USD",
         "dest": "usdc.solana",
-        "providers": ["lightspark", "bvnk", "moneygram", "coinbase", "stripe"]
+        "providers": ["lightspark", "bvnk", "coinbase", "stripe"]
       }
     ],
     "providerDetails": {
@@ -90,7 +90,6 @@ The example shows one `providerDetails` entry; a real response has one for every
 A few things to know about discovery:
 
 - SDP answers from its own support data. It does not call the providers for this request.
-- The results only include providers offered in the calling key's environment. MoneyGram appears only for sandbox keys.
 - Discovery does not check which providers are enabled for your organization. A provider listed here can still return `403` when you quote, if it is not enabled for you.
 - Quote requests are checked against the same on-ramp data: a provider that does not list your `assetRail` and `fiatCurrency` pair is rejected with `UNSUPPORTED_CORRIDOR`.
 
@@ -133,7 +132,7 @@ Any other `status` means the counterparty is not ready for that provider:
 - `unsupported` — the provider cannot serve this request. `reason` explains why (for example, BVNK returns `"BVNK supports USD only."` for other fiat currencies).
 - Any other value — the provider still needs something before it will quote. The response describes what is outstanding, for example a `fields` list or a `verificationUrl`.
 
-MoonPay, MoneyGram, Coinbase, and Stripe report `ready` for every on-ramp counterparty. Lightspark and BVNK report the counterparty's current state with that provider. Quoting Lightspark or BVNK before the counterparty is provisioned with them returns `409 CONFLICT`.
+MoonPay, Coinbase, and Stripe report `ready` for every on-ramp counterparty. Lightspark and BVNK report the counterparty's current state with that provider. Quoting Lightspark or BVNK before the counterparty is provisioned with them returns `409 CONFLICT`.
 
 ## Creating an on-ramp quote
 
@@ -203,7 +202,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `stripe`. SDP does not choose a provider for you. |
+| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `coinbase`, `stripe`. SDP does not choose a provider for you. |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side customer records are resolved from it on the server; you never pass provider customer IDs. |
 | `destinationCustodyWalletId` | yes | The `id` of a custody wallet you control (from `GET /v1/wallets`). The crypto is delivered to this wallet's address. |
 | `assetRail` | yes | The crypto asset rail to buy: `sol.solana`, `usdc.solana`, `usdt.solana`, `usdg.solana`, or `pyusd.solana`. |
@@ -270,7 +269,7 @@ Lightspark quotes also return the quoted economics: `exchangeRate`, `totalSendin
 | --- | --- | --- |
 | `hosted` | Send the user to `quote.hostedUrl`, a page run by the provider, to pay there. | MoonPay, Coinbase |
 | `manual_instructions` | Show the user `quote.paymentInstructions`: the account to send the fiat to and any reference the payment must carry. For BVNK, the bank transfer must include `paymentReference`, or the payment cannot be matched to this transfer. | Lightspark, BVNK |
-| `session_widget` | Embed the provider's widget in your app. Stripe returns `quote.clientSecret`, `quote.publishableKey`, and `quote.sessionId` for its on-ramp session. | Stripe, MoneyGram (sandbox only) |
+| `session_widget` | Embed the provider's widget in your app. Stripe returns `quote.clientSecret`, `quote.publishableKey`, and `quote.sessionId` for its on-ramp session. | Stripe |
 
 There is no further SDP endpoint to call. The provider moves the money and delivers the crypto to the destination wallet. As the provider reports progress, SDP updates the transfer:
 

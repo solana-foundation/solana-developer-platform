@@ -345,17 +345,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       precreatedTransferId = pendingTransfer.id;
       break;
     }
-    case "moneygram": {
-      quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOfframpQuote(rampRuntime(c), {
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        cryptoAmount: input.cryptoAmount,
-        sourceWalletAddress,
-        externalCustomerId: counterparty.id,
-        paymentTransferId: reservedTransferId,
-      });
-      break;
-    }
     case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":

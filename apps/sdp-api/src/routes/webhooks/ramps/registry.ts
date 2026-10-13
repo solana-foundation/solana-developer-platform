@@ -13,10 +13,7 @@ export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   bvnk: new BvnkWebhookProcessor(),
   coinbase: new CoinbaseWebhookProcessor(),
   stripe: new StripeWebhookProcessor(),
-} as const satisfies Record<
-  Exclude<RampProviderId, "moneygram">,
-  WebhookProcessor<unknown, unknown>
->;
+} as const satisfies Record<RampProviderId, WebhookProcessor<unknown, unknown>>;
 
 export type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
 

@@ -187,7 +187,6 @@ export const PROVIDER_SETUP_REGISTRY = {
     moonpay: rampSetup("moonpay"),
     lightspark: rampSetup("lightspark"),
     bvnk: rampSetup("bvnk"),
-    moneygram: rampSetup("moneygram"),
     coinbase: rampSetup("coinbase"),
     stripe: rampSetup("stripe"),
   },

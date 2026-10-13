@@ -95,7 +95,6 @@ export const SDP_RAMP_PROVIDER_STAGES = {
   moonpay: "experimental",
   lightspark: "experimental",
   bvnk: "experimental",
-  moneygram: "experimental",
   coinbase: "experimental",
   stripe: "experimental",
 } as const satisfies SdpRampProviderStages;

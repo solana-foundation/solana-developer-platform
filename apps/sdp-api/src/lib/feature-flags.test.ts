@@ -298,7 +298,6 @@ describe("release channels", () => {
       moonpay: "experimental",
       lightspark: "experimental",
       bvnk: "beta",
-      moneygram: "experimental",
       coinbase: "experimental",
       stripe: "experimental",
     };

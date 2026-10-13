@@ -23,8 +23,8 @@
 }
 
 /* One keyframe set per rotation length, about 3s per row. */
-.rpr-track-6 {
-  animation: rpr-cycle-6 18s infinite;
+.rpr-track-5 {
+  animation: rpr-cycle-5 15s infinite;
 }
 
 .rpr-track-7 {
@@ -42,33 +42,29 @@
   content: attr(data-name);
 }
 
-@keyframes rpr-cycle-6 {
+@keyframes rpr-cycle-5 {
   0%,
-  14.37% {
+  17.24% {
     transform: translateY(0);
   }
-  16.67%,
-  31.03% {
+  20%,
+  37.24% {
     transform: translateY(-1lh);
   }
-  33.33%,
-  47.7% {
+  40%,
+  57.24% {
     transform: translateY(-2lh);
   }
-  50%,
-  64.37% {
+  60%,
+  77.24% {
     transform: translateY(-3lh);
   }
-  66.67%,
-  81.03% {
+  80%,
+  97.24% {
     transform: translateY(-4lh);
   }
-  83.33%,
-  97.7% {
-    transform: translateY(-5lh);
-  }
   100% {
-    transform: translateY(-6lh);
+    transform: translateY(-5lh);
   }
 }
 
@@ -107,7 +103,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rpr-track-6,
+  .rpr-track-5,
   .rpr-track-7 {
     animation: none;
   }

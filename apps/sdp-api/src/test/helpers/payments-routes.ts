@@ -168,10 +168,6 @@ export { TEST_BVNK_HAWK_AUTH_ID, TEST_BVNK_HAWK_SECRET_KEY, TEST_BVNK_WALLET_ID 
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
-export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
-
-export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
-
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -199,10 +195,6 @@ let originalBvnkHawkAuthId: string | undefined;
 let originalBvnkHawkSecretKey: string | undefined;
 
 let originalBvnkWalletId: string | undefined;
-
-let originalMoneygramSandboxPublicKey: string | undefined;
-
-let originalMoneygramSandboxSecretKey: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -603,8 +595,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
     originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
     originalBvnkWalletId = env.BVNK_WALLET_ID;
-    originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
-    originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
@@ -619,8 +609,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_AUTH_ID = undefined;
     env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = undefined;
-    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
-    env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -643,8 +631,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
     env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
     env.BVNK_WALLET_ID = originalBvnkWalletId;
-    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
-    env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
 
     await clearKVStores(env);
   });

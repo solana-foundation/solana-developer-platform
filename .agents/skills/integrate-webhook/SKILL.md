@@ -38,7 +38,7 @@ Signature variety across the five registered webhook providers:
 
 ## parse
 
-`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. Narrow the payload with `readString` / `readRecord` / `readNumber` from `@sdp/payments/json`. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
+`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. `safeParse` the payload with a zod `z.discriminatedUnion` per event type (`bvnk.schema.ts` is the pattern); an event type the schema doesn't know is an `ignore` event, not a parse failure. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
 
 `parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: references not minted by SDP return `undefined` from the processor's reference reader and get logged-and-skipped in `process`.
 

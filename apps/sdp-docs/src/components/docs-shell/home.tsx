@@ -103,7 +103,6 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
       { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg" },
       { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
       { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
-      { name: "MoneyGram", h: 24, src: "/docs/images/partners/moneygram.svg" },
     ],
   },
   {

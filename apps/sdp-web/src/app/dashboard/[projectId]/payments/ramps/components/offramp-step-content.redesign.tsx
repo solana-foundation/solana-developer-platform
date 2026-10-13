@@ -15,7 +15,6 @@ import { BvnkAgreementConsent } from "./bvnk-agreement-consent.redesign";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -230,47 +229,6 @@ function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
   );
 }
 
-function OfframpMoneygramStep({
-  wizard,
-  quote,
-}: {
-  wizard: OfframpWizard;
-  quote: Extract<NonNullable<OfframpWizard["quote"]>, { provider: "moneygram" }>;
-}) {
-  const {
-    selectedWallet,
-    quoteTransferId,
-    sourceTokenMint,
-    selectedRampPair,
-    fields,
-    refreshQuote,
-    transferStatus,
-  } = wizard;
-  if (!selectedWallet || quoteTransferId === null) {
-    return <RampQuoteSkeleton />;
-  }
-  return (
-    <div className="space-y-6">
-      <MoneygramRampWidget
-        direction="offramp"
-        quote={quote}
-        transferId={quoteTransferId}
-        sourceWalletId={selectedWallet.id}
-        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-        sourceWalletAddress={selectedWallet.publicKey}
-        sourceTokenMint={sourceTokenMint}
-        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-        cryptoAmount={fields.amount.trim()}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        onSessionExpiring={refreshQuote}
-      />
-      <div className="border-t border-border-default pt-5">
-        <RampStatusPanel direction="offramp" transfer={transferStatus} />
-      </div>
-    </div>
-  );
-}
-
 function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const demo = usePaymentsDemo();
@@ -337,10 +295,6 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
         src={quote.hostedUrl}
       />
     );
-  }
-
-  if (quote.provider === "moneygram") {
-    return <OfframpMoneygramStep wizard={wizard} quote={quote} />;
   }
 
   if (quote.deliveryMode === "manual_instructions") {

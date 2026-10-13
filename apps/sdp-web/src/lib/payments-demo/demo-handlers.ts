@@ -510,7 +510,6 @@ const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
   bvnk: 0.008,
   moonpay: 0.035,
   coinbase: 0.015,
-  moneygram: 0.02,
   stripe: 0.029,
 };
 const QUOTE_TTL_MS = 15 * MINUTE_MS;
@@ -770,16 +769,6 @@ function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQ
           },
         ],
       };
-    case "moneygram":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "session_widget",
-        sessionToken: `demo.${q.quoteId}`,
-        sessionId: q.quoteId,
-        widgetUrl: "https://playground.xramps.moneygram.com/",
-        expiresAt: q.expiresAt,
-      };
     case "stripe":
       return {
         ...base,
@@ -822,16 +811,6 @@ function offrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRamp
         provider,
         deliveryMode: "hosted",
         hostedUrl: `https://sell-sandbox.moonpay.com/?externalTransactionId=${q.transferId}`,
-      };
-    case "moneygram":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "session_widget",
-        sessionToken: `demo.${q.quoteId}`,
-        sessionId: q.quoteId,
-        widgetUrl: "https://playground.xramps.moneygram.com/",
-        expiresAt: q.expiresAt,
       };
     default:
       return {

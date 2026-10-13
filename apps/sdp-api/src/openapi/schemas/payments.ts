@@ -238,48 +238,6 @@ export const transferInitiatorSchema = z
   })
   .openapi({ description: "Initiator metadata for the transfer." });
 
-export const moneygramTransferDetailsSchema = z
-  .object({
-    customerId: z.string().optional().openapi({
-      description:
-        "MoneyGram profile id for the counterparty; matches the MoneyGram customer_link provider account reference.",
-      example: "mg_profile_example",
-    }),
-    transactionId: z.string().optional().openapi({
-      description: "MoneyGram xRamps transaction identifier.",
-      example: "mgi_tx_example",
-    }),
-    mgiTransactionId: z.string().optional().openapi({
-      description: "MoneyGram-side transaction identifier used to correlate status webhooks.",
-      example: "mgi_correlation_example",
-    }),
-    referenceNumber: z.string().optional().openapi({
-      description: "Cash pickup reference number issued by MoneyGram.",
-      example: "12345678",
-    }),
-    payoutAmount: z.number().optional().openapi({
-      description: "Fiat payout amount reported by MoneyGram.",
-      example: 25,
-    }),
-    payoutStatus: z.string().optional().openapi({
-      description: "MoneyGram payout status.",
-      example: "completed",
-    }),
-    cryptoTransferId: z.string().optional().openapi({
-      description: "SDP transfer id for the on-chain USDC leg.",
-      example: "xfr_moneygram_crypto_leg_example",
-    }),
-    solanaTxSignature: z.string().optional().openapi({
-      description: "Solana transaction signature for the USDC transfer.",
-      example: "sig_moneygram_usdc_transfer_example",
-    }),
-    lastWidgetError: z.string().optional().openapi({
-      description: "Last MoneyGram widget error recorded for this transfer.",
-      example: "Transaction cancelled by user",
-    }),
-  })
-  .openapi({ description: "MoneyGram-specific transfer metadata." });
-
 /**
  * Provider-reported ramp settlement economics, mirroring the
  * `RampTransferSettlement` union in `@sdp/types`. BVNK on-ramp transfers
@@ -574,9 +532,6 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
-    moneygram: moneygramTransferDetailsSchema.optional().openapi({
-      description: "MoneyGram-specific details for MoneyGram ramp transfers.",
-    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",

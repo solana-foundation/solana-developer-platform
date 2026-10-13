@@ -20,7 +20,7 @@ export const counterpartyIdParamsSchema = z.object({
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z
     .object({
-      provider: z.enum(["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "stripe"], {
+      provider: z.enum(["moonpay", "lightspark", "bvnk", "coinbase", "stripe"], {
         error: "provider does not support onramp requirements",
       }),
       direction: z.literal("onramp"),
@@ -43,7 +43,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       .strict(),
     z
       .object({
-        provider: z.enum(["moonpay", "bvnk", "moneygram"], {
+        provider: z.enum(["moonpay", "bvnk"], {
           error: "provider does not support offramp requirements",
         }),
         direction: z.literal("offramp"),
@@ -89,7 +89,6 @@ const collectedDataSchema = z.record(z.string(), z.string()).optional();
 
 export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
-  z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
   z.discriminatedUnion("direction", [
     z.object({
       provider: z.literal("bvnk"),

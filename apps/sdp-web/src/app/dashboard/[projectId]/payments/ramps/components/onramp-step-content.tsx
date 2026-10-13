@@ -11,7 +11,6 @@ import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -60,7 +59,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
@@ -169,27 +167,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
     return (
       <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
-    );
-  }
-
-  if (currentStepId === "PROVIDER" && quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <MoneygramRampWidget
-        direction="onramp"
-        quote={quote}
-        transferId={wizard.quoteTransferId}
-        sourceWalletId={selectedWallet.id}
-        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-        sourceWalletAddress={selectedWallet.publicKey}
-        sourceTokenMint={null}
-        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-        cryptoAmount={fields.amount.trim()}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        onSessionExpiring={refreshQuote}
-      />
     );
   }
 

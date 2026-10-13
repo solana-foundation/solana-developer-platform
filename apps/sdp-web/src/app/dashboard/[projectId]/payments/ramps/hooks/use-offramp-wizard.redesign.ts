@@ -215,9 +215,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
           }
         : null;
     }
-    // Demo mode stands in for MoneyGram's widget too, so its deposit is sent the same way.
-    const reportsDeposit =
-      quote?.deliveryMode === "hosted" || (demo && quote?.deliveryMode === "session_widget");
+    const reportsDeposit = quote?.deliveryMode === "hosted";
     if (
       reportsDeposit &&
       transferStatus?.status === "awaiting_payment" &&
@@ -226,7 +224,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       return transferStatus.cryptoDeposit;
     }
     return null;
-  }, [demo, wizard.quote, wizard.fields.amount, transferStatus]);
+  }, [wizard.quote, wizard.fields.amount, transferStatus]);
 
   const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.

@@ -2,6 +2,7 @@
 
 import type { UnifiedTransactionModule } from "@sdp/types";
 import {
+  ArrowDownIcon,
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
@@ -24,9 +25,10 @@ import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs
 import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
+import { type DesignModuleFlags, isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -66,7 +68,7 @@ export type DashboardHeaderActionConfig = {
   label: string;
   href: string;
   /** Left out for a plain label, as a contact page's Pay is. */
-  icon?: "plus" | "download";
+  icon?: "plus" | "download" | "arrow-down";
   variant: "primary" | "outline";
   /** Appends the page's current query string, so an export follows the list's filters. */
   withCurrentQuery?: boolean;
@@ -75,6 +77,8 @@ export type DashboardHeaderActionConfig = {
    * so a failed export reaches the user as a message rather than a broken download.
    */
   download?: boolean;
+  /** Hidden from a viewer without this capability, whose click would only reach a refusal. */
+  capability?: keyof DashboardCapabilities;
 };
 
 /** The saved file's name, off a Content-Disposition header. */
@@ -165,7 +169,14 @@ export function DashboardHeaderAction({
   search: string;
 }) {
   const projectHref = useProjectHref();
-  const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
+  const Icon =
+    action.icon === undefined
+      ? null
+      : action.icon === "plus"
+        ? PlusIcon
+        : action.icon === "arrow-down"
+          ? ArrowDownIcon
+          : DownloadIcon;
   const target = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
   if (action.download) {
     // The export route is an API path, not a dashboard page, so it takes no project segment.
@@ -208,6 +219,8 @@ type DashboardTopBarProps = {
   hasBottomNav?: boolean;
   /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
+  /** Shown before a refresh page's title, as a wallet's provider mark is. */
+  mark?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -298,6 +311,7 @@ export function StackedDashboardTopBar({
   trailingContent,
   hideTitle = false,
   above,
+  mark,
 }: {
   navigation: ReactNode;
   title: string;
@@ -306,6 +320,8 @@ export function StackedDashboardTopBar({
   hideTitle?: boolean;
   /** Set over the title in its column: a refresh action page's way back. */
   above?: ReactNode;
+  /** Set before the title, 16px from it (a wallet's 48px provider mark). */
+  mark?: ReactNode;
 }) {
   return (
     <div
@@ -317,10 +333,19 @@ export function StackedDashboardTopBar({
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {above ? <div className="mb-2">{above}</div> : null}
-          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-            {title}
-          </h1>
+          {above ? <div className={mark ? "mb-4" : "mb-2"}>{above}</div> : null}
+          {mark ? (
+            <div className="flex min-w-0 items-center gap-4">
+              <span className="shrink-0">{mark}</span>
+              <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+                {title}
+              </h1>
+            </div>
+          ) : (
+            <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+              {title}
+            </h1>
+          )}
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
@@ -438,6 +463,7 @@ export function DashboardTopBar({
   layout = "base",
   hasBottomNav = true,
   utilities,
+  mark,
 }: DashboardTopBarProps) {
   const utilityContent = utilities ?? null;
   const trailingContent = action ? (
@@ -461,6 +487,7 @@ export function DashboardTopBar({
         title={title}
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
+        mark={mark}
         action={action}
         trailingContent={utilityContent}
       />
@@ -782,20 +809,39 @@ function getMarketsRoutePageConfig(
 
 function getWalletRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  paymentsEnabled: boolean
 ): DashboardPageConfig | null {
+  const walletDetailMatch = pathname.match(/^\/dashboard\/(?:wallets|custody)\/([^/]+)\/?$/);
   const isWalletDetail =
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+    walletDetailMatch !== null && !["setup", "connections"].includes(walletDetailMatch[1] ?? "");
   if (!isWalletDetail) return null;
 
+  // The wallet names itself (and sets its provider mark and star) through DashboardPageTitle;
+  // "Wallet" holds the place until it does.
   return {
-    title: t("Shared.dashboardShell.wallets"),
-    contentWidthClass: "max-w-none",
+    title: t("Shared.dashboardShell.wallet"),
+    contentWidthClass: REFRESH_PAGE_WIDTH,
     backAction: {
       href: "/dashboard/wallets",
-      label: t("Shared.dashboardShell.backToWallets"),
+      label: t("Shared.dashboardShell.wallets"),
     },
+    headerTabs: {
+      tabs: [
+        { id: "overview", label: t("Shared.tabs.overview") },
+        { id: "activity", label: t("Shared.tabs.activity") },
+        { id: "settings", label: t("Shared.tabs.settings") },
+      ],
+      hideOnMobile: false,
+    },
+    headerAction: paymentsEnabled
+      ? {
+          label: t("Shared.dashboardShell.deposit"),
+          href: "/dashboard/payments/deposit",
+          icon: "arrow-down",
+          variant: "primary",
+        }
+      : undefined,
   };
 }
 
@@ -929,21 +975,30 @@ function getWalletSectionPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
+  // The list and the create flow are built on the refresh design: a left title over the
+  // design's 900px column with the page's one action beside it.
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
       headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("Shared.dashboardShell.createAWallet"),
+        href: "/dashboard/wallets/setup",
+        icon: "plus",
+        variant: "primary",
+        capability: "canManageCustody",
+      },
     };
   }
+  // The flow names itself in its step header, as the design draws it; the title stays for
+  // assistive tech and the footer's Cancel is the way back.
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
+      headerWidthClass: "max-w-flow",
     };
   }
   if (
@@ -1211,6 +1266,63 @@ function getLegacyDesignPageConfig(
   });
 }
 
+/** The Wallets routes as the previous design (NEW DESIGN off) configures them. */
+function getLegacyWalletRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  const isWalletDetail =
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+  if (!isWalletDetail) return null;
+
+  return {
+    title: t("Shared.dashboardShell.wallets"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/wallets",
+      label: t("Shared.dashboardShell.backToWallets"),
+    },
+  };
+}
+
+function getLegacyWalletSectionPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
+    return {
+      title: t("Shared.dashboardShell.wallets"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+    return {
+      title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (
+    pathname === "/dashboard/wallets/connections" ||
+    pathname === "/dashboard/custody/connections"
+  ) {
+    return {
+      title: t("Shared.dashboardShell.connections"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  return null;
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1219,7 +1331,7 @@ export function getDashboardPageConfig(
   // Transactions tabs, from `enabledTransactionModules`.
   transactionModules: readonly UnifiedTransactionModule[],
   _custodyEnabled = true,
-  _paymentsEnabled = true,
+  paymentsEnabled = true,
   newDesign = true,
   newDesignModules?: DesignModuleFlags
 ): DashboardPageConfig {
@@ -1249,9 +1361,15 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
+  // Every Wallets page's header follows the Wallets module.
+  const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
+  const walletSectionPageConfig = walletsNewDesign
+    ? getWalletSectionPageConfig(pathname, t)
+    : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
+  const walletRoutePageConfig = walletsNewDesign
+    ? getWalletRoutePageConfig(pathname, t, paymentsEnabled)
+    : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;

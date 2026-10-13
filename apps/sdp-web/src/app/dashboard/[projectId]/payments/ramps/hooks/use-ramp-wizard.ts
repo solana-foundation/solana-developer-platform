@@ -311,18 +311,6 @@ export function useRampWizard<TId extends string>(
     return created;
   };
 
-  const refreshQuote = async () => {
-    try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
-    } catch (error) {
-      toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
-        description:
-          error instanceof Error ? error.message : t("DashboardPayments.ramps.quoteRequestFailed"),
-        position: "bottom-right",
-      });
-    }
-  };
-
   // Only auto-fire the quote while the user sits on the transaction stage —
   // stepping back to edit selections must not create a quote from mid-edit state.
   // Once per wizard instance, held in local state (never a shared cache: a
@@ -534,7 +522,6 @@ export function useRampWizard<TId extends string>(
     quoteTransferId,
     memoRows,
     setMemoRows,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,

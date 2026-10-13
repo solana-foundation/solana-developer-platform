@@ -100,7 +100,7 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
  * Providers with a counterparty onboarding/provisioning lifecycle (and thus panel copy).
- * Widget providers (moonpay, moneygram) report `ready` and go straight to a quote — they
+ * Widget providers (moonpay, stripe) report `ready` and go straight to a quote — they
  * never render the onboarding panel, so callers must gate on this before rendering it.
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {

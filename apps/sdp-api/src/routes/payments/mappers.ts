@@ -10,7 +10,6 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { mapMoneygramTransferDetails } from "./mappers/moneygram";
 import { bvnkProviderReference } from "./ramps/providers/bvnk";
 
 /**
@@ -29,7 +28,6 @@ function rampProviderReference(row: TransferRow): string | undefined {
       return bvnkProviderReference(row);
     case "moonpay":
     case "lightspark":
-    case "moneygram":
     case "coinbase":
     case "stripe":
       return row.provider_reference === null ? undefined : row.provider_reference;
@@ -95,7 +93,6 @@ export function mapTransferRow(row: TransferRow) {
 
   const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
-  const moneygram = mapMoneygramTransferDetails(row);
   const providerReference = rampProviderReference(row);
   return {
     ...base,
@@ -106,7 +103,6 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
-    ...(moneygram ? { moneygram } : {}),
   };
 }
 

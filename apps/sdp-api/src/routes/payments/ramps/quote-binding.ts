@@ -66,9 +66,7 @@ export function assertRampQuoteBindingMatches(
  */
 export function rampQuoteExpiryProviderData(quote: PaymentRampQuote): Record<string, unknown> {
   const expiresAt =
-    (quote.provider === "lightspark" || quote.provider === "moneygram") && quote.expiresAt
-      ? quote.expiresAt
-      : undefined;
+    quote.provider === "lightspark" && quote.expiresAt ? quote.expiresAt : undefined;
   return expiresAt ? { rampQuote: { expiresAt } } : {};
 }
 

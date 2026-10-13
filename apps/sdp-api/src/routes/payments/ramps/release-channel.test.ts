@@ -80,7 +80,6 @@ describe("ramp providers outside the release channel", () => {
     ],
     ["GET", "/counterparties/cp_1/provider-accounts?provider=lightspark"],
     ["POST", "/coinbase/events"],
-    ["POST", "/moneygram/events"],
   ])("refuses %s %s, which names an excluded provider, with 403", async (method, path) => {
     const response = await app.request(path, { method }, env);
     expect(response.status).toBe(403);

@@ -327,8 +327,6 @@ export async function advanceCounterpartyRequirements(
   switch (input.provider) {
     case "moonpay":
       return readyCounterparty("moonpay", input.direction);
-    case "moneygram":
-      return readyCounterparty("moneygram", input.direction);
     case "lightspark":
       return advanceLightsparkRequirements(c, input);
     case "bvnk":
