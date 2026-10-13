@@ -20,9 +20,25 @@ import type { AppContext } from "./context";
  * A custody wallet of the caller's project by its id, whatever its status: for an
  * access check, where whether the wallet is active is state for the handler.
  */
-export async function findRetainedPaymentWallet(
+export function findRetainedPaymentWallet(
   c: AppContext,
   custodyWalletId: string
+): Promise<CustodyWallet | null> {
+  return findProjectPaymentWallet(c, "id", custodyWalletId);
+}
+
+/** {@link findRetainedPaymentWallet}, by the provider wallet ID a request names. */
+export function findRetainedPaymentWalletByWalletId(
+  c: AppContext,
+  walletId: string
+): Promise<CustodyWallet | null> {
+  return findProjectPaymentWallet(c, "wallet_id", walletId);
+}
+
+async function findProjectPaymentWallet(
+  c: AppContext,
+  column: "id" | "wallet_id",
+  value: string
 ): Promise<CustodyWallet | null> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -33,12 +49,12 @@ export async function findRetainedPaymentWallet(
        FROM custody_wallets w
        LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
        LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
-       WHERE w.id = ?
+       WHERE w.${column} = ?
          AND ((cfg.organization_id = ? AND cfg.project_id = ?)
            OR (conn.organization_id = ? AND conn.project_id = ?))
        LIMIT 1`
     )
-    .bind(custodyWalletId, auth.organizationId, projectId, auth.organizationId, projectId)
+    .bind(value, auth.organizationId, projectId, auth.organizationId, projectId)
     .first<{
       id: string;
       custody_config_id: string | null;

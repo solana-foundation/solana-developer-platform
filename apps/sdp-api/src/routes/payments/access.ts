@@ -1,12 +1,12 @@
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { notFound } from "@/lib/errors";
+import { notFound, walletNotFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   type AppContext,
   getCounterpartiesRepository,
   getPaymentSubscriptionsRepository,
 } from "./context";
-import { authorizeProviderWallet } from "./wallets";
+import { authorizeProviderWallet, findRetainedPaymentWalletByWalletId } from "./wallets";
 
 /**
  * Access checks for the payment routes that name wallets, plans and
@@ -25,9 +25,29 @@ function planIdParam(input: AuthorizeInput): string {
   return (input.params as { planId: string }).planId;
 }
 
-/** Payment-request create: the receiving wallet. */
+/** Payment-request create: the receiving wallet and any counterparty, in the caller's project. */
 export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
-  await authorizeProviderWallet(c, body<{ walletId: string }>(input).walletId, ["payments:write"]);
+  const { walletId, counterpartyId } = body<{ walletId: string; counterpartyId: string | null }>(
+    input
+  );
+  await authorizeProviderWallet(c, walletId, ["payments:write"]);
+  const [wallet, counterparty] = await Promise.all([
+    findRetainedPaymentWalletByWalletId(c, walletId),
+    counterpartyId
+      ? getCounterpartiesRepository(c).getCounterpartyById({
+          counterpartyId,
+          organizationId: getAuth(c).organizationId,
+          projectId: requireProjectId(c),
+          status: "any",
+        })
+      : null,
+  ]);
+  if (!wallet) {
+    throw walletNotFound();
+  }
+  if (counterpartyId && !counterparty) {
+    throw notFound("Counterparty");
+  }
 }
 
 async function authorizePlanWallets(
