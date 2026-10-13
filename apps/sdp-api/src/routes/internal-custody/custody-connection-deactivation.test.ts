@@ -12,6 +12,7 @@ import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { TEST_ORG } from "@/test/fixtures/organizations";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
@@ -744,6 +745,14 @@ describe("custody Connection deactivation", () => {
   it("rejects API keys before resource mutation", async () => {
     await seedConnection("failed");
     const before = await persistedState();
+    // The key's own organization must exist and be active for it to reach the
+    // route's API-key refusal.
+    await getDb(env)
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier)
+      .run();
     const { header } = await setupTestAuth(env);
     const response = await app.request(
       `/internal/dashboard/custody/connections/${CONNECTION}/deactivate`,

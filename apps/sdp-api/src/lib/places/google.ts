@@ -3,6 +3,7 @@ import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { z } from "zod";
 import { providerUnavailable } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 
 const PLACES_API_BASE_URL = "https://places.googleapis.com/v1";
 const STATIC_MAPS_API_BASE_URL = "https://maps.googleapis.com/maps/api/staticmap";
@@ -22,11 +23,19 @@ async function googleJson<TSchema extends z.ZodTypeAny>(
     payload = undefined;
   }
   if (!response.ok) {
-    throw providerUnavailable(
-      providerErrorMessageSchema.parse(payload) ??
-        `Google Maps request failed with status ${response.status}`,
-      { provider: "google", providerStatus: response.status }
+    // Google's wording stays in the logs; callers get the status alone (ADR 0008).
+    getLogger().warn(
+      {
+        event: "sdp_api_places_provider_error",
+        provider_status: response.status,
+        error_diagnostics: { providerMessage: providerErrorMessageSchema.parse(payload) },
+      },
+      "sdp_api_places_provider_error"
     );
+    throw providerUnavailable(`Google Maps request failed with status ${response.status}`, {
+      provider: "google",
+      providerStatus: response.status,
+    });
   }
   if (payload === undefined) {
     throw providerUnavailable("Google Maps returned an unparseable response", {

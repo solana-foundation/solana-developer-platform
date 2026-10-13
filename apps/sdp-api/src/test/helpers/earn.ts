@@ -105,7 +105,8 @@ export async function seedEarnApiKey(
   await getDb(env)
     .prepare(`INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', ?, 'active')`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', ?, 'active')
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`)
     .bind(
       key.id,
       tenant.org.id,

@@ -51,6 +51,7 @@ import {
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelDepositFingerprint } from "@/lib/idempotency";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -345,6 +346,11 @@ export async function createChannelDeposit(
       });
       if (failed) {
         await emitDepositEvent(env, failed, "transfer.deposit.failed", "failed", { failureReason });
+      }
+      // Refused before anything was signed: the row records it, and the caller
+      // gets the 403 rather than a failed deposit that looks accepted.
+      if (error instanceof MoneyMovementRefusedError) {
+        throw error;
       }
       return mapPrivateChannelDepositRow(failed ?? created);
     }
