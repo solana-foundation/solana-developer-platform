@@ -10,6 +10,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
+import { currentCustodyProviderNetworks } from "@/services/custody/custody-network";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
 import {
   type FireblocksProviderConfig,
@@ -109,11 +110,8 @@ async function initializeProviderConnection(
         projectId
       );
 
-      const { vaultAccountId, assetId } = existingFireblocksConfig
-        ? {
-            vaultAccountId: existingFireblocksConfig.vaultAccountId,
-            assetId: existingFireblocksConfig.assetId,
-          }
+      const { vaultAccountId } = existingFireblocksConfig
+        ? { vaultAccountId: existingFireblocksConfig.vaultAccountId }
         : await provisionFireblocksVaultAccount(env, {
             orgId: organizationId,
             orgSlug: organizationSlug,
@@ -125,7 +123,6 @@ async function initializeProviderConnection(
         apiKey: resolvedApiKey,
         apiSecretPem: resolvedApiSecretPem,
         vaultAccountId,
-        assetId,
         walletLabel: request.walletLabel,
       });
     }
@@ -135,8 +132,11 @@ async function initializeProviderConnection(
         walletLabel: request.walletLabel,
       });
     case "coinbase_cdp":
+      assertRequestedNetworkIsClusterNetwork(
+        request.network,
+        currentCustodyProviderNetworks().coinbaseCdp
+      );
       return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
-        network: request.network,
         accountPolicy: request.accountPolicy,
         walletLabel: request.walletLabel,
       });
@@ -151,19 +151,28 @@ async function initializeProviderConnection(
         walletLabel: request.walletLabel,
       });
     case "dfns":
+      assertRequestedNetworkIsClusterNetwork(
+        request.network,
+        currentCustodyProviderNetworks().dfns
+      );
       return signingService.initializeDfnsSigning(organizationId, projectId, {
-        network: request.network,
         walletLabel: request.walletLabel,
       });
     case "ibm_haven":
+      assertRequestedNetworkIsClusterNetwork(
+        request.network,
+        currentCustodyProviderNetworks().dfns
+      );
       return signingService.initializeIbmHavenSigning(organizationId, projectId, {
-        network: request.network,
         walletLabel: request.walletLabel,
       });
     case "anchorage":
+      assertRequestedNetworkIsClusterNetwork(
+        request.network,
+        currentCustodyProviderNetworks().anchorage
+      );
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
         walletLabel: request.walletLabel,
-        network: request.network,
       });
     case "utila":
       return signingService.initializeUtilaSigning(organizationId, projectId, {
@@ -171,6 +180,26 @@ async function initializeProviderConnection(
       });
     default:
       throw badRequest("Unsupported provider");
+  }
+}
+
+/**
+ * Refuses a requested custody network other than the one of the project's cluster.
+ * The wallet's network is always its project's environment's cluster; the request
+ * field can only restate it.
+ *
+ * @param requestedNetwork - The `network` the request named, when it named one.
+ * @param clusterNetwork - The provider's network name for the project's cluster.
+ * @throws 400 when the request names a different network.
+ */
+function assertRequestedNetworkIsClusterNetwork(
+  requestedNetwork: string | undefined,
+  clusterNetwork: string
+): void {
+  if (requestedNetwork !== undefined && requestedNetwork !== clusterNetwork) {
+    throw badRequest(
+      `network must be ${clusterNetwork}, the network of this project's cluster, or omitted`
+    );
   }
 }
 

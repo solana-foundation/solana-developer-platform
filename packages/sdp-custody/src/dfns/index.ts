@@ -2,7 +2,6 @@ export {
   createDfnsApiClient,
   createIbmHavenApiClient,
   DEFAULT_DFNS_API_BASE_URL,
-  DEFAULT_DFNS_NETWORK,
   DEFAULT_IBM_HAVEN_API_BASE_URL,
   DFNS_PROVIDER_LABEL,
   type DfnsApiClient,
@@ -16,6 +15,5 @@ export {
   IBM_HAVEN_PROVIDER_LABEL,
   type IbmHavenEnv,
   normalizeDfnsWalletId,
-  resolveDfnsNetwork,
 } from "./client";
 export { DfnsSigner, type DfnsSignerConfig } from "./signer";
