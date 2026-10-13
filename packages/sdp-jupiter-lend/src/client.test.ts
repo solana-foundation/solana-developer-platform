@@ -38,6 +38,10 @@ const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
   projectId: "proj_jupiter_lend_client",
   environment: "production",
 };
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_jupiter_lend_client",
+  environment: "sandbox",
+};
 const ownerShareAta = PublicKey.findProgramAddressSync(
   [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), shareMint.toBuffer()],
   ATA_PROGRAM
@@ -90,10 +94,14 @@ function instruction(programId: PublicKey, payer = owner) {
   });
 }
 
-function client() {
+function clientIn(scope: Parameters<typeof runInClusterScope>[0]) {
   return new JupiterLendVaultDirectClient(async (_label, operation) =>
-    runInClusterScope(PRODUCTION_SCOPE, () => operation(() => undefined))
+    runInClusterScope(scope, () => operation(() => undefined))
   );
+}
+
+function client() {
+  return clientIn(PRODUCTION_SCOPE);
 }
 
 beforeEach(() => {
@@ -467,7 +475,7 @@ describe("JupiterLendVaultDirectClient", () => {
   it("refuses devnet and missing slippage floors", async () => {
     const integration = client();
     await expect(
-      integration.buildVaultDeposit(
+      clientIn(SANDBOX_SCOPE).buildVaultDeposit(
         { environment: "sandbox", env: {} },
         {
           providerReference: JUPITER_LEND_USDT.assetMint,
