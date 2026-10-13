@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   CUSTODY_CONFIG_STATUSES,
   type CustodyConfigStatus,
@@ -70,10 +71,12 @@ describe("CustodyConfigStore project scope", () => {
       signingService.getPublicKey(ORGANIZATION_ID, OTHER_PROJECT_ID, PROVIDER_WALLET_ID)
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(
-      signingService.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        OTHER_PROJECT_ID,
-        CUSTODY_WALLET_ID
+      runInClusterScope({ projectId: OTHER_PROJECT_ID, environment: "production" }, () =>
+        signingService.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          OTHER_PROJECT_ID,
+          CUSTODY_WALLET_ID
+        )
       )
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(

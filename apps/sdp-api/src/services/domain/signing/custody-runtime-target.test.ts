@@ -1,5 +1,6 @@
 import type { CustodyProvider } from "@sdp/custody";
 import type { FullSigningPort } from "@sdp/custody/signing";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type CachedApiKey,
   CUSTODY_CONNECTION_LIFECYCLES,
@@ -947,10 +948,12 @@ describe("CustodyRuntimeTargets", () => {
     mockStoredCredentialRead();
 
     await expect(
-      createSigningService(env).getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        `cwlt_${connection.id}`
+      runInClusterScope({ projectId: PROJECT_ID, environment: "sandbox" }, () =>
+        createSigningService(env).getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          `cwlt_${connection.id}`
+        )
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
