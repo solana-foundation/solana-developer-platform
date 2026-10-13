@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
 import { wellKnownMint } from "@sdp/types";
+import {
+  isolateCataloguePool,
+  pointCataloguePool,
+  runInCatalogueScope,
+} from "../../test/cluster-pool";
 import type { EarnRuntimeContext } from "../../types";
 import {
   distillKaminoVault,
@@ -374,6 +379,8 @@ describe("distillKaminoVault", () => {
 });
 
 describe("KaminoEarnClient.listStrategies", () => {
+  isolateCataloguePool();
+
   it("joins the vault list with bulk metrics and catalogues what clears the floor", async () => {
     const fetchMock = stubKaminoFetch(
       ...catalogue(
@@ -455,11 +462,10 @@ describe("KaminoEarnClient.listStrategies", () => {
   it("never reads the mainnet catalogue outside production", async () => {
     const fetchMock = stubKaminoFetch(...catalogue([vault()], [metrics()]));
 
+    pointCataloguePool("devnet", null);
     await assert.rejects(
-      // No RPC URL in the sandbox context, so the devnet path fails closed —
-      // which itself proves the mainnet REST path was not taken.
-      client.listStrategies(sandboxCtx),
-      /RPC URL/
+      runInCatalogueScope("sandbox", () => client.listStrategies(sandboxCtx)),
+      { code: "PROVIDER_NOT_CONFIGURED" }
     );
     assert.equal(
       fetchMock.mock.calls.length,

@@ -258,18 +258,12 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     expect(mocks.resolveClient).toHaveBeenCalledTimes(2);
   });
 
-  it("never shares across a different environment, RPC endpoint, owner, reference set or minimum slot", async () => {
+  it("never shares across a different environment, owner, reference set or minimum slot", async () => {
     const pending = heldReads();
     const options = { ownerKind: "custody" as const, rowsReadAt: markVaultPositionRowsRead() };
     const reads = [
       hydrateIn("sandbox", context({}), [holding("p1", "vault-a")], options),
       hydrateIn("production", context({}), [holding("p1", "vault-a")], options),
-      hydrateIn(
-        "sandbox",
-        context({ SOLANA_DEVNET_RPC_URL: "https://devnet.rpc.invalid/?api-key=KEY" }),
-        [holding("p1", "vault-a")],
-        options
-      ),
       hydrateIn("sandbox", context({}), [holding("p1", "vault-a", OTHER_OWNER)], options),
       hydrateIn(
         "sandbox",
@@ -282,7 +276,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
         minimumSlotByPositionId: new Map([["p1", 101]]),
       }),
     ];
-    expect(pending).toHaveLength(6);
+    expect(pending).toHaveLength(5);
     for (const read of pending) read.release();
     await Promise.all(reads);
   });

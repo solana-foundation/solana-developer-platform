@@ -1,7 +1,8 @@
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { wellKnownMint } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ONDO_SWAP_COMPUTE_UNIT_LIMIT, OndoVaultDirectClient } from "./client";
 import { SdpOndoError } from "./errors";
 import type { OndoSwapLeg, OndoSwapPort } from "./types";
@@ -20,6 +21,11 @@ const OWNER = "C4XGF8r1gQP7p2PeKcRAFNwGAU1gCxiinRufqddY1m98";
 const USDY_ATA = "AM5oZfoUpUUpokKFVQgE23hmPAVw3dtEQatFHnMNP8DP";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
+const MAINNET_RPC_URL = "https://mainnet.ondo-client.test";
+const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_ondo_client",
+  environment: "production",
+};
 
 function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
   return {
@@ -44,8 +50,7 @@ function makeClient(port: Partial<OndoSwapPort>) {
     buildSwapLeg: port.buildSwapLeg ?? (async () => leg("0")),
   };
   return new OndoVaultDirectClient(
-    async () => "https://rpc.test",
-    (_label, operation) => operation(() => {}),
+    (_label, operation) => runInClusterScope(PRODUCTION_SCOPE, () => operation(() => {})),
     () => swapPort
   );
 }
@@ -66,17 +71,34 @@ function tokenAccount(amount: string, pubkey = USDY_ATA, state = "initialized") 
 }
 
 function stubAccounts(value: unknown) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => Response.json({ jsonrpc: "2.0", id: 1, result: { value } }))
-  );
+  vi.stubGlobal("fetch", async (_input: string, init: { body: string }) => {
+    const request: unknown = JSON.parse(init.body);
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("id" in request) ||
+      !("method" in request)
+    ) {
+      throw new Error("Expected a JSON-RPC request");
+    }
+    const result =
+      request.method === "getGenesisHash"
+        ? GENESIS_HASH_BY_CLUSTER["mainnet-beta"]
+        : { context: { slot: 1 }, value };
+    return Response.json({ jsonrpc: "2.0", id: request.id, result });
+  });
 }
 
 function stubTokenAccounts(amounts: string[]) {
   stubAccounts(amounts.map((amount, index) => tokenAccount(amount, index === 0 ? USDY_ATA : USDC)));
 }
 
+beforeEach(() => {
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", MAINNET_RPC_URL);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -405,16 +427,7 @@ describe("readVaultPositions", () => {
   });
 
   it("refuses a balance the RPC cannot state exactly", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          jsonrpc: "2.0",
-          id: 1,
-          result: { value: [{ account: { data: { parsed: { info: { tokenAmount: {} } } } } }] },
-        })
-      )
-    );
+    stubAccounts([{ account: { data: { parsed: { info: { tokenAmount: {} } } } } }]);
     const client = makeClient({});
     await expect(
       client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })

@@ -7,6 +7,7 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import app from "@/index";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -17,19 +18,6 @@ const { getSplTokenBalances } = vi.hoisted(() => ({ getSplTokenBalances: vi.fn()
 vi.mock("@/routes/payments/token-accounts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/routes/payments/token-accounts")>()),
   getSplTokenBalances,
-}));
-
-// The endpoint genesis-proof and per-cluster URL resolution are chain-facing;
-// balances themselves come from the mocked read above, so no RPC request is
-// ever issued by these tests.
-const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
-  assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
-}));
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  assertClusterEndpoint,
-  resolveClusterRpcUrl,
 }));
 
 // Lets one test shrink the pass budget to prove the deadline posture; null
@@ -323,12 +311,12 @@ beforeEach(async () => {
   await seedScope();
   vi.clearAllMocks();
   deadlineTimeoutOverride.ms = null;
-  assertClusterEndpoint.mockResolvedValue(undefined);
-  resolveClusterRpcUrl.mockReturnValue("http://127.0.0.1:8899");
   getSplTokenBalances.mockResolvedValue([]);
 });
 
 describe("GET /v1/earn/vault-share-reconciliation", () => {
+  installClusterRpcStub();
+
   it("surfaces a catalogued share balance that has no recorded claim behind it", async () => {
     const strategy = await seedStrategy();
     getSplTokenBalances.mockResolvedValue([balance(SHARE_MINT_CATALOGUED, "500")]);

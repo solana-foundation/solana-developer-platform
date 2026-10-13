@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
@@ -13,6 +14,7 @@ import {
 import {
   createClusterBoundedRpc,
   createClusterDasRpc,
+  createClusterJsonRpcFetch,
   createClusterReadRpc,
   createClusterRpc,
   type DasGetAssetBatchParams,
@@ -801,5 +803,248 @@ describe("createClusterDasRpc", () => {
     });
 
     assert.notEqual(runInClusterScope(SANDBOX, createClusterDasRpc), original);
+  });
+});
+
+interface JsonWithBigIntsCodec {
+  parse: (json: string) => unknown;
+  stringify: (value: unknown) => string;
+}
+
+function kitJsonWithBigIntsCodec(): JsonWithBigIntsCodec {
+  const requireFromRpc = createRequire(import.meta.url);
+  const requireFromKit = createRequire(requireFromRpc.resolve("@solana/kit"));
+  const specTypes: unknown = requireFromKit("@solana/rpc-spec-types");
+  assert.ok(
+    typeof specTypes === "object" &&
+      specTypes !== null &&
+      "parseJsonWithBigInts" in specTypes &&
+      typeof specTypes.parseJsonWithBigInts === "function" &&
+      "stringifyJsonWithBigInts" in specTypes &&
+      typeof specTypes.stringifyJsonWithBigInts === "function"
+  );
+  const kitParse = specTypes.parseJsonWithBigInts;
+  const kitStringify = specTypes.stringifyJsonWithBigInts;
+  return {
+    parse: (json) => {
+      const value: unknown = kitParse(json);
+      return value;
+    },
+    stringify: (value) => {
+      const text: unknown = kitStringify(value);
+      assert.ok(typeof text === "string");
+      return text;
+    },
+  };
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function pick<T>(random: () => number, choices: readonly T[]): T {
+  return choices[Math.floor(random() * choices.length)];
+}
+
+const INTEGER_LITERALS = [
+  "0",
+  "-0",
+  "1",
+  "-1",
+  "9007199254740991",
+  "9007199254740992",
+  "9007199254740993",
+  "-9007199254740993",
+  "9223372036854775807",
+  "-9223372036854775808",
+  "18446744073709551615",
+  "340282366920938463463374607431768211455",
+  "1E+2",
+  "7e3",
+] as const;
+
+const FLOAT_LITERALS = [
+  "1.5",
+  "-0.25",
+  "3.0",
+  "1e-7",
+  "6.02e23",
+  "2.5E-3",
+  "-1.7976931348623157e308",
+] as const;
+
+const STRING_VALUES = [
+  "",
+  "9007199254740993",
+  "-12",
+  "1e5",
+  '{"$n":"5"}',
+  '"quoted"',
+  "back\\slash",
+  "é",
+  "💥",
+  "\u2028",
+  "naïve façade",
+  "$n",
+  "0x1f",
+] as const;
+
+const OBJECT_KEYS = [
+  "slot",
+  "lamports",
+  "",
+  "ключ",
+  "💥",
+  "9007199254740993",
+  "a b",
+  '"q"',
+] as const;
+
+const WHITESPACE = ["", " ", "\n", "\t "] as const;
+
+function randomIntegerLiteral(random: () => number): string {
+  const length = 1 + Math.floor(random() * 40);
+  let digits = String(1 + Math.floor(random() * 9));
+  while (digits.length < length) digits += String(Math.floor(random() * 10));
+  return random() < 0.5 ? `-${digits}` : digits;
+}
+
+function jsonScalar(random: () => number): string {
+  const kind = pick(random, ["integer", "random-integer", "float", "string", "literal"] as const);
+  if (kind === "integer") return pick(random, INTEGER_LITERALS);
+  if (kind === "random-integer") return randomIntegerLiteral(random);
+  if (kind === "float") return pick(random, FLOAT_LITERALS);
+  if (kind === "string") return JSON.stringify(pick(random, STRING_VALUES));
+  return pick(random, ["true", "false", "null"] as const);
+}
+
+function jsonDocument(random: () => number, depth: number): string {
+  const kind = depth === 0 ? "scalar" : pick(random, ["scalar", "array", "object"] as const);
+  const space = () => pick(random, WHITESPACE);
+  const memberCount = Math.floor(random() * 4);
+  if (kind === "array") {
+    const elements = Array.from({ length: memberCount }, () => jsonDocument(random, depth - 1));
+    return `[${space()}${elements.join(`,${space()}`)}${space()}]`;
+  }
+  if (kind === "object") {
+    const members = Array.from(
+      { length: memberCount },
+      () =>
+        `${JSON.stringify(pick(random, OBJECT_KEYS))}${space()}:${space()}${jsonDocument(random, depth - 1)}`
+    );
+    return `{${space()}${members.join(`,${space()}`)}${space()}}`;
+  }
+  return jsonScalar(random);
+}
+
+function stubRawJsonRpc(genesisHash: string, answer: () => string): RpcCall[] {
+  const calls: RpcCall[] = [];
+  globalThis.fetch = async (input, init) => {
+    const request = readRequest(input, init);
+    calls.push({ url: request.url, method: request.method });
+    if (request.method === "getGenesisHash") return respond(request.id, { result: genesisHash });
+    return new Response(answer());
+  };
+  return calls;
+}
+
+function jsonRpcInit(method: string): RequestInit {
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method,
+      params: ["11111111111111111111111111111111", { encoding: "base64" }],
+    }),
+  };
+}
+
+describe("createClusterJsonRpcFetch", () => {
+  isolateManagedPool();
+
+  it("sends a request for any URL to the scope cluster's pool endpoint", async () => {
+    const devnet = "https://devnet-json-rpc-routing.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const calls = stubEndpoints({ [devnet]: SERVES_DEVNET });
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    const response = await jsonRpcFetch(
+      "https://door.invalid/never-dialed",
+      jsonRpcInit("getSlot")
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { jsonrpc: "2.0", id: 1, result: SLOT });
+    assert.deepEqual(calls, [genesisProbe(devnet), slotRead(devnet)]);
+  });
+
+  it("keeps a sandbox scope on the devnet pool and a production scope on mainnet", async () => {
+    const devnet = "https://devnet-json-rpc-clusters.example.test";
+    const mainnet = "https://mainnet-json-rpc-clusters.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet,
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnet,
+    });
+    const calls = stubEndpoints({ [devnet]: SERVES_DEVNET, [mainnet]: SERVES_MAINNET });
+    const options = { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS };
+    const sandboxFetch = runInClusterScope(SANDBOX, () => createClusterJsonRpcFetch(options));
+    const productionFetch = runInClusterScope(PRODUCTION, () => createClusterJsonRpcFetch(options));
+
+    assert.notEqual(sandboxFetch, productionFetch);
+    await sandboxFetch("https://door.invalid", jsonRpcInit("getSlot"));
+    await productionFetch("https://door.invalid", jsonRpcInit("getSlot"));
+
+    assert.deepEqual(calls, [
+      genesisProbe(devnet),
+      slotRead(devnet),
+      genesisProbe(mainnet),
+      slotRead(mainnet),
+    ]);
+  });
+
+  it("returns integers beyond 2^53 exactly as the endpoint sent them", async () => {
+    const devnet = "https://devnet-json-rpc-precision.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const answered =
+      '{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":9007199254740993},' +
+      '"value":{"lamports":18446744073709551615,"rentEpoch":-9223372036854775808}}}';
+    stubRawJsonRpc(GENESIS_HASH_BY_CLUSTER.devnet, () => answered);
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    const response = await jsonRpcFetch("https://door.invalid", jsonRpcInit("getAccountInfo"));
+
+    assert.equal(await response.text(), answered);
+  });
+
+  it("re-serializes every decoded response exactly as kit's own stringifyJsonWithBigInts", async () => {
+    const devnet = "https://devnet-json-rpc-differential.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
+    const kit = kitJsonWithBigIntsCodec();
+    const random = seededRandom(1_881);
+    const documents = Array.from({ length: 400 }, () => jsonDocument(random, 4));
+    let answered = "";
+    stubRawJsonRpc(GENESIS_HASH_BY_CLUSTER.devnet, () => answered);
+    const jsonRpcFetch = runInClusterScope(SANDBOX, () =>
+      createClusterJsonRpcFetch({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    for (const document of documents) {
+      answered = `{"jsonrpc":"2.0","id":1,"result":${document}}`;
+      const response = await jsonRpcFetch("https://door.invalid", jsonRpcInit("getAccountInfo"));
+      assert.equal(await response.text(), kit.stringify(kit.parse(answered)), answered);
+    }
+    assert.ok(documents.some((document) => document.includes("18446744073709551615")));
   });
 });

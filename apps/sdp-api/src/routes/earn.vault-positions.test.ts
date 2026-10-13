@@ -12,6 +12,7 @@ import {
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -40,7 +41,6 @@ const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
-  assertClusterEndpoint: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
@@ -229,6 +229,8 @@ afterEach(() => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
+  installClusterRpcStub();
+
   it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
     "does not constrain an unrelated %s position after a Kamino deposit",
     async (provider) => {
