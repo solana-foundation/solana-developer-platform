@@ -7,6 +7,7 @@
 
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { TransactionSigner } from "@solana/kit";
+import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
 import {
   createSponsorshipFeePayment,
   createUnscopedSponsorshipFeePayment,
@@ -36,5 +37,5 @@ export function createToken2022Service(
       : createUnscopedSponsorshipFeePayment(env)
     : undefined;
 
-  return new Token2022Service(env, signer, feePayment);
+  return new Token2022Service(createMosaicSdkRpc(), signer, feePayment);
 }

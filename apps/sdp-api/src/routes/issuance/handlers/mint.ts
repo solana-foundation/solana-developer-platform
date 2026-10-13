@@ -1,4 +1,5 @@
-import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
@@ -469,7 +470,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     destination,
   });
 
-  const currentAuthority = await resolveCurrentAuthorityForRole(c.env, tokenService, token, "mint");
+  const currentAuthority = await resolveCurrentAuthorityForRole(token, "mint");
   if (!currentAuthority) {
     throw badRequest("Current mint authority is not available for this token");
   }
@@ -511,7 +512,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
 
   let simulation: unknown;
   if (body.options?.simulate) {
-    const rpc = createRpc(c.env);
+    const rpc = createClusterRpc();
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
   }
@@ -671,12 +672,7 @@ export async function extractMintRequest(
     });
   }
 
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    c.env,
-    tokenService,
-    token,
-    "mint"
-  );
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(token, "mint");
   if (!currentAuthorityRaw) {
     throw badRequest("Current mint authority is not available for this token");
   }

@@ -1,4 +1,6 @@
-import { getSolanaConfig } from "@sdp/rpc";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, notFound } from "@/lib/errors";
@@ -9,48 +11,6 @@ import { getTenantTokenService, requireProjectScope } from "../helpers";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
-
-interface TokenSupplyRpcResponse {
-  result?: {
-    value?: {
-      amount?: string;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
-async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): Promise<string> {
-  const rpcResponse = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTokenSupply",
-      params: [mintAddress, { commitment: "confirmed" }],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as TokenSupplyRpcResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  const amount = payload.result?.value?.amount;
-  if (!amount || !/^\d+$/.test(amount)) {
-    throw new Error("RPC returned an invalid token supply");
-  }
-
-  return amount;
-}
 
 export const refreshTokenSupply = async (c: AppContext) => {
   const { tokenId } = c.req.param();
@@ -73,9 +33,19 @@ export const refreshTokenSupply = async (c: AppContext) => {
 
   let supplyBaseUnits: string;
   try {
-    const { rpcUrl } = getSolanaConfig(c.env);
-    supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
+    const { value: tokenSupply } = await createClusterRpc()
+      .getTokenSupply(assertValidAddress(token.mintAddress, "mintAddress"), {
+        commitment: "confirmed",
+      })
+      .send();
+    if (!/^\d+$/.test(tokenSupply.amount)) {
+      throw new Error("RPC returned a token supply that is not a base-unit integer");
+    }
+    supplyBaseUnits = tokenSupply.amount;
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to refresh token supply"
