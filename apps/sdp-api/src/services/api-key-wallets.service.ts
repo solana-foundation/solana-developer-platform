@@ -90,6 +90,8 @@ export async function loadApiKeyWalletAuthorization(
   walletStatus: "active" | "any" = "active"
 ) {
   const activeWalletOnly = walletStatus === "active" ? "AND w.status = 'active'" : "";
+  // `any` keeps a wallet whose config or connection was deactivated since, too.
+  const activeOwnerOnly = walletStatus === "active" ? "AND c.status = 'active'" : "";
   const permissionResult = await db
     .prepare(
       `SELECT wallet_id, permissions
@@ -117,7 +119,7 @@ export async function loadApiKeyWalletAuthorization(
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
          AND c.project_id = ?
-         AND c.status = 'active'
+         ${activeOwnerOnly}
          ${activeWalletOnly}
          AND w.wallet_id IN (${placeholders})
 
@@ -128,7 +130,7 @@ export async function loadApiKeyWalletAuthorization(
        JOIN custody_connections c ON c.id = w.custody_connection_id
        WHERE c.organization_id = ?
          AND c.project_id = ?
-         AND c.status = 'active'
+         ${activeOwnerOnly}
          ${activeWalletOnly}
          AND w.wallet_id IN (${placeholders})`
     )

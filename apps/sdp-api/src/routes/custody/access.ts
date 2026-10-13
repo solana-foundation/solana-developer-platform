@@ -38,9 +38,11 @@ async function authorizeCustodyWalletBinding(
   c: AppContext,
   walletId: string,
   requiredPermissions: WalletPermissions,
-  notFound: () => AppError
+  notFound: () => AppError,
+  /** A fresh `any` scope the caller already loaded, so it is not read twice. */
+  loaded?: Awaited<ReturnType<typeof loadFreshApiKeyWalletScope>>
 ): Promise<void> {
-  const access = await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
+  const access = loaded ?? (await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any"));
   try {
     resolveApiKeyCustodyWalletId(access, walletId, requiredPermissions, true);
   } catch (error) {
@@ -160,5 +162,5 @@ export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput)
     );
   }
   // An unknown wallet is a 400 here, which is never stored, so the handler resolves it.
-  return authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound);
+  return authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound, auth);
 }
