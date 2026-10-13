@@ -1,4 +1,4 @@
-import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
+import { type ClusterScope, currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runPerCluster } from "./cluster-runs";
@@ -50,6 +50,33 @@ describe("runPerCluster", () => {
 
     await expect(running).rejects.toBe(productionFailure);
     expect(completed).toEqual(["sandbox"]);
+    expect(logEvent).toHaveBeenCalledExactlyOnceWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_cluster_job_run_failed",
+        job: "test-job",
+        environment: "production",
+      })
+    );
+  });
+
+  it("completes the equal-facts run and logs and rethrows the conflicting run's synchronous scope throw", async () => {
+    const completed: ClusterScope[] = [];
+
+    const running = runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      runPerCluster("test-job", async () => {
+        await Promise.resolve();
+        completed.push(currentClusterScope());
+      })
+    );
+
+    await expect(running).rejects.toMatchObject({
+      code: "CLUSTER_SCOPE_CONFLICT",
+      details: { openEnvironment: "sandbox", requestedEnvironment: "production" },
+    });
+    expect(completed).toEqual([
+      { projectId: null, environment: "sandbox", cluster: CLUSTER_BY_SDP_ENVIRONMENT.sandbox },
+    ]);
     expect(logEvent).toHaveBeenCalledExactlyOnceWith(
       "error",
       expect.objectContaining({
