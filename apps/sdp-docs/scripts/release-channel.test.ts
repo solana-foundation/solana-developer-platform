@@ -10,7 +10,7 @@ import { unified } from "unified";
 import { expandDocsBlocks, remarkDocsBlocks } from "../src/lib/docs-blocks";
 import { isPagePublished, type PublicSurface } from "../src/lib/release-channel";
 
-const ALL = {
+const ALL: Pick<PublicSurface, "allModules" | "allRampProviders"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],
   allRampProviders: ["moonpay", "bvnk", "coinbase", "stripe"],
 };

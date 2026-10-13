@@ -175,12 +175,15 @@ const validateGeneratedTagPages = async ({
     );
   }
 
-  const sources = await Promise.all(
-    tagPages.map((tagPage) => fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"))
+  const renderedPages = await Promise.all(
+    tagPages.map(async (tagPage) => ({
+      tagPage,
+      source: await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"),
+    }))
   );
 
-  for (const [index, tagPage] of tagPages.entries()) {
-    const actualRows = extractRenderedRows(sources[index]);
+  for (const { tagPage, source } of renderedPages) {
+    const actualRows = extractRenderedRows(source);
     const actualRowSet = new Set(actualRows);
     const expectedRows = (groupedOperations.get(tagPage.title) || [])
       .slice()

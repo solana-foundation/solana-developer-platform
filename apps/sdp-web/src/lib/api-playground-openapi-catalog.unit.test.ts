@@ -85,12 +85,24 @@ describe("API playground release channel", () => {
     expect(filterPlaygroundEndpointsToReleaseChannel(issuance, "stable")).toEqual([]);
   });
 
+  it("offers no module the stable channel leaves out in a kept endpoint's fields", () => {
+    const transactions = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("payments"),
+      "stable"
+    ).find((endpoint) => endpoint.id === "list-unified-transactions");
+    const modulePicker = transactions?.pathFields.find((field) => field.key === "module");
+    expect(modulePicker?.options?.map((option) => option.value)).toEqual(["payments"]);
+    expect(JSON.stringify(transactions?.expectedResponse)).not.toMatch(/"(issuance|dvp|rings)"/);
+  });
+
   it("keeps every catalog operation on an experimental deployment", () => {
     for (const module of ["wallets", "payments", "counterparties", "issuance"] as const) {
       const endpoints = getOpenApiPlaygroundEndpoints(module);
-      expect(filterPlaygroundEndpointsToReleaseChannel(endpoints, "experimental")).toEqual(
-        endpoints
-      );
+      expect(
+        filterPlaygroundEndpointsToReleaseChannel(endpoints, "experimental").map(
+          (endpoint) => endpoint.id
+        )
+      ).toEqual(endpoints.map((endpoint) => endpoint.id));
     }
   });
 });

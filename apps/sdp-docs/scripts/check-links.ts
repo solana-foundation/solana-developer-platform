@@ -114,10 +114,11 @@ async function loadDocPages(): Promise<Map<string, string>> {
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, string>();
 
-  const sources = await Promise.all(mdxFiles.map((filePath) => fs.readFile(filePath, "utf8")));
+  const sources = await Promise.all(
+    mdxFiles.map(async (filePath) => ({ filePath, raw: await fs.readFile(filePath, "utf8") }))
+  );
 
-  for (const [index, filePath] of mdxFiles.entries()) {
-    const raw = sources[index] ?? "";
+  for (const { filePath, raw } of sources) {
     if (isPageSourcePublished(raw, filePath)) {
       pages.set(toPageSlug(filePath), filePath);
     } else {

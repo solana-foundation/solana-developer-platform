@@ -4,9 +4,13 @@ import {
   OPERATION_FAMILIES,
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
+  type OperationFamily,
+  type OperationType,
   RAMP_PROVIDERS,
+  type RampProviderId,
   SDP_MODULES,
   SDP_RELEASE_CHANNELS,
+  type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
@@ -327,11 +331,11 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
  */
 export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
-  modules: string[];
-  rampProviders: string[];
-  allowedOperations: { family: string; types: string[] }[];
-  allModules: string[];
-  allRampProviders: string[];
+  modules: SdpModule[];
+  rampProviders: RampProviderId[];
+  allowedOperations: { family: OperationFamily; types: OperationType[] }[];
+  allModules: SdpModule[];
+  allRampProviders: RampProviderId[];
 };
 
 export function createPublicSurfaceManifest(

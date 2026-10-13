@@ -1,3 +1,10 @@
+import type {
+  OperationFamily,
+  OperationType,
+  RampProviderId,
+  SdpModule,
+  SdpReleaseChannel,
+} from "@sdp/types";
 import { parse as parseYaml } from "yaml";
 import generatedSurface from "../generated/public-surface.json";
 
@@ -8,41 +15,50 @@ import generatedSurface from "../generated/public-surface.json";
  * written by `openapi:generate` from `SDP_RELEASE_CHANNEL`) and `generate:api`
  * copies it to src/generated/public-surface.json, committed at `experimental`.
  *
- * Deliberately free of workspace imports: the MDX pipeline (source.config.ts)
- * loads this file in a plain Node context.
+ * Free of runtime workspace imports (types only): the MDX pipeline
+ * (source.config.ts) loads this file in a plain Node context.
  */
 export type PublicSurface = {
-  releaseChannel: string;
-  modules: readonly string[];
-  rampProviders: readonly string[];
-  allowedOperations: readonly { family: string; types: readonly string[] }[];
-  allModules: readonly string[];
-  allRampProviders: readonly string[];
+  releaseChannel: SdpReleaseChannel;
+  modules: readonly SdpModule[];
+  rampProviders: readonly RampProviderId[];
+  allowedOperations: readonly { family: OperationFamily; types: readonly OperationType[] }[];
+  allModules: readonly SdpModule[];
+  allRampProviders: readonly RampProviderId[];
 };
 
-export const publicSurface: PublicSurface = generatedSurface;
+// SAFETY: createPublicSurfaceManifest (apps/sdp-api/src/openapi/spec.ts) writes
+// this file from the same types, and CI diffs it against a fresh generation;
+// JSON imports widen its unions to string.
+export const publicSurface = generatedSurface as PublicSurface;
 
-/** What a page, passage or row is about: one module, or one ramp provider. */
-export type ChannelGate = { module: string } | { rampProvider: string };
+/** What a page or list entry is about: one module, or one ramp provider. */
+export type ChannelGate = { module: SdpModule } | { rampProvider: RampProviderId };
 
 /**
- * Validates a gate, so a typo fails the build instead of publishing (or hiding)
- * content.
+ * Parses a module or ramp provider named in content (frontmatter), so a typo
+ * fails the build instead of publishing or hiding a page.
  *
- * @throws When the module or ramp provider is unknown.
+ * @throws When the name is not a known module or ramp provider.
  */
-export function checkGate(gate: ChannelGate, where: string, surface = publicSurface): ChannelGate {
-  if ("module" in gate && !surface.allModules.includes(gate.module)) {
+export function parseGate(
+  key: "module" | "rampProvider",
+  value: string,
+  where: string,
+  surface = publicSurface
+): ChannelGate {
+  if (key === "module") {
+    const module = surface.allModules.find((candidate) => candidate === value);
+    if (module) return { module };
     throw new Error(
-      `${where}: module must be one of ${surface.allModules.join(", ")}; got "${gate.module}"`
+      `${where}: module must be one of ${surface.allModules.join(", ")}; got "${value}"`
     );
   }
-  if ("rampProvider" in gate && !surface.allRampProviders.includes(gate.rampProvider)) {
-    throw new Error(
-      `${where}: rampProvider must be one of ${surface.allRampProviders.join(", ")}; got "${gate.rampProvider}"`
-    );
-  }
-  return gate;
+  const rampProvider = surface.allRampProviders.find((candidate) => candidate === value);
+  if (rampProvider) return { rampProvider };
+  throw new Error(
+    `${where}: rampProvider must be one of ${surface.allRampProviders.join(", ")}; got "${value}"`
+  );
 }
 
 /** Whether the build publishes content behind `gate`. */
@@ -53,8 +69,13 @@ export function isGatePublished(gate: ChannelGate, surface = publicSurface): boo
 }
 
 /** Whether the build publishes content about `module` (undefined: no module). */
-export function isModulePublished(module: string | undefined, surface = publicSurface): boolean {
+export function isModulePublished(module: SdpModule | undefined, surface = publicSurface): boolean {
   return module === undefined || isGatePublished({ module }, surface);
+}
+
+/** A plain object, such as parsed frontmatter or a page's data. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -63,7 +84,11 @@ const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 export function frontmatterOf(source: string): { raw: string; data: Record<string, unknown> } {
   const raw = source.match(FRONTMATTER)?.[0] ?? "";
   const body = source.match(FRONTMATTER)?.[1];
-  const data = body === undefined ? {} : ((parseYaml(body) as Record<string, unknown>) ?? {});
+  if (body === undefined) return { raw, data: {} };
+  const data: unknown = parseYaml(body);
+  // Empty frontmatter parses to null; anything else must be a mapping.
+  if (data === null) return { raw, data: {} };
+  if (!isRecord(data)) throw new Error("Frontmatter must be a YAML mapping");
   return { raw, data };
 }
 
@@ -83,7 +108,7 @@ export function pageGateOf(
     const value = data[key];
     if (value === undefined || value === null) continue;
     if (typeof value !== "string") throw new Error(`${where}: ${key} must be a string`);
-    return checkGate(key === "module" ? { module: value } : { rampProvider: value }, where);
+    return parseGate(key, value, where);
   }
   return undefined;
 }

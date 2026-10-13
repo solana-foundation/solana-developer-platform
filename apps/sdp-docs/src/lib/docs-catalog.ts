@@ -5,13 +5,16 @@
  * (src/generated/public-surface.json), so a module or provider appears in an
  * overview exactly when its own pages do.
  *
- * Free of workspace imports, like release-channel.ts (source.config.ts loads it).
+ * Free of runtime workspace imports (types only), like release-channel.ts:
+ * source.config.ts loads it.
  */
+
+import type { OperationFamily, RampProviderId, SdpModule } from "@sdp/types";
 
 /** One product module as the introduction and the AI guide describe it. */
 export type ModuleEntry = {
   /** An SDP module, or `core` for what every channel runs. */
-  module: string;
+  module: SdpModule | "core";
   name: string;
   summary: string;
   /** The capability line the llms files and the AI guide list. */
@@ -65,7 +68,7 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
 
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {
-  provider: string;
+  provider: RampProviderId;
   name: string;
   onramp: string;
   offramp: string;
@@ -127,13 +130,13 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
 export const ROTATE_PROVIDERS_TOKEN = '"moonpay"';
 
 /** The ramp providers this build publishes, in catalog order. */
-export function publishedRampProviderIds(published: readonly string[]): string[] {
+export function publishedRampProviderIds(published: readonly RampProviderId[]): RampProviderId[] {
   const publishedIds = new Set(published);
   return DOCS_RAMP_PROVIDERS.map((entry) => entry.provider).filter((id) => publishedIds.has(id));
 }
 
 /** What each API-key operation family covers; its types come from the manifest. */
-export const DOCS_OPERATION_FAMILIES: Readonly<Record<string, string>> = {
+export const DOCS_OPERATION_FAMILIES: Readonly<Record<OperationFamily, string>> = {
   payment: "Transfers, transfer batches, and recurring payment creation, updates and collections",
   ramp: "On-ramp and off-ramp quotes",
   issuance:

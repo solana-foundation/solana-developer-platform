@@ -1,4 +1,4 @@
-import type { SdpModule } from "@sdp/types";
+import type { RampProviderId, SdpModule } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
   ArrowRightIcon,
@@ -83,7 +83,7 @@ type Partner = {
   src: string;
   h: number;
   /** A ramp partner shows only when the build publishes that ramp provider. */
-  rampProvider?: string;
+  rampProvider?: RampProviderId;
 };
 
 const PARTNER_ROWS: {

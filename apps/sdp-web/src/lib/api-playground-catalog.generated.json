@@ -7851,29 +7851,325 @@
     ]
   },
   "routeOwners": [
-    ["^\\/v1\\/payments\\/ramps(\\/|$)", "ramps"],
-    ["^\\/webhooks\\/payments\\/ramps\\/", "ramps"],
-    [
-      "^\\/v1\\/counterparties\\/:counterpartyId\\/(requirements|provider-accounts)(\\/|$)",
-      "ramps"
-    ],
-    ["^\\/v1\\/issuance(\\/|$)", "issuance"],
-    ["^\\/v1\\/earn(\\/|$)", "earn"],
-    ["^\\/v1\\/dvp(\\/|$)", "dvp"],
-    ["^\\/v1\\/private-channels(\\/|$)", "private_channels"],
-    ["^\\/(v1|internal\\/dashboard)\\/helius-rings(\\/|$)", "helius_rings"],
-    [
-      "^\\/v1\\/payments\\/(recurring-payments|subscription-plans|subscriptions)(\\/|$)",
-      "recurring_payments"
-    ],
-    ["^\\/(v1\\/payments|v1\\/counterparties|v1\\/transactions|pay)(\\/|$)", "payments"],
-    ["^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)", "custody"],
-    ["^\\/v1\\/compliance(\\/|$)", "compliance"],
-    [
-      "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
-      "core"
-    ],
-    ["^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)", "core"],
-    ["^\\/$", "core"]
-  ]
+    {
+      "pattern": "^\\/v1\\/payments\\/ramps(\\/|$)",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/webhooks\\/payments\\/ramps\\/",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/v1\\/counterparties\\/:counterpartyId\\/(requirements|provider-accounts)(\\/|$)",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/v1\\/issuance(\\/|$)",
+      "owner": "issuance"
+    },
+    {
+      "pattern": "^\\/v1\\/earn(\\/|$)",
+      "owner": "earn"
+    },
+    {
+      "pattern": "^\\/v1\\/dvp(\\/|$)",
+      "owner": "dvp"
+    },
+    {
+      "pattern": "^\\/v1\\/private-channels(\\/|$)",
+      "owner": "private_channels"
+    },
+    {
+      "pattern": "^\\/(v1|internal\\/dashboard)\\/helius-rings(\\/|$)",
+      "owner": "helius_rings"
+    },
+    {
+      "pattern": "^\\/v1\\/payments\\/(recurring-payments|subscription-plans|subscriptions)(\\/|$)",
+      "owner": "recurring_payments"
+    },
+    {
+      "pattern": "^\\/(v1\\/payments|v1\\/counterparties|v1\\/transactions|pay)(\\/|$)",
+      "owner": "payments"
+    },
+    {
+      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)",
+      "owner": "custody"
+    },
+    {
+      "pattern": "^\\/v1\\/compliance(\\/|$)",
+      "owner": "compliance"
+    },
+    {
+      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
+      "owner": "core"
+    },
+    {
+      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)",
+      "owner": "core"
+    },
+    {
+      "pattern": "^\\/$",
+      "owner": "core"
+    }
+  ],
+  "valueGates": {
+    "tokens:read": {
+      "module": "issuance"
+    },
+    "tokens:write": {
+      "module": "issuance"
+    },
+    "tokens:admin": {
+      "module": "issuance"
+    },
+    "payments:read": {
+      "module": "payments"
+    },
+    "payments:write": {
+      "module": "payments"
+    },
+    "earn:read": {
+      "module": "earn"
+    },
+    "earn:write": {
+      "module": "earn"
+    },
+    "counterparties:read": {
+      "module": "payments"
+    },
+    "counterparties:write": {
+      "module": "payments"
+    },
+    "wallets:read": {
+      "module": "custody"
+    },
+    "wallets:write": {
+      "module": "custody"
+    },
+    "compliance:read": {
+      "module": "compliance"
+    },
+    "compliance:write": {
+      "module": "compliance"
+    },
+    "custody:read": {
+      "module": "custody"
+    },
+    "custody:write": {
+      "module": "custody"
+    },
+    "custody:admin": {
+      "module": "custody"
+    },
+    "privacy": {
+      "module": "helius_rings"
+    },
+    "payment": {
+      "module": "payments"
+    },
+    "ramp": {
+      "module": "ramps"
+    },
+    "issuance": {
+      "module": "issuance"
+    },
+    "program": {
+      "module": "markets"
+    },
+    "payment_transfer_execute": {
+      "module": "payments"
+    },
+    "payment_transfer_batch_execute": {
+      "module": "payments"
+    },
+    "recurring_payment_create": {
+      "module": "recurring_payments"
+    },
+    "recurring_payment_update": {
+      "module": "recurring_payments"
+    },
+    "recurring_payment_collection": {
+      "module": "recurring_payments"
+    },
+    "ramp_onramp_quote": {
+      "module": "ramps"
+    },
+    "ramp_offramp_quote": {
+      "module": "ramps"
+    },
+    "issuance_allowlist_add_execute": {
+      "module": "issuance"
+    },
+    "issuance_allowlist_remove_execute": {
+      "module": "issuance"
+    },
+    "issuance_burn_execute": {
+      "module": "issuance"
+    },
+    "issuance_deploy_execute": {
+      "module": "issuance"
+    },
+    "issuance_force_burn_execute": {
+      "module": "issuance"
+    },
+    "issuance_freeze_execute": {
+      "module": "issuance"
+    },
+    "issuance_metadata_update_execute": {
+      "module": "issuance"
+    },
+    "issuance_mint_execute": {
+      "module": "issuance"
+    },
+    "issuance_pause_execute": {
+      "module": "issuance"
+    },
+    "issuance_seize_execute": {
+      "module": "issuance"
+    },
+    "issuance_unfreeze_execute": {
+      "module": "issuance"
+    },
+    "issuance_unpause_execute": {
+      "module": "issuance"
+    },
+    "issuance_update_authority_execute": {
+      "module": "issuance"
+    },
+    "dvp_fund": {
+      "module": "dvp"
+    },
+    "dvp_settle": {
+      "module": "dvp"
+    },
+    "earn_vault_deposit": {
+      "module": "earn"
+    },
+    "earn_vault_withdrawal": {
+      "module": "earn"
+    },
+    "earn_program_withdrawal": {
+      "module": "earn"
+    },
+    "rings_shield": {
+      "module": "helius_rings"
+    },
+    "rings_transfer_registered": {
+      "module": "helius_rings"
+    },
+    "rings_transfer_anonymous": {
+      "module": "helius_rings"
+    },
+    "rings_withdraw": {
+      "module": "helius_rings"
+    },
+    "rings_merge": {
+      "module": "helius_rings"
+    },
+    "rings_timelock_create": {
+      "module": "helius_rings"
+    },
+    "rings_timelock_settle": {
+      "module": "helius_rings"
+    },
+    "rings_zone_create": {
+      "module": "helius_rings"
+    },
+    "rings_ring_exit": {
+      "module": "helius_rings"
+    },
+    "rings_ring_entry": {
+      "module": "helius_rings"
+    },
+    "mint_authority": {
+      "module": "issuance"
+    },
+    "freeze_authority": {
+      "module": "issuance"
+    },
+    "dvp_settlement_authority": {
+      "module": "dvp"
+    },
+    "payments": {
+      "module": "payments"
+    },
+    "earn": {
+      "module": "earn"
+    },
+    "dvp": {
+      "module": "dvp"
+    },
+    "private_channels": {
+      "module": "private_channels"
+    },
+    "rings": {
+      "module": "helius_rings"
+    },
+    "mint": {
+      "module": "issuance"
+    },
+    "burn": {
+      "module": "issuance"
+    },
+    "freeze": {
+      "module": "issuance"
+    },
+    "unfreeze": {
+      "module": "issuance"
+    },
+    "seize": {
+      "module": "issuance"
+    },
+    "force_burn": {
+      "module": "issuance"
+    },
+    "update_authority": {
+      "module": "issuance"
+    },
+    "pause": {
+      "module": "issuance"
+    },
+    "unpause": {
+      "module": "issuance"
+    },
+    "deploy": {
+      "module": "issuance"
+    },
+    "onramp": {
+      "module": "ramps"
+    },
+    "offramp": {
+      "module": "ramps"
+    },
+    "offramp_channel": {
+      "module": "ramps"
+    },
+    "ramps": {
+      "module": "ramps"
+    },
+    "moonpay": {
+      "rampProvider": "moonpay"
+    },
+    "bvnk": {
+      "rampProvider": "bvnk"
+    },
+    "coinbase": {
+      "rampProvider": "coinbase"
+    },
+    "stripe": {
+      "rampProvider": "stripe"
+    },
+    "hercle": {
+      "module": "ramps"
+    },
+    "mural": {
+      "module": "ramps"
+    },
+    "moneygram": {
+      "module": "ramps"
+    },
+    "lightspark": {
+      "module": "ramps"
+    }
+  }
 }

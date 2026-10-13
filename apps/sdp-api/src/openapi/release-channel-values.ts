@@ -119,7 +119,7 @@ const WALLET_PURPOSE_OWNERS = {
   dvp_settlement_authority: "dvp",
 } as const satisfies Record<CustodyWalletPurpose, ValueOwner>;
 
-type Owner = { module: SdpModule } | { rampProvider: RampProviderId };
+export type Owner = { module: SdpModule } | { rampProvider: RampProviderId };
 
 function buildOwners(): ReadonlyMap<string, Owner> {
   const owners = new Map<string, Owner>();
@@ -186,9 +186,19 @@ export function classifiedValues(): readonly string[] {
   return [...VALUE_OWNERS.keys()];
 }
 
+/** The module or ramp provider that owns a value, for consumers that filter by channel. */
+export function valueGates(): Record<string, Owner> {
+  return Object.fromEntries(VALUE_OWNERS);
+}
+
 const EMPTY = Symbol("empty schema");
 type Json = unknown;
-type Published = (value: unknown) => boolean;
+type JsonObject = { [key: string]: Json };
+type Published = (value: Json) => boolean;
+
+function isJsonObject(value: Json): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /**
  * An example without the unpublished values: a string the channel does not
@@ -202,12 +212,12 @@ function pruneExample(value: Json, published: Published): Json | undefined {
       .filter((entry) => entry !== undefined);
     return kept.length === 0 && value.length > 0 ? undefined : kept;
   }
-  if (value && typeof value === "object") {
+  if (isJsonObject(value)) {
     const entries = Object.entries(value);
     if (entries.some(([, field]) => typeof field === "string" && !published(field))) {
       return undefined;
     }
-    const result: Record<string, Json> = {};
+    const result: JsonObject = {};
     for (const [key, field] of entries) {
       const kept = pruneExample(field, published);
       if (kept !== undefined) result[key] = kept;
@@ -218,94 +228,116 @@ function pruneExample(value: Json, published: Published): Json | undefined {
 }
 
 /**
+ * Where a node sits: request schemas (bodies, parameters) list exactly what the
+ * channel accepts; response schemas must also accept what a deployment already
+ * stores, such as an API key saved with a scope the channel now leaves out.
+ */
+type Context = { published: Published; inResponse: boolean };
+
+/**
+ * An enum without the unpublished values. In a request it narrows; in a
+ * response a narrowed list would reject stored records, so it opens up to its
+ * base type instead (a forward-compatible enum), still naming no unpublished
+ * value. An enum with nothing published is EMPTY either way: the branch,
+ * property or parameter it decides goes.
+ */
+function pruneEnum(values: Json[], context: Context): Json[] | undefined | typeof EMPTY {
+  const kept = values.filter(context.published);
+  if (kept.length === 0) return EMPTY;
+  if (context.inResponse && kept.length < values.length) return undefined;
+  return kept;
+}
+
+function pruneExamples(value: Json, context: Context): JsonObject | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const kept: JsonObject = {};
+  for (const [name, example] of Object.entries(value)) {
+    if (!isJsonObject(example)) continue;
+    const prunedValue = pruneExample(example.value, context.published);
+    if (prunedValue !== undefined) kept[name] = { ...example, value: prunedValue };
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+function pruneProperties(
+  value: JsonObject,
+  required: Json,
+  context: Context
+): JsonObject | typeof EMPTY {
+  const properties: JsonObject = {};
+  const dropped = new Set<string>();
+  for (const [name, schema] of Object.entries(value)) {
+    const kept = pruneNode(schema, context);
+    if (kept === EMPTY) dropped.add(name);
+    else properties[name] = kept;
+  }
+  // A required property with no publishable value leaves no publishable object.
+  const requiredNames = Array.isArray(required) ? required : [];
+  if (requiredNames.some((name) => typeof name === "string" && dropped.has(name))) return EMPTY;
+  return properties;
+}
+
+function pruneParameters(parameters: Json[], context: Context): Json[] {
+  // An operation's parameter list: a query parameter left with no value goes.
+  return parameters
+    .filter(
+      (parameter) => !isJsonObject(parameter) || pruneNode(parameter.schema, context) !== EMPTY
+    )
+    .map((parameter) => pruneNode(parameter, context));
+}
+
+/**
  * Prunes one node. Returns EMPTY for a schema that can no longer hold any value
  * (every enum value unpublished, or no `oneOf` branch left), so its parent drops
  * the property, branch or parameter.
  */
-function pruneNode(node: Json, published: Published): Json | typeof EMPTY {
+function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   if (Array.isArray(node)) {
-    return node.map((entry) => pruneNode(entry, published)).filter((entry) => entry !== EMPTY);
+    return node.map((entry) => pruneNode(entry, context)).filter((entry) => entry !== EMPTY);
   }
-  if (!node || typeof node !== "object") return node;
+  if (!isJsonObject(node)) return node;
 
-  const source = node as Record<string, Json>;
-  const result: Record<string, Json> = {};
-  for (const [key, value] of Object.entries(source)) {
-    switch (key) {
-      case "enum": {
-        const kept = (value as Json[]).filter(published);
-        if (kept.length === 0) return EMPTY;
-        result.enum = kept;
-        break;
+  const result: JsonObject = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "enum" && Array.isArray(value)) {
+      const kept = pruneEnum(value, context);
+      if (kept === EMPTY) return EMPTY;
+      if (kept !== undefined) result.enum = kept;
+    } else if (key === "example" || key === "default") {
+      const kept = pruneExample(value, context.published);
+      if (kept !== undefined) result[key] = kept;
+    } else if (key === "examples") {
+      const kept = pruneExamples(value, context);
+      if (kept !== undefined) result.examples = kept;
+    } else if ((key === "oneOf" || key === "anyOf") && Array.isArray(value)) {
+      const branches = value
+        .map((branch) => pruneNode(branch, context))
+        .filter((branch) => branch !== EMPTY);
+      if (branches.length === 0) return EMPTY;
+      result[key] = branches;
+    } else if (key === "allOf" && Array.isArray(value)) {
+      const branches = value.map((branch) => pruneNode(branch, context));
+      if (branches.includes(EMPTY)) return EMPTY;
+      result.allOf = branches;
+    } else if (key === "items") {
+      const kept = pruneNode(value, context);
+      if (kept === EMPTY) return EMPTY;
+      result.items = kept;
+    } else if (key === "properties" && isJsonObject(value)) {
+      const kept = pruneProperties(value, node.required, context);
+      if (kept === EMPTY) return EMPTY;
+      result.properties = kept;
+    } else if (key === "parameters" && Array.isArray(value)) {
+      result.parameters = pruneParameters(value, context);
+    } else {
+      const kept = pruneNode(value, {
+        ...context,
+        inResponse: context.inResponse || key === "responses",
+      });
+      if (kept === EMPTY) {
+        throw new Error(`OpenAPI ${key} has no value its release channel publishes`);
       }
-      case "example":
-      case "default": {
-        const kept = pruneExample(value, published);
-        if (kept !== undefined) result[key] = kept;
-        break;
-      }
-      case "examples": {
-        const kept: Record<string, Json> = {};
-        for (const [name, example] of Object.entries(value as Record<string, Json>)) {
-          const exampleValue = (example as { value?: Json }).value;
-          const prunedValue = pruneExample(exampleValue, published);
-          if (prunedValue !== undefined)
-            kept[name] = { ...(example as object), value: prunedValue };
-        }
-        if (Object.keys(kept).length > 0) result.examples = kept;
-        break;
-      }
-      case "oneOf":
-      case "anyOf": {
-        const kept = pruneNode(value, published) as Json[];
-        if (kept.length === 0) return EMPTY;
-        result[key] = kept;
-        break;
-      }
-      case "allOf": {
-        const branches = (value as Json[]).map((branch) => pruneNode(branch, published));
-        if (branches.includes(EMPTY)) return EMPTY;
-        result.allOf = branches;
-        break;
-      }
-      case "items": {
-        const kept = pruneNode(value, published);
-        if (kept === EMPTY) return EMPTY;
-        result.items = kept;
-        break;
-      }
-      case "properties": {
-        const properties: Record<string, Json> = {};
-        const dropped = new Set<string>();
-        for (const [name, schema] of Object.entries(value as Record<string, Json>)) {
-          const kept = pruneNode(schema, published);
-          if (kept === EMPTY) dropped.add(name);
-          else properties[name] = kept;
-        }
-        result.properties = properties;
-        if (dropped.size > 0 && Array.isArray(source.required)) {
-          // A required property with no publishable value leaves no publishable object.
-          if (source.required.some((name) => dropped.has(name as string))) return EMPTY;
-        }
-        break;
-      }
-      default: {
-        if (key === "parameters" && Array.isArray(value)) {
-          // An operation's parameter list: a query parameter left with no value goes.
-          result.parameters = value
-            .filter((parameter) => {
-              const schema = (parameter as { schema?: Json }).schema;
-              return schema === undefined || pruneNode(schema, published) !== EMPTY;
-            })
-            .map((parameter) => pruneNode(parameter, published));
-          break;
-        }
-        const kept = pruneNode(value, published);
-        if (kept === EMPTY) {
-          throw new Error(`OpenAPI ${key} has no value its release channel publishes`);
-        }
-        result[key] = kept;
-      }
+      result[key] = kept;
     }
   }
   return result;
@@ -313,8 +345,9 @@ function pruneNode(node: Json, published: Published): Json | typeof EMPTY {
 
 /**
  * Removes every value the document's release channel does not publish: enum
- * members, examples and defaults naming one, and the properties, `oneOf`
- * branches and query parameters left with no value.
+ * members (request enums narrow, response enums open up), examples and defaults
+ * naming one, and the properties, `oneOf` branches and query parameters left
+ * with no value.
  */
 export function pruneUnpublishedValues(
   document: OpenAPIObject,
@@ -322,8 +355,20 @@ export function pruneUnpublishedValues(
   publishEarn: boolean
 ): OpenAPIObject {
   const modules = publishedModules(releaseChannel, publishEarn);
-  const published: Published = (value) => isValuePublished(value, modules, releaseChannel);
-  const pruned = pruneNode(document, published);
-  if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");
-  return pruned as OpenAPIObject;
+  const pruned = pruneNode(document, {
+    published: (value) => isValuePublished(value, modules, releaseChannel),
+    inResponse: false,
+  });
+  if (!isOpenApiObject(pruned)) throw new Error("The public OpenAPI document pruned to nothing");
+  return pruned;
+}
+
+/** Pruning only removes members, so a pruned document keeps its top-level shape. */
+function isOpenApiObject(value: Json): value is OpenAPIObject {
+  return (
+    isJsonObject(value) &&
+    typeof value.openapi === "string" &&
+    isJsonObject(value.info) &&
+    isJsonObject(value.paths)
+  );
 }

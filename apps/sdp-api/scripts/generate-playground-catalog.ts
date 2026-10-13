@@ -15,6 +15,7 @@ import {
   type SecurityRequirementObject,
 } from "openapi3-ts/oas30";
 
+import { valueGates } from "../src/openapi/release-channel-values";
 import { createPublicOpenApiDocument } from "../src/openapi/spec";
 import { ROUTE_OWNERS, type RouteOwner, routeOwnerOf } from "../src/routes/route-modules";
 
@@ -391,7 +392,10 @@ function generateCatalog(): string {
       },
       modules,
       // Route ownership, for hand-authored forms the catalog does not carry.
-      routeOwners: ROUTE_OWNERS.map(([pattern, owner]) => [pattern.source, owner]),
+      routeOwners: ROUTE_OWNERS.map(([pattern, owner]) => ({ pattern: pattern.source, owner })),
+      // Which module or ramp provider owns a field value, so the dashboard drops
+      // options, defaults and example values its channel does not run.
+      valueGates: valueGates(),
     },
     null,
     2

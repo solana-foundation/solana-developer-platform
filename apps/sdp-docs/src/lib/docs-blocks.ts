@@ -1,5 +1,5 @@
-import type { Nodes, Parent, Root, RootContent } from "mdast";
-import type { MdxJsxFlowElement } from "mdast-util-mdx-jsx";
+import type { OperationFamily } from "@sdp/types";
+import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -50,7 +50,7 @@ const publishedModules = (surface: PublicSurface): ModuleEntry[] =>
     (entry) => entry.module === "core" || isModulePublished(entry.module, surface)
   );
 
-const BLOCKS: Record<string, (surface: PublicSurface) => string> = {
+const BLOCKS = {
   ModuleTable: (surface) =>
     table(
       ["Module", "What it does"],
@@ -80,34 +80,49 @@ const BLOCKS: Record<string, (surface: PublicSurface) => string> = {
   AllowedOperationsTable: (surface) =>
     table(
       ["Family", "Covers", "Operation types"],
-      // Families in the catalog's reading order (payment first), then any it does not describe.
+      // Families in the catalog's reading order (payment first).
       [...surface.allowedOperations]
         .sort((left, right) => familyRank(left.family) - familyRank(right.family))
         .map(({ family, types }) => [
           `\`${family}\``,
-          DOCS_OPERATION_FAMILIES[family] ?? family,
+          DOCS_OPERATION_FAMILIES[family],
           types.map((type) => `\`${type}\``).join(", "),
         ])
     ),
-};
+} satisfies Record<string, (surface: PublicSurface) => string>;
 
-function familyRank(family: string): number {
-  const rank = Object.keys(DOCS_OPERATION_FAMILIES).indexOf(family);
-  return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+type BlockName = keyof typeof BLOCKS;
+
+const FAMILY_ORDER: readonly OperationFamily[] = Object.keys(DOCS_OPERATION_FAMILIES).filter(
+  (family): family is OperationFamily => Object.hasOwn(DOCS_OPERATION_FAMILIES, family)
+);
+
+function familyRank(family: OperationFamily): number {
+  return FAMILY_ORDER.indexOf(family);
 }
 
-function blockName(node: Nodes): string | undefined {
+function isBlockName(name: string | null): name is BlockName {
+  return name !== null && Object.hasOwn(BLOCKS, name);
+}
+
+/** A generated block's element and name, or undefined for any other node. */
+function blockOf(node: RootContent, where: string): { name: BlockName } | undefined {
   if (node.type !== "mdxJsxFlowElement" && node.type !== "mdxJsxTextElement") return undefined;
-  return node.name !== null && node.name in BLOCKS ? node.name : undefined;
+  if (!isBlockName(node.name)) return undefined;
+  if (node.type !== "mdxJsxFlowElement" || node.attributes.length > 0) {
+    throw new Error(`${where}: <${node.name} /> stands on its own line and takes no attributes`);
+  }
+  return { name: node.name };
 }
 
-function renderBlock(node: Nodes, where: string, surface: PublicSurface): string {
-  const name = blockName(node) as string;
-  const element = node as MdxJsxFlowElement;
-  if (node.type !== "mdxJsxFlowElement" || element.attributes.length > 0) {
-    throw new Error(`${where}: <${name} /> stands on its own line and takes no attributes`);
+/** A node's source offsets; the parser sets them on every node it produces. */
+function spanOf(node: RootContent, where: string): { start: number; end: number } {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) {
+    throw new Error(`${where}: a parsed ${node.type} node has no source position`);
   }
-  return BLOCKS[name]?.(surface) ?? "";
+  return { start, end };
 }
 
 const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
@@ -118,13 +133,12 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   return (tree: Root, file: { path?: string }) => {
     const where = file.path ?? "MDX page";
     const walk = (parent: Parent) => {
-      parent.children = (parent.children as Nodes[]).flatMap((child) => {
-        if (blockName(child)) {
-          return (parser.parse(renderBlock(child, where, surface)) as Root).children;
-        }
+      parent.children = parent.children.flatMap((child) => {
+        const block = blockOf(child, where);
+        if (block) return parser.parse(BLOCKS[block.name](surface)).children;
         if ("children" in child) walk(child);
         return [child];
-      }) as RootContent[];
+      });
     };
     walk(tree);
   };
@@ -139,25 +153,21 @@ export function expandDocsBlocks(
   const surface = options.surface ?? publicSurface;
   // Frontmatter is not MDX; blank it (keeping offsets) for the parse.
   const { raw } = frontmatterOf(source);
-  const tree = parser.parse(raw.replace(/[^\n]/g, " ") + source.slice(raw.length)) as Root;
+  const tree = parser.parse(raw.replace(/[^\n]/g, " ") + source.slice(raw.length));
   const blocks: { start: number; end: number; markdown: string }[] = [];
   const [leadProvider] = publishedRampProviderIds(surface.rampProviders);
   const walk = (parent: Parent) => {
-    for (const child of parent.children as Nodes[]) {
+    for (const child of parent.children) {
+      const block = blockOf(child, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
         // The page rotates this fence's provider; text names the first published one.
-        const start = child.position?.start.offset ?? 0;
-        const end = child.position?.end.offset ?? 0;
+        const span = spanOf(child, where);
         const markdown = source
-          .slice(start, end)
+          .slice(span.start, span.end)
           .replaceAll(ROTATE_PROVIDERS_TOKEN, `"${leadProvider}"`);
-        blocks.push({ start, end, markdown });
-      } else if (blockName(child)) {
-        blocks.push({
-          start: child.position?.start.offset ?? 0,
-          end: child.position?.end.offset ?? 0,
-          markdown: renderBlock(child, where, surface),
-        });
+        blocks.push({ ...span, markdown });
+      } else if (block) {
+        blocks.push({ ...spanOf(child, where), markdown: BLOCKS[block.name](surface) });
       } else if ("children" in child) {
         walk(child);
       }

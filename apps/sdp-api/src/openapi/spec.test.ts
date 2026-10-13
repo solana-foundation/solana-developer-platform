@@ -800,6 +800,27 @@ describe("OpenAPI spec", () => {
     });
   }
 
+  // A deployment stores values a narrower channel no longer documents (a key
+  // saved with `tokens:read` before a downgrade, or created on another
+  // channel's dashboard). Response enums therefore open up rather than narrow,
+  // so stored records still validate, while request enums list what it accepts.
+  it("narrows request enums and opens response enums that lose values", () => {
+    const doc = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    const create = getJsonSchema(doc.paths?.["/v1/api-keys"]?.post?.requestBody);
+    const requested = create.properties?.permissions?.items?.enum ?? [];
+    expect(requested).toContain("payments:write");
+    expect(requested).not.toContain("tokens:read");
+
+    const read = getJsonSchema(doc.paths?.["/v1/api-keys/{keyId}"]?.get?.responses?.["200"]);
+    const stored = JSON.stringify(read);
+    expect(stored).toContain('"permissions"');
+    expect(stored).not.toMatch(/tokens:|earn:/);
+    const permissions = (read.properties?.data?.properties?.permissions ??
+      read.properties?.data?.properties?.apiKey?.properties?.permissions) as TestJsonSchema;
+    expect(permissions?.items?.enum).toBeUndefined();
+    expect(permissions?.items?.type).toBe("string");
+  });
+
   it("names Earn nowhere in any channel's document while the hold is on", () => {
     for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toMatch(/earn/i);

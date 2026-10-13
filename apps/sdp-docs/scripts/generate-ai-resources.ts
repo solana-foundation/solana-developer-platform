@@ -144,11 +144,12 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, DocsPage>();
 
-  const sources = await Promise.all(mdxFiles.map((filePath) => fs.readFile(filePath, "utf8")));
+  const sources = await Promise.all(
+    mdxFiles.map(async (filePath) => ({ filePath, raw: await fs.readFile(filePath, "utf8") }))
+  );
 
-  for (const [index, filePath] of mdxFiles.entries()) {
+  for (const { filePath, raw } of sources) {
     const slug = toPageSlug(filePath);
-    const raw = sources[index] ?? "";
     if (!isPageSourcePublished(raw, filePath)) {
       excludedSlugs.add(slug);
       continue;
