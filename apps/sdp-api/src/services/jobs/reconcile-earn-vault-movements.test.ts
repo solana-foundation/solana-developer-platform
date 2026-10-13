@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { runInJobClusterScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -44,13 +45,32 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
-const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
+const job = await import("./reconcile-earn-vault-movements");
 const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
-const {
-  reconcileEarnVaultMovementReadThrough,
-  repairUnvaluedWithdrawalPayouts,
-  repairUnvaluedKaminoDeposits,
-} = await import("../earn/vault-movement-reconciliation.service");
+const reconciliation = await import("../earn/vault-movement-reconciliation.service");
+const { reconcileEarnVaultMovementReadThrough } = reconciliation;
+
+function reconcileEarnVaultMovements(
+  ...args: Parameters<typeof job.reconcileEarnVaultMovements>
+): ReturnType<typeof job.reconcileEarnVaultMovements> {
+  return runInJobClusterScope("sandbox", () => job.reconcileEarnVaultMovements(...args));
+}
+
+function repairUnvaluedWithdrawalPayouts(
+  ...args: Parameters<typeof reconciliation.repairUnvaluedWithdrawalPayouts>
+): ReturnType<typeof reconciliation.repairUnvaluedWithdrawalPayouts> {
+  return runInJobClusterScope("sandbox", () =>
+    reconciliation.repairUnvaluedWithdrawalPayouts(...args)
+  );
+}
+
+function repairUnvaluedKaminoDeposits(
+  ...args: Parameters<typeof reconciliation.repairUnvaluedKaminoDeposits>
+): ReturnType<typeof reconciliation.repairUnvaluedKaminoDeposits> {
+  return runInJobClusterScope("sandbox", () =>
+    reconciliation.repairUnvaluedKaminoDeposits(...args)
+  );
+}
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";
@@ -336,7 +356,8 @@ describe("Kamino deposit receipts", () => {
       shares_out: "0.39",
     });
     expect(readKaminoDepositReceipt).toHaveBeenCalledWith(
-      expect.objectContaining({ cluster: "devnet" }),
+      expect.anything(),
+      "devnet",
       expect.objectContaining({
         owner: EXTERNAL_OWNER,
         vault: seeded.position.vault_address,
@@ -622,9 +643,13 @@ describe("provider-order settlement boundary", () => {
       settled_at: null,
     });
     const ledger = createPostgresEarnMovementsRepository(getDb(env));
-    const confirmedClaim = await ledger.claimUnsettledVaultMovements(256);
+    const confirmedClaim = await runInJobClusterScope("sandbox", () =>
+      ledger.claimUnsettledVaultMovements(256)
+    );
     expect(confirmedClaim.map((movement) => movement.id)).toContain(seeded.movement.id);
-    await expect(ledger.getUnsettledVaultMovementStats()).resolves.toMatchObject({
+    await expect(
+      runInJobClusterScope("sandbox", () => ledger.getUnsettledVaultMovementStats())
+    ).resolves.toMatchObject({
       backlog: 1,
       backlogConfirmed: 1,
     });
@@ -655,9 +680,13 @@ describe("provider-order settlement boundary", () => {
 
     // Only durable finality takes the row out of the chain queue. It remains
     // economically unsettled and visible to pending-movement consumers.
-    const claimable = await ledger.claimUnsettledVaultMovements(256);
+    const claimable = await runInJobClusterScope("sandbox", () =>
+      ledger.claimUnsettledVaultMovements(256)
+    );
     expect(claimable.map((movement) => movement.id)).not.toContain(seeded.movement.id);
-    await expect(ledger.getUnsettledVaultMovementStats()).resolves.toMatchObject({
+    await expect(
+      runInJobClusterScope("sandbox", () => ledger.getUnsettledVaultMovementStats())
+    ).resolves.toMatchObject({
       backlog: 0,
       backlogConfirmed: 0,
     });
@@ -704,11 +733,13 @@ describe("provider-order settlement boundary", () => {
     // observation to close the position.
     const ledger = createPostgresEarnMovementsRepository(getDb(env));
     await expect(
-      ledger.claimUnvaluedWithdrawalPayouts({
-        limit: 25,
-        settledAfter: new Date(0).toISOString(),
-        retryBefore: new Date().toISOString(),
-      })
+      runInJobClusterScope("sandbox", () =>
+        ledger.claimUnvaluedWithdrawalPayouts({
+          limit: 25,
+          settledAfter: new Date(0).toISOString(),
+          retryBefore: new Date().toISOString(),
+        })
+      )
     ).resolves.toEqual([]);
     const position = await positionRow(seeded.position.id);
     await expect(
@@ -1217,9 +1248,9 @@ describe("reconcileEarnVaultMovements", () => {
       status: "confirmed",
       settled_at: null,
     });
-    const queued = await createPostgresEarnMovementsRepository(
-      getDb(env)
-    ).claimUnsettledVaultMovements(256);
+    const queued = await runInJobClusterScope("sandbox", () =>
+      createPostgresEarnMovementsRepository(getDb(env)).claimUnsettledVaultMovements(256)
+    );
     expect(queued.map((row) => row.id)).toContain(seeded.movement.id);
 
     // A later tick sees finalization and settles it.
@@ -1236,7 +1267,9 @@ describe("reconcileEarnVaultMovements", () => {
     expect(finalized?.confirmed_at).not.toBeNull();
     expect(
       (
-        await createPostgresEarnMovementsRepository(getDb(env)).claimUnsettledVaultMovements(256)
+        await runInJobClusterScope("sandbox", () =>
+          createPostgresEarnMovementsRepository(getDb(env)).claimUnsettledVaultMovements(256)
+        )
       ).map((row) => row.id)
     ).not.toContain(seeded.movement.id);
   });
@@ -1356,6 +1389,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
 
     expect(tickLevel()).toBe("info");
     expect(tickPayload()).toMatchObject({
+      environment: "sandbox",
       claimed: 1,
       settled: 1,
       failed: 0,
@@ -1568,8 +1602,12 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
       settledAt: observedAt,
     });
 
-    const stats = await ledger.getUnsettledVaultMovementStats();
-    const claimable = await ledger.claimUnsettledVaultMovements(256);
+    const stats = await runInJobClusterScope("sandbox", () =>
+      ledger.getUnsettledVaultMovementStats()
+    );
+    const claimable = await runInJobClusterScope("sandbox", () =>
+      ledger.claimUnsettledVaultMovements(256)
+    );
 
     // Unsettled: requested, submitted, confirmed. Terminal: failed, finalized.
     expect(new Set(claimable.map((row) => row.id))).toEqual(
@@ -1588,7 +1626,9 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     const ledger = createPostgresEarnMovementsRepository(getDb(env));
     await seedWithdrawal();
 
-    const stats = await ledger.getUnsettledVaultMovementStats();
+    const stats = await runInJobClusterScope("sandbox", () =>
+      ledger.getUnsettledVaultMovementStats()
+    );
 
     expect(stats.backlogWithdrawals).toBe(1);
     expect(stats.oldestWithdrawalCreatedAt).not.toBeNull();

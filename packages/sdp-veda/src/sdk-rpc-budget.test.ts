@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VedaVaultDirectClient, type VedaVaultOperationRunner } from "./client";
@@ -140,6 +142,15 @@ function recordedChain() {
       const payload = record(JSON.parse(String(init?.body)));
       const method = typeof payload?.method === "string" ? payload.method : "(none)";
       const params = Array.isArray(payload?.params) ? payload.params : [];
+      if (method === "getGenesisHash") {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: payload?.id,
+            result: GENESIS_HASH_BY_CLUSTER.devnet,
+          })
+        );
+      }
       sent.push({ method, params });
       let result: unknown;
       try {
@@ -182,14 +193,19 @@ function recordedChain() {
   };
 }
 
-const runOperation: VedaVaultOperationRunner = (_label, operation) => operation(() => undefined);
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_veda_rpc_budget",
+  environment: "sandbox",
+};
+const runOperation: VedaVaultOperationRunner = (_label, operation) =>
+  runInClusterScope(SANDBOX_SCOPE, () => operation(() => undefined));
 const sandbox = { env: {}, environment: "sandbox" } as const;
 let endpoint = 0;
 
 function vedaClient() {
   endpoint += 1;
-  const rpcUrl = `https://veda-budget-${endpoint}.invalid`;
-  return new VedaVaultDirectClient(async () => rpcUrl, runOperation);
+  vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", `https://veda-budget-${endpoint}.veda.test`);
+  return new VedaVaultDirectClient(runOperation);
 }
 
 function readHolding(client: VedaVaultDirectClient, owner: string) {
@@ -216,6 +232,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

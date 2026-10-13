@@ -1,5 +1,11 @@
 import type { ManagedRpcEnv } from "@sdp/rpc";
-import { GENESIS_HASH_BY_CLUSTER, SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import {
+  GENESIS_HASH_BY_CLUSTER,
+  type SdpEnvironment,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+} from "@sdp/types";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
@@ -450,4 +456,19 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
       });
     },
   };
+}
+
+/**
+ * Run `work` inside the cluster scope `runPerCluster` opens for one environment's job run: that
+ * environment and no project. For tests of a job body, or a claim it makes, on one cluster.
+ *
+ * @param environment - The environment whose run `work` stands in for.
+ * @param work - The job body or query under test.
+ * @returns Whatever `work` returns.
+ */
+export function runInJobClusterScope<TResult>(
+  environment: SdpEnvironment,
+  work: () => TResult
+): TResult {
+  return runInClusterScope({ projectId: null, environment }, work);
 }

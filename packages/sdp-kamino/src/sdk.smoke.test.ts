@@ -75,7 +75,7 @@ async function execute(
   plan: KaminoInstructionPlan,
   signers: TransactionSigner[] = []
 ) {
-  const rpc = createSolanaRpc(runtime.rpcUrl);
+  const { rpc } = runtime;
   expect(planProgramAddresses(plan)).toContain(
     kaminoClusterConfig(runtime.cluster).kvaultProgramId
   );
@@ -104,8 +104,8 @@ async function execute(
 describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
   it("enforces the deposit floor, lands a deposit, and redeems partial and full positions", async () => {
     if (CLUSTER !== "mainnet-beta" && CLUSTER !== "devnet") throw new Error("Unsupported cluster");
-    const runtime = { cluster: CLUSTER as SolanaCluster, rpcUrl: RPC_URL ?? "" };
-    const rpc = createSolanaRpc(runtime.rpcUrl);
+    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const runtime: KaminoRuntime = { cluster: CLUSTER as SolanaCluster, rpc, readRpc: rpc };
     const owner = await generateKeyPairSigner();
     await cheat("surfnet_setAccount", [owner.address, { lamports: 1_000_000_000 }]);
     // Lazily cloned accounts can be ahead of the fork's initial slot.
@@ -170,7 +170,7 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
       })
     );
     const deposited = await position();
-    const receipt = await readKaminoDepositReceipt(runtime, {
+    const receipt = await readKaminoDepositReceipt(runtime.rpc, runtime.cluster, {
       signature: depositSignature,
       vault: VAULT,
       owner: owner.address,
@@ -233,8 +233,8 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
   }, 180_000);
   it("does not refund a concurrent creation claimant who paid no rent", async () => {
     if (CLUSTER !== "mainnet-beta" && CLUSTER !== "devnet") throw new Error("Unsupported cluster");
-    const runtime = { cluster: CLUSTER as SolanaCluster, rpcUrl: RPC_URL ?? "" };
-    const rpc = createSolanaRpc(runtime.rpcUrl);
+    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const runtime: KaminoRuntime = { cluster: CLUSTER as SolanaCluster, rpc, readRpc: rpc };
     const owner = await generateKeyPairSigner();
     const firstPayer = await generateKeyPairSigner();
     const secondPayer = await generateKeyPairSigner();

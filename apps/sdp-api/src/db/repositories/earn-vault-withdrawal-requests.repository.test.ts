@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { runInJobClusterScope } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -1502,20 +1503,105 @@ describe("Earn queued withdrawal repository", () => {
       nonce: "9",
       creationTimestamp: "1700000000",
     });
-    const claimed = await repository.claimOpenRequests(16);
+    const claimed = await runInJobClusterScope("sandbox", () => repository.claimOpenRequests(16));
     expect(claimed.map(({ id }) => id)).toContain(created.request.id);
 
     // The claim itself is a lease. A second worker cannot pick up the same
     // provider read until either the worker schedules it or the lease expires.
-    const overlapping = await repository.claimOpenRequests(16);
+    const overlapping = await runInJobClusterScope("sandbox", () =>
+      repository.claimOpenRequests(16)
+    );
     expect(overlapping.map(({ id }) => id)).not.toContain(created.request.id);
 
     await getDb(env)
       .prepare("UPDATE earn_vault_withdrawal_requests SET next_check_at = ? WHERE id = ?")
       .bind("2020-01-01T00:00:00.000Z", created.request.id)
       .run();
-    const retried = await repository.claimOpenRequests(16);
+    const retried = await runInJobClusterScope("sandbox", () => repository.claimOpenRequests(16));
     expect(retried.map(({ id }) => id)).toContain(created.request.id);
+  });
+
+  it("claims unsettled actions and open requests only in the open cluster scope's environment", async () => {
+    const db = getDb(env);
+    const productionProject = `${PROJECT}_production`;
+    const productionConfig = `${CONFIG}_production`;
+    const productionWallet = `${WALLET}_production`;
+    const productionPosition = `${POSITION}_production`;
+    await insertTestCustodyConfigRow(db, {
+      id: productionConfig,
+      organizationId: ORG,
+      projectId: productionProject,
+      provider: "local",
+      configEncrypted: "encrypted",
+      status: "active",
+    });
+    await insertTestCustodyWalletRow(db, {
+      id: productionWallet,
+      owner: { kind: "config", custodyConfigId: productionConfig },
+      walletId: "queued-wallet-production",
+      publicKey: OWNER,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
+    await db
+      .prepare(
+        `INSERT INTO earn_positions (
+           id, organization_id, project_id, environment, provider, kind,
+           custody_wallet_id, vault_address, share_mint, token_mint, label,
+           activated_at
+         ) VALUES (?, ?, ?, 'production', 'veda', 'vault_direct', ?, ?, ?, ?,
+                   'Production Veda queued vault', sdp_iso_now())`
+      )
+      .bind(
+        productionPosition,
+        ORG,
+        productionProject,
+        productionWallet,
+        VAULT,
+        SHARE_MINT,
+        TOKEN_MINT
+      )
+      .run();
+    const sandboxRequest = await createRequest();
+    const productionRequest = await createRequest({
+      projectId: productionProject,
+      environment: "production",
+      positionId: productionPosition,
+      custodyWalletId: productionWallet,
+    });
+    for (const created of [sandboxRequest, productionRequest]) {
+      await repository.advanceAction({
+        actionId: created.action.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      await repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "pending",
+        nonce: "9",
+        creationTimestamp: "1700000000",
+      });
+    }
+
+    const productionActions = await runInJobClusterScope("production", () =>
+      repository.claimUnsettledActions(16)
+    );
+    const productionRequests = await runInJobClusterScope("production", () =>
+      repository.claimOpenRequests(16)
+    );
+    const sandboxActions = await runInJobClusterScope("sandbox", () =>
+      repository.claimUnsettledActions(16)
+    );
+    const sandboxRequests = await runInJobClusterScope("sandbox", () =>
+      repository.claimOpenRequests(16)
+    );
+
+    expect(productionActions.map(({ id }) => id)).toEqual([productionRequest.action.id]);
+    expect(productionRequests.map(({ id }) => id)).toEqual([productionRequest.request.id]);
+    expect(sandboxActions.map(({ id }) => id)).toEqual([sandboxRequest.action.id]);
+    expect(sandboxRequests.map(({ id }) => id)).toEqual([sandboxRequest.request.id]);
   });
 
   it("preserves the claim lease when a nonterminal advance omits the next check", async () => {
@@ -1532,7 +1618,7 @@ describe("Earn queued withdrawal repository", () => {
       nonce: "9",
       creationTimestamp: "1700000000",
     });
-    const [claimed] = await repository.claimOpenRequests(1);
+    const [claimed] = await runInJobClusterScope("sandbox", () => repository.claimOpenRequests(1));
     if (!claimed) throw new Error("Expected one due queued withdrawal");
     expect(claimed.next_check_at).not.toBeNull();
 
@@ -1600,7 +1686,7 @@ describe("Earn queued withdrawal repository", () => {
       });
     }
 
-    const [failed] = await repository.claimOpenRequests(1);
+    const [failed] = await runInJobClusterScope("sandbox", () => repository.claimOpenRequests(1));
     if (!failed) throw new Error("Expected one due queued withdrawal");
     await repository.recordIndexError({
       withdrawalRequestId: failed.id,
@@ -1608,7 +1694,7 @@ describe("Earn queued withdrawal repository", () => {
       retryAt: "2099-01-01T00:00:00.000Z",
     });
 
-    const [next] = await repository.claimOpenRequests(1);
+    const [next] = await runInJobClusterScope("sandbox", () => repository.claimOpenRequests(1));
     const expectedNext = [first.request.id, second.request.id].find((id) => id !== failed.id);
     expect(next?.id).toBe(expectedNext);
     await expect(

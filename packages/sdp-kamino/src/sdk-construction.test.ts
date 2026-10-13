@@ -146,7 +146,7 @@ describe("vault construction", () => {
     const callers = (file: string, entry: string, end: string) => {
       const source = read(file);
       const body = source.slice(source.indexOf(entry));
-      const count = (text: string) => text.match(/createKaminoReadRpc\(/g)?.length ?? 0;
+      const count = (text: string) => text.match(/runtime\.readRpc\b/g)?.length ?? 0;
       return { total: count(source), inEntry: count(body.slice(0, body.indexOf(end))) };
     };
     expect(callers("sdk.ts", "export async function readKaminoPositions", "\n}\n")).toEqual({

@@ -1,4 +1,4 @@
-import { address } from "@solana/kit";
+import { address, createSolanaRpc } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { planInstructionCount, planProgramAddresses } from "./guards";
 import { toClusterConfig } from "./programs";
@@ -46,7 +46,10 @@ describe.skipIf(!configured)("Veda plans against a live chain", () => {
   // Everything is resolved LAZILY: `describe.skipIf` still evaluates this
   // callback, so branding an empty address at suite scope would fail collection
   // for everyone rather than skipping quietly.
-  const runtime = (): VedaRuntime => ({ cluster: "devnet", rpcUrl: RPC_URL ?? "" });
+  const runtime = (): VedaRuntime => {
+    const rpc = createSolanaRpc(RPC_URL ?? "");
+    return { cluster: "devnet", rpc, readRpc: rpc };
+  };
   const config = () =>
     toClusterConfig("devnet", {
       vaultProgramAddress: VAULT_PROGRAM ?? "",

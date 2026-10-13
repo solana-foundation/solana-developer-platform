@@ -5,10 +5,14 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
+import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { address } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertNotPortfolioProvider,
+  KAMINO_RPC_REQUEST_TIMEOUT_MS,
   KaminoVaultDirectClient,
   type KaminoVaultOperationRunner,
   toEarnVaultTransactionPlan,
@@ -17,22 +21,21 @@ import type { KaminoInstructionPlan, KaminoPosition, KaminoRuntime } from "./typ
 
 const DEPOSIT_TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
+const DEVNET_RPC_URL = "https://devnet.kamino-client.test";
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_kamino_client",
+  environment: "sandbox",
+};
 
 const mocks = vi.hoisted(() => ({
   buildKaminoDepositPlan: vi.fn(),
   buildKaminoWithdrawPlan: vi.fn(),
-  createKaminoReadRpc: vi.fn(),
-  createKaminoRpc: vi.fn(),
   discoverKaminoPositionVaults: vi.fn(),
   quoteKaminoDeposit: vi.fn(),
   quoteKaminoWithdraw: vi.fn(),
   readKaminoPositions: vi.fn(),
 }));
 
-vi.mock("./rpc", () => ({
-  createKaminoReadRpc: mocks.createKaminoReadRpc,
-  createKaminoRpc: mocks.createKaminoRpc,
-}));
 vi.mock("./sdk", () => ({
   buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
   buildKaminoWithdrawPlan: mocks.buildKaminoWithdrawPlan,
@@ -59,12 +62,52 @@ function position(
   };
 }
 
+function stubChainSlot(answerSlot: () => number): string[] {
+  const methods: string[] = [];
+  vi.stubGlobal("fetch", async (_input: string, init: { body: string }) => {
+    const request: unknown = JSON.parse(init.body);
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("id" in request) ||
+      !("method" in request) ||
+      typeof request.method !== "string"
+    ) {
+      throw new Error("Expected a JSON-RPC request");
+    }
+    if (request.method === "getGenesisHash") {
+      return new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: request.id, result: GENESIS_HASH_BY_CLUSTER.devnet })
+      );
+    }
+    methods.push(request.method);
+    if (request.method !== "getSlot") throw new Error(`Unexpected ${request.method}`);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: answerSlot() }));
+  });
+  return methods;
+}
+
+function sandboxRuntime(): KaminoRuntime {
+  return runInClusterScope(SANDBOX_SCOPE, () => ({
+    cluster: "devnet",
+    rpc: createClusterBoundedRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+    readRpc: createClusterReadRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+  }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", DEVNET_RPC_URL);
 });
 
-const runOperation: KaminoVaultOperationRunner = (_label, operation) => operation(() => undefined);
-const client = new KaminoVaultDirectClient(async () => "https://example.invalid", runOperation);
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+const runOperation: KaminoVaultOperationRunner = (_label, operation) =>
+  runInClusterScope(SANDBOX_SCOPE, () => operation(() => undefined));
+const client = new KaminoVaultDirectClient(runOperation);
 
 describe("KaminoVaultDirectClient capabilities", () => {
   it("reports the vault-direct capability", () => {
@@ -77,12 +120,11 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(typeof client.buildVaultWithdrawal).toBe("function");
   });
 
-  it("refuses an unsupported withdrawal floor before resolving an RPC or building", async () => {
-    const resolveRpc = vi.fn(async () => "https://example.invalid");
-    const probe = new KaminoVaultDirectClient(resolveRpc, runOperation);
+  it("refuses an unsupported withdrawal floor before any chain read or build", async () => {
+    const methods = stubChainSlot(() => 1);
 
     await expect(
-      probe.buildVaultWithdrawal(
+      client.buildVaultWithdrawal(
         { env: {}, environment: "production" },
         {
           providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
@@ -92,18 +134,15 @@ describe("KaminoVaultDirectClient capabilities", () => {
         }
       )
     ).rejects.toMatchObject({ code: "WITHDRAW_REFUSED" });
-    expect(resolveRpc).not.toHaveBeenCalled();
+    expect(methods).toEqual([]);
     expect(mocks.buildKaminoWithdrawPlan).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "So11111111111111111111111111111111111111112", "invalid-address"])(
     "maps the withdrawal plan without parsing or forwarding refund hint %s",
     async (rentRefundTo) => {
-      const resolvedRpcUrl = "https://devnet.example.invalid";
-      const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
       const slot = 456n;
-      const getSlotSend = vi.fn().mockResolvedValue(slot);
-      mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+      const methods = stubChainSlot(() => Number(slot));
 
       const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
       const owner = "11111111111111111111111111111112";
@@ -119,15 +158,14 @@ describe("KaminoVaultDirectClient capabilities", () => {
       };
       mocks.buildKaminoWithdrawPlan.mockResolvedValue(builtPlan);
 
-      const plan = await probe.buildVaultWithdrawal(
+      const plan = await client.buildVaultWithdrawal(
         { env: {}, environment: "sandbox" },
         { providerReference: vault, owner, shares: "2", rentRefundTo }
       );
 
-      expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
-      expect(getSlotSend).toHaveBeenCalledOnce();
+      expect(methods).toEqual(["getSlot"]);
       expect(mocks.buildKaminoWithdrawPlan).toHaveBeenCalledWith(
-        { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+        sandboxRuntime(),
         expect.objectContaining({
           vault: address(vault),
           shares: "2",
@@ -154,48 +192,43 @@ describe("KaminoVaultDirectClient capabilities", () => {
   });
 
   it("prices the deposit quote against one slot and maps it to the Earn contract", async () => {
-    const resolvedRpcUrl = "https://devnet.example.invalid";
-    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
     const slot = 789n;
-    const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const methods = stubChainSlot(() => Number(slot));
     const issues = [{ code: "DEPOSIT_CAP_EXCEEDED", message: "Cap exceeded" }];
     mocks.quoteKaminoDeposit.mockResolvedValue({ sharesOut: "0.999", shareDecimals: 6, issues });
     const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 
-    const quote = await probe.quoteVaultDeposit(
+    const quote = await client.quoteVaultDeposit(
       { env: {}, environment: "sandbox" },
       { providerReference: vault, amount: "1" }
     );
 
-    expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
-    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(methods).toEqual(["getSlot"]);
     expect(mocks.quoteKaminoDeposit).toHaveBeenCalledWith(
-      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      sandboxRuntime(),
       { vault: address(vault), amount: "1", slot },
       expect.any(Function)
     );
+    expect(mocks.quoteKaminoDeposit.mock.calls[0][0].rpc).toBe(sandboxRuntime().rpc);
+    expect(mocks.quoteKaminoDeposit.mock.calls[0][0].readRpc).toBe(sandboxRuntime().readRpc);
     expect(quote).toEqual({ sharesOut: "0.999", shareDecimals: 6, blockingIssues: issues });
   });
 
   it("prices the withdrawal quote against one slot and maps it to the Earn contract", async () => {
-    const resolvedRpcUrl = "https://devnet.example.invalid";
-    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
     const slot = 790n;
-    const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const methods = stubChainSlot(() => Number(slot));
     const issues = [{ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY", message: "Short" }];
     mocks.quoteKaminoWithdraw.mockResolvedValue({ assetsOut: "4.997", assetDecimals: 6, issues });
     const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 
-    const quote = await probe.quoteVaultWithdrawal(
+    const quote = await client.quoteVaultWithdrawal(
       { env: {}, environment: "sandbox" },
       { providerReference: vault, shares: "5" }
     );
 
-    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(methods).toEqual(["getSlot"]);
     expect(mocks.quoteKaminoWithdraw).toHaveBeenCalledWith(
-      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      sandboxRuntime(),
       { vault: address(vault), shares: "5", slot },
       expect.any(Function)
     );
@@ -222,121 +255,30 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(typeof client.listStrategies).toBe("function");
   });
 
-  it("refuses to build when no RPC endpoint is configured for the cluster", async () => {
-    const unconfigured = new KaminoVaultDirectClient(async () => "  ", runOperation);
-    await expect(
-      unconfigured.buildVaultDeposit(
-        { env: {}, environment: "sandbox" },
-        {
-          providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-          owner: "11111111111111111111111111111112",
-          amount: "1",
-        }
-      )
-      // Fails before any network call, the same fail-closed rule @sdp/earn
-      // applies to a missing credential.
-    ).rejects.toThrow(/No Solana RPC endpoint configured for devnet/);
-  });
+  it("refuses a production context inside a sandbox cluster scope before any chain work", async () => {
+    const methods = stubChainSlot(() => 1);
+    const unscoped = new KaminoVaultDirectClient((_label, operation) => operation(() => undefined));
 
-  it("maps the SDP environment to the right cluster", async () => {
-    const seen: string[] = [];
-    const probe = new KaminoVaultDirectClient(async (_ctx, cluster) => {
-      seen.push(cluster);
-      return "";
-    }, runOperation);
-    for (const environment of ["sandbox", "production"] as const) {
-      await probe
-        .buildVaultDeposit(
-          { env: {}, environment },
-          {
-            providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-            owner: "11111111111111111111111111111112",
-            amount: "1",
-          }
+    await expect(
+      runInClusterScope(SANDBOX_SCOPE, () =>
+        unscoped.quoteVaultDeposit(
+          { env: {}, environment: "production" },
+          { providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", amount: "1" }
         )
-        .catch(() => undefined);
-    }
-    // sandbox -> devnet, production -> mainnet-beta, via CLUSTER_BY_SDP_ENVIRONMENT
-    // rather than a second copy of that mapping.
-    expect(seen).toEqual(["devnet", "mainnet-beta"]);
-  });
-
-  it("requires the proven RPC resolver before any chain work", async () => {
-    const resolverError = new Error("RPC endpoint was not proven");
-    const unproven = new KaminoVaultDirectClient(async () => {
-      throw resolverError;
-    }, runOperation);
-
-    await expect(
-      unproven.buildVaultDeposit(
-        { env: {}, environment: "sandbox" },
-        {
-          providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-          owner: "11111111111111111111111111111112",
-          amount: "1",
-        }
       )
-    ).rejects.toBe(resolverError);
-    await expect(
-      unproven.readVaultPositions(
-        { env: {}, environment: "sandbox" },
-        {
-          owner: "11111111111111111111111111111112",
-          providerReferences: ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx"],
-        }
-      )
-    ).rejects.toBe(resolverError);
-
-    expect(mocks.buildKaminoDepositPlan).not.toHaveBeenCalled();
-    expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
-    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
-    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
-    expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
-  });
-
-  it("does not start provider work when endpoint proof finishes after expiry", async () => {
-    let resolveRpc!: (url: string) => void;
-    let expired = false;
-    const probe = new KaminoVaultDirectClient(
-      () =>
-        new Promise<string>((resolve) => {
-          resolveRpc = resolve;
-        }),
-      (_label, operation) =>
-        operation(() => {
-          if (expired) throw new Error("vault operation expired");
-        })
-    );
-
-    const pending = probe.buildVaultDeposit(
-      { env: {}, environment: "sandbox" },
-      {
-        providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
-        owner: "11111111111111111111111111111112",
-        amount: "1",
-      }
-    );
-    await vi.waitFor(() => expect(resolveRpc).toBeTypeOf("function"));
-
-    expired = true;
-    resolveRpc("https://devnet.example.invalid");
-
-    await expect(pending).rejects.toThrow("vault operation expired");
-    expect(mocks.buildKaminoDepositPlan).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({ name: "SdpEarnError", code: "INTERNAL_ERROR" });
+    expect(methods).toEqual([]);
+    expect(mocks.quoteKaminoDeposit).not.toHaveBeenCalled();
   });
 
   it("discovers owner-held vaults on chain without consulting the curated shelf", async () => {
-    const resolvedRpcUrl = "https://devnet.example.invalid";
-    const resolveRpcUrl = vi.fn(async () => resolvedRpcUrl);
-    const probe = new KaminoVaultDirectClient(resolveRpcUrl, runOperation);
     const slot = 123n;
-    const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoReadRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const methods = stubChainSlot(() => Number(slot));
 
     const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
     const owner = "11111111111111111111111111111112";
     mocks.discoverKaminoPositionVaults.mockResolvedValue(providerReferences.map(address));
-    const listStrategies = vi.spyOn(probe, "listStrategies");
+    const listStrategies = vi.spyOn(client, "listStrategies");
     mocks.readKaminoPositions.mockImplementation(
       async (runtime: KaminoRuntime, input: { vaults: string[]; owner: string }) =>
         input.vaults.map((vault) => ({
@@ -349,7 +291,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
       UNRELATED: "preserved",
     };
 
-    const positions = await probe.readVaultPositions(
+    const positions = await client.readVaultPositions(
       {
         environment: "sandbox",
         env: processEnv,
@@ -360,39 +302,28 @@ describe("KaminoVaultDirectClient capabilities", () => {
       }
     );
 
-    expect(resolveRpcUrl).toHaveBeenCalledWith(
-      {
-        environment: "sandbox",
-        env: processEnv,
-      },
-      "devnet"
-    );
     expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledWith(
-      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      sandboxRuntime(),
       address(owner),
       expect.any(Function)
     );
     expect(listStrategies).not.toHaveBeenCalled();
-    expect(mocks.createKaminoReadRpc).toHaveBeenCalledWith(resolvedRpcUrl);
-    expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(methods).toEqual(["getSlot"]);
     expect(positions.map((entry) => entry.providerReference)).toEqual([providerReferences[0]]);
     expect(mocks.readKaminoPositions).toHaveBeenCalledOnce();
     expect(mocks.readKaminoPositions).toHaveBeenCalledWith(
-      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      sandboxRuntime(),
       { vaults: providerReferences, owner: address(owner), slot },
       expect.any(Function)
     );
   });
 
   it("returns an empty snapshot without slot or hydration reads when discovery finds no holdings", async () => {
-    const probe = new KaminoVaultDirectClient(
-      async () => "https://devnet.example.invalid",
-      runOperation
-    );
+    const methods = stubChainSlot(() => 1);
     mocks.discoverKaminoPositionVaults.mockResolvedValue([]);
 
     await expect(
-      probe.readVaultPositions(
+      client.readVaultPositions(
         { env: {}, environment: "sandbox" },
         {
           owner: "11111111111111111111111111111112",
@@ -402,20 +333,17 @@ describe("KaminoVaultDirectClient capabilities", () => {
     ).resolves.toEqual([]);
 
     expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledOnce();
-    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
+    expect(methods).toEqual([]);
     expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 
   it("propagates on-chain discovery failures instead of reporting no holdings", async () => {
-    const probe = new KaminoVaultDirectClient(
-      async () => "https://devnet.example.invalid",
-      runOperation
-    );
+    const methods = stubChainSlot(() => 1);
     const discoveryError = new Error("program census unavailable");
     mocks.discoverKaminoPositionVaults.mockRejectedValue(discoveryError);
 
     await expect(
-      probe.readVaultPositions(
+      client.readVaultPositions(
         { env: {}, environment: "sandbox" },
         {
           owner: "11111111111111111111111111111112",
@@ -424,15 +352,12 @@ describe("KaminoVaultDirectClient capabilities", () => {
       )
     ).rejects.toBe(discoveryError);
 
-    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
+    expect(methods).toEqual([]);
     expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 
   it("fails the whole snapshot when any discovered vault cannot be hydrated", async () => {
-    const slot = 123n;
-    mocks.createKaminoReadRpc.mockReturnValue({
-      getSlot: () => ({ send: vi.fn().mockResolvedValue(slot) }),
-    });
+    stubChainSlot(() => 123);
 
     const owner = "11111111111111111111111111111112";
     const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
@@ -461,8 +386,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
   it("reads every requested vault in one page read against one shared slot", async () => {
     const slot = 123n;
-    const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoReadRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    const methods = stubChainSlot(() => Number(slot));
     mocks.readKaminoPositions.mockImplementation(
       async (runtime: KaminoRuntime, input: { vaults: string[]; owner: string }) =>
         input.vaults.map((vault) => ({
@@ -480,8 +404,7 @@ describe("KaminoVaultDirectClient capabilities", () => {
       )
     ).resolves.toHaveLength(9);
 
-    expect(getSlotSend).toHaveBeenCalledOnce();
-    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
+    expect(methods).toEqual(["getSlot"]);
     expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
     expect(mocks.readKaminoPositions).toHaveBeenCalledOnce();
     expect(mocks.readKaminoPositions.mock.calls[0]?.[1]).toMatchObject({
@@ -492,20 +415,16 @@ describe("KaminoVaultDirectClient capabilities", () => {
 
   it("does not start the page read after the operation expires", async () => {
     let expired = false;
-    const probe = new KaminoVaultDirectClient(
-      async () => "https://devnet.example.invalid",
-      (_label, operation) =>
+    const probe = new KaminoVaultDirectClient((_label, operation) =>
+      runInClusterScope(SANDBOX_SCOPE, () =>
         operation(() => {
           if (expired) throw new Error("vault operation expired");
         })
+      )
     );
-    mocks.createKaminoReadRpc.mockReturnValue({
-      getSlot: () => ({
-        send: vi.fn(async () => {
-          expired = true;
-          return 123n;
-        }),
-      }),
+    stubChainSlot(() => {
+      expired = true;
+      return 123;
     });
 
     await expect(

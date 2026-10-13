@@ -1,7 +1,7 @@
 import { prepareRpcRead, withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { wellKnownMint } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
-import { type Address, address } from "@solana/kit";
+import { type Address, address, createSolanaRpc } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   VEDA_DEPOSIT_ALLOWED_USER_ACCOUNT_INDEX,
@@ -76,12 +76,6 @@ vi.mock("./accounts", () => ({
   accountExists: mocks.accountExists,
   minimumBalanceForRentExemption: mocks.minimumBalanceForRentExemption,
 }));
-// The RPC client is only handed to the (mocked) SDK; keep it inert. The read
-// client is tagged so a test can tell which one a construction received.
-vi.mock("./rpc", () => ({
-  createVedaRpc: vi.fn(() => ({})),
-  createVedaReadRpc: vi.fn(() => ({ positionReads: true })),
-}));
 
 import {
   buildVedaDepositPlan,
@@ -99,7 +93,6 @@ import {
   resetVedaCompatibilityCache,
   resetVedaReadCaches,
   VEDA_READ_CACHE_TTL_MS,
-  vedaReadCacheSizes,
 } from "./sdk";
 
 const USDC_DEVNET = wellKnownMint("USDC", "devnet") as string;
@@ -119,7 +112,11 @@ const DEPLOYMENT: VedaDeployment = {
   vaultStateAddresses: [String(VAULT)],
 };
 const config = toClusterConfig("devnet", DEPLOYMENT);
-const runtime: VedaRuntime = { cluster: "devnet", rpcUrl: "https://rpc.test.invalid" };
+const runtime: VedaRuntime = {
+  cluster: "devnet",
+  rpc: createSolanaRpc("https://devnet.veda-sdk.test"),
+  readRpc: createSolanaRpc("https://devnet.veda-sdk-reads.test"),
+};
 const OTHER_SHARE_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
 /** `getUserPosition` as the SDK answers it: the share account comes from the live share mint. */
@@ -262,8 +259,9 @@ describe("position reads reuse the client and the vault's static facts", () => {
 
     expect(mocks.clientOptions).toHaveBeenCalledTimes(1);
     expect(mocks.clientOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ rpc: { positionReads: true }, commitment: "confirmed" })
+      expect.objectContaining({ commitment: "confirmed" })
     );
+    expect(mocks.clientOptions.mock.calls[0][0].rpc).toBe(runtime.readRpc);
     expect(mocks.vault.getState).toHaveBeenCalledTimes(1);
     expect(mocks.vault.listAssets).toHaveBeenCalledTimes(1);
     expect(mocks.readMintDecimals).not.toHaveBeenCalled();
@@ -292,27 +290,6 @@ describe("position reads reuse the client and the vault's static facts", () => {
     expect(mocks.clientOptions).toHaveBeenCalledTimes(2);
     expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
     expect(mocks.vault.listAssets).toHaveBeenCalledTimes(2);
-  });
-
-  it("drops expired entries and caps the clients as new endpoints fill the caches", async () => {
-    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
-    const read = (rpcUrl: string) =>
-      readVedaPosition({ ...runtime, rpcUrl }, config, { vault: VAULT, owner: OWNER });
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    try {
-      await read("https://first.test.invalid");
-      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
-      clock.mockReturnValue(now + VEDA_READ_CACHE_TTL_MS + 1);
-      await read("https://second.test.invalid");
-      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
-      for (let index = 0; index < 40; index += 1) {
-        await read(`https://rpc-${index}.test.invalid`);
-      }
-    } finally {
-      clock.mockRestore();
-    }
-    expect(vedaReadCacheSizes()).toEqual({ clients: 32, shareFacts: 41, assetMints: 41 });
   });
 
   it("never reuses a client whose program validation rejected", async () => {
@@ -562,7 +539,7 @@ describe("rent attribution and share-account truth", () => {
     expect(plan.instructions[2]).toEqual(depositInstruction);
     // A missing share account means THIS deposit pays its rent.
     expect(plan.createsShareAccount).toBe(true);
-    expect(mocks.accountExists).toHaveBeenCalledWith(runtime.rpcUrl, SHARE_ATA);
+    expect(mocks.accountExists).toHaveBeenCalledWith(runtime.rpc, SHARE_ATA);
   });
 
   it("reports createsShareAccount false when the share account already exists", async () => {
@@ -646,7 +623,7 @@ describe("a sponsored first deposit pre-funds the allowed-user rent", () => {
       protectedInstructionGroups: [],
     });
     mocks.accountExists.mockImplementation(
-      async (_rpcUrl: string, account: unknown) =>
+      async (_rpc: unknown, account: unknown) =>
         String(account) !== String(ALLOWED_USER) || allowedUserExists
     );
     mocks.minimumBalanceForRentExemption.mockResolvedValue(1_171_605n);
@@ -676,7 +653,7 @@ describe("a sponsored first deposit pre-funds the allowed-user rent", () => {
     // The deposit instruction itself survives verbatim, still after the prefund.
     expect(deposit).toEqual(vedaDeposit());
     // Sized from the chain the plan targets, never a hardcoded lamport figure.
-    expect(mocks.minimumBalanceForRentExemption).toHaveBeenCalledWith(runtime.rpcUrl, 57);
+    expect(mocks.minimumBalanceForRentExemption).toHaveBeenCalledWith(runtime.rpc, 57);
   });
 
   it("adds nothing when the allowed-user record already exists", async () => {
@@ -695,7 +672,7 @@ describe("a sponsored first deposit pre-funds the allowed-user rent", () => {
 
     expect(plan.instructions).toHaveLength(1);
     // Unsponsored builds never even ask: the answer could not change the plan.
-    expect(mocks.accountExists).not.toHaveBeenCalledWith(runtime.rpcUrl, ALLOWED_USER);
+    expect(mocks.accountExists).not.toHaveBeenCalledWith(runtime.rpc, ALLOWED_USER);
     expect(mocks.minimumBalanceForRentExemption).not.toHaveBeenCalled();
   });
 });
