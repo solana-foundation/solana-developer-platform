@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -482,29 +483,29 @@ describe("DvpLegFundingClaimRepository", () => {
     const productionProjectId = `prj_${PARTY_A_ORG}_production`;
     const productionWalletId = `${walletId(PARTY_A_ORG)}_production`;
     await insertTrade(productionTradeId, "production");
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: `cust_${PARTY_A_ORG}_production`,
-          organizationId: PARTY_A_ORG,
-          projectId: productionProjectId,
-          provider: "local",
-          configEncrypted: "x",
-          status: "active",
-        },
-      ],
-      wallets: [
-        {
-          id: productionWalletId,
-          owner: { kind: "config", custodyConfigId: `cust_${PARTY_A_ORG}_production` },
-          walletId: `w_${PARTY_A_ORG}_production`,
-          publicKey: ADDRESS_A,
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-      ],
-    });
+    await getDb(env).transaction((tx) =>
+      seedTestPrivyConnection(tx, {
+        organizationId: PARTY_A_ORG,
+        projectId: productionProjectId,
+        connectionId: `cconn_${PARTY_A_ORG}_production`,
+        credentialId: `pcred_${PARTY_A_ORG}_production`,
+        createdBy: USER_ID,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+        providerAccountFingerprint: `sha256:pcred_${PARTY_A_ORG}_production`,
+        lastCheckStatus: "success",
+        wallets: [
+          {
+            id: productionWalletId,
+            walletId: `w_${PARTY_A_ORG}_production`,
+            publicKey: ADDRESS_A,
+            label: null,
+            purpose: null,
+            status: "active",
+          },
+        ],
+        defaultCustodyWalletId: productionWalletId,
+      })
+    );
     const funders = [
       {
         tradeId: TRADE_ID,
