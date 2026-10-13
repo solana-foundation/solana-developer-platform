@@ -32,6 +32,7 @@ describe("fireblocks adapter", () => {
       apiKey: "api-key",
       apiSecretPem: "api-secret",
       vaultAccountId: "default-vault",
+      assetId: "SOL_TEST",
     });
 
     fireblocksSignerMock.init

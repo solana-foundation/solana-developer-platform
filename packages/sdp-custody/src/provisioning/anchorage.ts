@@ -18,7 +18,7 @@ type AnchorageAuthStrategy = "api-key" | "bearer";
 
 export interface ProvisionAnchorageOptions {
   walletLabel?: string;
-  network?: "solana" | "solana-devnet";
+  network: "solana" | "solana-devnet";
 }
 
 export interface ProvisionAnchorageResult {
@@ -48,7 +48,7 @@ export async function provisionAnchorageWallet(
     apiKey,
     path: "/v1/wallets",
     body: {
-      network: options.network ?? "solana-devnet",
+      network: options.network,
       ...(options.walletLabel ? { label: options.walletLabel } : {}),
     },
   });

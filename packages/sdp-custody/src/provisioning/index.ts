@@ -52,9 +52,6 @@ const PRIVY_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_COINBASE_CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform";
 const DEFAULT_PARA_API_BASE_URL = "https://api.getpara.com";
 const DEFAULT_TURNKEY_API_BASE_URL = "https://api.turnkey.com";
-const DEFAULT_COINBASE_CDP_NETWORK = "solana-devnet";
-const DEFAULT_FIREBLOCKS_ASSET_ID = "SOL";
-const DEFAULT_UTILA_NETWORK = "networks/solana-devnet";
 
 interface FireblocksVaultAccountResponse {
   id: string;
@@ -101,12 +98,12 @@ export interface FireblocksProvisioningConfig {
   apiKey?: string;
   apiSecretPem?: string;
   apiBaseUrl?: string;
-  assetId?: string;
+  assetId: "SOL" | "SOL_TEST";
 }
 
 export interface ProvisionFireblocksResult {
   vaultAccountId: string;
-  assetId: string;
+  assetId: "SOL" | "SOL_TEST";
   apiBaseUrl: string;
 }
 
@@ -153,7 +150,7 @@ export interface CoinbaseCdpProvisioningConfig {
   apiKeySecret?: string;
   walletSecret?: string;
   apiBaseUrl?: string;
-  network?: "solana" | "solana-devnet";
+  network: "solana" | "solana-devnet";
   accountScope?: string;
 }
 
@@ -206,7 +203,7 @@ export interface UtilaProvisioningConfig {
   serviceAccountEmail?: string;
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
+  network: "networks/solana-mainnet" | "networks/solana-devnet";
   apiBaseUrl?: string;
 }
 
@@ -236,7 +233,7 @@ export async function provisionFireblocksVaultAccount(
     config.apiBaseUrl ?? DEFAULT_FIREBLOCKS_API_BASE_URL,
     "Fireblocks"
   );
-  const assetId = config.assetId ?? DEFAULT_FIREBLOCKS_ASSET_ID;
+  const assetId = config.assetId;
 
   let vaultAccountId = options.vaultAccountId;
 
@@ -437,7 +434,7 @@ export async function provisionCoinbaseCdpAccount(
     config.apiBaseUrl ?? DEFAULT_COINBASE_CDP_API_BASE_URL,
     "Coinbase CDP"
   );
-  const network = config.network ?? DEFAULT_COINBASE_CDP_NETWORK;
+  const network = config.network;
 
   const name = await deriveCoinbaseCdpAccountName(runtime, {
     accountScope: config.accountScope,
@@ -628,7 +625,7 @@ export async function provisionUtilaWallet(
   const serviceAccountEmail = config.serviceAccountEmail;
   const serviceAccountPrivateKeyPem = config.serviceAccountPrivateKeyPem;
   const configuredVaultId = config.vaultId;
-  const network = config.network ?? DEFAULT_UTILA_NETWORK;
+  const network = config.network;
 
   if (!serviceAccountEmail || !serviceAccountPrivateKeyPem || !configuredVaultId) {
     throw new SigningError(

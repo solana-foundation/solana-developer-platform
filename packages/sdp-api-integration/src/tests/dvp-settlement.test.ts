@@ -138,21 +138,25 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
-      const signer = await createOrgSignerForCustodyWallet(
-        env as ApiTestEnv,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        custodyWallet.id
-      );
-      const mosaic = runInClusterScope(
+      const { signer, mosaic } = await runInClusterScope(
         { projectId: TEST_PROJECT.id, environment: TEST_PROJECT.environment },
-        () =>
-          createMosaicService(env as ApiTestEnv, signer, "sponsored", {
-            environment: TEST_PROJECT.environment,
-            organizationId: TEST_ORG.id,
-            projectId: TEST_PROJECT.id,
-            actor: { type: "project", id: TEST_PROJECT.id },
-          })
+        async () => {
+          const scopedSigner = await createOrgSignerForCustodyWallet(
+            env as ApiTestEnv,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            custodyWallet.id
+          );
+          return {
+            signer: scopedSigner,
+            mosaic: createMosaicService(env as ApiTestEnv, scopedSigner, "sponsored", {
+              environment: TEST_PROJECT.environment,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+              actor: { type: "project", id: TEST_PROJECT.id },
+            }),
+          };
+        }
       );
 
       const wallet =

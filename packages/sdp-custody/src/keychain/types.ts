@@ -20,8 +20,8 @@ export interface KeychainFireblocksConfig {
   /** Fireblocks vault account ID */
   vaultAccountId: string;
 
-  /** Asset ID (default: "SOL", use "SOL_TEST" for devnet) */
-  assetId?: string;
+  /** Fireblocks Solana asset: `SOL` on mainnet, `SOL_TEST` on devnet. */
+  assetId: "SOL" | "SOL_TEST";
 
   /** API base URL (default: "https://api.fireblocks.io") */
   apiBaseUrl?: string;

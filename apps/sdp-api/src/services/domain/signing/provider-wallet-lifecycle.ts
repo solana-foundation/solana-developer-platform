@@ -12,12 +12,11 @@ import {
 import {
   createDfnsApiClient,
   createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
-  resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
 import { SigningError } from "@sdp/custody/signing";
 import { KeychainFireblocksAdapter } from "@/services/adapters";
+import { currentCustodyProviderNetworks } from "@/services/custody/custody-network";
 import {
   deleteAnchorageWallet,
   provisionAnchorageWallet,
@@ -80,7 +79,6 @@ const providerWalletLifecycleRegistry = {
           orgSlug: orgId,
           apiKey: parsed.apiKey,
           apiSecretPem,
-          assetId: parsed.assetId,
         })
       );
       const adapter = new KeychainFireblocksAdapter({
@@ -116,7 +114,6 @@ const providerWalletLifecycleRegistry = {
           orgId,
           projectId,
           walletSeed: crypto.randomUUID(),
-          network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
         })
       );
@@ -159,12 +156,13 @@ const providerWalletLifecycleRegistry = {
     },
   },
   dfns: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
+      const dfnsNetwork = currentCustodyProviderNetworks().dfns;
       const provisioned = await withProvisioningError("DFNS", async () => {
         const client = await createDfnsApiClient(env);
         return client.wallets.createWallet({
           body: {
-            network: resolveDfnsNetwork(parsed.network),
+            network: dfnsNetwork,
             ...(params.label ? { name: params.label } : {}),
           },
         });
@@ -181,12 +179,13 @@ const providerWalletLifecycleRegistry = {
     },
   },
   ibm_haven: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
+      const dfnsNetwork = currentCustodyProviderNetworks().dfns;
       const provisioned = await withProvisioningError("IBM Digital Asset Haven", async () => {
         const client = await createIbmHavenApiClient(env);
         return client.wallets.createWallet({
           body: {
-            network: resolveDfnsNetwork(parsed.network, IBM_HAVEN_PROVIDER_LABEL),
+            network: dfnsNetwork,
             ...(params.label ? { name: params.label } : {}),
           },
         });
@@ -206,11 +205,10 @@ const providerWalletLifecycleRegistry = {
     },
   },
   anchorage: {
-    create: async ({ env, params, parsed }) => {
+    create: async ({ env, params }) => {
       const provisioned = await withProvisioningError("Anchorage", () =>
         provisionAnchorageWallet(env, {
           walletLabel: params.label,
-          network: parsed.network,
         })
       );
 
@@ -231,7 +229,6 @@ const providerWalletLifecycleRegistry = {
       const provisioned = await withProvisioningError("Utila", () =>
         provisionUtilaWallet(env, {
           vaultId: parsed.vaultId,
-          network: parsed.network,
           displayName: params.label,
         })
       );
@@ -248,6 +245,21 @@ const providerWalletLifecycleRegistry = {
   >;
 };
 
+/**
+ * Provisions one more wallet under a stored Managed config, on the caller's cluster.
+ *
+ * @param context - The wallet to create.
+ * @param context.env - Process environment holding the platform provider credentials.
+ * @param context.orgId - The organization that owns the config.
+ * @param context.projectId - The project that owns the config.
+ * @param context.params - The wallet's creation fields.
+ * @param context.params.label - The wallet's label.
+ * @param context.parsed - The parsed config the wallet lives under.
+ * @param context.cipher - Decrypts the config's sealed fields.
+ * @returns The provider wallet ID and its public key.
+ * @throws SigningError `INVALID_REQUEST` when the provider has no wallet creation.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export async function createProviderWallet(
   context: WalletCreateContext
 ): Promise<ProvisionedProviderWallet> {
