@@ -11,7 +11,8 @@
  * an authority. `observed_at` is part of the answer.
  */
 
-import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getSignatureStatuses, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
@@ -58,9 +59,13 @@ const CLOSE_RESOLUTION_MAX_BACKOFF_MINUTES = 360;
 const MILLISECONDS_PER_MINUTE = 60_000;
 
 /**
- * Reconciles open DvP trades against the chain.
+ * Reconciles the open cluster scope's environment's open DvP trades against
+ * that cluster. The job runner runs this once per cluster, each in its own
+ * scope, so every block-height comparison is against the trades' own cluster.
  *
  * @param env - API process environment.
+ * @returns Resolves when the sweep has advanced what it could.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function reconcileDvpTrades(env: Env): Promise<void> {
   if (!isDvpEnabled(env)) {
@@ -73,7 +78,7 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     return;
   }
 
-  const rpc = createRpc(env);
+  const rpc = createClusterRpc();
 
   // Read once for the whole batch. Every trade's create-expiry decision is made
   // against the same height, which also keeps the sweep internally consistent:
@@ -235,7 +240,7 @@ async function syncTradeTransfers(
  */
 async function resolveExpiredReceipts(
   claims: ReturnType<typeof createPostgresDvpLegFundingClaimRepository>,
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   chunk: readonly DvpLegFundingClaim[]
 ): Promise<void> {
   let statuses: Awaited<ReturnType<typeof getSignatureStatuses>>;
@@ -310,7 +315,7 @@ async function resolveExpiredReceipts(
 async function reconcileTrade(
   repository: ReturnType<typeof createDvpTradeRepository>,
   ledger: TransferLedger,
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   trade: DvpTradeRow,
   blockHeight: bigint
 ): Promise<void> {
