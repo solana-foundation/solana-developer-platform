@@ -77,7 +77,6 @@ describe("Payments write requests", () => {
                 id: "trf_1",
                 custodyWalletId,
                 providerWalletId: "same-provider-reference",
-                rampsMemo: {},
               },
             },
           })
@@ -89,6 +88,18 @@ describe("Payments write requests", () => {
       );
     }
   );
+
+  it("accepts a created transfer with exact identity without ramps memo metadata", async () => {
+    const transfer = {
+      id: "trf_1",
+      custodyWalletId: "cwlt_1",
+      status: "pending",
+      signature: null,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { transfer } })));
+
+    expect(await createTransfer(transferInput, t, "idem_transfer_1")).toEqual(transfer);
+  });
 
   it("reads exact and nullable history without requiring provider metadata", async () => {
     const exact = { id: "trf_1", custodyWalletId: "cwlt_1", rampsMemo: {} };
@@ -104,6 +115,35 @@ describe("Payments write requests", () => {
     expect(await fetchTransfers({ pageSize: 10 }, t)).toEqual([exact, legacy]);
     expect(await fetchTransferById({ transferId: "trf_legacy" }, t)).toEqual(legacy);
   });
+
+  it("reads exact and nullable transfers without ramps memo metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: [
+            { id: "trf_1", custodyWalletId: "cwlt_1" },
+            { id: "trf_legacy", custodyWalletId: null },
+          ],
+        })
+      )
+    );
+
+    expect(await fetchTransfers({ pageSize: 10 }, t)).toEqual([
+      { id: "trf_1", custodyWalletId: "cwlt_1" },
+      { id: "trf_legacy", custodyWalletId: null },
+    ]);
+  });
+
+  it.each(["cwlt_1", null])(
+    "reads transfer detail without ramps memo metadata for source %s",
+    async (custodyWalletId) => {
+      const transfer = { id: "trf_1", custodyWalletId };
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { transfer } })));
+
+      expect(await fetchTransferById({ transferId: "trf_1" }, t)).toEqual(transfer);
+    }
+  );
 
   it("reports incomplete history and detail as unavailable", async () => {
     vi.stubGlobal(
@@ -188,6 +228,33 @@ describe("Payments write requests", () => {
     }
   });
 
+  it("accepts batch transfers with exact identity without ramps memo metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: {
+            batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+            recipients: [],
+            transfers: [{ id: "trf_chunk", custodyWalletId: "cwlt_1" }],
+          },
+        })
+      )
+    );
+
+    expect(
+      await createTransferBatch(
+        { sourceCustodyWalletId: "cwlt_1", token: "mint", recipients: [] },
+        t,
+        "idem_batch_1"
+      )
+    ).toEqual({
+      batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+      recipients: [],
+      transfers: [{ id: "trf_chunk", custodyWalletId: "cwlt_1" }],
+    });
+  });
+
   it.each([
     { batchSource: undefined, chunkSource: "cwlt_1" },
     { batchSource: null, chunkSource: "cwlt_1" },
@@ -213,7 +280,6 @@ describe("Payments write requests", () => {
                   id: "trf_chunk",
                   custodyWalletId: chunkSource,
                   providerWalletId: "shared-provider-reference",
-                  rampsMemo: {},
                 },
               ],
             },

@@ -49,6 +49,8 @@ import {
 } from "./payments-page.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
+const paymentTransferIdentitySchema = paymentTransferRequiredFieldsSchema.omit({ rampsMemo: true });
+
 export type { PaymentRampInstruction } from "@sdp/types";
 export { getPaymentApiError as getApiError } from "./payment-api-errors";
 
@@ -304,7 +306,7 @@ export async function fetchTransfers(
     );
   }
 
-  if (!body.data || !z.array(paymentTransferRequiredFieldsSchema).safeParse(body.data).success) {
+  if (!body.data || !z.array(paymentTransferIdentitySchema).safeParse(body.data).success) {
     throw new Error(t("DashboardPayments.workspace.transferListMissing"));
   }
 
@@ -340,7 +342,7 @@ export async function fetchTransferById(
   }
   if (
     !body.data?.transfer ||
-    !paymentTransferRequiredFieldsSchema.safeParse(body.data.transfer).success
+    !paymentTransferIdentitySchema.safeParse(body.data.transfer).success
   ) {
     throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
   }
@@ -505,7 +507,7 @@ export async function createTransfer(
   const envelope = body as TransferEnvelope | null;
   if (
     !envelope?.data?.transfer ||
-    !paymentTransferRequiredFieldsSchema.safeParse(envelope.data.transfer).success ||
+    !paymentTransferIdentitySchema.safeParse(envelope.data.transfer).success ||
     envelope.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
   ) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
@@ -631,7 +633,7 @@ export async function createTransferBatch(
     !body.data.transfers ||
     !paymentTransferBatchIdentitySchema.safeParse(body.data.batch).success ||
     body.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||
-    !z.array(paymentTransferRequiredFieldsSchema).safeParse(body.data.transfers).success ||
+    !z.array(paymentTransferIdentitySchema).safeParse(body.data.transfers).success ||
     body.data.transfers.some((transfer) => transfer.custodyWalletId !== input.sourceCustodyWalletId)
   ) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
