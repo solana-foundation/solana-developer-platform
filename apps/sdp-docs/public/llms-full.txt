@@ -2180,17 +2180,19 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 ## Request
 
+Use the exact SDP wallet `id` (`cwlt_…`) returned by `GET /v1/wallets`. Provider wallet references are not accepted.
+
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
+curl https://api.solana.com/v1/payments/wallets/cwlt_abc123/balances \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-balances.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
+  "https://api.solana.com/v1/payments/wallets/cwlt_abc123/balances",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -2200,7 +2202,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
+    .uri(URI.create("https://api.solana.com/v1/payments/wallets/cwlt_abc123/balances"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
     .build();
@@ -2216,7 +2218,7 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the balanc
 {
   "data": {
     "walletBalances": {
-      "walletId": "wal_abc123",
+      "custodyWalletId": "cwlt_abc123",
       "address": "3xYZa...2aBc",
       "balances": [
         {
@@ -2337,7 +2339,7 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, give the key [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId`. Provider wallet references remain internal to custody and saved payment evidence. The **destination** remains the recipient's on-chain Solana address.
 
 Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
 
@@ -4184,7 +4186,6 @@ A successful response includes the on-chain signature once the transaction confi
       "direction": "outbound",
       "status": "confirmed",
       "custodyWalletId": "cwlt_123",
-      "providerWalletId": "privy_jfxdbsq4bg6dxzsd7imgon3j",
       "signature": "ekNe4HK67AXptsx6krYATZd5xYeq8wYQShmN9oHUdAipVJVFELGwiLhdJNCAbyN2TPv9SwzBTNz6igoAfWTdCYP",
       "source": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "destination": "2H2w3hSxAPTybuTL7LkhPbyk6bWYi94x2J4aqBhhyJL2",
