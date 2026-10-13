@@ -45,8 +45,9 @@ export type IdempotencyKeyClaim =
       kind: "claimed";
       fresh: boolean;
       /**
-       * The key's earlier row had expired while still `in_progress`: a request
-       * that never recorded an outcome. The new claim replaces it; callers alert.
+       * The key's earlier row had expired while still `in_progress` with a lease
+       * that lapsed rather than was released: a request that crashed before
+       * recording an outcome. The new claim replaces it; callers alert.
        */
       replacedUnfinished: boolean;
     }
@@ -64,11 +65,15 @@ export interface IdempotencyKeyRepository {
   complete(id: string, claimToken: string, response: StoredIdempotentResponse): Promise<boolean>;
   /** Deletes a fresh claim that nothing ran under. */
   discard(id: string, claimToken: string): Promise<void>;
-  /** Ends the lease now, keeping the row bound to its fingerprint. */
+  /**
+   * Ends the lease now and marks it released, keeping the row bound to its
+   * fingerprint: a takeover can still claim it, and it is not alerted on.
+   */
   unlock(id: string, claimToken: string): Promise<void>;
   /**
    * Deletes up to `limit` expired rows. Returns how many went, and how many of
-   * those never recorded an outcome (still `in_progress`), which callers alert on.
+   * those were left by a crash (still `in_progress`, lease lapsed, never
+   * released), which callers alert on.
    */
   pruneExpired(limit: number): Promise<{ deleted: number; unfinished: number }>;
 }
@@ -121,7 +126,7 @@ export function createPostgresIdempotencyKeyRepository(
     const inserted = await db
       .prepare(
         `WITH expired AS (
-           SELECT status FROM idempotency_keys WHERE ${scope.sql} AND expires_at <= now()
+           SELECT status, released FROM idempotency_keys WHERE ${scope.sql} AND expires_at <= now()
          )
          INSERT INTO idempotency_keys
            (id, organization_id, project_id, operation, idempotency_key, principal, fingerprint,
@@ -135,6 +140,7 @@ export function createPostgresIdempotencyKeyRepository(
                status = 'in_progress',
                claim_token = EXCLUDED.claim_token,
                locked_until = EXCLUDED.locked_until,
+               released = false,
                response_status = NULL,
                response_headers = NULL,
                response_body = NULL,
@@ -142,7 +148,8 @@ export function createPostgresIdempotencyKeyRepository(
                updated_at = sdp_iso_now(),
                expires_at = EXCLUDED.expires_at
            WHERE idempotency_keys.expires_at <= now()
-         RETURNING id, (SELECT status FROM expired) = 'in_progress' AS replaced_unfinished`
+         RETURNING id,
+           (SELECT status = 'in_progress' AND NOT released FROM expired) AS replaced_unfinished`
       )
       .bind(
         ...scope.params,
@@ -172,7 +179,7 @@ export function createPostgresIdempotencyKeyRepository(
       .prepare(
         `UPDATE idempotency_keys
             SET id = ?, claim_token = ?, locked_until = now() + make_interval(secs => ?),
-                updated_at = sdp_iso_now()
+                released = false, updated_at = sdp_iso_now()
           WHERE ${scope.sql}
             AND status = 'in_progress' AND principal = ? AND fingerprint = ?
             AND locked_until <= now() AND expires_at > now()
@@ -275,7 +282,7 @@ export function createPostgresIdempotencyKeyRepository(
       await db
         .prepare(
           `UPDATE idempotency_keys
-              SET locked_until = now(), updated_at = sdp_iso_now()
+              SET locked_until = now(), released = true, updated_at = sdp_iso_now()
             WHERE id = ? AND claim_token = ? AND status = 'in_progress'`
         )
         .bind(id, claimToken)
@@ -292,10 +299,11 @@ export function createPostgresIdempotencyKeyRepository(
               LIMIT ?
               FOR UPDATE SKIP LOCKED
            ), deleted AS (
-             DELETE FROM idempotency_keys WHERE id IN (SELECT id FROM doomed) RETURNING status
+             DELETE FROM idempotency_keys WHERE id IN (SELECT id FROM doomed)
+               RETURNING status, released
            )
            SELECT count(*)::int AS deleted,
-                  count(*) FILTER (WHERE status = 'in_progress')::int AS unfinished
+                  count(*) FILTER (WHERE status = 'in_progress' AND NOT released)::int AS unfinished
              FROM deleted`
         )
         .bind(limit)

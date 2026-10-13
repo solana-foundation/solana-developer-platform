@@ -12,7 +12,9 @@
 -- request that took over. A crashed request (or a 5xx on a route that opts to
 -- re-run) leaves the row `in_progress` with an ended lease: the next request
 -- with the same key and fingerprint takes it over, and a different fingerprint
--- is refused. `completed` holds the response every later request replays;
+-- is refused. `released` marks a lease its request ended on purpose (a re-run
+-- 5xx, a refused takeover) rather than one that lapsed, so only lapsed leases
+-- are alerted on when the row is pruned or replaced. `completed` holds the response every later request replays;
 -- `response_body` is null for a bodyless status or a body too large to keep.
 --
 -- Rows are kept for 24 hours (`expires_at`) and pruned by the idempotency-key
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed')),
     claim_token TEXT,
     locked_until TIMESTAMPTZ,
+    released BOOLEAN NOT NULL DEFAULT false,
     response_status INTEGER,
     response_headers JSONB,
     response_body TEXT,
