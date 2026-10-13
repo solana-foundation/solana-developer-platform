@@ -10,9 +10,10 @@ import {
   mapPrivateChannelError,
 } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
-import { getPrivateChannelDepositRepository, loadPrivateChannelProjectRpcClient } from "../context";
+import { getPrivateChannelDepositRepository } from "../context";
 import { requireIdempotencyKey } from "../helpers";
 import { authorizeMovementReplay, matchesDepositReplay, requireMovementWrite } from "../replay";
 import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
@@ -70,7 +71,7 @@ export async function createPrivateChannelDeposit(
       context.projectId,
       context.wallet
     );
-    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+    const projectRpc = loadProjectRpcClient();
 
     // Auth-enabled instances JWT-gate the gateway baseline read.
     const gatewayAuth = await resolveGatewayAuth(c.env, {

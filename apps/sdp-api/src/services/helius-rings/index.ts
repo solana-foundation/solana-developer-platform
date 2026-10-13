@@ -13,6 +13,7 @@ export {
   type HeliusRingsServiceDependencies,
   type HeliusRingsTenant,
   type ProvisionPrivateWalletInput,
+  ringsServesScopeCluster,
   type WalletIdentityResult,
 } from "./service";
 export { signRingsOuterTransaction } from "./signer-adapter";

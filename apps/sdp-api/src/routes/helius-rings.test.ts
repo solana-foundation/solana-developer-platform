@@ -7,7 +7,7 @@ import type {
 } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import { type CachedApiKey, SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
@@ -62,6 +62,16 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
+const PROJECT_ID_BY_ENVIRONMENT = {
+  sandbox: TEST_PROJECT.id,
+  production: `${TEST_PROJECT.id}_production`,
+} as const satisfies Record<SdpEnvironment, string>;
+
+const HEALTH_STATUS_BY_ENVIRONMENT = {
+  sandbox: 200,
+  production: 503,
+} as const satisfies Record<SdpEnvironment, number>;
+
 let originalFlag: string | undefined;
 let ringsWalletId: string;
 
@@ -81,7 +91,7 @@ async function seedAuth(): Promise<void> {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: PROJECT_ID_BY_ENVIRONMENT,
   });
   await db.batch([
     db
@@ -231,6 +241,21 @@ describe("Helius Rings routes", () => {
     expect(body.data.health.prover).toBe("red");
     expect(body.data.health.photon).toBe("red");
   });
+
+  it.each(SDP_ENVIRONMENTS)(
+    "serves GET /health only on devnet (%s project)",
+    async (environment) => {
+      await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        projectId: PROJECT_ID_BY_ENVIRONMENT[environment],
+        environment,
+      });
+
+      const res = await app.request("/v1/helius-rings/health", { headers: authHeaders() }, env);
+
+      expect(res.status).toBe(HEALTH_STATUS_BY_ENVIRONMENT[environment]);
+    }
+  );
 
   it("GET /setup-status asks for project setup without exposing management to API keys", async () => {
     const res = await app.request("/v1/helius-rings/setup-status", { headers: authHeaders() }, env);

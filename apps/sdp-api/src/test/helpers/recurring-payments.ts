@@ -1,6 +1,5 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
-import { getBase58Decoder } from "@solana/codecs";
-import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
+import { generateKeyPairSigner, type Signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -23,6 +22,7 @@ import {
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { testSignature } from "@/test/helpers/signatures";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const recurringResponseSchema = successResponseSchema(paymentRecurringPaymentResponseSchema);
@@ -34,10 +34,6 @@ export const RECURRING_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
   "Content-Type": "application/json",
 };
-
-export function testSignature(seed: number): Signature {
-  return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
-}
 
 export function installRecurringExecutionHooks() {
   let sourceSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;

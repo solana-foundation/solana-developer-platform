@@ -83,8 +83,8 @@ import {
   RECURRING_HEADERS,
   seedRecurringCollectionJournal,
   setRecurringCollectionDue,
-  testSignature,
 } from "@/test/helpers/recurring-payments";
+import { testSignature } from "@/test/helpers/signatures";
 
 const recurringPaymentLogEventSchema = z.object({ event: z.string() });
 

@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -161,7 +162,9 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       expectedStatus: "pending",
     });
 
-    const rows = await repo.listNonTerminal(10);
+    const rows = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      repo.listNonTerminal(10)
+    );
     expect(rows.map((r) => r.id)).toEqual([pending?.id ?? ""]);
   });
 

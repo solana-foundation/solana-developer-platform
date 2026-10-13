@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
@@ -12,7 +13,10 @@ import {
   type ReserveHeliusRingsIntentInput,
 } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
-import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
+import type {
+  HeliusRingsProjectScope,
+  HeliusRingsWalletRepository,
+} from "./helius-rings-wallet.repository";
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 
@@ -60,14 +64,14 @@ async function setUpdatedAt(id: string, updatedAt: string): Promise<void> {
     .run();
 }
 
-async function insertRingsConnection(tag: string) {
+async function insertRingsConnection(tag: string, projectId: string) {
   const db = getDb(env);
   const credentialId = `pcred_operation_${tag}`;
   const connectionId = `hrconn_operation_${tag}`;
   const credential = await new ProviderCredentialStore(db).insertCredential({
     id: credentialId,
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
+    projectId,
     provider: "helius_rings",
     label: tag,
     scope: "project",
@@ -86,7 +90,7 @@ async function insertRingsConnection(tag: string) {
   return new HeliusRingsConnectionStore(db).insert({
     id: connectionId,
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
+    projectId,
     name: tag,
     providerCredentialId: credentialId,
     providerCredentialScopeKey: credential.scope_key,
@@ -134,7 +138,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
     if (!wallet) throw new Error("wallet fixture was not created");
     walletId = wallet.id;
-    defaultConnectionId = (await insertRingsConnection("default")).id;
+    defaultConnectionId = (await insertRingsConnection("default", TEST_PROJECT_ID)).id;
   });
 
   describe("reserveIntent", () => {
@@ -153,7 +157,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
 
     it("pins an active connection on a newly reserved operation", async () => {
-      const connection = await insertRingsConnection("active");
+      const connection = await insertRingsConnection("active", TEST_PROJECT_ID);
 
       const result = await repo.reserveIntent(shieldIntent({ ringsConnectionId: connection.id }));
 
@@ -161,7 +165,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
 
     it("refuses to pin a connection after it is deactivated", async () => {
-      const connection = await insertRingsConnection("deactivated");
+      const connection = await insertRingsConnection("deactivated", TEST_PROJECT_ID);
       await getDb(env).execute(
         `UPDATE helius_rings_connections
             SET status = 'deactivated', deactivated_at = sdp_iso_now()
@@ -719,7 +723,9 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       await setUpdatedAt(done.operation.id, "2026-01-01T00:00:00.000Z");
       await setUpdatedAt(waiting.operation.id, "2026-01-01T00:00:00.000Z");
 
-      const swept = await repo.listInFlightOperations({ staleBefore: "2026-06-01T00:00:00.000Z" });
+      const swept = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        repo.listInFlightOperations({ staleBefore: "2026-06-01T00:00:00.000Z" })
+      );
 
       // `draft` is excluded because nothing is in flight yet, `completed`
       // because it is terminal, and the fresh row because it was just touched.
@@ -727,6 +733,95 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       // like it are the oldest ones in the table, so returning them would fill
       // the budget ahead of what it can settle.
       expect(swept.map((row) => row.id)).toEqual([inFlight.operation.id]);
+    });
+  });
+
+  describe("chain sweeps in a sandbox scope", () => {
+    const productionScope = { organizationId: TEST_ORG.id, projectId: OTHER_PROJECT_ID };
+
+    async function submittedOperationIn(
+      projectScope: HeliusRingsProjectScope,
+      tag: string
+    ): Promise<string> {
+      const wallet = await walletRepo.createWallet({
+        ...projectScope,
+        sdpWalletId: `wal_sweep_${tag}`,
+        name: tag,
+        materialTag: "simulated",
+      });
+      if (!wallet) throw new Error("wallet fixture was not created");
+      const connection = await insertRingsConnection(`sweep_${tag}`, projectScope.projectId);
+      const { operation } = await repo.reserveIntent(
+        shieldIntent({
+          ...projectScope,
+          ringsConnectionId: connection.id,
+          walletId: wallet.id,
+          intentKey: `sha256:sweep-${tag}`,
+        })
+      );
+      await repo.transitionState({
+        ...projectScope,
+        id: operation.id,
+        expectedState: "draft",
+        nextState: "ready_to_sign",
+      });
+      await repo.persistSigned({
+        ...projectScope,
+        id: operation.id,
+        signature: `sweep-signature-${tag}`,
+        signedTransaction: `sweep-bytes-${tag}`,
+        lastValidBlockHeight: "100",
+      });
+      const submitted = await repo.transitionState({
+        ...projectScope,
+        id: operation.id,
+        expectedState: "ready_to_sign",
+        nextState: "submitted",
+      });
+      if (!submitted) throw new Error("submitted fixture was not created");
+      return submitted.id;
+    }
+
+    async function signedFailureIn(
+      projectScope: HeliusRingsProjectScope,
+      tag: string
+    ): Promise<string> {
+      const id = await submittedOperationIn(projectScope, tag);
+      const failed = await repo.failOperation({
+        ...projectScope,
+        id,
+        expectedState: "submitted",
+        code: "submit_failed",
+        message: "rpc unavailable",
+        retryable: true,
+      });
+      if (!failed) throw new Error("signed failure fixture was not created");
+      return failed.id;
+    }
+
+    it.each([
+      {
+        sweep: "listExpiredSubmissions",
+        seed: submittedOperationIn,
+        read: () => repo.listExpiredSubmissions({ blockHeight: "5000" }),
+      },
+      {
+        sweep: "listSignedFailures",
+        seed: signedFailureIn,
+        read: () => repo.listSignedFailures({}),
+      },
+      {
+        sweep: "listExpiredSignedFailures",
+        seed: signedFailureIn,
+        read: () => repo.listExpiredSignedFailures({ blockHeight: "5000" }),
+      },
+    ])("$sweep leaves a Production project's row out", async ({ seed, read }) => {
+      const sandboxId = await seed(scope, "sandbox");
+      await seed(productionScope, "production");
+
+      const swept = await runInClusterScope({ projectId: null, environment: "sandbox" }, read);
+
+      expect(swept.map((row) => row.id)).toEqual([sandboxId]);
     });
   });
 
