@@ -14,6 +14,12 @@
 -- no real users. Configuration rows (counterparties, Rings connections,
 -- Private Channels instances, channels, users and wallets, KYC wallets) are
 -- kept; reservations carry their cluster, so only network = 'devnet' goes.
+-- Production Rings runtime health goes with the Rings it describes.
+-- Sponsorship reservations whose project no longer exists are deleted so the
+-- new foreign key validates. A kept row pointing at a deleted one through a
+-- single-column ON DELETE SET NULL key (KYC wallets to org-level
+-- counterparties, recurring update attempts to plans and subscriptions, Rings
+-- retries) is unlinked, not deleted.
 --
 -- Earn is excluded: it has routed by the project's environment since Aug 17
 -- 2026, so its Production rows are already mainnet. Instead each Earn table
@@ -23,11 +29,17 @@
 -- rows whose project was deleted, and ON DELETE SET NULL (project_id) keeps
 -- their environment, as the forensic-attribution rule (ADR 0002) requires.
 --
--- Rows that can be cleaned deterministically are deleted; a cross-project
--- fulfillment or an Earn environment mismatch aborts, as an invariant a human must see.
+-- Rows that can be cleaned deterministically are deleted. A kept payment
+-- request or subscription collection attempt settled by a deleted transfer,
+-- and an Earn environment mismatch, abort instead: those are invariant
+-- violations a human must see.
 --
 -- Rollout: an image that writes a NULL project_id to any of these tables
--- fails with 23502; one that touches signing_requests fails with 42P01.
+-- fails with 23502; one that touches signing_requests fails with 42P01. Every
+-- table deleted from is locked for the migration, so no row appears mid-run,
+-- but an image from before the cluster cutover can still write a devnet
+-- Production row once the locks release. Apply it with the cutover deploy,
+-- after the last pre-cutover image stops serving.
 
 -- Every table the DDL below alters, or whose referential triggers it drops or
 -- adds, is locked before the deletes and the guard run, parent before child as
@@ -40,6 +52,16 @@ LOCK TABLE organizations, projects, custody_configs, issuance_transactions,
     custody_connections, sponsorship_budget_reservations
     IN ACCESS EXCLUSIVE MODE;
 
+LOCK TABLE payment_subscription_plans, payment_subscriptions,
+    payment_recurring_payments, payment_transfer_batches,
+    payment_subscription_collection_attempts, counterparty_provider_accounts,
+    dvp_settlement_wallets, dvp_trades, issued_tokens,
+    helius_rings_project_rings, helius_rings_wallets, helius_rings_operations,
+    helius_rings_runtime_health, private_channel_deposits,
+    private_channel_transfers, private_channel_withdrawals,
+    private_channel_settlement_observations, private_channel_events
+    IN ACCESS EXCLUSIVE MODE;
+
 LOCK TABLE earn_provider_wallets, earn_positions,
     earn_vault_withdrawal_requests, earn_vault_withdrawal_request_actions,
     earn_vault_withdrawal_request_reservations, earn_movements,
@@ -47,13 +69,14 @@ LOCK TABLE earn_provider_wallets, earn_positions,
     earn_external_wallet_withdrawal_request_transactions
     IN SHARE ROW EXCLUSIVE MODE;
 
--- Fails the migration, rather than deleting or unlinking a kept request, when
--- a request outside the deleted set is fulfilled by a transfer inside it.
--- payment_requests_fulfilled_by_transfer_id_fkey is single-column, so nothing
--- else keeps the two in one project.
+-- Fails the migration, rather than deleting or unlinking a kept row, when a
+-- payment request or subscription collection attempt outside the deleted set
+-- is settled by a transfer inside it. Both foreign keys to payment_transfers
+-- are single-column, so nothing else keeps the two in one project.
 DO $$
 DECLARE
     cross_project_fulfillment_count BIGINT;
+    cross_project_collection_count BIGINT;
 BEGIN
     SELECT COUNT(*) INTO cross_project_fulfillment_count
       FROM payment_requests request
@@ -65,6 +88,18 @@ BEGIN
 
     IF cross_project_fulfillment_count > 0 THEN
         RAISE EXCEPTION '% kept payment request(s) are fulfilled by a deleted transfer', cross_project_fulfillment_count;
+    END IF;
+
+    SELECT COUNT(*) INTO cross_project_collection_count
+      FROM payment_subscription_collection_attempts attempt
+      JOIN projects attempt_project ON attempt_project.id = attempt.project_id
+      JOIN payment_transfers transfer ON transfer.id = attempt.transfer_id
+      LEFT JOIN projects transfer_project ON transfer_project.id = transfer.project_id
+     WHERE attempt_project.environment <> 'production'
+       AND (transfer.project_id IS NULL OR transfer_project.environment = 'production');
+
+    IF cross_project_collection_count > 0 THEN
+        RAISE EXCEPTION '% kept subscription collection attempt(s) are settled by a deleted transfer', cross_project_collection_count;
     END IF;
 END;
 $$;
@@ -127,6 +162,9 @@ DELETE FROM helius_rings_wallets
  WHERE project_id IN (SELECT id FROM projects WHERE environment = 'production');
 
 DELETE FROM helius_rings_project_rings
+ WHERE project_id IN (SELECT id FROM projects WHERE environment = 'production');
+
+DELETE FROM helius_rings_runtime_health
  WHERE project_id IN (SELECT id FROM projects WHERE environment = 'production');
 
 -- Transfer-family events name their intent in the payload, with no foreign key.
