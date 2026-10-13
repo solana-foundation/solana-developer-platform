@@ -6,9 +6,8 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import { isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
+import { isFeePaymentConfigured } from "@sdp/payments/fee-payment";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { TransactionSigner } from "@solana/kit";
 import type { resolveTokenAccount } from "@solana/mosaic-sdk";
@@ -55,9 +54,7 @@ export function createMosaicService(
   feePayment: MosaicFeePayment,
   sponsorshipScope?: SponsorshipScope
 ): MosaicService {
-  const sponsored =
-    feePayment === "sponsored" &&
-    isFeePaymentConfiguredForCluster(env, currentClusterScope().cluster);
+  const sponsored = feePayment === "sponsored" && isFeePaymentConfigured(env);
   if (sponsored && !sponsorshipScope) {
     throw new Error("Sponsorship scope is required for sponsored issuance");
   }

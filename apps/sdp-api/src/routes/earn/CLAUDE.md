@@ -734,15 +734,13 @@ transaction signed by the organization custody wallet or external owner.
     exits the instant devnet deposits were enabled, against a paymaster the
     deployment may not have for that cluster. That is a 5xx on a customer's
     money-OUT path, the one failure ADR 0002 rules out.
-    `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
-    from CONFIGURATION: the flag, plus a Kora for that cluster
-    (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
-    the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
-    the other; there is no built-in default URL. The bare trio is legacy: the
-    project's environment picks the cluster, so a deployment wires BOTH suffix
-    trios (PRO-2007) and never relies on `SOLANA_NETWORK` to pick a paymaster. The movement's cluster rides `SponsorshipScope.cluster`, so the
-    matching Kora signs, the matching budget network is charged and the fee is
-    priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring
+    `isEarnVaultSponsorshipEnabled` therefore answers per cluster from
+    CONFIGURATION: the flag, plus a Kora for the open cluster scope's cluster
+    (`isFeePaymentConfigured`, @sdp/payments): `KORA_RPC_URL_DEVNET` /
+    `KORA_RPC_URL_MAINNET`; there is no built-in default URL and no unsuffixed
+    trio. The movement runs under its project's cluster scope, so the matching
+    Kora signs, the matching budget network is charged and the fee is priced on
+    the matching RPC (`createClusterRpc()`). Opening mainnet is wiring
     the mainnet Kora in after its policy is opened and `sbp_mainnet_global`
     is enabled (PRO-1738); no code changes either way.
   - Sponsored signing stays sign-only, so record-before-broadcast survives

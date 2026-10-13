@@ -5,7 +5,6 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -1687,7 +1686,6 @@ export async function collectRecurringPayment(input: {
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      cluster: currentClusterScope().cluster,
       actor: { type: "wallet", id: input.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();

@@ -5,8 +5,7 @@
  * fee payment provider integration (Kora for gasless transactions).
  */
 
-import { isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
-import { currentClusterScope } from "@sdp/rpc/scope";
+import { isFeePaymentConfigured } from "@sdp/payments/fee-payment";
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { TransactionSigner } from "@solana/kit";
 import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
@@ -33,7 +32,7 @@ export function createToken2022Service(
   signer: TransactionSigner,
   sponsorshipScope?: SponsorshipScope
 ): Token2022Service {
-  const feePayment = isFeePaymentConfiguredForCluster(env, currentClusterScope().cluster)
+  const feePayment = isFeePaymentConfigured(env)
     ? sponsorshipScope
       ? createSponsorshipFeePayment(env, sponsorshipScope)
       : createUnscopedSponsorshipFeePayment(env)

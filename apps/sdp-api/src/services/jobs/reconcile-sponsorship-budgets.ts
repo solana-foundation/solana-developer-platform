@@ -6,7 +6,6 @@ import {
   getTransaction as readTransaction,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -72,7 +71,7 @@ export interface SponsorshipReconciliationDependencies {
   budgetRedis?: ReconciliationRedis;
   getTransaction?: (signature: Signature) => Promise<Awaited<ReturnType<typeof readTransaction>>>;
   isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
-  getProviderConfiguration?: (cluster: SolanaCluster) => Promise<SponsorshipProviderConfiguration>;
+  getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -152,13 +151,10 @@ export async function reconcileSponsorshipBudgets(
 
   const getProviderConfiguration =
     dependencies.getProviderConfiguration ??
-    ((target: SolanaCluster) => getManagedSponsorshipProviderConfiguration(env, target));
+    (() => getManagedSponsorshipProviderConfiguration(env));
   let providerConfiguration: SponsorshipProviderConfiguration;
   try {
-    providerConfiguration = await readProviderConfiguration(
-      () => getProviderConfiguration(cluster),
-      sleep
-    );
+    providerConfiguration = await readProviderConfiguration(getProviderConfiguration, sleep);
   } catch (error) {
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.
