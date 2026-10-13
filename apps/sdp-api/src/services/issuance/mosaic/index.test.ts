@@ -2,6 +2,7 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { address, createNoopSigner } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { createMosaicService } from "./index";
@@ -28,6 +29,8 @@ function createInProduction(serviceEnv: Env) {
 }
 
 describe("createMosaicService sponsorship gate", () => {
+  installClusterRpcStub();
+
   afterEach(() => {
     vi.clearAllMocks();
   });
