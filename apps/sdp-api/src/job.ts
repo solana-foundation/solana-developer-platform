@@ -180,8 +180,7 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
 
-  // Warmup never stops the ticks; runPerCluster has already logged a failed cluster.
-  await runPerCluster("egress-warmup", warmEgressOnScopeCluster).catch(() => undefined);
+  await runPerCluster("egress-warmup", warmEgressOnScopeCluster);
 
   const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const earnEnabled = isEarnEnabled(env);
