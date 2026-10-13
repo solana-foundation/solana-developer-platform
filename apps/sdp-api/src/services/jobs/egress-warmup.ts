@@ -26,6 +26,9 @@ export async function waitForEgress(params: {
       if (Date.now() - startedAt >= params.deadlineMs) {
         return { outcome: "deadline", elapsedMs: Date.now() - startedAt, attempts };
       }
+      if (params.stopSignal.aborted) {
+        return { outcome: "stopped", elapsedMs: Date.now() - startedAt, attempts };
+      }
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, params.intervalMs);
         params.stopSignal.addEventListener(
