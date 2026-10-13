@@ -187,7 +187,6 @@ pay.post(
           organizationId: request.organization_id,
           projectId: request.project_id as string,
           actor: { type: "wallet", id: request.wallet_id },
-          cluster: currentClusterScope().cluster,
         });
         return feePaymentInstance;
       };
