@@ -1,4 +1,5 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
@@ -962,7 +963,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   }
 
   // Read, not recorded: persisting would UPDATE another org's row (0089).
-  const observed = await observeDvpTradeWithoutRecording(c.env, trade);
+  const observed = await observeDvpTradeWithoutRecording(trade);
 
   // Derived from the caller's OWN wallets, like any other view. Labels are
   // never resolved (attribution is the creator's fact); claims ARE read, and
@@ -1023,11 +1024,16 @@ export const inspectMint = async (c: AppContext) => {
     throw notFound("Mint not found");
   }
 
+  const rpc = createClusterRpc();
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
-    inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
-  } catch {
-    // The read failed, so nothing is known about the mint: retryable, never "not found".
+    inspection = await inspectDvpMint(rpc, parsed);
+  } catch (error) {
+    // A door fault (cluster mismatch, scope, configuration) is not a failed read and keeps its
+    // own status. A failed read means nothing is known about the mint: retryable, never "not found".
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     throw solanaRpcError("Could not read the mint from Solana. Try again.");
   }
   if (!inspection) {

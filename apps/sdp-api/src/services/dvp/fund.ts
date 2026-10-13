@@ -7,6 +7,8 @@ import {
   SwapDvpVerificationError,
   verifySwapDvpAccount,
 } from "@sdp/dvp";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
@@ -188,7 +190,7 @@ export async function executeDvpFunding(
 
   const { side, mint, tokenProgram, escrow, amount } = plan.leg;
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
 
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a
@@ -370,6 +372,7 @@ export async function executeDvpFunding(
     organizationId: plan.signer.organizationId,
     projectId: plan.signer.projectId,
     actor: { type: "wallet", id: plan.signer.custodyWalletId },
+    cluster: currentClusterScope().cluster,
   });
   const sponsor = await feePayment.getFeePayer();
   const instruction = getTransferCheckedInstruction(

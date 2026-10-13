@@ -24,7 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -131,7 +131,6 @@ type Resolution =
  *   transaction that can still land.
  */
 async function resolveExisting(
-  env: Env,
   requests: DvpLegActionRequestRepository,
   existing: DvpLegActionRequest | null,
   fingerprint: string
@@ -158,7 +157,7 @@ async function resolveExisting(
     return { kind: "run", id: existing.id };
   }
 
-  const outcome = await readDvpFundingReceipt(createRpc(env), {
+  const outcome = await readDvpFundingReceipt(createClusterRpc(), {
     fundingTx: existing.attempt.signature,
     expiryHeight: existing.attempt.expiryHeight,
   });
@@ -304,7 +303,7 @@ async function runDvpActionOnce<TResult extends { signature: Signature }>(
     side: "side" in scope ? scope.side : null,
   });
   if (!reservation.reserved) {
-    const resolution = await resolveExisting(env, requests, reservation.existing, fingerprint);
+    const resolution = await resolveExisting(requests, reservation.existing, fingerprint);
     if (resolution.kind === "replay") {
       return { result: handlers.replay(resolution.side, resolution.attempt), replayed: true };
     }
