@@ -293,7 +293,7 @@
         "**/apps/sdp-api/src/middleware/project-context.ts",
         "**/apps/sdp-api/src/routes/pay.ts",
         "**/apps/sdp-api/src/routes/earn/index.ts",
-        "**/apps/sdp-api/src/services/jobs/track-pending-transfers.ts"
+        "**/apps/sdp-api/src/cron/cluster-runs.ts"
       ],
       "linter": {
         "rules": {
@@ -356,7 +356,6 @@
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
         "**/apps/sdp-api/src/services/jobs/reconcile-dvp-trades.ts",
-        "**/apps/sdp-api/src/services/jobs/reconcile-sponsorship-budgets.ts",
         "**/apps/sdp-api/src/services/jobs/track-pending-withdrawals.ts",
         "**/apps/sdp-api/src/services/payments/recurring-payments/activation.ts",
         "**/apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
