@@ -3,7 +3,7 @@ import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/t
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { addDecimalAmounts, compareDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
+import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   estimateNotAvailable,
@@ -78,7 +78,9 @@ const stripeSessionFieldSchema = z.string().regex(/\S/);
 
 /**
  * The fields `createOnrampQuote` reads from a Stripe onramp session, including
- * the terms Stripe echoes back so the quote can refuse a session that differs.
+ * the locks Stripe echoes back so the quote can refuse a session without them.
+ * The fiat amount and currency are only defaults the buyer can change in the
+ * widget, so they are not read; settlement compares the observed amounts.
  */
 const stripeOnrampSessionSchema = z.object({
   id: stripeSessionFieldSchema,
@@ -88,8 +90,6 @@ const stripeOnrampSessionSchema = z.object({
     destination_currencies: z.array(z.string()).nullable(),
     destination_networks: z.array(z.string()).nullable(),
     lock_wallet_address: z.boolean().nullable(),
-    source_amount: z.string().nullable(),
-    source_currency: z.string().nullable(),
     wallet_addresses: z.object({ solana: z.string().nullable().optional() }).nullable(),
   }),
 });
@@ -100,11 +100,9 @@ interface StripeQuotedTerms {
   currency: string;
   network: string;
   walletAddress: string;
-  sourceCurrency: string;
-  sourceAmount: string;
 }
 
-/** Names the echoed session terms that differ from the quote; empty when the session matches. */
+/** Names the session locks that differ from the quote; empty when the session matches. */
 function mismatchedStripeSessionTerms(
   terms: StripeOnrampSessionTerms,
   quoted: StripeQuotedTerms
@@ -123,17 +121,6 @@ function mismatchedStripeSessionTerms(
   }
   if (terms.wallet_addresses?.solana !== quoted.walletAddress) {
     mismatched.push("wallet_addresses.solana");
-  }
-  if (terms.source_currency !== quoted.sourceCurrency) {
-    mismatched.push("source_currency");
-  }
-  // Stripe normalizes amounts ("100" comes back as "100.00"), so compare values.
-  if (
-    terms.source_amount === null ||
-    !isDecimalString(terms.source_amount) ||
-    compareDecimalAmounts(terms.source_amount, quoted.sourceAmount) !== 0
-  ) {
-    mismatched.push("source_amount");
   }
   return mismatched;
 }
@@ -451,8 +438,6 @@ export class StripeRampClient implements RampProvider {
       currency,
       network,
       walletAddress: input.destinationWalletAddress,
-      sourceCurrency: input.fiatCurrency.toLowerCase(),
-      sourceAmount: input.fiatAmount,
     });
     if (mismatched.length > 0) {
       throw providerUnavailable(

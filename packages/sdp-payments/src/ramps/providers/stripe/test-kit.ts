@@ -38,10 +38,7 @@ const QUOTES_EXCHANGE: RecordedExchange = {
   body: QUOTES,
 };
 
-/**
- * The terms a Stripe session echoes for the kit's quote, as Stripe formats
- * them: the amount comes back normalized ("100.00" for a requested "100").
- */
+/** The terms a Stripe session echoes for the kit's quote, as Stripe formats them. */
 export const STRIPE_SESSION_TERMS = {
   destination_amount: null,
   destination_currencies: ["usdc"],

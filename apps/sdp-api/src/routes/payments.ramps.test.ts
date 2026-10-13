@@ -2494,10 +2494,10 @@ describe("Payments routes — ramps", () => {
     /** Answers a session create the way Stripe does, echoing the request's locked terms. */
     function stripeSessionResponse(sessionId: string) {
       return async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-        const form =
-          init?.body instanceof URLSearchParams
-            ? init.body
-            : new URLSearchParams(typeof init?.body === "string" ? init.body : "");
+        if (!(init?.body instanceof URLSearchParams)) {
+          throw new Error("Expected the Stripe session request to send a form body");
+        }
+        const form = init.body;
         return new Response(
           JSON.stringify({
             id: sessionId,

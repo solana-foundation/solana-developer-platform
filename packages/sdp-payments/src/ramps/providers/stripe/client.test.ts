@@ -33,8 +33,13 @@ function refusedFor(mismatched: string[]) {
 }
 
 describe("StripeRampClient session terms", () => {
-  it("accepts a session that echoes the quote, amount normalized", async () => {
+  it("accepts a session that echoes the quote's locks", async () => {
     const quote = await quoteAgainst(STRIPE_SESSION_TERMS);
+    assert.equal(quote.id, "cos_contract");
+  });
+
+  it("ignores the fiat amount, which the buyer can change in Stripe's widget", async () => {
+    const quote = await quoteAgainst({ ...STRIPE_SESSION_TERMS, source_amount: "96.50" });
     assert.equal(quote.id, "cos_contract");
   });
 
@@ -55,14 +60,14 @@ describe("StripeRampClient session terms", () => {
     );
   });
 
-  it("refuses a session that unlocks the wallet or changes the amount", async () => {
+  it("refuses a session that unlocks the wallet or the network", async () => {
     await assert.rejects(
       quoteAgainst({
         ...STRIPE_SESSION_TERMS,
+        destination_networks: ["solana", "ethereum"],
         lock_wallet_address: false,
-        source_amount: "250.00",
       }),
-      refusedFor(["lock_wallet_address", "source_amount"])
+      refusedFor(["destination_networks", "lock_wallet_address"])
     );
   });
 });
