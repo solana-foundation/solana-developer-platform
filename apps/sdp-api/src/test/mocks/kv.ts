@@ -158,10 +158,6 @@ export async function seedApiKeyRowFor(
   if (data.walletBindings === undefined && data.signingWalletIds === undefined) {
     return;
   }
-  await db
-    .prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?")
-    .bind(data.id)
-    .run();
   const bindings = [
     ...(data.walletBindings ?? []).map((binding) => ({
       walletId: binding.walletId,
@@ -171,21 +167,23 @@ export async function seedApiKeyRowFor(
       .filter((walletId) => !data.walletBindings?.some((binding) => binding.walletId === walletId))
       .map((walletId) => ({ walletId, permissions: ["*"] })),
   ];
-  for (const binding of bindings) {
-    await db
-      .prepare(
+  // One replacement: a failed insert must not leave the key partly unbound.
+  await db.transaction(async (tx) => {
+    await tx.execute("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?", [data.id]);
+    for (const binding of bindings) {
+      await tx.execute(
         `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
          SELECT ?, ak.id, ?, ? FROM api_keys ak WHERE ak.id = ?
-         ON CONFLICT DO NOTHING`
-      )
-      .bind(
-        `akw_${crypto.randomUUID()}`,
-        binding.walletId,
-        JSON.stringify(binding.permissions),
-        data.id
-      )
-      .run();
-  }
+         ON CONFLICT DO NOTHING`,
+        [
+          `akw_${crypto.randomUUID()}`,
+          binding.walletId,
+          JSON.stringify(binding.permissions),
+          data.id,
+        ]
+      );
+    }
+  });
 }
 
 /**
