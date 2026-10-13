@@ -765,6 +765,13 @@ export const FIELDS: EnvField[] = [
     defaultValue: "http://localhost:3001",
   },
   {
+    key: "NEXT_PUBLIC_SOLANA_NETWORK",
+    section: "advanced",
+    kind: "text",
+    label: "Public Solana network",
+    defaultValue: "devnet",
+  },
+  {
     key: "TRUST_PROXY_HEADERS",
     section: "advanced",
     kind: "select",

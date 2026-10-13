@@ -4794,7 +4794,7 @@ cluster the project uses, so fund that key on every cluster you configure. With
 | `KORA_RPC_URL_DEVNET` | Kora node for Sandbox projects. Required with `kora`. |
 | `KORA_RPC_URL_MAINNET` | Kora node for Production projects. Optional; without it, Production projects cannot submit fee-sponsored transactions. |
 | `KORA_API_KEY_DEVNET`, `KORA_API_KEY_MAINNET` | Only for Kora nodes that require API-key authentication. |
-| `KORA_CLOUD_RUN_AUDIENCE_DEVNET`, `KORA_CLOUD_RUN_AUDIENCE_MAINNET` | Only for a private Kora Cloud Run service; the API fetches a Google identity token for it. |
+| `KORA_CLOUD_RUN_AUDIENCE_DEVNET`, `KORA_CLOUD_RUN_AUDIENCE_MAINNET` | Only for a private Kora Cloud Run service; the API fetches a Google identity token for it. The audience and that cluster's `KORA_RPC_URL_<CLUSTER>` must both be HTTPS on the same origin, with no credentials in the URL. |
 
 ## Signing providers
 

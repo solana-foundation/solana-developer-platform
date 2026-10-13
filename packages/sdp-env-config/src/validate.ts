@@ -1,4 +1,4 @@
-import { FIELDS, isFieldVisible, parseList } from "./fields";
+import { FIELDS, isFieldVisible, parseList, RPC_ENDPOINT_SLOTS } from "./fields";
 import type { EnvField, Values } from "./types";
 
 export type Errors = Record<string, string>;
@@ -49,7 +49,11 @@ function validateField(f: EnvField, values: Values): string | undefined {
   return optionMembershipError(f, values, selected);
 }
 
-/** Validate only visible fields: required-but-empty, pattern, and option membership. */
+/**
+ * Validate only visible fields: required-but-empty, pattern, and option membership.
+ * An RPC URL whose provider is not in its cluster's list is an error too, since
+ * the generated .env would drop it.
+ */
 export function validateValues(values: Values): Errors {
   const errors: Errors = {};
   for (const f of FIELDS) {
@@ -60,6 +64,16 @@ export function validateValues(values: Values): Errors {
     if (!isFieldVisible(f, values) && !f.alwaysEmit) continue;
     const error = validateField(f, values);
     if (error) errors[f.key] = error;
+  }
+  for (const slot of RPC_ENDPOINT_SLOTS) {
+    if (
+      !(values[slot.key] ?? "").trim() ||
+      parseList(values[slot.providersKey] ?? "").includes(slot.provider)
+    ) {
+      continue;
+    }
+    errors[slot.key] =
+      `${slot.label} is set but ${slot.provider} is not in ${slot.providersKey}, so it would be dropped`;
   }
   return errors;
 }
