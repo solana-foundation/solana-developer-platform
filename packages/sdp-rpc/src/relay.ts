@@ -1,6 +1,6 @@
-import type { OrganizationRpcProvider } from "@sdp/types";
-import { type ManagedRpcProvider, resolveManagedRpcProviders } from "./config";
-import { SdpRpcError } from "./errors";
+import type { OrganizationRpcProvider, SolanaCluster } from "@sdp/types";
+import { type ManagedRpcEndpoint, managedRpcEndpoints } from "./factory";
+import { currentClusterScope } from "./scope";
 import type { KVStore, RpcEnv } from "./types";
 
 export { withHeliusApiKey } from "./config";
@@ -16,7 +16,15 @@ export interface ResolvedRpcTarget {
   endpointLabel: string;
 }
 
-const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
+/**
+ * The KV key of `cluster`'s round-robin cursor; each cluster rotates over its own pool.
+ *
+ * @param cluster - The cluster whose pool the cursor indexes.
+ * @returns The cursor's KV key.
+ */
+function roundRobinCursorKey(cluster: SolanaCluster): string {
+  return `rpc:relay:round-robin-cursor:${cluster}`;
+}
 
 function collectRpcApiKeys(env: RpcEnv): string[] {
   const secrets: string[] = [];
@@ -112,74 +120,76 @@ function maskCredentialShapes(url: string): string {
 }
 
 /**
- * Advance the shared round-robin cursor and return the providers starting at the selected one.
+ * The open scope's cluster pool, rotated so the endpoint its round-robin cursor selects comes
+ * first, advancing the cursor.
  *
- * @param cache - KV store holding the cursor.
- * @param providers - The configured managed providers.
- * @returns Every provider, rotated so the selected one is first.
+ * @param cache - KV store holding the cursors.
+ * @returns Every endpoint of the scope's cluster pool, starting at the selected one.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint configured.
  */
-async function rotateProviders(
-  cache: KVStore,
-  providers: ManagedRpcProvider[]
-): Promise<ManagedRpcProvider[]> {
-  if (providers.length === 0) {
-    throw new SdpRpcError("SOLANA_RPC_ERROR", "No managed Solana RPC providers are configured");
+async function rotateScopeClusterEndpoints(cache: KVStore): Promise<ManagedRpcEndpoint[]> {
+  const { cluster } = currentClusterScope();
+  const endpoints = managedRpcEndpoints(cluster);
+  if (endpoints.length === 1) {
+    return endpoints;
   }
 
-  if (providers.length === 1) {
-    return providers;
-  }
-
-  const rawCursor = await cache.get(ROUND_ROBIN_CURSOR_KEY);
+  const cursorKey = roundRobinCursorKey(cluster);
+  const rawCursor = await cache.get(cursorKey);
   const parsedCursor = rawCursor ? Number.parseInt(rawCursor, 10) : 0;
   const cursor = Number.isFinite(parsedCursor) && parsedCursor >= 0 ? parsedCursor : 0;
-  const index = cursor % providers.length;
+  const index = cursor % endpoints.length;
 
-  await cache.put(ROUND_ROBIN_CURSOR_KEY, String((index + 1) % providers.length));
-  return [...providers.slice(index), ...providers.slice(0, index)];
+  await cache.put(cursorKey, String((index + 1) % endpoints.length));
+  return [...endpoints.slice(index), ...endpoints.slice(0, index)];
 }
 
 /**
- * The relay target for one managed provider, with a masked label for responses.
+ * The relay target for one managed endpoint, with a masked label for responses.
  *
- * @param provider - A managed provider.
+ * @param endpoint - A managed pool endpoint.
  * @param env - Process env, used to mask the provider's keys out of the label.
- * @returns The relay target for that provider.
+ * @returns The relay target for that endpoint.
  */
-function toRelayTarget(provider: ManagedRpcProvider, env: RpcEnv): ResolvedRpcTarget {
+function toRelayTarget(endpoint: ManagedRpcEndpoint, env: RpcEnv): ResolvedRpcTarget {
   return {
-    providerId: provider.id,
-    endpoint: provider.url,
-    endpointLabel: maskEndpoint(provider.url, env),
+    providerId: endpoint.providerId,
+    endpoint: endpoint.endpointUrl,
+    endpointLabel: maskEndpoint(endpoint.endpointUrl, env),
   };
 }
 
 /**
- * The managed provider the next relay request goes to, chosen round-robin across the pool.
+ * The managed endpoint the next relay request goes to, chosen round-robin across the open
+ * scope's cluster pool.
  *
- * @param input - Process env and the KV store holding the round-robin cursor.
- * @param input.env - Process env carrying the managed provider URLs and keys.
- * @param input.cache - KV store holding the round-robin cursor.
+ * @param input - Process env and the KV store holding the round-robin cursors.
+ * @param input.env - Process env, used to mask provider keys out of the label.
+ * @param input.cache - KV store holding the round-robin cursors.
  * @returns The selected relay target.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when no managed provider is configured.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint configured.
  */
 export async function resolveRpcTarget(input: ResolveRpcTargetInput): Promise<ResolvedRpcTarget> {
-  const [selected] = await rotateProviders(input.cache, resolveManagedRpcProviders(input.env));
+  const [selected] = await rotateScopeClusterEndpoints(input.cache);
   return toRelayTarget(selected, input.env);
 }
 
 /**
- * Every managed provider in round-robin order, for callers that try each in turn.
+ * Every endpoint of the open scope's cluster pool in round-robin order, for callers that try
+ * each in turn.
  *
- * @param input - Process env and the KV store holding the round-robin cursor.
- * @param input.env - Process env carrying the managed provider URLs and keys.
- * @param input.cache - KV store holding the round-robin cursor.
- * @returns The relay targets, starting at the selected provider.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when no managed provider is configured.
+ * @param input - Process env and the KV store holding the round-robin cursors.
+ * @param input.env - Process env, used to mask provider keys out of the labels.
+ * @param input.cache - KV store holding the round-robin cursors.
+ * @returns The relay targets, starting at the selected endpoint.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint configured.
  */
 export async function resolveRoundRobinRpcTargets(
   input: ResolveRpcTargetInput
 ): Promise<ResolvedRpcTarget[]> {
-  const ordered = await rotateProviders(input.cache, resolveManagedRpcProviders(input.env));
-  return ordered.map((provider) => toRelayTarget(provider, input.env));
+  const ordered = await rotateScopeClusterEndpoints(input.cache);
+  return ordered.map((endpoint) => toRelayTarget(endpoint, input.env));
 }
