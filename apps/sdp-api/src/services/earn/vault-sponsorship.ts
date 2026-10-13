@@ -1,5 +1,4 @@
 import type { FeePaymentPort } from "@sdp/payments/fee-payment";
-import type { SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -56,13 +55,11 @@ export interface ResolveVaultSponsorshipInput {
   projectId: string;
   /** Custody wallet id, used as the sponsorship quota actor. */
   walletId: string;
-  /** Cluster the movement executes on, NOT the process's default network. */
-  cluster: SolanaCluster;
   deadline: VaultDeadline;
 }
 
 /**
- * Decide who pays, and resolve the sponsor when that is SDP.
+ * Decide who pays on the open cluster scope's cluster, and resolve the sponsor when that is SDP.
  *
  * CALL THIS AFTER the idempotency replay short-circuit, never before. A replay
  * is a pure durable read that must keep answering during a paymaster or RPC
@@ -76,12 +73,21 @@ export interface ResolveVaultSponsorshipInput {
  * adapter, so managed deployments keep the budget reservation and the Kora
  * usage identity that boundary owns; bypassing it would spend the fee payer's
  * lamports without any budget seeing it.
+ *
+ * @param env - Environment carrying the sponsorship flag and fee-payment configuration.
+ * @param input - The movement's owner and deadline.
+ * @param input.organizationId - The organization that owns the project.
+ * @param input.projectId - The project the sponsorship is charged to.
+ * @param input.walletId - Custody wallet id, used as the sponsorship quota actor.
+ * @param input.deadline - The movement's deadline, bounding the fee-payer lookup.
+ * @returns The fee mode for the movement.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope when the flag is on.
  */
 export async function resolveVaultSponsorship(
   env: Env,
   input: ResolveVaultSponsorshipInput
 ): Promise<VaultFeeMode> {
-  if (!isEarnVaultSponsorshipEnabled(env, input.cluster)) {
+  if (!isEarnVaultSponsorshipEnabled(env)) {
     return { kind: "wallet-pays" };
   }
 
@@ -89,7 +95,6 @@ export async function resolveVaultSponsorship(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actor: { type: "wallet", id: input.walletId },
-    cluster: input.cluster,
   });
   const sponsor = await input.deadline.run("Resolving the sponsored fee payer", () =>
     feePayment.getFeePayer()

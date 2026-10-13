@@ -118,7 +118,7 @@ export function mapToEarnStrategy(
       : null,
     hostCluster: row.host_cluster,
     fundable,
-    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env, row.host_cluster),
+    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

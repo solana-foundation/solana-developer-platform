@@ -173,7 +173,6 @@ export async function withdrawFromVault(
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.wallet.id,
-    cluster,
     deadline,
   });
   const rentPayer = vaultRentPayer(fee);

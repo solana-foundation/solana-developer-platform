@@ -26,7 +26,6 @@
 
 import { findDvpNonceTombstonePda, findSwapDvpPda, getCreateDvpInstruction } from "@sdp/dvp";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
@@ -480,7 +479,6 @@ export async function createDvpTrade(
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: settlement.custodyWalletId },
-      cluster: currentClusterScope().cluster,
     });
     const sponsor = await feePayment.getFeePayer();
 

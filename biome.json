@@ -356,11 +356,9 @@
         "**/apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.ts",
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
-        "**/apps/sdp-api/src/services/sponsorship-budget.service.ts",
         "**/packages/sdp-api-integration/src/helpers/integration.ts",
         "**/packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts",
         "**/packages/sdp-kamino/src/rpc.ts",
-        "**/packages/sdp-payments/src/fee-payment/native.adapter.ts",
         "**/packages/sdp-private-channels/src/gateway.ts",
         "**/packages/sdp-veda/src/rpc.ts",
         "**/packages/sdp-wisdomtree/src/chain.ts"

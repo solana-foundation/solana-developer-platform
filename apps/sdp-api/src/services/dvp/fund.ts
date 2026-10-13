@@ -8,7 +8,6 @@ import {
   verifySwapDvpAccount,
 } from "@sdp/dvp";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
@@ -372,7 +371,6 @@ export async function executeDvpFunding(
     organizationId: plan.signer.organizationId,
     projectId: plan.signer.projectId,
     actor: { type: "wallet", id: plan.signer.custodyWalletId },
-    cluster: currentClusterScope().cluster,
   });
   const sponsor = await feePayment.getFeePayer();
   const instruction = getTransferCheckedInstruction(
