@@ -4,7 +4,9 @@ import {
   getRecurringPaymentOperationStaleBefore,
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -680,7 +682,7 @@ async function runMetadataScheduleUpdate(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
 
@@ -767,7 +769,6 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     await confirmSubscriptionSignature(
-      input.env,
       planUpdateSignature,
       "Recurring payment update failed on-chain"
     );
@@ -792,7 +793,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -847,11 +848,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     authorizationSetupSignature: initSignature,
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment update failed on-chain"
-  );
+  await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -1161,7 +1158,7 @@ async function runReplacementUpdate(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
   let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
@@ -1268,7 +1265,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     planCreationSignature,
     "Recurring payment replacement plan creation failed on-chain"
   );
@@ -1339,6 +1335,7 @@ async function runReplacementUpdate(input: {
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
+      cluster: currentClusterScope().cluster,
       actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();
@@ -1396,7 +1393,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     authorizationSignature,
     "Recurring payment replacement authorization failed on-chain"
   );
@@ -1446,7 +1442,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     oldCancelSignature,
     "Recurring payment old subscription cancellation failed on-chain"
   );

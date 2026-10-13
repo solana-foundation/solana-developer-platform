@@ -329,6 +329,16 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
   }
 }
 
+/**
+ * Recovers stale lifecycle operations and collections, then collects due recurring payments,
+ * for projects in the open cluster scope's environment only; runs once per cluster under
+ * `runPerCluster`.
+ *
+ * @param env - The worker environment.
+ * @param now - The tick's clock, from which the due, stale and retry cutoffs derive.
+ * @returns The per-outcome row counts for this environment.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export async function collectDueRecurringPayments(
   env: Env,
   now: Date

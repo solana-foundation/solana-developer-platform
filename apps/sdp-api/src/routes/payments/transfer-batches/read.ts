@@ -1,4 +1,3 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { z } from "zod";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
@@ -46,9 +45,7 @@ export async function listTransferBatches(c: AppContext) {
       query.data.sourceCustodyWalletId || walletAuthorization === null
         ? undefined
         : walletAuthorization,
-    token: query.data.token
-      ? normalizePaymentToken(query.data.token, currentClusterScope().cluster)
-      : undefined,
+    token: query.data.token ? normalizePaymentToken(query.data.token) : undefined,
     status: query.data.status,
     externalId: query.data.externalId,
     limit: query.data.pageSize,

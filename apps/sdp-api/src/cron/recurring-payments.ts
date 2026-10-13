@@ -1,3 +1,4 @@
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
@@ -13,7 +14,10 @@ export interface RecurringPaymentsCollectionDeps {
 }
 
 export function runRecurringPaymentsCollection(deps: RecurringPaymentsCollectionDeps): void {
-  const work = () => collectDueRecurringPayments(deps.env, new Date());
+  const work = () =>
+    runPerCluster("collect-recurring-payments", async () => {
+      await collectDueRecurringPayments(deps.env, new Date());
+    });
   const promise = deps.observability
     ? deps.observability.withMonitor(RECURRING_PAYMENTS_COLLECTION_MONITOR, work, {
         schedule: { type: "crontab", value: RECURRING_PAYMENTS_COLLECTION_CRON },
