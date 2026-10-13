@@ -38,7 +38,7 @@ export class <Id>RampClient implements RampProvider {
 }
 ```
 
-`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` and `listExternalAccountDetails` are optional — implement the latter when the provider JIT-creates external accounts, so the provider-accounts list endpoint and the offramp payout tree can show display info (`bankName`, masked `accountNumberLast4`; fetched per request, never persisted).
+`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional.
 
 Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`.
 

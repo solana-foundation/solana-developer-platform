@@ -39,6 +39,7 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
   },
   "sdp-api-reconcile-dvp-trades": { effect: "finishes" },
   "sdp-api-reconcile-earn-vault-movements": { effect: "finishes" },
+  "sdp-api-reconcile-ramp-transfers": { effect: "finishes" },
   "sdp-api-track-pending-withdrawals": { effect: "finishes" },
   "sdp-api-track-pending-deposits": { effect: "observes" },
   "sdp-api-detect-orphaned-earn-split-swaps": { effect: "observes" },

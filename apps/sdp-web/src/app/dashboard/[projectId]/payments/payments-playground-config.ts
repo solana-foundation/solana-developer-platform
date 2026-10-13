@@ -59,7 +59,6 @@ function buildRampProviderOptions(
 ): ApiPlaygroundFieldOption[] {
   return [
     { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
-    { label: t("DashboardPayments.playground.lightspark"), value: "lightspark" },
     { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
   ];
 }

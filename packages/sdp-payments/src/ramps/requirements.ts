@@ -13,14 +13,14 @@ import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 
 /**
- * Builds the ready state for a non-Lightspark ramp counterparty.
+ * Builds the ready state for a ramp counterparty.
  *
  * @param provider - Ramp provider whose requirements are complete.
  * @param direction - Ramp direction whose requirements are complete.
  * @returns The provider's ready counterparty state.
  */
 export function readyCounterparty(
-  provider: Exclude<RampProviderId, "lightspark">,
+  provider: RampProviderId,
   direction: RampDirection
 ): CounterpartyRequirements {
   return { provider, direction, status: "ready" };

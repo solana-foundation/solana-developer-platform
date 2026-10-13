@@ -383,6 +383,7 @@ async function quoteAndBuildRequest(
   };
 }
 
+/** Signs a custody cancellation; requests sign in `createCustodyQueuedWithdrawal`. */
 async function prepareCustodyTransaction(
   env: Env,
   input: {
@@ -395,6 +396,7 @@ async function prepareCustodyTransaction(
   const cluster = earnClusterFor(input.actor.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw_cancel",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
@@ -425,7 +427,8 @@ async function prepareCustodyTransaction(
       env,
       input.actor.organizationId,
       input.actor.projectId,
-      input.actor.custodyWalletId
+      input.actor.custodyWalletId,
+      "earn.queued_withdraw_cancel"
     )
   );
   if (signer.address !== input.actor.custodyWalletPublicKey) {
@@ -514,6 +517,7 @@ export async function createCustodyQueuedWithdrawal(
   const actionId = generateEarnVaultWithdrawalRequestActionId();
   const deadline = createVaultDeadline();
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw_request",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
@@ -573,7 +577,8 @@ export async function createCustodyQueuedWithdrawal(
         env,
         input.actor.organizationId,
         input.actor.projectId,
-        input.actor.custodyWalletId
+        input.actor.custodyWalletId,
+        "earn.queued_withdraw_request"
       )
     );
     if (signer.address !== input.actor.custodyWalletPublicKey) {

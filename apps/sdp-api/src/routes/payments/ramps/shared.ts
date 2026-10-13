@@ -43,10 +43,7 @@ import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import {
-  assertProviderAvailable,
-  loadProjectProviderVerdict,
-} from "@/services/provider-availability.service";
+import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -60,17 +57,14 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "../wallets";
+import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
 import { advanceBvnkRequirements } from "./providers/bvnk";
-import { advanceLightsparkRequirements } from "./providers/lightspark";
-import { resolveMuralRequirements } from "./providers/mural";
 import {
   assertRampQuoteBindingMatches,
-  isRampQuoteBindingExpired,
   type RampQuoteBinding,
   rampQuoteCryptoDepositProviderData,
-  rampQuoteExpiryProviderData,
 } from "./quote-binding";
 
 type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
@@ -134,7 +128,7 @@ type RampQuoteDirection = "onramp" | "offramp";
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
  * provider), the provider must support the crypto rail for at least one fiat.
- * Surfacing is not checked here: `assertProviderAvailable` refuses an un-offered
+ * Surfacing is not checked here: `admitRamp` refuses an un-offered
  * provider; only the error's `supportedProviders` hint is narrowed to offered ones.
  */
 function assertRampCorridorSupported(
@@ -210,7 +204,7 @@ export async function resolveRampQuoteRequest(
 ): Promise<RampQuoteResolved> {
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
-  await assertProviderAvailable(c, { family: "ramps", provider: input.provider });
+  await admitRamp(c, { need: "quote", provider: input.provider });
 
   const projectId = requireProjectId(c);
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -263,12 +257,8 @@ export async function persistRampQuoteTransfer(
     projectId: input.projectId,
   });
   if (existing) {
-    // Idempotent replay only: the same reference with any changed input, or a
-    // reference whose bound session/quote already expired, fails closed.
+    // Idempotent replay only: the same reference with any changed input fails closed.
     assertRampQuoteBindingMatches(existing, binding);
-    if (isRampQuoteBindingExpired(existing)) {
-      throw conflict("Provider quote/session reference has expired; create a new quote.");
-    }
     return existing.id;
   }
 
@@ -298,7 +288,6 @@ export async function persistRampQuoteTransfer(
       rampsMemo: input.rampsMemo,
       providerData: {
         ...(input.providerData ?? {}),
-        ...rampQuoteExpiryProviderData(input.quote),
         ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
       serializedTx: null,
@@ -330,14 +319,8 @@ export async function advanceCounterpartyRequirements(
   switch (input.provider) {
     case "moonpay":
       return readyCounterparty("moonpay", input.direction);
-    case "moneygram":
-      return readyCounterparty("moneygram", input.direction);
-    case "lightspark":
-      return advanceLightsparkRequirements(c, input);
     case "bvnk":
       return advanceBvnkRequirements(c, input);
-    case "mural":
-      return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
     case "coinbase":
       return readyCounterparty("coinbase", input.direction);
     case "stripe":

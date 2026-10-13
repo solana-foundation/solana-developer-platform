@@ -1,8 +1,10 @@
 import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
+  PERSISTED_RAMP_PROVIDERS,
   tokenFilterAliases,
 } from "@sdp/types";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
@@ -152,6 +154,9 @@ export type PaymentTransferProjectionRow = Record<string, unknown> & {
   kind: PaymentTransactionKind;
 };
 
+// A retired provider's id still parses; an id this deployment does not know throws.
+const storedTransferProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS).nullable();
+
 /** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
 export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
@@ -171,7 +176,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     kind: row.kind,
     direction: row.direction as PaymentTransferRow["direction"],
     status: row.status as PaymentTransferRow["status"],
-    provider: row.provider as PaymentTransferRow["provider"],
+    provider: storedTransferProviderSchema.parse(row.provider),
     provider_reference: row.provider_reference as string | null,
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,
@@ -606,31 +611,6 @@ export function createPostgresPaymentsRepository(
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(...assignmentValues, ...scope.values)
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
-    },
-
-    async claimTransferDestination(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ?", "destination_address IS NULL"],
-        extraValues: [input.transferId, input.expectedStatus],
-      });
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET destination_address = ?, memo = ?, updated_at = ?
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind(input.destinationAddress, input.memo, input.updatedAt, ...scope.values)
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;

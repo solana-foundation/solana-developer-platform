@@ -28,6 +28,16 @@ const nextConfig = {
         permanent: true,
       },
       {
+        source: "/docs/reference/api/policies",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
+        permanent: true,
+      },
+      {
+        source: "/docs/reference/api/policies/:path*",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
+        permanent: true,
+      },
+      {
         source: "/docs/payments/wallet-balances",
         destination: "/docs/wallet-operations/balances",
         permanent: true,

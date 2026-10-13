@@ -30,7 +30,7 @@ Explicitly invoke **`integrate-ramp-provider`** first. Pass the provider docs UR
 | `integrate-offramp` | Crypto→fiat quote |
 | `integrate-webhook` | Signature verification + settlement events |
 
-Capability work is parallel after registration. For an unsupported direction, declare empty support and implement the required interface methods as typed rejections; only `createOnrampQuote` and `listExternalAccountDetails` are optional in the current `RampProvider` contract.
+Capability work is parallel after registration. For an unsupported direction, declare empty support and implement the required interface methods as typed rejections; only `createOnrampQuote` is optional in the current `RampProvider` contract.
 
 ## Choose the closest reference
 

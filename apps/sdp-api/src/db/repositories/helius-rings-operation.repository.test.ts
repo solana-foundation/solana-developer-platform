@@ -6,9 +6,10 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type {
-  HeliusRingsOperationRepository,
-  ReserveHeliusRingsIntentInput,
+import {
+  type HeliusRingsOperationRepository,
+  mapHeliusRingsOperationSummaryRow,
+  type ReserveHeliusRingsIntentInput,
 } from "./helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.repository";
@@ -726,6 +727,24 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       // like it are the oldest ones in the table, so returning them would fill
       // the budget ahead of what it can settle.
       expect(swept.map((row) => row.id)).toEqual([inFlight.operation.id]);
+    });
+  });
+
+  describe("a stored approval_required row (retired, ADR 0006)", () => {
+    it("is summarised as a failed operation that cannot be retried", async () => {
+      const { operation } = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:retired" }));
+      await getDb(env)
+        .prepare("UPDATE helius_rings_operations SET state = 'approval_required' WHERE id = ?")
+        .bind(operation.id)
+        .run();
+      const stored = await repo.getOperationById({ ...scope, id: operation.id });
+      if (!stored) throw new Error("fixture row missing");
+
+      expect(mapHeliusRingsOperationSummaryRow(stored)).toMatchObject({
+        state: "failed",
+        failureCode: "invalid_input",
+        retryable: false,
+      });
     });
   });
 

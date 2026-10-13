@@ -13,6 +13,11 @@ describe("designModuleForPath", () => {
     ["/dashboard/payments/requests/new", "activity"],
     ["/dashboard/payments/recurring/rp_1", "activity"],
     ["/dashboard/payments-archive", null],
+    ["/dashboard/wallets", "wallets"],
+    ["/dashboard/custody/wal_1", "wallets"],
+    ["/dashboard/wallets/setup", "wallets"],
+    ["/dashboard/wallets/connections", null],
+    ["/dashboard/wallets/wal_1/policy", null],
     ["/dashboard/issuance", null],
   ])("puts %s in %s", (pathname, designModule) => {
     expect(designModuleForPath(pathname)).toBe(designModule);
