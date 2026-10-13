@@ -1,7 +1,8 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { DVP_SETTLEMENT_AVAILABILITY } from "@sdp/types";
 import { type Address, address, getBase58Decoder, signature } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, aroundEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -90,6 +91,10 @@ const UNFILTERED: DvpTradeListFilters = { statuses: null, settlementAvailability
 describe("DvpTradeRepository (postgres)", () => {
   let repo: DvpTradeRepository;
   let projects: SeededDefaultProjects;
+
+  aroundEach((runTest) =>
+    runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, runTest)
+  );
 
   beforeAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -1237,5 +1242,122 @@ describe("DvpTradeRepository (postgres)", () => {
         repo.listInboundForParty(inboundScope([address(WALLET_A_PUBKEY)]), 10)
       ).resolves.toEqual([]);
     });
+  });
+});
+
+describe("DvpTradeRepository environment scope (postgres)", () => {
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const PARTY_ORG = { id: "org_dvp_repo_party", name: "DvP Repo Party", slug: "dvp-repo-party" };
+  const PARTY_PROJECT_ID = "prj_dvp_repo_party";
+  const SANDBOX_TRADE_ID = "dvp_env_sandbox";
+  const PRODUCTION_TRADE_ID = "dvp_env_production";
+  const PARTY_SANDBOX_SCOPE = { projectId: PARTY_PROJECT_ID, environment: "sandbox" } as const;
+  let repo: DvpTradeRepository;
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email),
+      ...[TEST_ORG, PARTY_ORG].map((organization) =>
+        db
+          .prepare(
+            "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+          )
+          .bind(organization.id, organization.name, organization.slug)
+      ),
+    ]);
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: PRODUCTION_PROJECT_ID },
+    });
+    await seedDefaultProjects(db, {
+      organizationId: PARTY_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PARTY_PROJECT_ID, production: `${PARTY_PROJECT_ID}_production` },
+    });
+    repo = createPostgresDvpTradeRepository(db);
+    await runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, () =>
+      repo.create(tradeInsert({ id: SANDBOX_TRADE_ID }))
+    );
+    await runInClusterScope({ projectId: PRODUCTION_PROJECT_ID, environment: "production" }, () =>
+      repo.create(
+        tradeInsert({
+          id: PRODUCTION_TRADE_ID,
+          projectId: PRODUCTION_PROJECT_ID,
+          swapDvp: address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU"),
+        })
+      )
+    );
+    await repo.resolveCreate(SANDBOX_TRADE_ID, "created");
+    await repo.resolveCreate(PRODUCTION_TRADE_ID, "created");
+  });
+
+  it("records the creating scope's environment on the trade", async () => {
+    const rows = await getDb(env)
+      .prepare("SELECT id, environment FROM dvp_trades ORDER BY id")
+      .all<{ id: string; environment: string }>();
+
+    expect(rows.results).toEqual([
+      { id: PRODUCTION_TRADE_ID, environment: "production" },
+      { id: SANDBOX_TRADE_ID, environment: "sandbox" },
+    ]);
+  });
+
+  it("reads a trade as a party only from the trade's own environment", async () => {
+    const reads = await runInClusterScope(PARTY_SANDBOX_SCOPE, async () => ({
+      sandbox: await repo.getByIdAsParty(SANDBOX_TRADE_ID),
+      production: await repo.getByIdAsParty(PRODUCTION_TRADE_ID),
+    }));
+
+    expect(reads.sandbox).toMatchObject({ id: SANDBOX_TRADE_ID });
+    expect(reads.production).toBeNull();
+  });
+
+  it("lists inbound trades only from the scope's environment", async () => {
+    const listed = await runInClusterScope(PARTY_SANDBOX_SCOPE, () =>
+      repo.listInboundForParty(
+        {
+          organizationId: PARTY_ORG.id,
+          projectId: PARTY_PROJECT_ID,
+          partyAddresses: [address(WALLET_A_PUBKEY)],
+        },
+        10
+      )
+    );
+
+    expect(listed.map((trade) => trade.id)).toEqual([SANDBOX_TRADE_ID]);
+  });
+
+  it("sweeps only the scope environment's trades against its block height", async () => {
+    for (const id of [SANDBOX_TRADE_ID, PRODUCTION_TRADE_ID]) {
+      await repo.claimClose(id, {
+        action: "settle",
+        signature: CLOSE_SIGNATURE,
+        expiryHeight: "500",
+      });
+    }
+
+    const swept = await runInClusterScope(
+      { projectId: null, environment: "production" },
+      async () => ({
+        released: await repo.releaseExpiredCloseClaims(900n),
+        open: (await repo.listOpenForReconciliation(10)).map((trade) => trade.id),
+      })
+    );
+
+    expect(swept).toEqual({ released: 1, open: [PRODUCTION_TRADE_ID] });
+    const locks = await getDb(env)
+      .prepare("SELECT id, close_claim_signature FROM dvp_trades ORDER BY id")
+      .all<{ id: string; close_claim_signature: string | null }>();
+    expect(locks.results).toEqual([
+      { id: PRODUCTION_TRADE_ID, close_claim_signature: null },
+      { id: SANDBOX_TRADE_ID, close_claim_signature: CLOSE_SIGNATURE },
+    ]);
   });
 });
