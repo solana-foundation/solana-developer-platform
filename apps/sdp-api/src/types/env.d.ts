@@ -320,9 +320,9 @@ export interface Env extends ManagedRpcEnv {
   // the parties can only unwind. It cannot be either party or an executable
   // account. Where it ultimately lives is still an open decision (PRO-1796).
   DVP_SETTLEMENT_AUTHORITY?: string;
-  // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
-  // Narrowed per cluster by `isEarnVaultSponsorshipEnabled`, never global: one
-  // process serves both clusters and withdrawals are not environment-gated.
+  // Whether Kora pays fees AND share-ATA rent for Earn vault movements, on
+  // every cluster at once: with it on, a cluster whose Kora is not configured
+  // refuses sponsored movements (503), so wire every cluster's Kora first.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
   // Whether the Earn volume caps (ADR 0004) refuse deposits. Unset or false is
   // shadow mode: evaluate and emit `sdp_api_earn_volume_cap_evaluated`, refuse
