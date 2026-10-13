@@ -443,7 +443,8 @@ describe("runCronJob", () => {
     expect(collectDueRecurringPayments).toHaveBeenCalledWith(env, expect.any(Date));
     // The rings poll gates itself on the flag plus the http adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
-    expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
+    expect(pollRingsIndexing).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(pollRingsIndexing).toHaveBeenCalledWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
     // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
@@ -500,9 +501,9 @@ describe("runCronJob", () => {
     try {
       await vi.waitFor(() => {
         expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-        expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
-        expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
-        expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
+        expect(trackPendingDeposits).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+        expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+        expect(pollRingsIndexing).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
@@ -566,7 +567,7 @@ describe("runCronJob", () => {
   });
 
   it("fails the job on a rings-poll error but still runs the ticks after it", async () => {
-    vi.mocked(pollRingsIndexing).mockRejectedValue(new Error("photon down"));
+    vi.mocked(pollRingsIndexing).mockRejectedValueOnce(new Error("photon down"));
 
     await expect(runCronJob()).rejects.toThrow("photon down");
 
@@ -580,19 +581,21 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    expect(trackPendingDeposits).toHaveBeenCalledExactlyOnceWith(env);
-    expect(trackPendingWithdrawals).toHaveBeenCalledExactlyOnceWith(env);
+    expect(trackPendingDeposits).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(trackPendingDeposits).toHaveBeenCalledWith(env);
+    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(trackPendingWithdrawals).toHaveBeenCalledWith(env);
   });
 
   // The reconcilers are siblings: a failing deposits leg must never skip the
   // withdrawals leg (or vice versa), only fail the job after both settle.
   it("still reconciles withdrawals when deposit tracking fails", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
-    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
+    vi.mocked(trackPendingDeposits).mockRejectedValueOnce(new Error("deposits down"));
 
     await expect(runCronJob()).rejects.toThrow("deposits down");
 
-    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
+    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -820,7 +823,7 @@ describe("runCronJob", () => {
   it("aggregates failures from more than one tick without dropping either", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
     vi.mocked(reconcileSponsorshipBudgets).mockRejectedValueOnce(new Error("sponsorship down"));
-    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
+    vi.mocked(trackPendingDeposits).mockRejectedValueOnce(new Error("deposits down"));
     vi.mocked(detectOrphanedEarnSplitSwaps).mockRejectedValue(new Error("split swaps down"));
 
     await expect(runCronJob()).rejects.toMatchObject({
@@ -832,7 +835,7 @@ describe("runCronJob", () => {
       ],
     });
 
-    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
+    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
   });
 

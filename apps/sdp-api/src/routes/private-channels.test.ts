@@ -5,6 +5,7 @@ import type { CachedApiKey, PrivateChannelInstanceEnvelope } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -115,6 +116,8 @@ function successProbe() {
 }
 
 describe("Private Channels routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
