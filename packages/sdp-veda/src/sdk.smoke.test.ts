@@ -44,12 +44,18 @@ const OWNER = process.env.VEDA_SMOKE_OWNER;
 
 const configured = Boolean(RPC_URL && VAULT_PROGRAM && HOOK_PROGRAM && VAULT && OWNER);
 
+function requireRpcUrl(): string {
+  if (!RPC_URL)
+    throw new Error("VEDA_SMOKE_RPC_URL is required for the Veda live-chain smoke tests");
+  return RPC_URL;
+}
+
 describe.skipIf(!configured)("Veda plans against a live chain", () => {
   // Everything is resolved LAZILY: `describe.skipIf` still evaluates this
   // callback, so branding an empty address at suite scope would fail collection
   // for everyone rather than skipping quietly.
   const runtime = (): VedaRuntime => {
-    const rpc = createEndpointRpc(RPC_URL ?? "", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
+    const rpc = createEndpointRpc(requireRpcUrl(), { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
     return { cluster: "devnet", rpc, readRpc: rpc };
   };
   const config = () =>

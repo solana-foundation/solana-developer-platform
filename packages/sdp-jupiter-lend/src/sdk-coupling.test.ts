@@ -10,7 +10,7 @@ import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type AccountInfo,
-  Connection,
+  type GetProgramAccountsConfig,
   PublicKey,
   type TransactionInstruction,
 } from "@solana/web3.js";
@@ -56,10 +56,26 @@ const LENDING = pda([Buffer.from("lending"), USDT.toBuffer(), JLUSDT.toBuffer()]
 const RESERVE = pda([Buffer.from("reserve"), USDT.toBuffer()], LIQUIDITY_PROGRAM);
 const REWARDS = pda([Buffer.from("lending_rewards_rate_model"), USDT.toBuffer()], REWARDS_PROGRAM);
 
-const plain = new Connection(RPC, {
-  commitment: "confirmed",
-  fetch: (input, init) => fetch(input, init),
-});
+type DoorConnection = ReturnType<typeof jupiterLendConnection>;
+
+const door = () => runInClusterScope(PRODUCTION_SCOPE, jupiterLendConnection);
+
+/**
+ * The door Connection minus its PDA shim, for the SDK-only plans: web3.js sends an explicit
+ * `encoding: "base64"` exactly as its default, and the shim admits no config key beyond
+ * `commitment` and `filters`, so every scan runs for real.
+ */
+function sdkAlone(connection: DoorConnection): DoorConnection {
+  return new Proxy(connection, {
+    get(target, property, receiver) {
+      if (property !== "getProgramAccounts") return Reflect.get(target, property, receiver);
+      return (programId: PublicKey, config: GetProgramAccountsConfig) =>
+        target.getProgramAccounts(programId, { ...config, encoding: "base64" });
+    },
+  });
+}
+
+let plain: DoorConnection;
 const chain = new Map<string, { owner: PublicKey; data: Buffer }>();
 let requests: Array<{ method: string; params: unknown[] }> = [];
 let catalogueRequests = 0;
@@ -133,6 +149,8 @@ function rpcResult(method: string, params: unknown[]): unknown {
 }
 
 beforeAll(async () => {
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", RPC);
+  plain = sdkAlone(door());
   const coder = getLendingProgram({ connection: plain, market: "main" }).coder.accounts;
   chain.set(USDT.toBase58(), { owner: TOKEN_PROGRAM, data: mint(2_000_000_000_000_000n) });
   chain.set(JLUSDT.toBase58(), { owner: TOKEN_PROGRAM, data: mint(48_123_456_789_012n) });
@@ -337,7 +355,10 @@ function recordingMints(fields: Set<string>) {
   return new Proxy(plain, {
     get(target, property, receiver) {
       if (property !== "getAccountInfo") return Reflect.get(target, property, receiver);
-      return async (address: PublicKey, config?: Parameters<Connection["getAccountInfo"]>[1]) => {
+      return async (
+        address: PublicKey,
+        config?: Parameters<DoorConnection["getAccountInfo"]>[1]
+      ) => {
         if (!address.equals(USDT) && !address.equals(JLUSDT))
           return target.getAccountInfo(address, config);
         const info = await target.getAccountInfo(address, config);
@@ -354,8 +375,9 @@ function recordingMints(fields: Set<string>) {
 
 describe("@jup-ag/lend coupling", () => {
   it("looks the lending account up with exactly the query the PDA shim answers", async () => {
-    const scan = vi.spyOn(Connection.prototype, "getProgramAccounts");
-    await getLendingTokenDetails({ lendingToken: JLUSDT, connection: plain, market: "main" });
+    const connection = door();
+    const scan = vi.spyOn(connection, "getProgramAccounts");
+    await getLendingTokenDetails({ lendingToken: JLUSDT, connection, market: "main" });
     expect(scan).toHaveBeenCalledTimes(1);
     const [programId, config] = scan.mock.calls[0] ?? [];
     expect(programId?.equals(LENDING_PROGRAM)).toBe(true);
@@ -374,10 +396,11 @@ describe("@jup-ag/lend coupling", () => {
       connection: plain,
       market: "main",
     });
+    expect(requests.map((request) => request.method)).toContain("getProgramAccounts");
     requests = [];
     const shimmed = await getLendingTokenDetails({
       lendingToken: JLUSDT,
-      connection: runInClusterScope(PRODUCTION_SCOPE, jupiterLendConnection),
+      connection: door(),
       market: "main",
     });
     expect(details(shimmed)).toEqual(details(scanned));

@@ -3,7 +3,6 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type AccountInfo,
-  Connection,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
@@ -24,7 +23,9 @@ const sdk = vi.hoisted(() => ({
 vi.mock("@jup-ag/lend/earn", () => sdk);
 
 const { JupiterLendVaultDirectClient } = await import("./client");
-const { JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS } = await import("./rpc");
+const { JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS, jupiterLendConnection } = await import("./rpc");
+
+type DoorConnection = ReturnType<typeof jupiterLendConnection>;
 
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -104,12 +105,16 @@ function client() {
   return clientIn(PRODUCTION_SCOPE);
 }
 
+function doorConnection() {
+  return runInClusterScope(PRODUCTION_SCOPE, jupiterLendConnection);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://mainnet.jupiter-lend-client.test");
   mockJupiterLiquidity();
-  vi.spyOn(Connection.prototype, "getAccountInfo").mockResolvedValue(shareAccount(4_500_000n));
-  vi.spyOn(Connection.prototype, "getTokenAccountBalance");
+  vi.spyOn(doorConnection(), "getAccountInfo").mockResolvedValue(shareAccount(4_500_000n));
+  vi.spyOn(doorConnection(), "getTokenAccountBalance");
   const depositContext = {
     fTokenMint: shareMint,
     recipientTokenAccount: shareAta,
@@ -242,14 +247,14 @@ describe("JupiterLendVaultDirectClient", () => {
       owner: owner.toBase58(),
       providerReferences: [JUPITER_LEND_USDT.assetMint],
     });
-    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledTimes(1);
-    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledWith(ownerShareAta);
-    expect(Connection.prototype.getTokenAccountBalance).not.toHaveBeenCalled();
+    expect(doorConnection().getAccountInfo).toHaveBeenCalledTimes(1);
+    expect(doorConnection().getAccountInfo).toHaveBeenCalledWith(ownerShareAta);
+    expect(doorConnection().getTokenAccountBalance).not.toHaveBeenCalled();
     expect(sdk.getWithdrawContext).not.toHaveBeenCalled();
   });
 
   it("returns zero only when the jlUSDT account is confirmed missing", async () => {
-    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(null);
+    vi.mocked(doorConnection().getAccountInfo).mockResolvedValueOnce(null);
     await expect(
       client().readVaultPositions(runtime, {
         owner: owner.toBase58(),
@@ -262,7 +267,7 @@ describe("JupiterLendVaultDirectClient", () => {
   });
 
   it("reads a frozen jlUSDT account's balance", async () => {
-    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+    vi.mocked(doorConnection().getAccountInfo).mockResolvedValueOnce(
       shareAccount(18_446_744_073_709_551_615n, { state: 2 })
     );
     await expect(
@@ -274,7 +279,7 @@ describe("JupiterLendVaultDirectClient", () => {
   });
 
   it("reads an ATA whose token owner was reassigned, as getTokenAccountBalance does", async () => {
-    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+    vi.mocked(doorConnection().getAccountInfo).mockResolvedValueOnce(
       shareAccount(2_000_000_000n, { holder: rentPayer })
     );
     await expect(
@@ -293,9 +298,7 @@ describe("JupiterLendVaultDirectClient", () => {
   });
 
   it("preserves an existing jlUSDT account's RPC read failure as unavailable", async () => {
-    vi.mocked(Connection.prototype.getAccountInfo).mockRejectedValueOnce(
-      new Error("RPC unavailable")
-    );
+    vi.mocked(doorConnection().getAccountInfo).mockRejectedValueOnce(new Error("RPC unavailable"));
     await expect(
       client().readVaultPositions(runtime, {
         owner: owner.toBase58(),
@@ -314,7 +317,7 @@ describe("JupiterLendVaultDirectClient", () => {
   ])(
     "refuses a share account with the wrong %s instead of reading zero",
     async (_field, layout) => {
-      vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+      vi.mocked(doorConnection().getAccountInfo).mockResolvedValueOnce(
         shareAccount(4_500_000n, layout)
       );
       await expect(
@@ -336,15 +339,15 @@ describe("JupiterLendVaultDirectClient", () => {
       amount: "1",
       minSharesOut: "0.9",
     });
-    expect(Connection.prototype.getAccountInfo).not.toHaveBeenCalled();
+    expect(doorConnection().getAccountInfo).not.toHaveBeenCalled();
 
     const [{ connection: contextConnection }] = sdk.getDepositContext.mock.calls[0] as [
-      { connection: Connection },
+      { connection: DoorConnection },
     ];
     const [, , ataConnection] = sdk.getOrCreateATAInstruction.mock.calls[0] as [
       PublicKey,
       PublicKey,
-      Connection,
+      DoorConnection,
     ];
     expect(ataConnection).toBe(contextConnection);
     await expect(ataConnection.getAccountInfo(assetMint)).resolves.toMatchObject({
@@ -353,12 +356,12 @@ describe("JupiterLendVaultDirectClient", () => {
     await expect(ataConnection.getAccountInfo(shareMint)).resolves.toMatchObject({
       owner: TOKEN_PROGRAM,
     });
-    expect(Connection.prototype.getAccountInfo).not.toHaveBeenCalled();
+    expect(doorConnection().getAccountInfo).not.toHaveBeenCalled();
     await expect(ataConnection.getAccountInfo(ownerShareAta, "confirmed")).resolves.toEqual(
       shareAccount(4_500_000n)
     );
-    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledTimes(1);
-    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledWith(ownerShareAta, "confirmed");
+    expect(doorConnection().getAccountInfo).toHaveBeenCalledTimes(1);
+    expect(doorConnection().getAccountInfo).toHaveBeenCalledWith(ownerShareAta, "confirmed");
   });
 
   it("shares one in-flight liquidity read between concurrent quotes, never a settled one", async () => {
