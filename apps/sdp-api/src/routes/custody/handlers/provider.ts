@@ -109,11 +109,8 @@ async function initializeProviderConnection(
         projectId
       );
 
-      const { vaultAccountId, assetId } = existingFireblocksConfig
-        ? {
-            vaultAccountId: existingFireblocksConfig.vaultAccountId,
-            assetId: existingFireblocksConfig.assetId,
-          }
+      const { vaultAccountId } = existingFireblocksConfig
+        ? { vaultAccountId: existingFireblocksConfig.vaultAccountId }
         : await provisionFireblocksVaultAccount(env, {
             orgId: organizationId,
             orgSlug: organizationSlug,
@@ -125,7 +122,6 @@ async function initializeProviderConnection(
         apiKey: resolvedApiKey,
         apiSecretPem: resolvedApiSecretPem,
         vaultAccountId,
-        assetId,
         walletLabel: request.walletLabel,
       });
     }
@@ -136,7 +132,6 @@ async function initializeProviderConnection(
       });
     case "coinbase_cdp":
       return signingService.initializeCoinbaseCdpSigning(organizationId, projectId, {
-        network: request.network,
         accountPolicy: request.accountPolicy,
         walletLabel: request.walletLabel,
       });
@@ -152,18 +147,15 @@ async function initializeProviderConnection(
       });
     case "dfns":
       return signingService.initializeDfnsSigning(organizationId, projectId, {
-        network: request.network,
         walletLabel: request.walletLabel,
       });
     case "ibm_haven":
       return signingService.initializeIbmHavenSigning(organizationId, projectId, {
-        network: request.network,
         walletLabel: request.walletLabel,
       });
     case "anchorage":
       return signingService.initializeAnchorageWalletLifecycle(organizationId, projectId, {
         walletLabel: request.walletLabel,
-        network: request.network,
       });
     case "utila":
       return signingService.initializeUtilaSigning(organizationId, projectId, {

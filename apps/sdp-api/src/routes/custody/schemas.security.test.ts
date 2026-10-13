@@ -42,7 +42,6 @@ describe("custody initialize endpoint selection", () => {
   it("preserves ordinary platform-managed provisioning requests", () => {
     const parsed = initializeSigningSchema.safeParse({
       provider: "coinbase_cdp",
-      network: "solana-devnet",
       walletLabel: "Treasury",
     });
 

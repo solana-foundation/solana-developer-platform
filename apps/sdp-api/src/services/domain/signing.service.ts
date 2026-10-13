@@ -18,9 +18,7 @@ import {
 import {
   createDfnsApiClient,
   createIbmHavenApiClient,
-  IBM_HAVEN_PROVIDER_LABEL,
   normalizeDfnsWalletId,
-  resolveDfnsNetwork,
 } from "@sdp/custody/dfns";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
@@ -32,6 +30,7 @@ import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
+import { currentCustodyProviderNetworks } from "@/services/custody/custody-network";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
@@ -57,6 +56,7 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { assertWalletProjectInClusterScope } from "@/services/domain/signing/wallet-scope-guard";
 import {
   assertCustodyProviderAvailable,
   assertCustodyProviderEnabled,
@@ -119,7 +119,6 @@ export interface InitFireblocksSigningOptions {
   apiKey: string;
   apiSecretPem: string;
   vaultAccountId: string;
-  assetId?: string;
   walletLabel?: string;
 }
 
@@ -135,7 +134,6 @@ export interface InitPrivySigningOptions {
  * Options for initializing org signing with Coinbase CDP provider.
  */
 export interface InitCoinbaseCdpSigningOptions {
-  network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   walletLabel?: string;
 }
@@ -160,7 +158,6 @@ export interface InitTurnkeySigningOptions {
  * Options for initializing org signing with DFNS provider.
  */
 export interface InitDfnsSigningOptions {
-  network?: "Solana" | "SolanaDevnet";
   walletLabel?: string;
 }
 
@@ -171,7 +168,6 @@ export interface InitDfnsSigningOptions {
  * platform-managed via IBM_HAVEN_* env bindings.
  */
 export interface InitIbmHavenSigningOptions {
-  network?: "Solana" | "SolanaDevnet";
   walletLabel?: string;
 }
 
@@ -182,7 +178,6 @@ export interface InitIbmHavenSigningOptions {
  */
 export interface InitAnchorageSigningOptions {
   walletLabel?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 /**
@@ -463,12 +458,19 @@ export class SigningService {
   }
 
   /**
-   * Initialize signing for an organization with Fireblocks provider.
+   * Initialize signing for a project with the Fireblocks provider. The vault's Solana
+   * asset is the one of the caller's cluster, never a persisted or env value.
    *
    * @param orgId - Organization ID
    * @param projectId - The project that owns the config
    * @param options - Fireblocks configuration
+   * @param options.apiKey - The platform Fireblocks API key.
+   * @param options.apiSecretPem - The platform Fireblocks API secret, PEM-encoded.
+   * @param options.vaultAccountId - The project's Fireblocks vault account.
+   * @param options.walletLabel - Label for the root wallet.
    * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeFireblocksSigning(
     orgId: string,
@@ -494,7 +496,6 @@ export class SigningService {
       apiKey: options.apiKey,
       apiSecretEncrypted: encryptedSecret,
       vaultAccountId: options.vaultAccountId,
-      assetId: options.assetId ?? "SOL",
     };
 
     // Create the adapter to get the public key
@@ -502,7 +503,7 @@ export class SigningService {
       apiKey: options.apiKey,
       apiSecretPem: options.apiSecretPem,
       vaultAccountId: options.vaultAccountId,
-      assetId: options.assetId ?? "SOL",
+      assetId: currentCustodyProviderNetworks().fireblocksAssetId,
       apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
     });
 
@@ -579,7 +580,17 @@ export class SigningService {
   }
 
   /**
-   * Initialize signing for an organization with Coinbase CDP provider.
+   * Initialize signing for a project with the Coinbase CDP provider, provisioning the
+   * root account on the caller's cluster.
+   *
+   * @param orgId - Organization ID
+   * @param projectId - The project that owns the config
+   * @param options - Coinbase CDP configuration
+   * @param options.accountPolicy - The CDP account policy to attach.
+   * @param options.walletLabel - Label for the root wallet.
+   * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeCoinbaseCdpSigning(
     orgId: string,
@@ -610,7 +621,6 @@ export class SigningService {
     if (reusable) {
       const configJson: CoinbaseCdpProviderConfig = {
         provider: "coinbase_cdp",
-        network: options.network ?? this.env.COINBASE_CDP_NETWORK,
         accountPolicy: options.accountPolicy,
       };
 
@@ -623,7 +633,6 @@ export class SigningService {
     const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
       projectId,
-      network: options.network,
       accountPolicy: options.accountPolicy,
       reuseExisting: true,
     });
@@ -633,7 +642,6 @@ export class SigningService {
 
     const configJson: CoinbaseCdpProviderConfig = {
       provider: "coinbase_cdp",
-      network: provisioned.network,
       accountPolicy: options.accountPolicy,
     };
 
@@ -778,9 +786,16 @@ export class SigningService {
   }
 
   /**
-   * Initialize signing for an organization with DFNS provider.
+   * Initialize signing for a project with the DFNS provider, creating the root wallet
+   * on the caller's cluster. DFNS credentials are platform-managed via env bindings.
    *
-   * DFNS credentials are platform-managed via env bindings.
+   * @param orgId - Organization ID
+   * @param projectId - The project that owns the config
+   * @param options - DFNS configuration
+   * @param options.walletLabel - Label for the root wallet.
+   * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeDfnsSigning(
     orgId: string,
@@ -796,11 +811,10 @@ export class SigningService {
     }
 
     const client = await createDfnsApiClient(this.env);
-    const resolvedNetwork = resolveDfnsNetwork(options.network);
 
     const wallet = await client.wallets.createWallet({
       body: {
-        network: resolvedNetwork,
+        network: currentCustodyProviderNetworks().dfns,
         ...(options.walletLabel ? { name: options.walletLabel } : {}),
       },
     });
@@ -814,14 +828,9 @@ export class SigningService {
 
     const walletId = normalizeDfnsWalletId(wallet.id);
     const publicKey = wallet.address as Address;
-    const walletNetwork =
-      wallet.network === "Solana" || wallet.network === "SolanaDevnet"
-        ? wallet.network
-        : resolvedNetwork;
 
     const configJson: DfnsProviderConfig = {
       provider: "dfns",
-      network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id,
     };
@@ -837,10 +846,18 @@ export class SigningService {
   }
 
   /**
-   * Initialize signing for an organization with IBM Digital Asset Haven.
+   * Initialize signing for a project with IBM Digital Asset Haven, creating the root
+   * wallet on the caller's cluster. IBM Digital Asset Haven is a white-label Dfns
+   * deployment, so this reuses the Dfns wallet API with IBM-hosted credentials
+   * (IBM_HAVEN_* env bindings).
    *
-   * IBM Digital Asset Haven is a white-label Dfns deployment, so this reuses the
-   * Dfns wallet API with IBM-hosted credentials (IBM_HAVEN_* env bindings).
+   * @param orgId - Organization ID
+   * @param projectId - The project that owns the config
+   * @param options - IBM Digital Asset Haven configuration
+   * @param options.walletLabel - Label for the root wallet.
+   * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeIbmHavenSigning(
     orgId: string,
@@ -856,11 +873,10 @@ export class SigningService {
     }
 
     const client = await createIbmHavenApiClient(this.env);
-    const resolvedNetwork = resolveDfnsNetwork(options.network, IBM_HAVEN_PROVIDER_LABEL);
 
     const wallet = await client.wallets.createWallet({
       body: {
-        network: resolvedNetwork,
+        network: currentCustodyProviderNetworks().dfns,
         ...(options.walletLabel ? { name: options.walletLabel } : {}),
       },
     });
@@ -874,14 +890,9 @@ export class SigningService {
 
     const walletId = normalizeIbmHavenWalletId(wallet.id);
     const publicKey = wallet.address as Address;
-    const walletNetwork =
-      wallet.network === "Solana" || wallet.network === "SolanaDevnet"
-        ? wallet.network
-        : resolvedNetwork;
 
     const configJson: IbmHavenProviderConfig = {
       provider: "ibm_haven",
-      network: walletNetwork,
       walletId: wallet.id,
       signingKeyId: wallet.signingKey?.id,
     };
@@ -897,9 +908,17 @@ export class SigningService {
   }
 
   /**
-   * Initialize wallet lifecycle for an organization with Anchorage provider.
+   * Initialize wallet lifecycle for a project with the Anchorage provider, creating the
+   * wallet on the caller's cluster. Anchorage does not currently support transaction
+   * signing in SDP.
    *
-   * Anchorage does not currently support transaction signing in SDP.
+   * @param orgId - Organization ID
+   * @param projectId - The project that owns the config
+   * @param options - Anchorage configuration
+   * @param options.walletLabel - Label for the wallet.
+   * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeAnchorageWalletLifecycle(
     orgId: string,
@@ -916,7 +935,6 @@ export class SigningService {
 
     const provisioned = await custodyProvisioning.provisionAnchorageWallet(this.env, {
       walletLabel: options.walletLabel,
-      network: options.network,
     });
 
     const walletId = normalizeAnchorageWalletId(provisioned.walletId);
@@ -924,7 +942,6 @@ export class SigningService {
     const configJson: AnchorageProviderConfig = {
       provider: "anchorage",
       walletId: provisioned.walletId,
-      network: options.network,
     };
 
     return this.persistInitializedProvider({
@@ -949,10 +966,17 @@ export class SigningService {
   }
 
   /**
-   * Initialize signing for an organization with Utila provider.
+   * Initialize signing for a project with the Utila provider. Utila is
+   * platform-managed: SDP creates a new Solana sub-wallet on the caller's cluster
+   * inside the configured vault and stores it like the other hosted providers.
    *
-   * Utila is platform-managed: SDP creates a new Solana sub-wallet inside the
-   * configured vault and stores it like the other hosted providers.
+   * @param orgId - Organization ID
+   * @param projectId - The project that owns the config
+   * @param options - Utila configuration
+   * @param options.walletLabel - Label for the first wallet.
+   * @returns The new config ID, public key, and wallet ID
+   * @throws SigningError `ALREADY_INITIALIZED` when the project already has an active config for the provider.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
    */
   async initializeUtilaSigning(
     orgId: string,
@@ -983,7 +1007,6 @@ export class SigningService {
       const configJson: UtilaProviderConfig = {
         provider: "utila",
         vaultId: this.env.UTILA_VAULT_ID,
-        network: this.env.UTILA_NETWORK,
       };
 
       return this.persistReusedProvider(orgId, projectId, configJson, reusable);
@@ -998,7 +1021,6 @@ export class SigningService {
     const configJson: UtilaProviderConfig = {
       provider: "utila",
       vaultId: provisioned.vaultId,
-      network: provisioned.network,
     };
 
     return this.persistInitializedProvider({
@@ -1229,11 +1251,25 @@ export class SigningService {
     });
   }
 
+  /**
+   * The signer for one already-authorized custody-wallet row, refused before any provider call
+   * when the wallet's project is outside the open cluster scope: under a request scope the
+   * wallet's project must be the request's; under a job or webhook scope (no project) its
+   * environment must be the scope's.
+   *
+   * @param orgId - The organization that owns the wallet's project.
+   * @param projectId - The project the wallet belongs to.
+   * @param custodyWalletId - The custody-wallet database row ID.
+   * @returns The wallet's transaction signer, on the scope's cluster.
+   * @throws SigningError `WALLET_NOT_FOUND` when the wallet's project is outside the open scope.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+   */
   async getTransactionSignerForWalletRecord(
     orgId: string,
     projectId: string,
     custodyWalletId: string
   ): Promise<TransactionSigner> {
+    await assertWalletProjectInClusterScope(this.env, { orgId, projectId, custodyWalletId });
     return this.runtimeTargets.getTransactionSignerForWalletRecord(
       orgId,
       projectId,

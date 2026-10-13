@@ -16,6 +16,7 @@ import {
   type SigningConfigRecord,
 } from "@/services/adapters";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
+import { currentCustodyProviderNetworks } from "@/services/custody/custody-network";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
@@ -80,7 +81,7 @@ const providerAdapterFactories = {
       apiKey: parsed.apiKey,
       apiSecretPem,
       vaultAccountId: parsed.vaultAccountId,
-      assetId: parsed.assetId,
+      assetId: currentCustodyProviderNetworks().fireblocksAssetId,
       apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
     });
   },
@@ -185,7 +186,7 @@ const providerAdapterFactories = {
   utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
-        network: parsed.network,
+        network: currentCustodyProviderNetworks().utila,
         vaultId: parsed.vaultId,
       })
     );
@@ -205,8 +206,9 @@ const providerAdapterFactories = {
  * @param orgId - The organization that owns the config, the decryption context.
  * @param record - The stored custody config row.
  * @param cipher - Decrypts the config's sealed fields.
- * @returns The instrumented signing adapter for the config's provider.
+ * @returns The instrumented signing adapter for the config's provider, on the caller's cluster.
  * @throws 403 when the (provider, managed) pair is outside the release channel.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
  */
 export async function createAdapterFromEncryptedConfig(
   env: Env,

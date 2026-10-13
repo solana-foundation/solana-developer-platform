@@ -25,13 +25,13 @@ import {
   provisionTurnkeyPrivateKey as provisionTurnkeyPrivateKeyInCustody,
   provisionUtilaWallet as provisionUtilaWalletInCustody,
 } from "@sdp/custody/provisioning";
+import { currentCustodyProviderNetworks } from "@/services/custody/custody-network";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
 // Credential-bearing provider requests must resolve destinations from trusted
 // server configuration. Operation options intentionally cannot override URLs.
 export type ProvisionFireblocksOptions = CustodyProvisionFireblocksOptions & {
-  assetId?: string;
   apiKey?: string;
   apiSecretPem?: string;
 };
@@ -40,9 +40,7 @@ export type { ProvisionFireblocksResult };
 export type ProvisionPrivyOptions = CustodyProvisionPrivyOptions;
 export type { PrivyCredentialAuthentication, ProvisionPrivyResult };
 
-export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions & {
-  network?: "solana" | "solana-devnet";
-};
+export type ProvisionCoinbaseCdpOptions = CustodyProvisionCoinbaseCdpOptions;
 export type { ProvisionCoinbaseCdpResult };
 
 export type ProvisionParaOptions = CustodyProvisionParaOptions;
@@ -55,15 +53,27 @@ export type ProvisionUtilaOptions = CustodyProvisionUtilaOptions & {
   serviceAccountEmail?: string;
   serviceAccountPrivateKeyPem?: string;
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 };
 export type { ProvisionUtilaResult };
 
-export type ProvisionAnchorageOptions = CustodyProvisionAnchorageOptions;
+export type ProvisionAnchorageOptions = Omit<CustodyProvisionAnchorageOptions, "network">;
 export type { ProvisionAnchorageResult };
 
 export type DeleteAnchorageOptions = CustodyDeleteAnchorageOptions;
 
+/**
+ * Provisions a Fireblocks vault account holding the Solana asset of the caller's cluster.
+ *
+ * @param env - Process environment holding the platform Fireblocks credentials and base URL.
+ * @param options - The vault to provision.
+ * @param options.orgId - The organization the vault is named and referenced for.
+ * @param options.orgSlug - The organization slug the vault name is built from.
+ * @param options.vaultAccountId - An existing vault account to add the asset to, instead of creating one.
+ * @param options.apiKey - Overrides `FIREBLOCKS_API_KEY`.
+ * @param options.apiSecretPem - Overrides `FIREBLOCKS_API_SECRET`.
+ * @returns The vault account, the asset it holds, and the base URL used.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export async function provisionFireblocksVaultAccount(
   env: Env,
   options: ProvisionFireblocksOptions
@@ -74,7 +84,7 @@ export async function provisionFireblocksVaultAccount(
       apiKey: options.apiKey ?? env.FIREBLOCKS_API_KEY,
       apiSecretPem: options.apiSecretPem ?? env.FIREBLOCKS_API_SECRET,
       apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
-      assetId: options.assetId ?? env.FIREBLOCKS_ASSET_ID,
+      assetId: currentCustodyProviderNetworks().fireblocksAssetId,
     },
     options
   );
@@ -112,6 +122,19 @@ export async function findPrivyWalletByExternalId(
   );
 }
 
+/**
+ * Provisions a Coinbase CDP Solana account on the caller's cluster.
+ *
+ * @param env - Process environment holding the platform CDP credentials and account namespace.
+ * @param options - The account to provision.
+ * @param options.orgId - The organization the account name is derived from.
+ * @param options.projectId - The project the account name is derived from.
+ * @param options.walletSeed - A unique seed for an additional wallet; omitted for the root account.
+ * @param options.accountPolicy - The CDP account policy to attach.
+ * @param options.reuseExisting - Reclaims an account that already has the derived name.
+ * @returns The account address and the CDP network it lives on.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export async function provisionCoinbaseCdpAccount(
   env: Env,
   options: ProvisionCoinbaseCdpOptions
@@ -123,7 +146,7 @@ export async function provisionCoinbaseCdpAccount(
       apiKeySecret: env.COINBASE_CDP_API_KEY_SECRET,
       walletSecret: env.COINBASE_CDP_WALLET_SECRET,
       apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
-      network: options.network ?? env.COINBASE_CDP_NETWORK,
+      network: currentCustodyProviderNetworks().coinbaseCdp,
       accountScope: env.COINBASE_CDP_ACCOUNT_NAMESPACE?.trim() || env.ENVIRONMENT,
     },
     options
@@ -160,6 +183,18 @@ export async function provisionTurnkeyPrivateKey(
   );
 }
 
+/**
+ * Provisions a Utila Solana sub-wallet on the caller's cluster inside the platform vault.
+ *
+ * @param env - Process environment holding the platform Utila credentials, vault, and base URL.
+ * @param options - The wallet to provision.
+ * @param options.displayName - The sub-wallet's display name.
+ * @param options.serviceAccountEmail - Overrides `UTILA_SERVICE_ACCOUNT_EMAIL`.
+ * @param options.serviceAccountPrivateKeyPem - Overrides `UTILA_SERVICE_ACCOUNT_PRIVATE_KEY`.
+ * @param options.vaultId - Overrides `UTILA_VAULT_ID`.
+ * @returns The sub-wallet, its address, vault, and network.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export async function provisionUtilaWallet(
   env: Env,
   options: ProvisionUtilaOptions
@@ -171,18 +206,22 @@ export async function provisionUtilaWallet(
       serviceAccountPrivateKeyPem:
         options.serviceAccountPrivateKeyPem ?? env.UTILA_SERVICE_ACCOUNT_PRIVATE_KEY,
       vaultId: options.vaultId ?? env.UTILA_VAULT_ID,
-      network:
-        options.network ??
-        env.UTILA_NETWORK ??
-        (env.SOLANA_NETWORK === "mainnet-beta"
-          ? "networks/solana-mainnet"
-          : "networks/solana-devnet"),
+      network: currentCustodyProviderNetworks().utila,
       apiBaseUrl: env.UTILA_API_BASE_URL,
     },
     options
   );
 }
 
+/**
+ * Provisions an Anchorage Solana wallet on the caller's cluster.
+ *
+ * @param env - Process environment holding the platform Anchorage credentials and base URL.
+ * @param options - The wallet to provision.
+ * @param options.walletLabel - The wallet's label.
+ * @returns The wallet and its address.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export async function provisionAnchorageWallet(
   env: Env,
   options: ProvisionAnchorageOptions
@@ -193,7 +232,7 @@ export async function provisionAnchorageWallet(
       apiKey: env.ANCHORAGE_API_KEY,
       apiBaseUrl: env.ANCHORAGE_API_BASE_URL,
     },
-    options
+    { ...options, network: currentCustodyProviderNetworks().anchorage }
   );
 }
 

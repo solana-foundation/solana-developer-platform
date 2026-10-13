@@ -32,7 +32,6 @@ export const DEFAULT_IBM_HAVEN_API_BASE_URL = "https://api.digitalassets.ibm.com
 // deployment self-identifies (a Haven credential failure must not read "DFNS").
 export const DFNS_PROVIDER_LABEL = "DFNS";
 export const IBM_HAVEN_PROVIDER_LABEL = "IBM Digital Asset Haven";
-export const DEFAULT_DFNS_NETWORK = "SolanaDevnet";
 
 export type DfnsNetwork = "Solana" | "SolanaDevnet";
 
@@ -541,24 +540,6 @@ export function normalizeDfnsWalletId(walletId: string): string {
 
 export function denormalizeDfnsWalletId(walletId: string): string {
   return walletId.startsWith("dfns_") ? walletId.slice("dfns_".length) : walletId;
-}
-
-export function resolveDfnsNetwork(
-  value?: string,
-  providerLabel: string = DFNS_PROVIDER_LABEL
-): DfnsNetwork {
-  if (!value) {
-    return DEFAULT_DFNS_NETWORK;
-  }
-
-  if (value === "Solana" || value === "SolanaDevnet") {
-    return value;
-  }
-
-  throw new SigningError(
-    `${providerLabel} network must be one of: Solana, SolanaDevnet`,
-    "PROVIDER_NOT_CONFIGURED"
-  );
 }
 
 function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
