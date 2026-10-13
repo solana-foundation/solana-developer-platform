@@ -248,6 +248,23 @@ describe("trackPendingWithdrawals", () => {
     });
   });
 
+  it("keeps a malformed burn signature to its own row and batches the rest of its gateway", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted", signature: "not-a-signature" }),
+      withdrawalRow({ id: "w2", status: "submitted", signature: BURN_SIG_2 }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([CONFIRMED_STATUS]);
+
+    await track();
+
+    expect(getSignatureStatuses).toHaveBeenCalledExactlyOnceWith(expect.anything(), [BURN_SIG_2], {
+      searchTransactionHistory: true,
+    });
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "w2", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
   it("fails a submitted burn that errored on-chain (pre-confirmation failure allowed)", async () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w1", status: "submitted" }),
