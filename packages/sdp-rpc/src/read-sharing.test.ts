@@ -296,6 +296,31 @@ describe("withInFlightReadSharing", () => {
     assert.equal(held.length, 2);
   });
 
+  it("serves a remembered block time only to a caller whose read floor predates its request", async () => {
+    const held = holdRequests();
+    const shared = sharingTransport();
+
+    const earlierFloor = readStamp();
+    const known = shared(read("getBlockTime", [5]));
+    await nextTurn();
+    held[0].answer({ result: 1_800_000_000 });
+    const knownResponse = await known;
+    const laterFloor = readStamp();
+
+    assert.equal(await shared(read("getBlockTime", [5])), knownResponse);
+    assert.equal(
+      await withReadFloor(earlierFloor, () => shared(read("getBlockTime", [5]))),
+      knownResponse
+    );
+    assert.equal(held.length, 1);
+
+    const floored = withReadFloor(laterFloor, () => shared(read("getBlockTime", [5])));
+    await nextTurn();
+    assert.equal(held.length, 2);
+    held[1].answer({ result: 1_800_000_000 });
+    assert.notEqual(await floored, knownResponse);
+  });
+
   it("rejects an abandoning consumer with its own reason and serves the rest", async () => {
     const held = holdRequests();
     const shared = sharingTransport();
