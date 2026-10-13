@@ -468,7 +468,7 @@ describe("runCronJob", () => {
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
-        expect(reconcileDvpTrades).toHaveBeenCalledTimes(1);
+        expect(reconcileDvpTrades).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
         expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
         expect(runEarnMetricsRefreshTick).toHaveBeenCalledTimes(1);
@@ -684,7 +684,7 @@ describe("runCronJob", () => {
       kind: "system",
       component: "job:sdp-api-reconcile-dvp-trades",
     });
-    expect(reconcileDvpTrades).toHaveBeenCalledOnce();
+    expect(reconcileDvpTrades).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledOnce();
     expect(logEvent).toHaveBeenCalledWith(
       "error",

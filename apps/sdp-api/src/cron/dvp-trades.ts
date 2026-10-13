@@ -1,3 +1,4 @@
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
@@ -11,7 +12,7 @@ export function runDvpTradeReconciliation(deps: {
   bg: BackgroundRunner;
   observability?: Observability;
 }): void {
-  const work = () => reconcileDvpTrades(deps.env);
+  const work = () => runPerCluster("reconcile-dvp-trades", () => reconcileDvpTrades(deps.env));
   const promise = deps.observability
     ? deps.observability.withMonitor(DVP_TRADES_MONITOR, work, {
         schedule: { type: "crontab", value: DVP_TRADES_CRON },

@@ -13,10 +13,13 @@
  * mint can revert the settlement it was meant to complete.
  */
 
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -30,6 +33,14 @@ const PARTY_A_ORG = "org_claim_party_a";
 const PARTY_B_ORG = "org_claim_party_b";
 const USER_ID = "usr_claim";
 const TRADE_ID = "dvp_claim_trade";
+
+const AGENT_PROJECT_IDS = {
+  sandbox: `prj_${AGENT_ORG}`,
+  production: `prj_${AGENT_ORG}_production`,
+} as const satisfies Record<SdpEnvironment, string>;
+
+const SANDBOX_SWEEP = { projectId: null, environment: "sandbox" } as const;
+const PRODUCTION_SWEEP = { projectId: null, environment: "production" } as const;
 
 const ADDRESS_A = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
 const ADDRESS_B = "C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk";
@@ -101,7 +112,7 @@ async function seed(): Promise<void> {
          user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
          decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status
+         escrow_a, escrow_b, status, environment
        ) VALUES (?, ?, ?, 'BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po',
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY', ?, ?,
          'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
@@ -109,10 +120,18 @@ async function seed(): Promise<void> {
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', 6, 6, '1000', '2000',
          '1900000000', ?, ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
-         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created')
+         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created', 'sandbox')
        ON CONFLICT (id) DO NOTHING`
     )
-    .bind(TRADE_ID, AGENT_ORG, `prj_${AGENT_ORG}`, ADDRESS_A, ADDRESS_B, ADDRESS_A, ADDRESS_B)
+    .bind(
+      TRADE_ID,
+      AGENT_ORG,
+      AGENT_PROJECT_IDS.sandbox,
+      ADDRESS_A,
+      ADDRESS_B,
+      ADDRESS_A,
+      ADDRESS_B
+    )
     .run();
 }
 
@@ -129,7 +148,7 @@ function claimInput(org: string, side: "a" | "b", signature: string) {
 }
 
 /** A second trade, for rows that need a (trade, side) slot beyond TRADE_ID's two. */
-async function insertTrade(id: string): Promise<void> {
+async function insertTrade(id: string, environment: SdpEnvironment): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -137,18 +156,26 @@ async function insertTrade(id: string): Promise<void> {
          user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
          decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status
-       ) VALUES (?, 'org_claim_agent', 'prj_org_claim_agent', 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+         escrow_a, escrow_b, status, environment
+       ) VALUES (?, 'org_claim_agent', ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY', ?, ?,
          'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
          'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE', '42',
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', 6, 6, '1000', '2000',
          '1900000000', ?, ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
-         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created')
+         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created', ?)
        ON CONFLICT (id) DO NOTHING`
     )
-    .bind(id, ADDRESS_A, ADDRESS_B, ADDRESS_A, ADDRESS_B)
+    .bind(
+      id,
+      AGENT_PROJECT_IDS[environment],
+      ADDRESS_A,
+      ADDRESS_B,
+      ADDRESS_A,
+      ADDRESS_B,
+      environment
+    )
     .run();
 }
 
@@ -318,7 +345,7 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_dead"), expiryHeight: "500" })
       );
 
-      const released = await repo.releaseExpired(900n);
+      const released = await runInClusterScope(SANDBOX_SWEEP, () => repo.releaseExpired(900n));
       expect(released).toBe(1);
 
       const retried = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
@@ -334,7 +361,7 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_live"), expiryHeight: "5000" })
       );
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await runInClusterScope(SANDBOX_SWEEP, () => repo.releaseExpired(900n))).toBe(0);
     });
 
     // A broadcast claim is a receipt. Sweeping it would invite a second
@@ -345,7 +372,7 @@ describe("DvpLegFundingClaimRepository", () => {
         await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
       });
 
-      expect(await repo.releaseExpired(900n)).toBe(0);
+      expect(await runInClusterScope(SANDBOX_SWEEP, () => repo.releaseExpired(900n))).toBe(0);
     });
   });
 
@@ -357,7 +384,7 @@ describe("DvpLegFundingClaimRepository", () => {
    */
   describe("resolving expired broadcast claims", () => {
     it("lists only broadcast claims past their last-valid height", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", "sandbox");
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_brd_dead"), expiryHeight: "500" });
         await repo.recordFundingTx(TRADE_ID, "a", "sig_brd_dead");
@@ -375,7 +402,7 @@ describe("DvpLegFundingClaimRepository", () => {
         });
       });
 
-      const listed = await repo.listExpiredBroadcast(900n);
+      const listed = await runInClusterScope(SANDBOX_SWEEP, () => repo.listExpiredBroadcast(900n));
 
       expect(listed.map((claim) => claim.signature)).toEqual(["sig_brd_dead"]);
     });
@@ -395,19 +422,23 @@ describe("DvpLegFundingClaimRepository", () => {
         .prepare("UPDATE dvp_trades SET status = 'expired' WHERE id = ?")
         .bind(TRADE_ID)
         .run();
-      expect((await repo.listExpiredBroadcast(900n)).map((claim) => claim.signature)).toEqual([
-        "sig_on_expired",
-      ]);
+      expect(
+        (await runInClusterScope(SANDBOX_SWEEP, () => repo.listExpiredBroadcast(900n))).map(
+          (claim) => claim.signature
+        )
+      ).toEqual(["sig_on_expired"]);
 
       await getDb(env)
         .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
         .bind(TRADE_ID)
         .run();
-      expect(await repo.listExpiredBroadcast(900n)).toEqual([]);
+      expect(await runInClusterScope(SANDBOX_SWEEP, () => repo.listExpiredBroadcast(900n))).toEqual(
+        []
+      );
     });
 
     it("deletes the matching broadcast claim and never an unbroadcast lock", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", "sandbox");
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_target"), expiryHeight: "500" });
         await repo.recordFundingTx(TRADE_ID, "a", "sig_target");
@@ -444,6 +475,88 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.listForTrade(TRADE_ID)
       );
       expect(afterTarget.map((claim) => claim.signature)).toEqual(["sig_other"]);
+    });
+  });
+
+  it("sweeps only the claims on trades in the scope's environment", async () => {
+    const productionTradeId = "dvp_claim_trade_production";
+    const productionProjectId = `prj_${PARTY_A_ORG}_production`;
+    const productionWalletId = `${walletId(PARTY_A_ORG)}_production`;
+    await insertTrade(productionTradeId, "production");
+    await getDb(env).transaction((tx) =>
+      seedTestPrivyConnection(tx, {
+        organizationId: PARTY_A_ORG,
+        projectId: productionProjectId,
+        connectionId: `cconn_${PARTY_A_ORG}_production`,
+        credentialId: `pcred_${PARTY_A_ORG}_production`,
+        createdBy: USER_ID,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+        providerAccountFingerprint: `sha256:pcred_${PARTY_A_ORG}_production`,
+        lastCheckStatus: "success",
+        wallets: [
+          {
+            id: productionWalletId,
+            walletId: `w_${PARTY_A_ORG}_production`,
+            publicKey: ADDRESS_A,
+            label: null,
+            purpose: null,
+            status: "active",
+          },
+        ],
+        defaultCustodyWalletId: productionWalletId,
+      })
+    );
+    const funders = [
+      {
+        tradeId: TRADE_ID,
+        projectId: `prj_${PARTY_A_ORG}`,
+        custodyWalletId: walletId(PARTY_A_ORG),
+      },
+      {
+        tradeId: productionTradeId,
+        projectId: productionProjectId,
+        custodyWalletId: productionWalletId,
+      },
+    ];
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      for (const funder of funders) {
+        await repo.claim({
+          ...funder,
+          side: "a",
+          organizationId: PARTY_A_ORG,
+          signature: `sig_lock_${funder.tradeId}`,
+          expiryHeight: "500",
+        });
+        await repo.claim({
+          ...funder,
+          side: "b",
+          organizationId: PARTY_A_ORG,
+          signature: `sig_receipt_${funder.tradeId}`,
+          expiryHeight: "500",
+        });
+        await repo.recordFundingTx(funder.tradeId, "b", `sig_receipt_${funder.tradeId}`);
+      }
+    });
+
+    const swept = await runInClusterScope(PRODUCTION_SWEEP, async () => ({
+      released: await repo.releaseExpired(900n),
+      expiredBroadcast: (await repo.listExpiredBroadcast(900n)).map((claim) => claim.signature),
+    }));
+
+    expect(swept).toEqual({
+      released: 1,
+      expiredBroadcast: [`sig_receipt_${productionTradeId}`],
+    });
+    const remaining = await runWithTenantDatabaseIdentity(
+      { organizationId: PARTY_A_ORG },
+      async () => ({
+        sandbox: (await repo.listForTrade(TRADE_ID)).map((claim) => claim.signature).sort(),
+        production: (await repo.listForTrade(productionTradeId)).map((claim) => claim.signature),
+      })
+    );
+    expect(remaining).toEqual({
+      sandbox: [`sig_lock_${TRADE_ID}`, `sig_receipt_${TRADE_ID}`],
+      production: [`sig_receipt_${productionTradeId}`],
     });
   });
 
@@ -545,7 +658,7 @@ describe("DvpLegFundingClaimRepository", () => {
    */
   describe("listing a page's claims in one query", () => {
     it("groups claims by trade and answers an empty list for a trade with none", async () => {
-      await insertTrade("dvp_claim_trade_b");
+      await insertTrade("dvp_claim_trade_b", "sandbox");
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
         repo.claim(claimInput(PARTY_A_ORG, "a", "sig_a"))
       );

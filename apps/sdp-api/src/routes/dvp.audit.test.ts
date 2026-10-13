@@ -176,7 +176,7 @@ async function seedTrade(tradeId: string, status = "created"): Promise<void> {
          token_program_a, token_program_b,
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status
+         escrow_a, escrow_b, status, environment
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?,
          'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE',
@@ -186,7 +186,7 @@ async function seedTrade(tradeId: string, status = "created"): Promise<void> {
          ?, ?,
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         ?
+         ?, 'sandbox'
        )`
     )
     .bind(

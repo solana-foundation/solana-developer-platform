@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types";
 import type { Client } from "pg";
 import { expect } from "vitest";
 
@@ -125,4 +126,54 @@ export async function seedHeliusRingsConnection(
   );
 
   return connectionId;
+}
+
+/**
+ * Seeds a created DvP trade. A null environment omits the column, the shape
+ * an image predating `dvp_trades.environment` writes.
+ *
+ * @param client - Connection the seed runs on.
+ * @param trade - The trade to seed.
+ * @param trade.id - Trade id, also suffixed into its `swap_dvp` address.
+ * @param trade.organizationId - Owning organization.
+ * @param trade.projectId - Project that created the trade.
+ * @param trade.environment - Environment recorded on the trade, or null to omit it.
+ * @returns Resolves once the row is inserted.
+ */
+export async function seedDvpTrade(
+  client: Client,
+  trade: {
+    id: string;
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment | null;
+  }
+): Promise<void> {
+  const environmentColumn = trade.environment === null ? "" : ", environment";
+  const environmentValue = trade.environment === null ? "" : ", $5";
+  const environmentParams = trade.environment === null ? [] : [trade.environment];
+  await client.query(
+    `INSERT INTO dvp_trades (
+       id, organization_id, project_id, swap_dvp, settlement_authority,
+       user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
+       amount_a, amount_b, expiry_timestamp,
+       user_a_settlement_destination, user_b_settlement_destination,
+       escrow_a, escrow_b, status${environmentColumn}
+     ) VALUES (
+       $1, $2, $3, $4, '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
+       '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
+       '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
+       'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
+       'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE', '42',
+       'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+       'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+       '1000', '2000', '1800003600',
+       '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
+       '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
+       'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
+       '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
+       'created'${environmentValue}
+     )`,
+    [trade.id, trade.organizationId, trade.projectId, `swap_${trade.id}`, ...environmentParams]
+  );
 }
