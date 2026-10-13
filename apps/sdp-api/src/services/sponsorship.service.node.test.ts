@@ -279,6 +279,24 @@ describe("sponsorship identity boundary", () => {
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored"
     );
   });
+  it("refuses a Production project's sponsorship inside a sandbox scope before building a Kora adapter", async () => {
+    projectMocks.getProject.mockResolvedValue({
+      id: "project_stored",
+      organizationId: "org_stored",
+      environment: "production",
+      status: "active",
+    });
+    await expect(
+      runInClusterScope({ projectId: "project_stored", environment: "sandbox" }, () =>
+        createProjectSponsorshipFeePayment(testEnv, {
+          organizationId: "org_stored",
+          projectId: "project_stored",
+          actor: { type: "wallet", id: "wallet_stored" },
+        })
+      )
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
+  });
   it("rejects a persisted project that does not belong to the claimed organization", async () => {
     projectMocks.getProject.mockResolvedValue({
       id: "project_stored",
