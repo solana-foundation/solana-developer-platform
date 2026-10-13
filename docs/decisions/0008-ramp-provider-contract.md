@@ -62,10 +62,11 @@ stateful providers fit the model at all.
   `SdpPaymentsError` are public: error bodies and transfer rows carry them, so
   they hold only SDP's own wording. The provider's message, codes and field
   errors, and why a response was refused, go in `diagnostics`. The API logs
-  them scrubbed, on the ramp estimate log and on
+  them scrubbed as `error_diagnostics` and never serializes them: on
   `sdp_api_payments_provider_error` for failures the error handler answers,
-  and never serializes them. The shared vendor-call event stays name and code
-  only (EARN-025).
+  and on every log that catches a provider failure without rethrowing it,
+  such as the estimate fan-out and the BVNK payout job. The shared
+  vendor-call event stays name and code only (EARN-025).
 - **One contract suite.** A single test iterates the registry. Every provider
   has a test kit of recorded HTTP transcripts, keyed by provider id, so a new
   provider fails typecheck until it has one. The suite covers estimate and

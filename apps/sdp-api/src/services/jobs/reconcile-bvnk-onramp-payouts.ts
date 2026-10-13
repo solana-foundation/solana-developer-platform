@@ -40,6 +40,7 @@ import {
   recordBvnkPayoutCreation,
 } from "@/routes/payments/ramps/providers/bvnk-settlement";
 import { getLogger } from "@/runtime/logger";
+import { paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 export const BVNK_PAYOUT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
@@ -398,6 +399,7 @@ async function translateUnclaimedFailure(
       counterparty_id: candidate.counterparty_id,
       funding_wallet_reference: candidate.fundingWalletReference,
       error: errorMessage(error),
+      error_diagnostics: paymentsErrorDiagnostics(error),
     },
     "[bvnk onramp] unclaimed payout reconcile failed"
   );
@@ -453,7 +455,12 @@ async function adjudicateRecoveryLookup(
     });
   } catch (error) {
     logger.error(
-      { transfer_id: candidate.id, payout_id: row.uuid, error: errorMessage(error) },
+      {
+        transfer_id: candidate.id,
+        payout_id: row.uuid,
+        error: errorMessage(error),
+        error_diagnostics: paymentsErrorDiagnostics(error),
+      },
       "[bvnk onramp] recovery adoption failed; the payout claim stays ambiguous"
     );
     return { kind: "ambiguous" };
@@ -526,7 +533,12 @@ async function reissueRecoveryPayout(
     }
     if (error.bvnkCode !== "MER-PAY-2010") {
       logger.warn(
-        { transfer_id: candidate.id, error: error.message, error_code: error.bvnkCode },
+        {
+          transfer_id: candidate.id,
+          error: error.message,
+          error_code: error.bvnkCode,
+          error_diagnostics: paymentsErrorDiagnostics(error),
+        },
         "[bvnk onramp] recovery reissue rejected; the payout claim stays ambiguous"
       );
       return true;
@@ -628,6 +640,7 @@ async function reconcileRecoverablePayout(
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
         error: errorMessage(error),
+        error_diagnostics: paymentsErrorDiagnostics(error),
       },
       "[bvnk onramp] recoverable payout reconcile failed"
     );
@@ -709,6 +722,7 @@ async function reconcilePollablePayout(
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
         error: errorMessage(error),
+        error_diagnostics: paymentsErrorDiagnostics(error),
       },
       "[bvnk onramp] pollable payout reconcile failed"
     );
