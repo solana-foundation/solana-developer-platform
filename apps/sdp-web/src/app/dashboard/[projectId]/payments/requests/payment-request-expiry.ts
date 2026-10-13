@@ -1,7 +1,7 @@
 "use client";
 
 import { z } from "zod";
-import { createActionMemo, dashboardFetchKeyAnswer } from "@/lib/action-memo";
+import { createActionMemo, dashboardFetchKeyAnswer } from "@/lib/idempotency-key-store";
 
 const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", z.string().nullable());
 

@@ -8,7 +8,6 @@ import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetActionMemosForTests } from "@/lib/action-memo";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
@@ -60,7 +59,6 @@ function readsAs(): string {
 
 beforeEach(() => {
   window.sessionStorage.clear();
-  resetActionMemosForTests();
   resetIdempotencyKeyStoresForTests();
 });
 
@@ -272,7 +270,6 @@ describe("New request page", () => {
 
     // A reload keeps sessionStorage and loses everything in memory.
     cleanup();
-    resetActionMemosForTests();
     resetIdempotencyKeyStoresForTests();
     await fillRequest(user, "25");
     await createLater(user, sends, 5);

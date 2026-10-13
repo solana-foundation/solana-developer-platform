@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetActionMemosForTests } from "./action-memo";
+import { resetIdempotencyKeyStoresForTests } from "./idempotency-key-store";
 import { useActionIdempotencyKey } from "./use-action-idempotency-key";
 
 beforeEach(() => {
   window.sessionStorage.clear();
-  resetActionMemosForTests();
+  resetIdempotencyKeyStoresForTests();
 });
 
 /** What a reload leaves: `sessionStorage`, and no module memory. */
 function reload(): void {
-  resetActionMemosForTests();
+  resetIdempotencyKeyStoresForTests();
 }
 
 describe("useActionIdempotencyKey", () => {

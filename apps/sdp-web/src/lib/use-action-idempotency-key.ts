@@ -1,8 +1,8 @@
 "use client";
 
 import { z } from "zod";
-import { createActionMemo } from "./action-memo";
 import type { ActionKeyAnswer } from "./idempotency";
+import { createActionMemo } from "./idempotency-key-store";
 
 /** What a server action reports: its status, and on a failure what it settles about the key. */
 export interface ActionKeyResult {
@@ -31,7 +31,7 @@ function settled(input: string, result: ActionKeyResult): void {
  * B to A) and a reload, until the action is definitively answered; changed
  * input is a new action with a new key, so an edit after a failure never
  * reuses a key for a different request (422). Kept in `sessionStorage` (see
- * `action-memo.ts`); when the browser refuses storage the key lives as long as
+ * `createActionMemo`); when the browser refuses storage the key lives as long as
  * the page, and the action is still sent: these are not money routes.
  *
  * @returns `keyFor(input)` right before the send, and `settled(input, result)`
