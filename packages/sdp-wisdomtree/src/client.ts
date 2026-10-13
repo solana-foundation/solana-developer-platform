@@ -1,5 +1,5 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
-import { badRequest } from "@sdp/earn/errors";
+import { badRequest, internalError } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
 import type {
@@ -12,6 +12,8 @@ import type {
   EarnVaultTransactionPlan,
   EarnVaultWithdrawInput,
 } from "@sdp/earn/types";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type SolanaCluster,
@@ -24,12 +26,37 @@ import {
   wisdomTreeFundsForCluster,
 } from "@sdp/types/wisdomtree-programs";
 import { address, createNoopSigner } from "@solana/kit";
-import { createWisdomTreeChainReader, type WisdomTreeChainReader } from "./chain";
+import {
+  createWisdomTreeChainReader,
+  type WisdomTreeChainReader,
+  type WisdomTreeChainRpc,
+} from "./chain";
 import { SdpWisdomTreeError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
 import { buildWisdomTreeDepositPlan, buildWisdomTreeRedemptionPlan } from "./plan";
 import { readWisdomTreePosition } from "./positions";
 import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
+
+/** Maximum time a single WisdomTree RPC request may hold a worker open. */
+export const WISDOMTREE_RPC_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Refuse a runtime whose environment differs from the open cluster scope's: program ids come from
+ * `ctx.environment` and clients from the scope, so a mismatch would read one cluster with the
+ * other cluster's programs.
+ *
+ * @param ctx - The request's runtime context.
+ * @throws SdpEarnError `INTERNAL_ERROR` when the two environments differ.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+function assertContextMatchesScope(ctx: EarnRuntimeContext): void {
+  const scopeEnvironment = currentClusterScope().environment;
+  if (scopeEnvironment !== ctx.environment) {
+    throw internalError(
+      `WisdomTree was asked to run on ${ctx.environment} inside a ${scopeEnvironment} cluster scope`
+    );
+  }
+}
 
 /** Same API-owned execution guard shape as `KaminoVaultOperationRunner`. */
 export type WisdomTreeVaultOperationRunner = <T>(
@@ -81,39 +108,53 @@ export class WisdomTreeVaultDirectClient
   /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
   readonly vaultWithdrawalSettlement = "provider_order" as const;
 
+  /**
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
+   * @param createReader - Test seam: builders and position reads use the chain through this.
+   */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
     private readonly runOperation: WisdomTreeVaultOperationRunner,
-    /** Test seam: builders read the chain through this factory. */
     private readonly createReader: (
-      rpcUrl: string
+      rpc: WisdomTreeChainRpc
     ) => WisdomTreeChainReader = createWisdomTreeChainReader
   ) {
     super();
   }
 
-  private async runtime(ctx: EarnRuntimeContext): Promise<WisdomTreeRuntime> {
-    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-    if (!rpcUrl.trim()) {
-      throw new SdpWisdomTreeError(
-        "VAULT_UNREADABLE",
-        `No Solana RPC endpoint configured for ${cluster}; WisdomTree cannot build a transaction.`
-      );
-    }
-    return { cluster, rpcUrl };
+  /**
+   * The operation's runtime: the request's cluster and the door client for the open cluster
+   * scope, built here inside the scope. The door proves each endpoint's genesis before its first
+   * request.
+   *
+   * @param ctx - The request's runtime context.
+   * @returns The runtime every chain capability receives.
+   * @throws SdpEarnError `INTERNAL_ERROR` when `ctx.environment` differs from the scope's.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+   */
+  private runtime(ctx: EarnRuntimeContext): WisdomTreeRuntime {
+    assertContextMatchesScope(ctx);
+    return {
+      cluster: CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment],
+      rpc: createClusterBoundedRpc({ timeoutMs: WISDOMTREE_RPC_REQUEST_TIMEOUT_MS }),
+    };
   }
 
+  /**
+   * Every chain capability enters through this runtime-then-deadline boundary.
+   *
+   * @param ctx - The request's runtime context.
+   * @param label - The operation's name, for the deadline's error.
+   * @param operation - The chain work, given the runtime and the deadline check.
+   * @returns Whatever `operation` returns.
+   */
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
     operation: (runtime: WisdomTreeRuntime, assertActive: () => void) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
-      const runtime = await this.runtime(ctx);
+      const runtime = this.runtime(ctx);
       assertActive();
       return operation(runtime, assertActive);
     });
@@ -183,7 +224,7 @@ export class WisdomTreeVaultDirectClient
         assertActive();
 
         try {
-          return await buildWisdomTreeDepositPlan(this.createReader(runtime.rpcUrl), runtime, {
+          return await buildWisdomTreeDepositPlan(this.createReader(runtime.rpc), runtime, {
             fund,
             owner: this.participant(input.owner),
             onReceiptWallet: address(onReceiptWallet),
@@ -253,7 +294,7 @@ export class WisdomTreeVaultDirectClient
         assertActive();
 
         try {
-          return await buildWisdomTreeRedemptionPlan(this.createReader(runtime.rpcUrl), runtime, {
+          return await buildWisdomTreeRedemptionPlan(this.createReader(runtime.rpc), runtime, {
             fund,
             owner: this.participant(input.owner),
             onReceiptWallet: address(onReceiptWallet),
@@ -300,7 +341,7 @@ export class WisdomTreeVaultDirectClient
           `USDC is not catalogued for ${runtime.cluster}.`
         );
       }
-      const reader = this.createReader(runtime.rpcUrl);
+      const reader = this.createReader(runtime.rpc);
       const owner = address(input.owner);
 
       // Promise.all, not allSettled: any unreadable fund fails the whole page,

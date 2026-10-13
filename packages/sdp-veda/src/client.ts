@@ -1,4 +1,5 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
+import { internalError } from "@sdp/earn/errors";
 import { VedaEarnClient } from "@sdp/earn/providers/veda/client";
 import type {
   EarnRuntimeContext,
@@ -31,6 +32,8 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
+import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { vedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
@@ -63,8 +66,33 @@ import type {
   VedaWithdrawalLifecycleEvent,
 } from "./types";
 
+/**
+ * Refuse a runtime whose environment differs from the open cluster scope's: program ids come from
+ * `ctx.environment` and clients from the scope, so a mismatch would read one cluster with the
+ * other cluster's programs.
+ *
+ * @param ctx - The request's runtime context.
+ * @throws SdpEarnError `INTERNAL_ERROR` when the two environments differ.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+function assertContextMatchesScope(ctx: EarnRuntimeContext): void {
+  const scopeEnvironment = currentClusterScope().environment;
+  if (scopeEnvironment !== ctx.environment) {
+    throw internalError(
+      `Veda was asked to run on ${ctx.environment} inside a ${scopeEnvironment} cluster scope`
+    );
+  }
+}
+
 /** One position page may fan out over several vaults; never fan out unbounded. */
 export const VEDA_POSITION_READ_CONCURRENCY = 4;
+
+/**
+ * Maximum time a single Veda RPC request may hold a worker open. Applied at the transport, so
+ * `@vedatech/svm-sdk`'s own vault, asset, oracle, mint and position reads are bounded too: a
+ * deposit build fans out over several of those.
+ */
+export const VEDA_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * API-owned execution guard for one provider operation. The API injects its
@@ -243,47 +271,48 @@ export class VedaVaultDirectClient
     EarnVaultWithdrawQuoteProvider
 {
   /**
-   * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
-   *
-   * Injected rather than read from `ctx.env.SOLANA_RPC_URL`, because that
-   * variable is PROCESS-level while the cluster is PER-REQUEST: one API process
-   * serves both SDP environments, so a sandbox request inside a production
-   * deployment would otherwise reach a MAINNET url. The API proves the resolved
-   * URL's genesis before returning it. Keeping that resolver inside the client
-   * makes proof a class invariant for deposits, positions and any future chain
-   * capability, rather than something each route has to remember — and for Veda
-   * it is load-bearing twice over, since its deployments may share addresses
-   * across clusters.
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
    */
-  constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: VedaVaultOperationRunner
-  ) {
+  constructor(private readonly runOperation: VedaVaultOperationRunner) {
     super();
   }
 
-  private async runtime(ctx: EarnRuntimeContext): Promise<{
-    runtime: VedaRuntime;
-    config: VedaClusterConfig;
-  }> {
+  /**
+   * The operation's runtime: the request's cluster, its deployment, and the door clients for the
+   * open cluster scope, built here inside the scope so the SDK's storeless snapshot fills only
+   * ever use clients passed in. The door proves each endpoint's genesis before its first request,
+   * which is load-bearing for Veda: its deployments may share addresses across clusters.
+   *
+   * @param ctx - The request's runtime context.
+   * @returns The runtime and the cluster's deployment config.
+   * @throws SdpVedaError when the cluster has no Veda deployment; checked before any client, so
+   *   an unconfigured deployment is reported without an RPC.
+   * @throws SdpEarnError `INTERNAL_ERROR` when `ctx.environment` differs from the scope's.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+   */
+  private runtime(ctx: EarnRuntimeContext): { runtime: VedaRuntime; config: VedaClusterConfig } {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    // Resolved BEFORE the endpoint: an unconfigured deployment is a fact about
-    // SDP, and reporting it should not depend on an RPC being reachable.
     const config = vedaClusterConfig(cluster);
-    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-    if (!rpcUrl.trim()) {
-      throw new SdpVedaError(
-        "VAULT_UNREADABLE",
-        `No Solana RPC endpoint configured for ${cluster}; Veda cannot build a transaction.`
-      );
-    }
-    return { runtime: { cluster, rpcUrl }, config };
+    assertContextMatchesScope(ctx);
+    return {
+      runtime: {
+        cluster,
+        rpc: createClusterBoundedRpc({ timeoutMs: VEDA_RPC_REQUEST_TIMEOUT_MS }),
+        readRpc: createClusterReadRpc({ timeoutMs: VEDA_RPC_REQUEST_TIMEOUT_MS }),
+      },
+      config,
+    };
   }
 
-  /** Every chain capability enters through this proof-then-deadline boundary. */
+  /**
+   * Every chain capability enters through this runtime-then-deadline boundary.
+   *
+   * @param ctx - The request's runtime context.
+   * @param label - The operation's name, for the deadline's error.
+   * @param operation - The chain work, given the runtime, the deployment and the deadline check.
+   * @returns Whatever `operation` returns.
+   */
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
@@ -294,9 +323,7 @@ export class VedaVaultDirectClient
     ) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
-      // Endpoint resolution/proof and provider work are one operation, so they
-      // consume one deadline rather than receiving independent budgets.
-      const { runtime, config } = await this.runtime(ctx);
+      const { runtime, config } = this.runtime(ctx);
       assertActive();
       return operation(runtime, config, assertActive);
     });

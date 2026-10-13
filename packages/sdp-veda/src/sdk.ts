@@ -19,7 +19,6 @@ import {
   queuedWithdrawalRequestAddress,
 } from "./queue-rent";
 import { chargeAtaCreationRentTo, createdAtaAddressForMint } from "./rent";
-import { createVedaReadRpc, createVedaRpc } from "./rpc";
 import type {
   VedaDepositInput,
   VedaDepositQuote,
@@ -101,7 +100,7 @@ function client(
   commitment: "confirmed" | "finalized" = "confirmed",
   // The transport deadline covers both our direct reads and every nested vault,
   // asset, oracle and mint request the SDK performs with this same client.
-  rpc: Kit7 = createVedaRpc(runtime.rpcUrl)
+  rpc: Kit7 = runtime.rpc
 ) {
   return createVedaClient({
     rpc,
@@ -149,9 +148,9 @@ const readClients = new Map<string, { veda: Kit7; expiresAt: number }>();
 const vaultShareFacts = new Map<string, CachedRead<VaultShareFacts>>();
 const vaultAssetMints = new Map<string, CachedRead<Address>>();
 
-/** Most position-read clients kept at once, one per (cluster, endpoint, deployment). */
+/** Most position-read clients kept at once, one per (cluster, deployment). */
 const VEDA_READ_CLIENT_CAPACITY = 32;
-/** Most entries kept in each vault-facts cache, one per (cluster, endpoint, vault). */
+/** Most entries kept in each vault-facts cache, one per (cluster, vault). */
 const VEDA_READ_FACTS_CAPACITY = 256;
 
 /** Test seam: forget the shared position-read client and memoised vault facts. */
@@ -172,8 +171,8 @@ export function vedaReadCacheSizes(): { clients: number; shareFacts: number; ass
 
 /**
  * Store `value` as the newest entry for `key`, after dropping every expired
- * entry and then the oldest past `capacity`, so distinct endpoints and vaults
- * cannot grow a cache for the process's lifetime.
+ * entry and then the oldest past `capacity`, so distinct vaults cannot grow a
+ * cache for the process's lifetime.
  */
 function storeBounded<V extends { expiresAt: number | null }>(
   cache: Map<string, V>,
@@ -195,19 +194,18 @@ function storeBounded<V extends { expiresAt: number | null }>(
 }
 
 /**
- * One SDK client per (cluster, endpoint, deployment) for position reads.
+ * One SDK client per (cluster, deployment) for position reads.
  *
  * The SDK validates all three programs in its CONSTRUCTOR (six requests) and
  * memoises that verdict per instance, so a client per read paid them on every
  * holding. Sharing one client also shares its de-duplicating transport
- * (`createVedaReadRpc`) across concurrent owners. The SDK keeps a rejected
+ * (`VedaRuntime.readRpc`) across concurrent owners. The SDK keeps a rejected
  * validation forever, so a client whose validation rejects is evicted at once;
  * the reads that observed it fail exactly as they did before.
  */
 function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
   const key = [
     config.cluster,
-    runtime.rpcUrl,
     config.vaultProgramAddress,
     config.hookProgramAddress,
     config.queueProgramAddress ?? "",
@@ -217,9 +215,7 @@ function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
 
   // The constructor fires the program validations, so it runs unscoped too.
   const entry = {
-    veda: outsideCallerScopes(() =>
-      client(runtime, config, "confirmed", createVedaReadRpc(runtime.rpcUrl))
-    ),
+    veda: outsideCallerScopes(() => client(runtime, config, "confirmed", runtime.readRpc)),
     expiresAt: Date.now() + VEDA_READ_CACHE_TTL_MS,
   };
   storeBounded(readClients, key, entry, VEDA_READ_CLIENT_CAPACITY);
@@ -231,8 +227,8 @@ function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
   return entry.veda;
 }
 
-function vaultFactsKey(runtime: VedaRuntime, config: VedaClusterConfig, vault: Address): string {
-  return [config.cluster, runtime.rpcUrl, config.vaultProgramAddress, vault].join("\n");
+function vaultFactsKey(config: VedaClusterConfig, vault: Address): string {
+  return [config.cluster, config.vaultProgramAddress, vault].join("\n");
 }
 
 /** Shared in-flight, kept for the TTL on success, never kept on failure. */
@@ -290,7 +286,7 @@ async function holdsShareAccount(
  * only the way IN — the catalogue read, position reads and any future exit path
  * never call this — so it can never trap funds, only decline to create them.
  *
- * Verdicts are cached per (cluster, endpoint, vault) for a short window.
+ * Verdicts are cached per (cluster, vault) for a short window.
  * FAILURES ARE NEVER CACHED: an incompatible or unreachable deployment must be
  * re-checked, not remembered.
  */
@@ -307,7 +303,7 @@ export async function assertVedaVaultUsable(
     );
   }
 
-  const key = `${config.cluster}\n${runtime.rpcUrl}\n${vault}`;
+  const key = `${config.cluster}\n${vault}`;
   let entry = compatibility.get(key);
   if (entry && entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
     compatibility.delete(key);
@@ -377,7 +373,7 @@ async function resolveVaultAsset(
   const { mint, allowDeposits } = await resolveVaultAssetMint(config, vaultClient, vault);
   return {
     mint,
-    decimals: await readMintDecimals(runtime.rpcUrl, mint),
+    decimals: await readMintDecimals(runtime.rpc, mint),
     allowDeposits,
   };
 }
@@ -507,7 +503,7 @@ export async function buildVedaDepositPlan(
   // pre-execution residual on `EarnVaultTransactionPlan.createsShareAccount`).
   const shareAta = createdAtaAddressForMint(instructions, shareMint);
   const createsShareAccount =
-    shareAta === undefined ? undefined : !(await accountExists(runtime.rpcUrl, shareAta));
+    shareAta === undefined ? undefined : !(await accountExists(runtime.rpc, shareAta));
 
   // The OTHER rent a first deposit owes, which the ATA swap above cannot
   // reach: the vault program lazily creates the depositor's AllowedUser
@@ -523,12 +519,9 @@ export async function buildVedaDepositPlan(
   if (
     sponsor !== undefined &&
     allowedUser !== undefined &&
-    !(await accountExists(runtime.rpcUrl, allowedUser))
+    !(await accountExists(runtime.rpc, allowedUser))
   ) {
-    const rent = await minimumBalanceForRentExemption(
-      runtime.rpcUrl,
-      VEDA_ALLOWED_USER_ACCOUNT_SIZE
-    );
+    const rent = await minimumBalanceForRentExemption(runtime.rpc, VEDA_ALLOWED_USER_ACCOUNT_SIZE);
     finalInstructions = [prefundOwnerRentInstruction(sponsor, input.owner, rent), ...instructions];
   }
 
@@ -947,7 +940,7 @@ export async function buildVedaQueuedWithdrawalRequestPlan(
       input.owner
     );
     const rents = await Promise.all(
-      accountSizes.map((bytes) => minimumBalanceForRentExemption(runtime.rpcUrl, bytes))
+      accountSizes.map((bytes) => minimumBalanceForRentExemption(runtime.rpc, bytes))
     );
     const ownerFundedRent = rents.reduce((total, rent) => total + rent, 0n);
     if (ownerFundedRent > 0n) {
@@ -1291,7 +1284,7 @@ export async function readVedaPosition(
   input: VedaPositionInput
 ): Promise<VedaPosition> {
   const vaultClient = readClient(runtime, config).vault(input.vault as Kit7);
-  const factsKey = vaultFactsKey(runtime, config, input.vault);
+  const factsKey = vaultFactsKey(config, input.vault);
 
   // Started together, so the vault-state read each SDK method repeats is one
   // shared request on a cold cache. Settled in the original order, so the first

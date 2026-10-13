@@ -23,6 +23,8 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { SdpRpcError, solanaRpcError } from "./errors";
+import { withRpcReadContext } from "./read-context";
+import { withInFlightReadSharing } from "./read-sharing";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
@@ -93,8 +95,26 @@ const genesisProbes = new Map<string, Promise<void>>();
  */
 const ENDPOINT_COOLDOWN_MS = 30_000;
 
-/** Pool key (cluster plus its endpoint URLs) to the memoized client. */
+/** Pool key (cluster plus its endpoint URLs) to the memoized pool transport every client shares. */
+const clusterPoolTransports = new Map<string, RpcTransport>();
+
+/** Pool key to the memoized client. */
 const clusterRpcs = new Map<string, SolanaRpc>();
+
+/** Pool key to the memoized in-flight read sharing over that pool. */
+const clusterSharedReadTransports = new Map<string, RpcTransport>();
+
+/** `<timeoutMs> <poolKey>` to the memoized bounded client. */
+const clusterBoundedRpcs = new Map<string, SolanaRpc>();
+
+/** `<timeoutMs> <poolKey>` to the memoized read client. */
+const clusterReadRpcs = new Map<string, SolanaRpc>();
+
+/** Behaviour options for a scope client: never a URL or a cluster, which come from the scope. */
+export type ClusterRpcOptions = Readonly<{
+  /** End-to-end deadline for each request, failover hops and genesis probes included. */
+  timeoutMs: number;
+}>;
 
 /** `<cluster> <heliusUrl>` to the memoized DAS client. */
 const clusterDasRpcs = new Map<string, DasRpc>();
@@ -421,6 +441,28 @@ function guardedEndpointTransport(cluster: SolanaCluster, endpointUrl: string): 
 }
 
 /**
+ * The open cluster scope's pool transport: failover across the cluster's managed endpoints, each
+ * behind the per-attempt deadline, read socket retry and genesis guard. Memoized per process by
+ * cluster and pool, so every client on a pool shares one failover and cooldown state.
+ *
+ * @returns The pool key and its transport.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+function clusterPool(): { poolKey: string; poolTransport: RpcTransport } {
+  const { cluster } = currentClusterScope();
+  const endpointUrls = managedEndpointUrls(cluster);
+  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
+  const memoizedPoolTransport = clusterPoolTransports.get(poolKey);
+  if (memoizedPoolTransport) return { poolKey, poolTransport: memoizedPoolTransport };
+  const poolTransport = createPoolTransport(
+    endpointUrls.map((endpointUrl) => guardedEndpointTransport(cluster, endpointUrl))
+  );
+  clusterPoolTransports.set(poolKey, poolTransport);
+  return { poolKey, poolTransport };
+}
+
+/**
  * The Solana RPC client for the open cluster scope, over that cluster's managed provider pool
  * with per-request failover, a per-attempt deadline, and a genesis guard on every endpoint.
  * Memoized per process by cluster and pool, so every caller on a cluster shares one client;
@@ -432,16 +474,67 @@ function guardedEndpointTransport(cluster: SolanaCluster, endpointUrl: string): 
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
 export function createClusterRpc(): SolanaRpc {
-  const { cluster } = currentClusterScope();
-  const endpointUrls = managedEndpointUrls(cluster);
-  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
+  const { poolKey, poolTransport } = clusterPool();
   const memoizedRpc = clusterRpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
-  const endpointTransports = endpointUrls.map((endpointUrl) =>
-    guardedEndpointTransport(cluster, endpointUrl)
-  );
-  const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
+  const rpc = createSolanaRpcFromTransport(poolTransport);
   clusterRpcs.set(poolKey, rpc);
+  return rpc;
+}
+
+/**
+ * A client for the open cluster scope to hand to code that sends without an `abortSignal`, such
+ * as a chain SDK: every request is bounded end to end by `timeoutMs` (failover hops included) and
+ * honours the caller's minimum-slot read scope (`withMinimumRpcSlot`). Shares the scope's pool, so
+ * failover, cooldowns and genesis proofs are the same as `createClusterRpc()`'s. Memoized per
+ * process by deadline, cluster and pool; below the client only the caller's read scope is read, at
+ * request time, never the cluster scope.
+ *
+ * @param options - The client's behaviour.
+ * @param options.timeoutMs - The end-to-end deadline for each request.
+ * @returns The bounded RPC client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function createClusterBoundedRpc(options: ClusterRpcOptions): SolanaRpc {
+  const { poolKey, poolTransport } = clusterPool();
+  const clientKey = `${options.timeoutMs} ${poolKey}`;
+  const memoizedRpc = clusterBoundedRpcs.get(clientKey);
+  if (memoizedRpc) return memoizedRpc;
+  const rpc = createSolanaRpcFromTransport(
+    withAttemptDeadline(withRpcReadContext(poolTransport), options.timeoutMs)
+  );
+  clusterBoundedRpcs.set(clientKey, rpc);
+  return rpc;
+}
+
+/**
+ * The read client for the open cluster scope: `createClusterBoundedRpc`'s deadline and read scope
+ * over in-flight read sharing (`withInFlightReadSharing`), so concurrent identical reads on the
+ * cluster go out once. For position and balance reads only, never to build a transaction: a
+ * joined read can predate the joiner by up to the join window. One sharing transport per cluster
+ * pool serves every deadline, so a share is keyed by cluster and request.
+ *
+ * @param options - The client's behaviour.
+ * @param options.timeoutMs - The end-to-end deadline for each request, per caller.
+ * @returns The read client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function createClusterReadRpc(options: ClusterRpcOptions): SolanaRpc {
+  const { poolKey, poolTransport } = clusterPool();
+  const clientKey = `${options.timeoutMs} ${poolKey}`;
+  const memoizedRpc = clusterReadRpcs.get(clientKey);
+  if (memoizedRpc) return memoizedRpc;
+  let sharedReadTransport = clusterSharedReadTransports.get(poolKey);
+  if (!sharedReadTransport) {
+    sharedReadTransport = withInFlightReadSharing(poolTransport);
+    clusterSharedReadTransports.set(poolKey, sharedReadTransport);
+  }
+  const rpc = createSolanaRpcFromTransport(
+    withAttemptDeadline(withRpcReadContext(sharedReadTransport), options.timeoutMs)
+  );
+  clusterReadRpcs.set(clientKey, rpc);
   return rpc;
 }
 

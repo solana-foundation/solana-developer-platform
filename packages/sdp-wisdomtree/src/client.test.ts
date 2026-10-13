@@ -7,6 +7,7 @@ import {
 import { SdpEarnError } from "@sdp/earn/errors";
 import { resetWisdomTreeTokenCache } from "@sdp/earn/providers/wisdomtree/connect";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
@@ -43,12 +44,18 @@ const productionCtx: EarnRuntimeContext = {
   env: { WISDOMTREE_API_KEY: credential },
   environment: "production",
 };
+const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_wisdomtree_client",
+  environment: "production",
+};
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_wisdomtree_client",
+  environment: "sandbox",
+};
 
-/** Offline client: proven-RPC resolver and deadline runner are passthroughs. */
 function offlineClient(reader: WisdomTreeChainReader) {
   return new WisdomTreeVaultDirectClient(
-    async () => "http://offline.invalid",
-    (_label, operation) => operation(() => {}),
+    (_label, operation) => runInClusterScope(PRODUCTION_SCOPE, () => operation(() => {})),
     () => reader
   );
 }
@@ -69,8 +76,15 @@ function stubConnectFetch() {
   });
 }
 
-beforeEach(() => resetWisdomTreeTokenCache());
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  resetWisdomTreeTokenCache();
+  vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://devnet.wisdomtree-client.test");
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://mainnet.wisdomtree-client.test");
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("capability shape", () => {
   it("is vault-direct with eligibility AND withdraw, and never custodial", () => {
@@ -192,12 +206,7 @@ describe("buildVaultWithdrawal", () => {
   it("refuses minAmountOut as a caller error, before any network or chain read", async () => {
     const reader = fakeReader({});
     const fetchSpy = stubConnectFetch();
-    const resolveRpcUrl = vi.fn(async () => "http://offline.invalid");
-    const client = new WisdomTreeVaultDirectClient(
-      resolveRpcUrl,
-      (_label, operation) => operation(() => {}),
-      () => reader
-    );
+    const client = offlineClient(reader);
 
     await expect(
       client.buildVaultWithdrawal(productionCtx, {
@@ -210,7 +219,6 @@ describe("buildVaultWithdrawal", () => {
       code: "BAD_REQUEST",
       message: expect.stringContaining("minAmountOut cannot be enforced"),
     });
-    expect(resolveRpcUrl).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(reader.reads).toEqual([]);
   });
@@ -287,8 +295,27 @@ describe("buildVaultWithdrawal", () => {
 });
 
 describe("readVaultPositions", () => {
+  it("refuses a production context inside a sandbox cluster scope before any chain read", async () => {
+    const reader = fakeReader({});
+    const unscoped = new WisdomTreeVaultDirectClient(
+      (_label, operation) => operation(() => {}),
+      () => reader
+    );
+
+    await expect(
+      runInClusterScope(SANDBOX_SCOPE, () =>
+        unscoped.readVaultPositions(productionCtx, { owner: OWNER, providerReferences: [] })
+      )
+    ).rejects.toMatchObject({ name: "SdpEarnError", code: "INTERNAL_ERROR" });
+    expect(reader.reads).toEqual([]);
+  });
+
   it("answers an empty page on devnet, where no instrument exists", async () => {
-    const client = offlineClient(fakeReader({}));
+    const reader = fakeReader({});
+    const client = new WisdomTreeVaultDirectClient(
+      (_label, operation) => runInClusterScope(SANDBOX_SCOPE, () => operation(() => {})),
+      () => reader
+    );
     const positions = await client.readVaultPositions(
       { env: {}, environment: "sandbox" },
       { owner: OWNER, providerReferences: [] }

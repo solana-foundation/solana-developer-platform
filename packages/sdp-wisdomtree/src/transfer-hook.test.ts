@@ -7,6 +7,7 @@ import {
 import {
   address,
   createNoopSigner,
+  createSolanaRpc,
   getAddressEncoder,
   getProgramDerivedAddress,
 } from "@solana/kit";
@@ -36,7 +37,10 @@ const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const OWNER = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 
-const runtime: WisdomTreeRuntime = { cluster: "mainnet-beta", rpcUrl: "http://offline.invalid" };
+const runtime: WisdomTreeRuntime = {
+  cluster: "mainnet-beta",
+  rpc: createSolanaRpc("http://offline.invalid"),
+};
 const encoder = getAddressEncoder();
 
 /** PDA on the hook program from a literal seed plus the mint's account key (execute index 1). */

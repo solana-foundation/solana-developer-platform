@@ -55,14 +55,14 @@ function runVaultOperation<T>(
   return deadline.run(label, () => operation(() => deadline.assertActive(label)));
 }
 
-const kamino = new KaminoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+const kamino = new KaminoVaultDirectClient(runVaultOperation);
 assertNotPortfolioProvider(kamino);
 const jupiterLend = new JupiterLendVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
 assertJupiterLendNotPortfolioProvider(jupiterLend);
 
-const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+const veda = new VedaVaultDirectClient(runVaultOperation);
 assertVedaNotPortfolioProvider(veda);
-const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+const wisdomtree = new WisdomTreeVaultDirectClient(runVaultOperation);
 assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
 // The swap port is resolved per request from the runtime context (the API

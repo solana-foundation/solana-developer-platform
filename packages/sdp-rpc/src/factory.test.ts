@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
+  address,
   type Base64EncodedWireTransaction,
   isSolanaError,
   SOLANA_ERROR__JSON_RPC__INVALID_PARAMS,
@@ -10,12 +11,15 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
 } from "@solana/kit";
 import {
+  createClusterBoundedRpc,
   createClusterDasRpc,
+  createClusterReadRpc,
   createClusterRpc,
   type DasGetAssetBatchParams,
   type DasSearchAssetsParams,
   type DasSearchAssetsResult,
 } from "./factory";
+import { withMinimumRpcSlot } from "./read-context";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
@@ -147,6 +151,32 @@ function stubHeldDevnetGenesisProbe(): {
     probeSignals,
     releaseProbe: () => {
       for (const release of probeReleases) release();
+    },
+  };
+}
+
+function stubHeldSlotReads(genesisHashByUrl: Readonly<Record<string, string>>): {
+  calls: RpcCall[];
+  releaseSlotReads: () => void;
+} {
+  const calls: RpcCall[] = [];
+  const slotReadReleases: Array<() => void> = [];
+  const slotReadsReleased = new Promise<void>((resolve) => {
+    slotReadReleases.push(resolve);
+  });
+  globalThis.fetch = async (input, init) => {
+    const request = readRequest(input, init);
+    calls.push({ url: request.url, method: request.method });
+    if (request.method === "getGenesisHash") {
+      return respond(request.id, { result: genesisHashByUrl[request.url] });
+    }
+    await slotReadsReleased;
+    return respond(request.id, { result: SLOT });
+  };
+  return {
+    calls,
+    releaseSlotReads: () => {
+      for (const release of slotReadReleases) release();
     },
   };
 }
@@ -593,6 +623,103 @@ describe("createClusterRpc", () => {
       genesisProbe(proven),
       { url: proven, method: "sendTransaction" },
     ]);
+  });
+});
+
+describe("createClusterBoundedRpc", () => {
+  isolateManagedPool();
+
+  it("rejects a read that outlives the client's deadline as a timeout", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const stalled = "https://devnet-bounded-stall.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: stalled });
+    const stall = stubStalledDevnetRead(stalled);
+    const timeoutMs = 1_000;
+
+    const slot = runInClusterScope(SANDBOX, () => createClusterBoundedRpc({ timeoutMs }))
+      .getSlot()
+      .send();
+    await stall.readStalled;
+    mock.timers.tick(timeoutMs);
+
+    await assert.rejects(slot, {
+      name: "SdpRpcError",
+      code: "SOLANA_RPC_ERROR",
+      message: `RPC request timed out after ${timeoutMs}ms`,
+      details: { timedOut: true },
+    });
+    assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
+  });
+
+  it("sends a read with the caller's minimum slot and refuses an answer from behind it", async () => {
+    const url = "https://devnet-bounded-minimum-slot.example.test";
+    const account = "11111111111111111111111111111111";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
+    const sentParams: unknown[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request = readRequest(input, init);
+      if (request.method === "getGenesisHash") {
+        return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+      }
+      assert.ok(init !== undefined && typeof init.body === "string");
+      const payload: unknown = JSON.parse(init.body);
+      assert.ok(typeof payload === "object" && payload !== null && "params" in payload);
+      sentParams.push(payload.params);
+      return respond(request.id, { result: { context: { slot: 99 }, value: [null] } });
+    };
+    const rpc = runInClusterScope(SANDBOX, () =>
+      createClusterBoundedRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    await assert.rejects(
+      withMinimumRpcSlot(100, () =>
+        rpc.getMultipleAccounts([address(account)], { encoding: "base64" }).send()
+      ),
+      /behind/
+    );
+    assert.deepEqual(sentParams, [
+      [[account], { commitment: "confirmed", encoding: "base64", minContextSlot: 100 }],
+    ]);
+  });
+});
+
+describe("createClusterReadRpc", () => {
+  isolateManagedPool();
+
+  it("sends concurrent identical reads in one scope once and never shares them across clusters", async () => {
+    const devnet = "https://devnet-read-sharing.example.test";
+    const mainnet = "https://mainnet-read-sharing.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet,
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnet,
+    });
+    const held = stubHeldSlotReads({
+      [devnet]: GENESIS_HASH_BY_CLUSTER.devnet,
+      [mainnet]: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+    });
+    const sandboxReads = runInClusterScope(SANDBOX, () =>
+      createClusterReadRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+    const productionReads = runInClusterScope(PRODUCTION, () =>
+      createClusterReadRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+    );
+
+    const first = sandboxReads.getSlot().send();
+    await nextTurn();
+    const joined = sandboxReads.getSlot().send();
+    const otherCluster = productionReads.getSlot().send();
+    await nextTurn();
+    held.releaseSlotReads();
+
+    assert.deepEqual(await Promise.all([first, joined, otherCluster]), [
+      BigInt(SLOT),
+      BigInt(SLOT),
+      BigInt(SLOT),
+    ]);
+    assert.deepEqual(
+      held.calls.filter((call) => call.method === "getSlot"),
+      [slotRead(devnet), slotRead(mainnet)]
+    );
   });
 });
 

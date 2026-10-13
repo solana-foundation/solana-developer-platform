@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { address, getAddressEncoder, none } from "@solana/kit";
 import { AccountState, getTokenEncoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KaminoVaultDirectClient } from "./client";
+import { KAMINO_RPC_REQUEST_TIMEOUT_MS, KaminoVaultDirectClient } from "./client";
 import { readKaminoPositions } from "./sdk";
+import type { KaminoRuntime } from "./types";
 
 /**
  * Position reads, quotes and builds against account bytes recorded from
@@ -280,6 +284,11 @@ function chain(options: {
 
   const fetchStub = vi.fn(async (_url: string, init: { body: string }) => {
     const request = JSON.parse(init.body) as { id: string; method: string; params?: unknown[] };
+    if (request.method === "getGenesisHash") {
+      return new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: request.id, result: GENESIS_HASH_BY_CLUSTER.devnet })
+      );
+    }
     const entry: Sent = { method: request.method, params: request.params ?? [], round: rounds + 1 };
     sent.push(entry);
     await nextRound();
@@ -299,18 +308,31 @@ function chain(options: {
   return sent;
 }
 
-let endpoint = 0;
-const runtime = () => {
-  endpoint += 1;
-  return { cluster: "devnet" as const, rpcUrl: `https://batched-${endpoint}.invalid` };
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_kamino_batched_reads",
+  environment: "sandbox",
 };
+
+let endpoint = 0;
+function useFreshPool(): void {
+  endpoint += 1;
+  vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", `https://batched-${endpoint}.kamino.test`);
+}
+
+function runtime(): KaminoRuntime {
+  useFreshPool();
+  return runInClusterScope(SANDBOX_SCOPE, () => ({
+    cluster: "devnet",
+    rpc: createClusterBoundedRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+    readRpc: createClusterReadRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+  }));
+}
 const accountsOf = (request: Sent | undefined) => request?.params[0] as string[] | undefined;
 
 const ctx = { env: {}, environment: "sandbox" as const };
-const client = (rpcUrl: string) =>
-  new KaminoVaultDirectClient(
-    async () => rpcUrl,
-    (_label, operation) => operation(() => undefined)
+const client = () =>
+  new KaminoVaultDirectClient((_label, operation) =>
+    runInClusterScope(SANDBOX_SCOPE, () => operation(() => undefined))
   );
 const methodCounts = (sent: Sent[]) =>
   Object.fromEntries(
@@ -362,6 +384,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -516,10 +539,10 @@ describe("readKaminoPositions over batched accounts", () => {
 describe("KaminoVaultDirectClient position read request counts", () => {
   it("reads one holding in four requests over three rounds", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     await expect(
-      client(rpcUrl).readVaultPositions(ctx, { owner: HOLDER_A, providerReferences: [VAULT] })
+      client().readVaultPositions(ctx, { owner: HOLDER_A, providerReferences: [VAULT] })
     ).resolves.toEqual([
       expect.objectContaining({
         providerReference: VAULT,
@@ -538,11 +561,11 @@ describe("KaminoVaultDirectClient position read request counts", () => {
 
   it("reads two owners hydrated together in six requests over three rounds", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const [first, second] = await Promise.all(
       [HOLDER_A, HOLDER_B].map((owner) =>
-        client(rpcUrl).readVaultPositions(ctx, { owner, providerReferences: [VAULT] })
+        client().readVaultPositions(ctx, { owner, providerReferences: [VAULT] })
       )
     );
 
@@ -564,10 +587,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
 
   it("quotes a deposit in three requests over three rounds", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const quote = await settled(
-      client(rpcUrl).quoteVaultDeposit(ctx, { providerReference: VAULT, amount: "1" })
+      client().quoteVaultDeposit(ctx, { providerReference: VAULT, amount: "1" })
     );
 
     expect(budget(sent)).toEqual({
@@ -588,10 +611,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
 
   it("quotes a withdrawal in three requests, the global config riding the reserve batch", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const quote = await settled(
-      client(rpcUrl).quoteVaultWithdrawal(ctx, { providerReference: VAULT, shares: "0.5" })
+      client().quoteVaultWithdrawal(ctx, { providerReference: VAULT, shares: "0.5" })
     );
 
     expect(budget(sent)).toEqual({
@@ -612,10 +635,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
 
   it("builds a deposit in two requests, the share ATA riding the reserve batch", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const plan = await settled(
-      client(rpcUrl).buildVaultDeposit(ctx, {
+      client().buildVaultDeposit(ctx, {
         providerReference: VAULT,
         owner: HOLDER_A,
         amount: "1.5",
@@ -663,10 +686,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
 
   it("builds a withdrawal from the share ATA in four requests over three rounds", async () => {
     const sent = chain({});
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const plan = await settled(
-      client(rpcUrl).buildVaultWithdrawal(ctx, {
+      client().buildVaultWithdrawal(ctx, {
         providerReference: VAULT,
         owner: HOLDER_A,
         shares: "0.4",
@@ -689,10 +712,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
     const sent = chain({
       shareAccounts: [{ pubkey: AUX_SHARE_ACCOUNT, owner: HOLDER_A, amount: "2000001" }],
     });
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const plan = await settled(
-      client(rpcUrl).buildVaultWithdrawal(ctx, {
+      client().buildVaultWithdrawal(ctx, {
         providerReference: VAULT,
         owner: HOLDER_A,
         shares: "2.5",
@@ -723,10 +746,10 @@ describe("KaminoVaultDirectClient quote and build request counts", () => {
 
   it("builds a withdrawal from a vault without a lookup table in four requests", async () => {
     const sent = chain({ withoutLookupTable: true });
-    const { rpcUrl } = runtime();
+    useFreshPool();
 
     const plan = await settled(
-      client(rpcUrl).buildVaultWithdrawal(ctx, {
+      client().buildVaultWithdrawal(ctx, {
         providerReference: VAULT,
         owner: HOLDER_A,
         shares: "0.4",

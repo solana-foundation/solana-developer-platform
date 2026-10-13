@@ -10,6 +10,7 @@ import {
   getFarmUserStatePDA,
   getUserSharesInTokensStakedInFarm,
 } from "@kamino-finance/klend-sdk/dist/classes/farm_utils.js";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import { type Address, address, getBase64Encoder, type Instruction } from "@solana/kit";
 import {
@@ -35,7 +36,6 @@ import {
   type KaminoWithdrawQuote,
   type KaminoWithdrawQuoteInput,
 } from "./quotes";
-import { createKaminoReadRpc, createKaminoRpc } from "./rpc";
 import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
   KaminoDepositInput,
@@ -75,8 +75,6 @@ import {
 /** klend-sdk's kit-2 surface, as far as this module needs to name it. */
 // biome-ignore lint/suspicious/noExplicitAny: the kit-2 <-> kit-6.8 seam; see the header.
 type Kit2 = any;
-/** This repo's kit RPC, as `createKaminoRpc` and `createKaminoReadRpc` build it. */
-type KaminoRpc = ReturnType<typeof createKaminoRpc>;
 type AssertActive = () => void;
 const alwaysActive: AssertActive = () => undefined;
 
@@ -104,7 +102,7 @@ function createVaultClient(
   runtime: KaminoRuntime,
   // The transport deadline covers both our direct reads and every nested
   // reserve/farm/vault request klend-sdk performs with this same client.
-  rpc: Kit2 = createKaminoRpc(runtime.rpcUrl)
+  rpc: Kit2 = runtime.rpc
 ) {
   const config = kaminoClusterConfig(runtime.cluster);
 
@@ -124,7 +122,7 @@ async function bindVault(
   runtime: KaminoRuntime,
   vaultAddress: Address,
   assertActive: AssertActive = alwaysActive,
-  reads: { rpc?: KaminoRpc; accounts?: BatchRpc } = {}
+  reads: { rpc?: SolanaRpc; accounts?: BatchRpc } = {}
 ) {
   assertActive();
   const { client, config, rpc } = createVaultClient(runtime, reads.rpc);
@@ -966,7 +964,7 @@ interface ChainReads {
  * vault states in one batch, then the union of their reserves and the owner's
  * farm user states in a second batch, alongside one share-account read per
  * vault. Identical reads from owners hydrated together are one request
- * (`createKaminoReadRpc`).
+ * (`KaminoRuntime.readRpc`).
  *
  * UNSTAKED shares are counted here rather than taken from the SDK, and that is
  * the whole point of the share-account read. `vault.getUserShares` sums its
@@ -993,7 +991,7 @@ export async function readKaminoPositions(
   assertActive: AssertActive = alwaysActive
 ): Promise<Array<PromiseSettledResult<KaminoPosition>>> {
   assertActive();
-  const rpc = createKaminoReadRpc(runtime.rpcUrl);
+  const rpc = runtime.readRpc;
   const settled = new Map<string, PromiseSettledResult<KaminoPosition>>();
   const vaults: Address[] = [];
   for (const reference of new Set(input.vaults)) {
