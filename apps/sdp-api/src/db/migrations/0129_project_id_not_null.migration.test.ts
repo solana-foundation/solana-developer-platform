@@ -24,7 +24,7 @@ type OrganizationScopedTable =
   | "sponsorship_budget_reservations"
   | "payment_subscription_collection_attempts";
 
-interface EarnMovementRow {
+interface EarnRow {
   id: string;
   project_id: string | null;
   environment: string;
@@ -200,10 +200,23 @@ async function idsOf(table: OrganizationScopedTable, organizationId: string): Pr
   return result.rows.map((row) => row.id);
 }
 
-async function earnMovementsOf(organizationId: string): Promise<EarnMovementRow[]> {
-  const result = await client.query<EarnMovementRow>(
+async function earnMovementsOf(organizationId: string): Promise<EarnRow[]> {
+  const result = await client.query<EarnRow>(
     `SELECT id, project_id, environment FROM earn_movements
       WHERE organization_id = $1 ORDER BY id`,
+    [organizationId]
+  );
+  return result.rows;
+}
+
+async function earnLineageOf(organizationId: string): Promise<EarnRow[]> {
+  const result = await client.query<EarnRow>(
+    `SELECT id, project_id, environment FROM earn_provider_wallets WHERE organization_id = $1
+     UNION ALL
+     SELECT id, project_id, environment FROM earn_positions WHERE organization_id = $1
+     UNION ALL
+     SELECT id, project_id, environment FROM earn_movements WHERE organization_id = $1
+     ORDER BY id`,
     [organizationId]
   );
   return result.rows;
@@ -490,5 +503,32 @@ describe("0129 project_id NOT NULL migration", () => {
       },
     ]);
     expect(await appliedProjectIdNotNull()).toEqual([{ version: PROJECT_ID_NOT_NULL_MIGRATION }]);
+  });
+
+  it("refuses to change the environment of a project holding Earn rows, and deleting it nulls their project_id and keeps their environment", async () => {
+    const tenant = await seedOrgProject(client, "0129_earn_project_delete");
+    const productionProjectId = `${tenant.projectId}_production`;
+    await runPostgresMigrations({ databaseUrl, migrationsDir });
+    await seedEarnMovement({
+      id: "emov_0129_project_delete",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      environment: "production",
+      userId: tenant.userId,
+    });
+    await client.query("UPDATE projects SET status = 'archived' WHERE id = $1", [tenant.projectId]);
+
+    await expect(
+      client.query("UPDATE projects SET environment = 'sandbox' WHERE id = $1", [
+        productionProjectId,
+      ])
+    ).rejects.toMatchObject({ code: FK_VIOLATION });
+    await client.query("DELETE FROM projects WHERE id = $1", [productionProjectId]);
+
+    expect(await earnLineageOf(tenant.organizationId)).toEqual([
+      { id: "emov_0129_project_delete", project_id: null, environment: "production" },
+      { id: "epos_emov_0129_project_delete", project_id: null, environment: "production" },
+      { id: "epw_emov_0129_project_delete", project_id: null, environment: "production" },
+    ]);
   });
 });
