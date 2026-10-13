@@ -65,6 +65,7 @@ const quote = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="onramp_quote.py"
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
@@ -141,6 +142,7 @@ const result = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="compliance_action.py" rotate-token-ops
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
@@ -5943,6 +5945,7 @@ Run both requests again for the second contractor, with `"displayName": "Ben Oka
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="payout.ts"
+import { sdp, WALLET_ID } from "./sdp";
 
 type Counterparty = { id: string; status: "active" | "archived" };
 type CounterpartyAccount = { id: string; counterpartyId: string };
