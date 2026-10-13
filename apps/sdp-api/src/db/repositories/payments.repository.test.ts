@@ -1,4 +1,9 @@
-import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import {
+  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  type PaymentTransferStatus,
+  type SdpEnvironment,
+} from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -823,6 +828,28 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       { own: projects.sandbox, other: projects.production },
       (row) => row === null
     );
+  });
+
+  it("lists transfers by status only for the open cluster scope's environment", async () => {
+    await seedTransfer({
+      id: "xfr_by_status_sandbox",
+      status: "processing",
+      projectId: projects.sandbox.id,
+    });
+    await seedTransfer({
+      id: "xfr_by_status_production",
+      status: "processing",
+      projectId: projects.production.id,
+    });
+    const listProcessingIds = async (environment: SdpEnvironment) => {
+      const rows = await runInClusterScope({ projectId: null, environment }, () =>
+        repo.listTransfersByStatus({ statuses: ["processing"], limit: 10 })
+      );
+      return rows.map((row) => row.id);
+    };
+
+    await expect(listProcessingIds("production")).resolves.toEqual(["xfr_by_status_production"]);
+    await expect(listProcessingIds("sandbox")).resolves.toEqual(["xfr_by_status_sandbox"]);
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {

@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -98,12 +100,10 @@ function reservation(
   };
 }
 
-/**
- * Every tick now runs one pass per network, so a mock must answer the way the
- * real repository does: keyed on the network the pass asks about. The devnet
- * fixtures below belong to devnet; mainnet has nothing outstanding and an
- * enabled, untripped policy unless a test says otherwise.
- */
+function inClusterScope(environment: SdpEnvironment, work: () => Promise<void>): Promise<void> {
+  return runInClusterScope({ projectId: null, environment }, work);
+}
+
 function answerGlobalPolicy(
   repository: { getGlobalPolicy: ReturnType<typeof vi.fn> },
   devnetPolicy: SponsorshipBudgetPolicy | null
@@ -159,24 +159,33 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     instructions: [],
   });
   const isBlockhashValid = vi.fn().mockResolvedValue(true);
-  const run = () =>
-    reconcileSponsorshipBudgets({} as Env, {
-      repository,
-      budgetRedis,
-      getTransaction,
-      isBlockhashValid,
-      getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
-      now: () => new Date("2026-08-03T10:05:00.000Z"),
-      sleep: vi.fn().mockResolvedValue(undefined),
-    });
-  return { repository, budgetRedis, getTransaction, isBlockhashValid, run };
+  const getProviderConfiguration = vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION);
+  const runIn = (environment: SdpEnvironment) =>
+    inClusterScope(environment, () =>
+      reconcileSponsorshipBudgets({} as Env, {
+        repository,
+        budgetRedis,
+        getTransaction,
+        isBlockhashValid,
+        getProviderConfiguration,
+        now: () => new Date("2026-08-03T10:05:00.000Z"),
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+    );
+  const run = () => runIn("sandbox");
+  return {
+    repository,
+    budgetRedis,
+    getTransaction,
+    isBlockhashValid,
+    getProviderConfiguration,
+    runIn,
+    run,
+  };
 }
 
 describe("reconcileSponsorshipBudgets", () => {
-  it("runs one pass per network every tick, whether or not a paymaster is wired", async () => {
-    // Reservations outlive configuration: a mainnet reservation made while a
-    // mainnet Kora was wired must still be settled after it is unwired, so no
-    // network is skipped. A network with nothing outstanding exits early.
+  it("finishes a network with nothing outstanding without reading its paymaster", async () => {
     const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(reservation());
     repository.listReconciliationCandidates.mockResolvedValue([]);
     const deps = {
@@ -189,22 +198,20 @@ describe("reconcileSponsorshipBudgets", () => {
       sleep: vi.fn().mockResolvedValue(undefined),
     };
 
-    await reconcileSponsorshipBudgets(
-      { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
-      deps
+    await inClusterScope("sandbox", () =>
+      reconcileSponsorshipBudgets(
+        { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+        deps
+      )
     );
 
     expect(repository.listReconciliationCandidates.mock.calls.map(([network]) => network)).toEqual([
       "devnet",
-      "mainnet",
     ]);
     expect(deps.getProviderConfiguration).not.toHaveBeenCalled();
   });
 
   it("reports a network with outstanding reservations but no readable paymaster as a failed pass", async () => {
-    // Devnet settles normally; mainnet still has a reservation but its Kora is
-    // gone, so its pass fails loudly and counts a config failure instead of
-    // leaving the reservation and its budget locked in silence.
     const { repository, budgetRedis, getTransaction, isBlockhashValid } = harness(reservation());
     repository.listReconciliationCandidates.mockImplementation(async (network: string) =>
       network === "mainnet" ? [reservation({ id: "reservation_mainnet", network: "mainnet" })] : []
@@ -215,17 +222,19 @@ describe("reconcileSponsorshipBudgets", () => {
     });
 
     await expect(
-      reconcileSponsorshipBudgets(
-        { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
-        {
-          repository,
-          budgetRedis,
-          getTransaction,
-          isBlockhashValid,
-          getProviderConfiguration,
-          now: () => new Date("2026-08-03T10:05:00.000Z"),
-          sleep: vi.fn().mockResolvedValue(undefined),
-        }
+      inClusterScope("production", () =>
+        reconcileSponsorshipBudgets(
+          { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+          {
+            repository,
+            budgetRedis,
+            getTransaction,
+            isBlockhashValid,
+            getProviderConfiguration,
+            now: () => new Date("2026-08-03T10:05:00.000Z"),
+            sleep: vi.fn().mockResolvedValue(undefined),
+          }
+        )
       )
     ).rejects.toThrow("Kora security configuration is unavailable");
 
@@ -233,6 +242,35 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("mainnet");
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { environment: "sandbox", network: "devnet", cluster: "devnet" },
+    { environment: "production", network: "mainnet", cluster: "mainnet-beta" },
+  ] as const)(
+    "reconciles only the $network reservations inside a $environment scope",
+    async ({ environment, network, cluster }) => {
+      const { repository, getProviderConfiguration, runIn } = harness(reservation());
+      repository.listReconciliationCandidates.mockImplementation(
+        async (candidateNetwork: string) =>
+          candidateNetwork === "mainnet"
+            ? [reservation({ id: "reservation_mainnet", network: "mainnet" })]
+            : [reservation({ id: "reservation_devnet", network: "devnet" })]
+      );
+
+      await expect(runIn(environment)).resolves.toBeUndefined();
+
+      expect(repository.listReconciliationCandidates.mock.calls.map(([listed]) => listed)).toEqual([
+        network,
+      ]);
+      expect(repository.getGlobalPolicy.mock.calls.map(([policyNetwork]) => policyNetwork)).toEqual(
+        [network]
+      );
+      expect(getProviderConfiguration).toHaveBeenCalledExactlyOnceWith(cluster);
+      expect(
+        repository.settleReservation.mock.calls.map(([reservationId]) => reservationId)
+      ).toEqual([`reservation_${network}`]);
+    }
+  );
 
   it("retries terminal rows whose durable Redis settlement is incomplete", async () => {
     const candidate = reservation({
@@ -422,15 +460,17 @@ describe("reconcileSponsorshipBudgets", () => {
     const getProviderConfiguration = vi.fn().mockRejectedValue(new Error("Kora unavailable"));
     const sleep = vi.fn().mockResolvedValue(undefined);
     await expect(
-      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
-        repository,
-        budgetRedis,
-        getTransaction,
-        isBlockhashValid: vi.fn(),
-        getProviderConfiguration,
-        now: () => new Date("2026-08-03T10:05:00.000Z"),
-        sleep,
-      })
+      inClusterScope("sandbox", () =>
+        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid: vi.fn(),
+          getProviderConfiguration,
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep,
+        })
+      )
     ).rejects.toThrow("configuration is unavailable");
     expect(getProviderConfiguration).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
@@ -451,15 +491,17 @@ describe("reconcileSponsorshipBudgets", () => {
     const { repository, budgetRedis, getTransaction } = harness(candidate);
     repository.recordProviderConfigFailure.mockResolvedValue(3);
     await expect(
-      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
-        repository,
-        budgetRedis,
-        getTransaction,
-        isBlockhashValid: vi.fn(),
-        getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
-        now: () => new Date("2026-08-03T10:05:00.000Z"),
-        sleep: vi.fn().mockResolvedValue(undefined),
-      })
+      inClusterScope("sandbox", () =>
+        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid: vi.fn(),
+          getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        })
+      )
     ).rejects.toThrow("configuration is unavailable");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
       "devnet",
@@ -484,15 +526,17 @@ describe("reconcileSponsorshipBudgets", () => {
       .mockRejectedValueOnce(new Error("Kora unavailable"))
       .mockResolvedValue(PROVIDER_CONFIGURATION);
     await expect(
-      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
-        repository,
-        budgetRedis,
-        getTransaction,
-        isBlockhashValid,
-        getProviderConfiguration,
-        now: () => new Date("2026-08-03T10:05:00.000Z"),
-        sleep: vi.fn().mockResolvedValue(undefined),
-      })
+      inClusterScope("sandbox", () =>
+        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid,
+          getProviderConfiguration,
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        })
+      )
     ).resolves.toBeUndefined();
     expect(getProviderConfiguration).toHaveBeenCalledTimes(2);
     expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
@@ -653,15 +697,17 @@ describe("reconcileSponsorshipBudgets", () => {
     answerGlobalPolicy(repository, trippedPolicy());
 
     await expect(
-      reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
-        repository,
-        budgetRedis,
-        getTransaction,
-        isBlockhashValid: vi.fn(),
-        getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
-        now: () => new Date("2026-08-03T10:05:00.000Z"),
-        sleep: vi.fn().mockResolvedValue(undefined),
-      })
+      inClusterScope("sandbox", () =>
+        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid: vi.fn(),
+          getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        })
+      )
     ).rejects.toThrow("configuration is unavailable");
 
     expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();

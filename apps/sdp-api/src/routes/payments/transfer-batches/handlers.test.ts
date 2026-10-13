@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
@@ -426,6 +427,12 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
   };
 }
 
+function trackSandboxTransfers(): Promise<void> {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    trackPendingTransfers(env)
+  );
+}
+
 describe("payment transfer batches", () => {
   const rpc = installClusterRpcResponder();
 
@@ -715,7 +722,7 @@ describe("payment transfer batches", () => {
             err: { InstructionError: [0, "InsufficientFunds"] },
           }
     );
-    await trackPendingTransfers(env);
+    await trackSandboxTransfers();
 
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -1710,7 +1717,7 @@ describe("payment transfer batches", () => {
         confirmationStatus: "confirmed",
         err: null,
       }));
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
       const settledBatch = await getDb(env)
         .prepare(
           `SELECT status
@@ -1823,7 +1830,7 @@ describe("payment transfer batches", () => {
       confirmationStatus: "confirmed",
       err: { InstructionError: [0, "InsufficientFunds"] },
     }));
-    await trackPendingTransfers(env);
+    await trackSandboxTransfers();
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
@@ -1947,7 +1954,7 @@ describe("payment transfer batches", () => {
             err: { InstructionError: [0, { Custom: 1 }] },
           }
     );
-    await trackPendingTransfers(env);
+    await trackSandboxTransfers();
 
     const batchRow = await getDb(env)
       .prepare("SELECT status, error FROM payment_transfer_batches WHERE id = ?")
@@ -2143,8 +2150,8 @@ describe("payment transfer batches", () => {
         .first<{ count: number | string }>();
       expect(Number(required(orphanRows).count)).toBe(0);
 
-      await trackPendingTransfers(env);
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
+      await trackSandboxTransfers();
 
       const batchRow = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -2277,7 +2284,7 @@ describe("payment transfer batches", () => {
               confirmationStatus: "confirmed",
               err: null,
             }));
-            await runOutsideRequest(() => trackPendingTransfers(env));
+            await runOutsideRequest(trackSandboxTransfers);
           }
           return repository.recomputeTransferBatchStatus(input);
         },
