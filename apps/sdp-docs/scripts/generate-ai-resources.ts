@@ -159,9 +159,11 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, DocsPage>();
 
-  for (const filePath of mdxFiles) {
+  const sources = await Promise.all(mdxFiles.map((filePath) => fs.readFile(filePath, "utf8")));
+
+  for (const [index, filePath] of mdxFiles.entries()) {
     const slug = toPageSlug(filePath);
-    const raw = await fs.readFile(filePath, "utf8");
+    const raw = sources[index] ?? "";
     if (!isPageSourceInChannel(raw, releaseChannel, filePath)) {
       excludedSlugs.add(slug);
       continue;

@@ -116,8 +116,10 @@ async function loadDocPages(): Promise<Map<string, string>> {
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, string>();
 
-  for (const filePath of mdxFiles) {
-    const raw = await fs.readFile(filePath, "utf8");
+  const sources = await Promise.all(mdxFiles.map((filePath) => fs.readFile(filePath, "utf8")));
+
+  for (const [index, filePath] of mdxFiles.entries()) {
+    const raw = sources[index] ?? "";
     if (isPageSourceInChannel(raw, releaseChannel, filePath)) {
       pages.set(toPageSlug(filePath), filePath);
     } else {
@@ -133,14 +135,13 @@ async function loadSectionDirs(): Promise<Set<string>> {
 
   async function walk(dirPath: string): Promise<void> {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const fullPath = path.join(dirPath, entry.name);
+    const subDirs = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(dirPath, entry.name));
+    for (const fullPath of subDirs) {
       dirs.add(path.relative(docsContentDir, fullPath).replace(/\\/g, "/"));
-      await walk(fullPath);
     }
+    await Promise.all(subDirs.map(walk));
   }
 
   await walk(docsContentDir);
@@ -248,23 +249,20 @@ async function probeExternalUrl(
 }
 
 async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]> {
-  const references: LinkReference[] = [];
-
-  for (const [slug, filePath] of pages) {
-    const raw = await fs.readFile(filePath, "utf8");
-    const source = stripMarkdownSource(resolveInChannelBlocks(raw, releaseChannel, filePath));
-
-    for (const link of extractMarkdownLinks(source)) {
-      references.push({
+  const perPage = await Promise.all(
+    [...pages].map(async ([slug, filePath]) => {
+      const raw = await fs.readFile(filePath, "utf8");
+      const source = stripMarkdownSource(resolveInChannelBlocks(raw, releaseChannel, filePath));
+      return extractMarkdownLinks(source).map((link) => ({
         sourcePath: filePath,
         sourceSlug: slug,
         destination: link.destination,
         line: link.line,
-      });
-    }
-  }
+      }));
+    })
+  );
 
-  return references;
+  return perPage.flat();
 }
 
 function findMissingNavEntries(

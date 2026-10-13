@@ -171,9 +171,13 @@ const validateGeneratedTagPages = async ({
     );
   }
 
-  for (const tagPage of tagPages) {
-    const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
-    const actualRows = extractRenderedRows(source);
+  const sources = await Promise.all(
+    tagPages.map((tagPage) => fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"))
+  );
+
+  for (const [index, tagPage] of tagPages.entries()) {
+    const actualRows = extractRenderedRows(sources[index]);
+    const actualRowSet = new Set(actualRows);
     const expectedRows = (groupedOperations.get(tagPage.title) || [])
       .slice()
       .sort((left, right) => {
@@ -191,7 +195,7 @@ const validateGeneratedTagPages = async ({
     }
 
     for (const row of expectedRows) {
-      if (!actualRows.includes(row)) {
+      if (!actualRowSet.has(row)) {
         throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
       }
     }

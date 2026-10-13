@@ -8,7 +8,7 @@ import {
 
 const ISSUANCE_PAGE = "---\nmodule: issuance\ntitle: Mint and Burn\n---\n\nBody\n";
 const SHARED_PAGE = [
-  "Transfers<InChannel module=\"ramps\"> and ramps</InChannel>.",
+  'Transfers<InChannel module="ramps"> and ramps</InChannel>.',
   "",
   '<InChannel module="issuance">',
   "",

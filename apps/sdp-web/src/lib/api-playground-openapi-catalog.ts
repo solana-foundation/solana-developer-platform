@@ -58,14 +58,12 @@ export function filterPlaygroundEndpointsToReleaseChannel(
   endpoints: ApiPlaygroundEndpointConfig[],
   releaseChannel: SdpReleaseChannel
 ): ApiPlaygroundEndpointConfig[] {
-  const modules: readonly string[] = SDP_RELEASE_CHANNELS[releaseChannel];
+  const modules = new Set<string>(SDP_RELEASE_CHANNELS[releaseChannel]);
   return endpoints.filter((endpoint) => {
     // Every API route is filed under a module (route-modules.test.ts), so a path no
     // module owns is not an API route the release channel could refuse.
     const releaseModule = releaseModuleOf(endpoint);
-    return (
-      releaseModule === undefined || releaseModule === "core" || modules.includes(releaseModule)
-    );
+    return releaseModule === undefined || releaseModule === "core" || modules.has(releaseModule);
   });
 }
 
