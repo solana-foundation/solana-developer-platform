@@ -165,10 +165,10 @@ async function seedDvp(status: string): Promise<string> {
         mint_a, mint_b, nonce, token_program_a, token_program_b, amount_a, amount_b,
         expiry_timestamp, user_a_settlement_destination, user_b_settlement_destination,
         escrow_a, escrow_b, status, escrow_a_amount, escrow_b_amount,
-        escrow_a_peak_amount, escrow_b_peak_amount, decimals_a, decimals_b)
+        escrow_a_peak_amount, escrow_b_peak_amount, decimals_a, decimals_b, environment)
      VALUES (?, ?, ?, ?, 'authority', 'user-a', 'user-b', 'mint-a', 'mint-b', '1',
              'program-a', 'program-b', '1', '2', '2000000000', 'destination-a',
-             'destination-b', 'escrow-a', 'escrow-b', ?, '1', '2', '1', '2', 6, 6)`,
+             'destination-b', 'escrow-a', 'escrow-b', ?, '1', '2', '1', '2', 6, 6, 'sandbox')`,
     [tradeId, TEST_ORG.id, PROJECT, `swap-${status}`, status]
   );
   await getDb(env).execute(
@@ -467,11 +467,11 @@ describe("unified_transactions view (postgres)", () => {
           expiry_timestamp, user_a_settlement_destination, user_b_settlement_destination,
           escrow_a, escrow_b, status, escrow_a_amount, escrow_b_amount,
           escrow_a_peak_amount, escrow_b_peak_amount, decimals_a, decimals_b, close_signature,
-          closed_at)
+          closed_at, environment)
        VALUES (?, ?, ?, 'swap-amount-units', 'authority', 'user-a', 'user-b', 'mint-a',
                'mint-b', '1', 'program-a', 'program-b', '1', '2', '2000000000',
                'destination-a', 'destination-b', 'escrow-a', 'escrow-b', 'settled', '0', '0',
-               '1000000', '2000000000', 6, 9, 'close-signature', ?)`,
+               '1000000', '2000000000', 6, 9, 'close-signature', ?, 'sandbox')`,
       [tradeId, TEST_ORG.id, PROJECT, CREATED_AT]
     );
     await getDb(env).execute(
