@@ -2,7 +2,6 @@ import { hashString } from "@sdp/payments/hash";
 import { normalizeOrganizationRole, type OrganizationRole, type Permission } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { isPlausibleEmail } from "@/lib/clerk-token";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { revokePendingInvitationsForUser } from "@/lib/invitations";
 import { created, noContent, success } from "@/lib/response";
@@ -14,7 +13,7 @@ import {
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
-import type { acceptSchema, inviteSchema } from "./schemas";
+import type { inviteSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -498,8 +497,9 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 
   // Create local invitation record for role mapping
   const invitationId = `inv_${crypto.randomUUID()}`;
-  const token = randomBase64Url(32);
-  const tokenHash = await hashString(token);
+  // Clerk's acceptance link is the only way an invitation is redeemed; the
+  // column is NOT NULL UNIQUE, so it still holds a hash nobody can present.
+  const tokenHash = await hashString(randomBase64Url(32));
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
 
   // Clerk's invitation id is stored, not just audited. It is the only key that
@@ -540,7 +540,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     apiKeyId: apiKeyId || undefined,
   });
 
-  const response = {
+  return created(c, {
     invitation: {
       id: invitationId,
       email: normalizedEmail,
@@ -548,224 +548,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       expiresAt,
       clerkInvitationId: clerkInvitation.id,
     },
-    ...(c.env.ENVIRONMENT === "development" && { token }),
-  };
-
-  return created(c, response);
-};
-
-/**
- * The caller's verified email, to match against `invitations.email`. Both
- * stored copies are consulted because either can hold an unsubstituted
- * JWT-template placeholder (see clerk-auth.ts).
- */
-async function resolveActorEmail(c: AppContext, userId: string): Promise<string | null> {
-  const clerkEmail = c.get("clerk")?.email;
-  if (isPlausibleEmail(clerkEmail)) {
-    return clerkEmail.trim().toLowerCase();
-  }
-
-  const row = await getDb(c.env)
-    .prepare(
-      `SELECT u.email AS user_email,
-              (SELECT aui.email
-                 FROM auth_user_identities aui
-                WHERE aui.user_id = u.id AND aui.email IS NOT NULL
-                ORDER BY aui.updated_at DESC NULLS LAST
-                LIMIT 1) AS identity_email
-         FROM users u
-        WHERE u.id = ?`
-    )
-    .bind(userId)
-    .first<{ user_email: string | null; identity_email: string | null }>();
-
-  const email = [row?.user_email, row?.identity_email].find(isPlausibleEmail);
-  return email ? email.trim().toLowerCase() : null;
-}
-
-export const acceptInvitation = async (c: ValidatedBodyContext<typeof acceptSchema>) => {
-  const { userId: actorUserId } = resolveActor(c);
-  const { token, name } = c.req.valid("json");
-
-  // An API key has no identity to be the invitee — letting it redeem a token
-  // would let any key holder enrol somebody else or burn their invitation.
-  if (!actorUserId) {
-    throw new AppError(
-      "FORBIDDEN",
-      "An invitation can only be accepted by the invited user, not by an API key"
-    );
-  }
-
-  const actorEmail = await resolveActorEmail(c, actorUserId);
-  if (!actorEmail) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Your account has no verified email address, so no invitation can be matched to it"
-    );
-  }
-
-  const tokenHash = await hashString(token);
-
-  // Get invitation
-  const invitation = await getDb(c.env)
-    .prepare(
-      `SELECT id, organization_id, email, role, expires_at, status
-     FROM invitations
-     WHERE token_hash = ?`
-    )
-    .bind(tokenHash)
-    .first<{
-      id: string;
-      organization_id: string;
-      email: string;
-      role: string;
-      expires_at: string;
-      status: string;
-    }>();
-
-  if (!invitation) {
-    throw new AppError("INVALID_INVITATION", "Invalid invitation token");
-  }
-
-  if (invitation.status !== "pending") {
-    throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-  }
-
-  if (new Date(invitation.expires_at) < new Date()) {
-    throw new AppError("EXPIRED_INVITATION", "Invitation has expired");
-  }
-
-  // The token proves an invitation was issued, not who is holding it — it
-  // travels by email and the link is forwardable. Anyone else spending it
-  // would enrol the invitee into an organization they never joined.
-  if (invitation.email.trim().toLowerCase() !== actorEmail) {
-    throw new AppError("FORBIDDEN", "This invitation was issued to a different email address");
-  }
-
-  // The conditional claim makes acceptance single-use under concurrency
-  // (exactly one caller flips pending → accepted) and re-tests expiry in the
-  // statement that consumes the row. It must commit together with the
-  // membership write: claiming alone and failing after would burn the token
-  // without granting anything.
-  const claimInvitationAndGrantMembership = () =>
-    getDb(c.env).transaction(async (tx) => {
-      // Fills a gap only — acceptance is not the place to rename an account.
-      // First statement so locks follow admission's order (user, invitation,
-      // member); claiming first and writing the user after can deadlock a
-      // concurrent Clerk sign-in.
-      if (name) {
-        await tx
-          .prepare("UPDATE users SET name = ? WHERE id = ? AND name IS NULL")
-          .bind(name, actorUserId)
-          .run();
-      }
-
-      const claimed = await tx
-        .prepare(
-          `UPDATE invitations
-            SET status = 'accepted', accepted_at = datetime('now')
-          WHERE id = ? AND status = 'pending' AND expires_at > ?`
-        )
-        .bind(invitation.id, new Date().toISOString())
-        .run();
-
-      if (claimed === 0) {
-        throw new AppError("INVALID_INVITATION", "Invitation is no longer valid");
-      }
-
-      // Scoped to the invitation's organization, not the caller's current one,
-      // so a token cannot be redeemed into whatever org the caller is signed
-      // in to. Locked because the row is read and then conditionally written.
-      const existingMembership = await tx
-        .prepare(
-          `SELECT id, role, status
-           FROM organization_members
-          WHERE organization_id = ? AND user_id = ?
-            FOR UPDATE`
-        )
-        .bind(invitation.organization_id, actorUserId)
-        .first<{ id: string; role: string; status: string }>();
-
-      if (existingMembership?.status === "active") {
-        // A concurrent Clerk sign-in can win the insert at its own role; the
-        // invitation is the explicit grant being consumed and must still
-        // deliver. Upgrade only — acceptance never demotes an existing admin
-        // (possibly the last one) over a stale member-role token.
-        if (
-          normalizeOrganizationRole(invitation.role) === "admin" &&
-          normalizeOrganizationRole(existingMembership.role) !== "admin"
-        ) {
-          await tx
-            .prepare("UPDATE organization_members SET role = 'admin' WHERE id = ?")
-            .bind(existingMembership.id)
-            .run();
-        }
-        return;
-      }
-
-      if (existingMembership) {
-        // Reinstating an inactive row is safe only because removal revokes the
-        // member's pending invitations in the same transaction (removeMember;
-        // migration 0056 for older rows) — so a still-pending invitation must
-        // postdate the removal: a deliberate re-invite, not a replayable leftover.
-        await tx
-          .prepare(
-            `UPDATE organization_members
-              SET role = ?, status = 'active'
-            WHERE id = ?`
-          )
-          .bind(normalizeOrganizationRole(invitation.role), existingMembership.id)
-          .run();
-        return;
-      }
-
-      await tx
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(
-          `mem_${crypto.randomUUID()}`,
-          invitation.organization_id,
-          actorUserId,
-          normalizeOrganizationRole(invitation.role)
-        )
-        .run();
-    });
-
-  try {
-    await claimInvitationAndGrantMembership();
-  } catch (error) {
-    // FOR UPDATE cannot lock a row that does not exist yet: a concurrent Clerk
-    // sign-in can insert this membership mid-transaction and the unique
-    // constraint rolls the acceptance back, claim included. That rollback makes
-    // one retry sound — the re-run claims again and sees the row that won.
-    // Retried only when such a row exists; every other failure propagates.
-    const concurrentMembership = await getDb(c.env)
-      .prepare("SELECT id FROM organization_members WHERE organization_id = ? AND user_id = ?")
-      .bind(invitation.organization_id, actorUserId)
-      .first<{ id: string }>();
-
-    if (!concurrentMembership) {
-      throw error;
-    }
-
-    await claimInvitationAndGrantMembership();
-  }
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "accept_invite",
-    resourceType: "invitation",
-    resourceId: invitation.id,
-    metadata: { email: invitation.email, userId: actorUserId },
-    // The org the membership landed in, not the one the caller was signed in to.
-    organizationId: invitation.organization_id,
-    userId: actorUserId,
   });
-
-  return success(c, { success: true });
 };
 
 export const removeMember = async (c: AppContext) => {
@@ -906,7 +689,7 @@ export const revokeInvitation = async (c: AppContext) => {
   }
 
   // Claim the row before calling Clerk. Revoking in Clerk first leaves a window
-  // in which an acceptance consumes the still-pending local token and creates a
+  // in which an acceptance claims the still-pending local row and creates a
   // membership that the local update below never removes, leaving the invitee
   // active against a revoked invitation. A conditional write closes that window.
   const claimed = await getDb(c.env)
@@ -989,18 +772,14 @@ export const revokeInvitation = async (c: AppContext) => {
       // into a live acceptance link recorded locally as revoked.
       //
       // Matched on Clerk's invitation id, so a different invitation raised for
-      // the same address cannot be mistaken for ours and reopen a token that
-      // was in fact revoked.
+      // the same address cannot be mistaken for ours and reopen an invitation
+      // that was in fact revoked.
       //
-      // If the verification itself also fails, the claim stays. The two doors
-      // are not equally ours: a live Clerk invitation provisions a membership
-      // through clerk-auth whatever this row says (`clerk-auth.ts:236` falls
-      // back to the Clerk role when no pending invitation is found), so
-      // reopening the row does not close that one. The local token is the door
-      // we do control, and reopening it would leave a credential we issued
-      // redeemable after a revocation that may well have succeeded. Keeping the
-      // claim gives up nothing we could have protected and keeps that credential
-      // dead. The admin still learns the attempt failed — this path throws.
+      // If the verification itself also fails, the claim stays. The revoked
+      // row is the door we control: admission refuses a join whose newest
+      // invitation is revoked, whatever Clerk's link says, and reopening the
+      // row would admit through an invitation whose revocation may well have
+      // succeeded. The admin still learns the attempt failed — this path throws.
       const stillPendingInClerk = await clerkService
         .listPendingOrganizationInvitations(clerkOrgId)
         .then((entries) => entries.some(matchesClerkInvitation(invitation)))

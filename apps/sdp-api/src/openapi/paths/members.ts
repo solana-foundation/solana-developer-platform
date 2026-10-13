@@ -2,7 +2,6 @@ import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 
 import {
-  acceptInvitationRequestSchema,
   errorResponseSchema,
   invitationIdSchema,
   inviteMemberRequestSchema,
@@ -10,7 +9,7 @@ import {
   memberIdParamSchema,
 } from "../schemas";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
-import { actionSuccessResponse, inviteMemberResponse, listMembersResponse } from "./responses";
+import { inviteMemberResponse, listMembersResponse } from "./responses";
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -60,31 +59,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "post",
-    path: "/v1/members/accept",
-    tags: ["Members"],
-    summary: "Accept invitation",
-    operationId: "acceptInvitation",
-    description:
-      "Accepts an invitation token and activates membership. The caller must be signed in as the invited user: the token identifies the invitation, and the authenticated account's email address is what binds it to a person. An API key cannot accept an invitation, and the membership is always granted in the organization that issued it rather than the one the caller is currently scoped to.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(acceptInvitationRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Invitation accepted",
-        content: jsonContent(actionSuccessResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "delete",
     path: "/v1/members/invitations/{invitationId}",
     tags: ["Members"],
@@ -114,7 +88,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Remove member",
     operationId: "removeMember",
     description:
-      "Removes a member from the organization and revokes their pending invitations, so an unspent invitation token cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
+      "Removes a member from the organization and revokes their pending invitations, so an unspent invitation cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
