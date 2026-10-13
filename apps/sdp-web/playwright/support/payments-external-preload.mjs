@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/security/noSecrets: Public Solana mint/program/account fixture addresses; no private keys. */
 import assert from "node:assert/strict";
-import { getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
+import { getBase64Encoder, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 
 // This preload controls external boundaries only; HTTP authorization and Postgres stay real.
 const database = new URL(process.env.DATABASE_URL);
@@ -46,7 +46,7 @@ globalThis.fetch = async (input, init) => {
     switch (payload.method) {
       case "sendTransaction":
         result = getSignatureFromTransaction(
-          getTransactionDecoder().decode(Buffer.from(payload.params[0], "base64"))
+          getTransactionDecoder().decode(getBase64Encoder().encode(payload.params[0]))
         );
         break;
       case "simulateTransaction":

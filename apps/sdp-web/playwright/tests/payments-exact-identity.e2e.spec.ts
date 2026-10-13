@@ -1,5 +1,6 @@
 /* biome-ignore-all lint/security/noSecrets: Public Solana account and wallet-list fixture paths; no private keys. */
 import { expect, type Page, test } from "@playwright/test";
+import type { MoneygramRampEvent } from "@sdp/types";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "../env";
@@ -423,7 +424,7 @@ test.describe
       );
       expect(quoteResult.status).toBe(200);
       const quote: { quote: { sessionId: string }; transferId: string } = quoteResult.body.data;
-      async function event(body: object) {
+      async function event(body: MoneygramRampEvent) {
         return page.evaluate(
           async ({ body, projectId }) => {
             const response = await fetch("/api/dashboard/payments/ramps/events/moneygram", {

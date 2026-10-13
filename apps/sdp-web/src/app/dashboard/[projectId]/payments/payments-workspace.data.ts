@@ -492,6 +492,8 @@ export async function createTransfer(
   }
 
   const body: unknown = await response.json().catch(() => null);
+  // SAFETY: the API success envelope is TransferEnvelope; the guard below checks
+  // transfer presence and exact wallet identity, preserving the previous field validation.
   const envelope = body as TransferEnvelope | null;
   if (
     !envelope?.data?.transfer ||
