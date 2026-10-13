@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -33,7 +34,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
   CLUSTER_RPC_URLS,
-  installClusterRpcStub,
+  installClusterRpcResponder,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -53,7 +54,6 @@ const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
-const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaServices,
@@ -427,7 +427,7 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -705,20 +705,16 @@ describe("payment transfer batches", () => {
     expect(transferRows.results).toHaveLength(2);
     expect(transferRows.results.every((transfer) => transfer.status === "processing")).toBe(true);
 
-    getSignatureStatusesMock.mockResolvedValueOnce([
-      {
-        slot: 101n,
-        confirmations: 1n,
-        confirmationStatus: "confirmed",
-        err: null,
-      },
-      {
-        slot: 102n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, "InsufficientFunds"] },
-      },
-    ]);
+    rpc.respondSignatureStatuses((signature) =>
+      signature === actualSignature(FIRST_SIGNATURE)
+        ? { slot: 101, confirmations: 1, confirmationStatus: "confirmed", err: null }
+        : {
+            slot: 102,
+            confirmations: 0,
+            confirmationStatus: "confirmed",
+            err: { InstructionError: [0, "InsufficientFunds"] },
+          }
+    );
     await trackPendingTransfers(env);
 
     const settledBatch = await getDb(env)
@@ -1708,14 +1704,12 @@ describe("payment transfer batches", () => {
         },
       ]);
       expect(signAndSendMock).toHaveBeenCalledTimes(1);
-      getSignatureStatusesMock.mockResolvedValueOnce([
-        {
-          slot: 103n,
-          confirmations: 1n,
-          confirmationStatus: "confirmed",
-          err: null,
-        },
-      ]);
+      rpc.respondSignatureStatuses(() => ({
+        slot: 103,
+        confirmations: 1,
+        confirmationStatus: "confirmed",
+        err: null,
+      }));
       await trackPendingTransfers(env);
       const settledBatch = await getDb(env)
         .prepare(
@@ -1823,14 +1817,12 @@ describe("payment transfer batches", () => {
     expect(body.data.transfers).toMatchObject([{ status: "processing" }]);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
-    getSignatureStatusesMock.mockResolvedValueOnce([
-      {
-        slot: 104n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, "InsufficientFunds"] },
-      },
-    ]);
+    rpc.respondSignatureStatuses(() => ({
+      slot: 104,
+      confirmations: 0,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "InsufficientFunds"] },
+    }));
     await trackPendingTransfers(env);
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -1945,18 +1937,15 @@ describe("payment transfer batches", () => {
     expect(body.data.batch.status).toBe("processing");
     expect(body.data.transfers).toHaveLength(2);
 
-    getSignatureStatusesMock.mockImplementation(async (_rpc, signatures) =>
-      signatures.map(
-        (signature): solanaRpc.SignatureStatusInfo =>
-          String(signature) === actualSignature(FIRST_SIGNATURE)
-            ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
-            : {
-                slot: 201n,
-                confirmations: 0n,
-                confirmationStatus: "confirmed",
-                err: { InstructionError: [0, { Custom: 1 }] },
-              }
-      )
+    rpc.respondSignatureStatuses((signature) =>
+      signature === actualSignature(FIRST_SIGNATURE)
+        ? { slot: 200, confirmations: 5, confirmationStatus: "confirmed", err: null }
+        : {
+            slot: 201,
+            confirmations: 0,
+            confirmationStatus: "confirmed",
+            err: { InstructionError: [0, { Custom: 1 }] },
+          }
     );
     await trackPendingTransfers(env);
 
@@ -2274,6 +2263,7 @@ describe("payment transfer batches", () => {
       "createPostgresPaymentTransferBatchesRepository"
     );
     let reconciliationInjected = false;
+    const runOutsideRequest = AsyncLocalStorage.snapshot();
     batchesSpy.mockImplementation((db) => {
       const repository = createBatchesRepository(db);
       return {
@@ -2281,10 +2271,13 @@ describe("payment transfer batches", () => {
         recomputeTransferBatchStatus: async (input) => {
           if (!reconciliationInjected) {
             reconciliationInjected = true;
-            getSignatureStatusesMock.mockResolvedValueOnce([
-              { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
-            ]);
-            await trackPendingTransfers(env);
+            rpc.respondSignatureStatuses(() => ({
+              slot: 300,
+              confirmations: 3,
+              confirmationStatus: "confirmed",
+              err: null,
+            }));
+            await runOutsideRequest(() => trackPendingTransfers(env));
           }
           return repository.recomputeTransferBatchStatus(input);
         },

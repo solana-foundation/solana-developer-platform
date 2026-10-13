@@ -247,3 +247,148 @@ export function tokenAccountsByOwnerResult(
     })),
   };
 }
+
+const jsonRpcRequestWithParamsSchema = jsonRpcRequestSchema.extend({
+  params: z.array(z.unknown()),
+});
+
+const signatureStatusesParamsSchema = z.union([
+  z.tuple([z.array(z.string())]),
+  z.tuple([z.array(z.string()), z.object({ searchTransactionHistory: z.literal(true) })]),
+]);
+
+/** What a responder answers one request with: a `result`, or a JSON-RPC `error` body. */
+export type ClusterRpcReply =
+  | { result: JsonRpcResult }
+  | { error: { code: number; message: string } };
+
+/** One signature's status as a stubbed `getSignatureStatuses` serves it. */
+export interface StubSignatureStatus {
+  slot: number;
+  confirmations: number | null;
+  confirmationStatus: "processed" | "confirmed" | "finalized";
+  err: JsonRpcResult;
+}
+
+/** The signatures one `getSignatureStatuses` request asked a cluster about. */
+export interface SignatureStatusesRead {
+  cluster: SolanaCluster;
+  signatures: readonly string[];
+  searchTransactionHistory: boolean;
+}
+
+export interface ClusterRpcResponder extends ClusterRpcRequestLog {
+  /**
+   * Answer every `method` request of the current test with `reply(request)`, ahead of any
+   * {@link ClusterRpcStub.answer} for it, so a test can answer per cluster, per params or per
+   * attempt, or fail the request.
+   *
+   * @param method - The JSON-RPC method name.
+   * @param reply - Builds the answer from the request.
+   */
+  respond(method: string, reply: (request: ClusterRpcRequest) => ClusterRpcReply): void;
+  /**
+   * Answer every `getSignatureStatuses` request of the current test signature by signature.
+   *
+   * @param verdict - The status of one signature in one request, or null when the cluster has none.
+   */
+  respondSignatureStatuses(
+    verdict: (signature: string, read: SignatureStatusesRead) => StubSignatureStatus | null
+  ): void;
+}
+
+/**
+ * The signatures a `getSignatureStatuses` request carried and whether it searched history.
+ *
+ * @param request - A recorded `getSignatureStatuses` request.
+ * @returns The cluster, signatures and history flag the request carried.
+ * @throws ZodError when the params are not a `getSignatureStatuses` call.
+ */
+export function signatureStatusesRead(request: ClusterRpcRequest): SignatureStatusesRead {
+  const params = signatureStatusesParamsSchema.parse(request.params);
+  return {
+    cluster: request.cluster,
+    signatures: params[0],
+    searchTransactionHistory: params.length === 2,
+  };
+}
+
+/**
+ * A `getSignatureStatuses` answer listing `statuses` in request order.
+ *
+ * @param statuses - Each requested signature's status, or null when the cluster has none.
+ * @returns The reply to return from a {@link ClusterRpcResponder.respond} responder.
+ */
+export function signatureStatusesReply(
+  statuses: readonly (StubSignatureStatus | null)[]
+): ClusterRpcReply {
+  return {
+    result: {
+      context: { slot: 1 },
+      value: statuses.map((status) =>
+        status === null
+          ? null
+          : {
+              slot: status.slot,
+              confirmations: status.confirmations,
+              confirmationStatus: status.confirmationStatus,
+              err: status.err,
+            }
+      ),
+    },
+  };
+}
+
+/**
+ * {@link installClusterRpcStub}, also recording every request with its params and answering the
+ * methods a test registers with {@link ClusterRpcResponder.respond}; methods without a responder
+ * fall through to the stub. Register at `describe` level.
+ *
+ * @returns The current test's calls and requests, and the answer and responder registries.
+ */
+export function installClusterRpcResponder(): ClusterRpcResponder {
+  const stub = installClusterRpcStub();
+  const calls: ClusterRpcCall[] = [];
+  const requests: ClusterRpcRequest[] = [];
+  const replies = new Map<string, (request: ClusterRpcRequest) => ClusterRpcReply>();
+
+  beforeEach(() => {
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (isLoopbackRequest(input)) {
+        return stubbedFetch(input, init);
+      }
+      const { cluster, body } = readJsonRpcFetch(input, init);
+      const { id, method, params } = jsonRpcRequestWithParamsSchema.parse(body);
+      const request: ClusterRpcRequest = { cluster, method, params };
+      calls.push({ cluster, method });
+      requests.push(request);
+      const reply = replies.get(method);
+      if (reply === undefined) {
+        return stubbedFetch(input, init);
+      }
+      return Response.json({ jsonrpc: "2.0", id, ...reply(request) });
+    };
+  });
+
+  afterEach(() => {
+    calls.length = 0;
+    requests.length = 0;
+    replies.clear();
+  });
+
+  return {
+    calls,
+    requests,
+    answer: stub.answer,
+    respond(method, reply) {
+      replies.set(method, reply);
+    },
+    respondSignatureStatuses(verdict) {
+      replies.set("getSignatureStatuses", (request) => {
+        const read = signatureStatusesRead(request);
+        return signatureStatusesReply(read.signatures.map((signature) => verdict(signature, read)));
+      });
+    },
+  };
+}
