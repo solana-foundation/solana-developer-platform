@@ -1,14 +1,24 @@
 "use client";
 
 import { z } from "zod";
+import {
+  type ActionKeyAnswer,
+  answerRetiresKey,
+  keyAnswerFor,
+  storageFingerprint,
+} from "./idempotency";
 
 /**
  * Browser-side durability for a value-moving IDEMPOTENCY KEY, per request
  * fingerprint — the machinery behind every dashboard money flow whose API route
  * requires a key: the Earn vault deposit and exit
- * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`) and Private
+ * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`), Private
  * Channels deposit, withdrawal and member transfer
- * (`integrations/private-channels/value-movement-tracking.ts`). It lives here
+ * (`integrations/private-channels/value-movement-tracking.ts`), Payments
+ * transfers and batches (`payments/transfer{,-batch}-idempotency.ts`) and
+ * `dashboard-fetch`'s per-action keys, and the per-input values of
+ * {@link createActionMemo} (server-action keys, frozen payment-request
+ * expiries). It lives here
  * rather than beside any one of them because they share every rule, and two
  * copies of a double-spend guard is how one drifts.
  *
@@ -253,6 +263,7 @@ function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolea
 export function resetIdempotencyKeyStoresForTests(): void {
   memoryEntries.clear();
   storageDivergedKeys.clear();
+  inFlightEarlierUnanswered.clear();
 }
 
 export interface IdempotencyKeyStore {
@@ -261,8 +272,10 @@ export interface IdempotencyKeyStore {
    * time. Called again for the same fingerprint — a retry, or the same form
    * after a reload — it returns the SAME key, which is what makes the retry a
    * retry.
+   *
+   * @param mint - Makes the value the first time; a fresh UUID by default.
    */
-  claim(fingerprint: string): string;
+  claim(fingerprint: string, mint?: () => string): string;
   /**
    * `claim` paired with the answer to "did this call hand back a live key or
    * mint a fresh one?" — answered from the SAME read that produced the key. A
@@ -295,6 +308,42 @@ export interface IdempotencyKeyStore {
    * only costs a replay, which the API reports honestly as `replayed`.
    */
   release(fingerprint: string): void;
+}
+
+/**
+ * The steps before a keyed send, in `dashboard-fetch`'s order: read whether an
+ * earlier attempt under this key went unanswered, claim the key, and pin it as
+ * sent (uncertain) before the request goes out, so it outlives a reload and
+ * its normal expiry until a definitive answer.
+ *
+ * @returns The key and whether storage took it (`persisted: false` makes a
+ *   money route refuse; see `dashboardRequestUnderOwnKey`), and whether an
+ *   earlier attempt under this key went unanswered, for {@link refusalRetiresKey}.
+ */
+export function beginKeyedSend(
+  store: IdempotencyKeyStore,
+  fingerprint: string
+): { key: { value: string; persisted: boolean }; earlierAttemptUnanswered: boolean } {
+  const earlierAttemptUnanswered = store.isUncertain(fingerprint) || store.isHeld(fingerprint);
+  const value = store.claim(fingerprint);
+  return { key: { value, persisted: store.markUncertain(fingerprint) }, earlierAttemptUnanswered };
+}
+
+/**
+ * Whether a failed keyed send retires its key, on the dashboard-wide rule
+ * (`answerRetiresKey`): a network failure (`null`), a 5xx, a 409 or a 429
+ * keeps it, and so does any refusal once an earlier attempt went unanswered.
+ * A replay of a stored failure is definitive and retires it.
+ *
+ * @param refusal - The HTTP refusal, or `null` when nothing answered.
+ * @param earlierAttemptUnanswered - From {@link beginKeyedSend}.
+ */
+export function refusalRetiresKey(
+  refusal: { status: number; replayed: boolean } | null,
+  earlierAttemptUnanswered: boolean
+): boolean {
+  if (refusal === null) return false;
+  return answerRetiresKey(keyAnswerFor(refusal.status, refusal.replayed), earlierAttemptUnanswered);
 }
 
 type IdempotencyKeyOutcome =
@@ -462,12 +511,15 @@ export function createFloorMemo(storageKey: string): FloorMemo {
 /** One per money flow, each under its own versioned `sessionStorage` key. */
 export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
   /** One read decides reuse and produces the key, so the two can never disagree. */
-  function claimReporting(fingerprint: string): { key: string; wasReused: boolean } {
+  function claimReporting(
+    fingerprint: string,
+    mint: () => string = () => crypto.randomUUID()
+  ): { key: string; wasReused: boolean } {
     const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
     const existing = entries.find((entry) => entry.id === fingerprint);
     if (existing) return { key: existing.value, wasReused: true };
 
-    const key = crypto.randomUUID();
+    const key = mint();
     writeEntries(storeKey, [
       ...entries.filter((entry) => entry.id !== fingerprint),
       { id: fingerprint, value: key, createdAt: Date.now(), uncertain: false },
@@ -476,8 +528,8 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
   }
 
   return {
-    claim(fingerprint) {
-      return claimReporting(fingerprint).key;
+    claim(fingerprint, mint) {
+      return claimReporting(fingerprint, mint).key;
     },
 
     claimReportingReuse(fingerprint) {
@@ -531,4 +583,102 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
       );
     },
   };
+}
+
+/**
+ * Per page: whether an earlier attempt under an action memo's value went
+ * unanswered when its latest send began, for that send's `settle`. Memory is
+ * enough: a reload ends the send, and the next send reads the pinned entry as
+ * unanswered.
+ */
+const inFlightEarlierUnanswered = new Map<string, boolean>();
+
+export interface ActionMemo<T> {
+  /**
+   * The value this input was first sent with, or `build()`'s, remembered.
+   * Call it once per send, right before it.
+   */
+  valueFor(input: string, build: () => T): T;
+  /**
+   * Record what the send's answer settles: the value is forgotten on the
+   * dashboard-wide rule (`answerRetiresKey`), and kept otherwise.
+   */
+  settle(input: string, answer: ActionKeyAnswer): void;
+}
+
+/**
+ * What one user action was first sent with (its Idempotency-Key, or a value
+ * read from the clock), per form input, kept in an {@link IdempotencyKeyStore}
+ * until the action is definitively answered. The same input finds the same
+ * value after an edit and back (A to B to A) and after a reload, so a retry
+ * resends the first attempt's request and the API replays it instead of acting
+ * twice. Inputs are stored as digests ({@link storageFingerprint}), so form
+ * contents never sit in storage; values are stored as JSON.
+ *
+ * Each value is pinned as sent before its send, so it never expires or is
+ * evicted, and a send cut off by a reload reads as unanswered next time. A
+ * store that refuses writes keeps the value in memory for this page, and the
+ * send still goes out: no caller is a money route.
+ *
+ * @param storeKey - The `sessionStorage` key.
+ * @param schema - What a stored value must be; anything else is rebuilt.
+ */
+export function createActionMemo<T>(storeKey: string, schema: z.ZodType<T>): ActionMemo<T> {
+  const store = createIdempotencyKeyStore(storeKey);
+  const decode = (raw: string): { data: T } | null => {
+    try {
+      const parsed = schema.safeParse(JSON.parse(raw));
+      return parsed.success ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    valueFor(input, build) {
+      const fingerprint = storageFingerprint(input);
+      const earlierAttemptUnanswered = store.isUncertain(fingerprint) || store.isHeld(fingerprint);
+      const mint = () => JSON.stringify(build());
+      let remembered = decode(store.claim(fingerprint, mint));
+      if (!remembered) {
+        store.release(fingerprint);
+        remembered = decode(store.claim(fingerprint, mint));
+      }
+      if (!remembered) throw new Error(`${storeKey}: build() made a value its schema rejects`);
+      store.markUncertain(fingerprint);
+      inFlightEarlierUnanswered.set(`${storeKey}:${fingerprint}`, earlierAttemptUnanswered);
+      return remembered.data;
+    },
+
+    settle(input, answer) {
+      const fingerprint = storageFingerprint(input);
+      if (!store.isUncertain(fingerprint)) return;
+      const slot = `${storeKey}:${fingerprint}`;
+      if (answerRetiresKey(answer, inFlightEarlierUnanswered.get(slot) ?? true)) {
+        store.release(fingerprint);
+        inFlightEarlierUnanswered.delete(slot);
+      } else {
+        // This attempt is now an unanswered one for every later answer.
+        store.markUncertain(fingerprint);
+        inFlightEarlierUnanswered.set(slot, true);
+      }
+    },
+  };
+}
+
+/**
+ * What a `dashboardFetch` result settles about its key: a success is
+ * definitive, a refusal is read by `keyAnswerFor`'s status rule, and a
+ * failure below 400 (a followed redirect, a body nobody could read) or no
+ * answer at all is open. A replay mark is not visible here, so a replayed
+ * failure reads as a refusal, which can only keep a value longer.
+ *
+ * @param result - The `dashboardFetch` result.
+ */
+export function dashboardFetchKeyAnswer(result: {
+  ok: boolean;
+  status: number | null;
+}): ActionKeyAnswer {
+  if (result.ok) return "definitive";
+  if (result.status === null || result.status < 400) return "open";
+  return keyAnswerFor(result.status, false);
 }

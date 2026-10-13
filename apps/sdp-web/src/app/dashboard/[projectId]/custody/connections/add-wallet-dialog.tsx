@@ -93,7 +93,7 @@ function AddWalletForm({
       failedTitle: t("DashboardCustody.addWalletFailedTitle"),
       unknownTitle: t("DashboardCustody.addWalletUnknownTitle"),
     });
-    actionKey.settled(input, result.status === "success");
+    actionKey.settled(input, result);
     if (result.status === "success") {
       onClose();
     }

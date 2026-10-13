@@ -2,25 +2,33 @@
 
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+  beginKeyedSend,
+  createIdempotencyKeyStore,
+  refusalRetiresKey,
+  resetIdempotencyKeyStoresForTests,
+} from "@/lib/idempotency-key-store";
+import {
+  type CreateTransferBatchResult,
+  createTransferBatch,
+  TransferBatchRequestError,
+  type Translate,
+} from "./payments-workspace.data";
 
 /**
  * Browser-side durability for the transfer-batch IDEMPOTENCY KEY.
  *
  * `POST /v1/payments/transfer-batches` replays by Idempotency-Key + payload
  * fingerprint, but only when the caller carries a key at all: an unkeyed retry
- * is a brand-new batch that moves the whole amount again. The storage, expiry
- * and hold mechanics live in `payment-idempotency-store.ts`, shared with single
- * transfers; this module owns what makes two batches the same one.
+ * is a brand-new batch that moves the whole amount again. Storage, expiry and
+ * the retire rule are the shared key store's (`lib/idempotency-key-store.ts`),
+ * as for single transfers; this module owns what makes two batches the same one.
  */
 
-const store = createPaymentIdempotencyStore("sdp:payments:transfer-batch:idempotency:v1");
+const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
-  store.resetForTests();
+  resetIdempotencyKeyStoresForTests();
 }
 
 /**
@@ -82,14 +90,43 @@ export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
 }
 
 /**
- * Retire a key once the API has answered for it: a recorded batch, or a 4xx
- * refusal other than a key conflict. Never on a 5xx or a network failure.
+ * Retire a key once the API has answered for it: a recorded batch, or a
+ * definitive refusal ({@link sendTransferBatchUnderKey}).
  */
 export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
 }
 
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferBatchKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
+/**
+ * Sends one batch under the key that makes a retry a retry: claimed and pinned
+ * before the request goes out (a batch whose key storage refused is not sent;
+ * see `createTransferBatch`), and retired only on the dashboard-wide rule. A
+ * recorded batch retires it; a network failure, a 5xx, a 409 or a 429 keeps
+ * it, and so does any refusal once an earlier attempt went unanswered, since
+ * that attempt may have paid every recipient.
+ *
+ * @param request - The batch, in canonical form.
+ * @param t - Translator, for the API's refusal message.
+ * @returns The recorded batch.
+ */
+export async function sendTransferBatchUnderKey(
+  request: PaymentTransferBatchRequest,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const fingerprint = transferBatchRequestFingerprint(request);
+  const { key, earlierAttemptUnanswered } = beginKeyedSend(store, fingerprint);
+  let result: CreateTransferBatchResult;
+  try {
+    result = await createTransferBatch(request, t, key);
+  } catch (error) {
+    const refusal = error instanceof TransferBatchRequestError ? error : null;
+    if (refusalRetiresKey(refusal, earlierAttemptUnanswered)) {
+      releaseTransferBatchIdempotencyKey(fingerprint);
+    }
+    throw error;
+  }
+  // The batch row exists, so the key is spent: the next identical batch is a
+  // new intent rather than a retry of this one.
+  releaseTransferBatchIdempotencyKey(fingerprint);
+  return result;
 }

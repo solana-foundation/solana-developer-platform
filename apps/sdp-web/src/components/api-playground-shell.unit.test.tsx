@@ -74,6 +74,66 @@ describe("ApiPlaygroundShell", () => {
     expect(proxyPath).toBe("/api/playground/execute");
     expect(new Headers(proxyInit.headers).get("x-project-id")).toBe(PRODUCTION_PROJECT.id);
   });
+
+  it("sends a new Idempotency-Key with each Send of a POST, and none with a GET", async () => {
+    storeApiKeySecret({
+      value: ["sk", "test", "idempotency", "fixture"].join("_"),
+      apiKeyId: "key-test",
+    });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({ ok: true, status: 201, statusText: "Created", body: {}, headers: {} }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const postEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-request",
+      method: "POST",
+    };
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          apiKeyId="key-test"
+          endpoints={[postEndpoint]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      (JSON.parse(String(fetchMock.mock.calls[call][1].body)) as { idempotencyKey?: string })
+        .idempotencyKey;
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        (view.getByRole("button", { name: "Run request" }) as HTMLButtonElement).disabled
+      ).toBe(false)
+    );
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const first = sentKey(0);
+    const second = sentKey(1);
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
+
+    cleanup();
+    fetchMock.mockClear();
+    const getView = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-test" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    fireEvent.click(getView.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(sentKey(0)).toBeUndefined();
+  });
 });
 
 describe("ApiPlaygroundShell refresh layout", () => {

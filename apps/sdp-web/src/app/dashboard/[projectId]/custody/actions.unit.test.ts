@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SdpApiResponseError } from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
@@ -59,7 +60,7 @@ describe("initializeCustodySetupAction", () => {
       walletForm({ provider: "privy", walletLabel: "Treasury" })
     );
 
-    expect(result).toEqual({ status: "provider_already_set_up" });
+    expect(result).toEqual({ status: "provider_already_set_up", keyAnswer: "open" });
     expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
       "/v1/wallets/initialize",
       expect.anything()
@@ -96,6 +97,24 @@ describe("createCustodySetupWalletAction", () => {
 
     expect(client.fetch.mock.calls[0]?.[1]?.headers).toEqual({ "Idempotency-Key": "browser-key" });
     expect(requestBody(client)).not.toHaveProperty("idempotencyKey");
+  });
+
+  // The browser cannot see Idempotent-Replayed through a server action, so the
+  // action says what each failure settles about the key it forwarded.
+  it.each([
+    ["a replayed stored failure", new SdpApiResponseError(422, "{}", true), "definitive"],
+    ["a fresh refusal", new SdpApiResponseError(422, "{}"), "refused"],
+    ["a conflict", new SdpApiResponseError(409, "{}"), "open"],
+    ["a server error", new SdpApiResponseError(502, "{}"), "open"],
+    ["a transport failure", new TypeError("fetch failed"), "open"],
+  ] as const)("reports %s as %s for the key", async (_name, error, keyAnswer) => {
+    client.fetch.mockRejectedValue(error);
+
+    const result = await createCustodySetupWalletAction(
+      walletForm({ provider: "privy", idempotencyKey: "browser-key" })
+    );
+
+    expect(result).toMatchObject({ status: "error", keyAnswer });
   });
 
   // Sending both would leave the API to reconcile a connection against a

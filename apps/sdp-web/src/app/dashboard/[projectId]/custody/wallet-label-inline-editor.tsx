@@ -56,7 +56,7 @@ export function WalletLabelInlineEditor({
         })
       );
 
-      actionKey.settled(input, result.status === "success");
+      actionKey.settled(input, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

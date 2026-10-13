@@ -33,6 +33,7 @@ import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
+import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const EXPIRY_OPTIONS = [
@@ -434,7 +435,13 @@ function PaymentRequestCreateForm({
     setSubmitting(true);
     let created: PaymentRequest | undefined;
     try {
-      const expiresAtOnSubmit = resolveExpiryDate(expiry);
+      const input = JSON.stringify([
+        wallet.walletId,
+        token.mintAddress,
+        amount.trim(),
+        contact?.id ?? null,
+        expiry,
+      ]);
       const res = await dashboardFetch<{ data: PaymentRequest }>(
         "/api/dashboard/payments/requests",
         {
@@ -444,10 +451,13 @@ function PaymentRequestCreateForm({
             token: token.mintAddress,
             amount: amount.trim(),
             counterpartyId: contact ? contact.id : null,
-            expiresAt: expiresAtOnSubmit ? expiresAtOnSubmit.toISOString() : null,
+            // Read from the clock once per action, so a retry resends the same
+            // body under the first attempt's key.
+            expiresAt: expiresAtForAction(input, () => resolveExpiryDate(expiry)),
           },
         }
       );
+      settleExpiresAt(input, res);
       if (!res.ok) {
         toast.error(res.error);
         return;

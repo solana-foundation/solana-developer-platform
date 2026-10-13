@@ -14,6 +14,7 @@ import {
   requestProjectHref,
   requestProjectId,
   SdpApiResponseError,
+  sdpApiKeyAnswer,
 } from "./sdp-api";
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -212,6 +213,27 @@ describe("server-side Idempotency-Key (HOO-1918)", () => {
       new Headers(init?.headers).get("Idempotency-Key")
     );
     expect(keys).toEqual([null, "browser-key"]);
+  });
+
+  // A server action hides the upstream headers from the browser, so the error
+  // carries the replay mark for the action to report.
+  it("marks a replayed failure so the action can retire the browser's key", async () => {
+    setApiRequest(SANDBOX_PROJECT.id);
+    vi.stubGlobal(
+      "fetch",
+      apiFetchMock(
+        () => new Response("{}", { status: 422, headers: { "Idempotent-Replayed": "true" } })
+      )
+    );
+    const client = await createSdpApiClient();
+
+    const failure = await client
+      .fetch("/v1/wallets", { method: "POST", body: "{}" })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({ status: 422, replayed: true });
+    expect(sdpApiKeyAnswer(failure)).toBe("definitive");
+    expect(sdpApiKeyAnswer(new SdpApiResponseError(422, "{}"))).toBe("refused");
   });
 });
 

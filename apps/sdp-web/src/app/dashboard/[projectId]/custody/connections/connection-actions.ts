@@ -4,8 +4,13 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
-import { actionIdempotencyHeaders } from "@/lib/idempotency";
-import { createSdpApiClient, extractSdpApiError, requestProjectHref } from "@/lib/sdp-api";
+import { type ActionKeyAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
+import {
+  createSdpApiClient,
+  extractSdpApiError,
+  requestProjectHref,
+  sdpApiKeyAnswer,
+} from "@/lib/sdp-api";
 import type { CustodyOutcomeKind } from "./verification-outcome";
 import { resolveHttpOutcome, resolveRotationOutcome } from "./verification-outcome";
 
@@ -19,8 +24,8 @@ import { resolveHttpOutcome, resolveRotationOutcome } from "./verification-outco
  */
 export type CustodyActionResult =
   | { status: "success" }
-  | { status: "failed"; kind: CustodyOutcomeKind; message: string }
-  | { status: "unknown"; message: string };
+  | { status: "failed"; kind: CustodyOutcomeKind; message: string; keyAnswer?: ActionKeyAnswer }
+  | { status: "unknown"; message: string; keyAnswer?: ActionKeyAnswer };
 
 interface RotationResponse {
   providerCredential: { id: string };
@@ -46,20 +51,24 @@ async function revalidateCustody(provider: CustodyProvider, connectionId?: strin
  * Classify a thrown request. Mirrors the server-side split in `byok-actions.ts`:
  * under 500 and not 408/429, the server answered and nothing committed;
  * anything else — including no response at all — leaves the outcome open.
+ * `keyAnswer` tells a browser-keyed action what the answer settles about its
+ * key (`useActionIdempotencyKey`), replays included.
  */
 function classifyThrown(
   error: unknown,
   fallback: string
 ): Exclude<CustodyActionResult, { status: "success" }> {
   const { status, message } = extractSdpApiError(error);
+  const keyAnswer = sdpApiKeyAnswer(error);
   if (status !== null && status < 500 && status !== 408 && status !== 429) {
     return {
       status: "failed",
       kind: resolveHttpOutcome(status).kind,
       message: message || fallback,
+      keyAnswer,
     };
   }
-  return { status: "unknown", message: message || fallback };
+  return { status: "unknown", message: message || fallback, keyAnswer };
 }
 
 /**

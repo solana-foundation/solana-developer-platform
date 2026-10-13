@@ -630,8 +630,12 @@ export function WalletSetupFlow({
 
     startTransition(async () => {
       try {
-        const result = await formAction(formData);
-        setupKey.settled(input, result.status === "success");
+        const result = await formAction(formData).catch((error: unknown) => {
+          // The call may have reached the server; the key stays for the retry.
+          setupKey.settled(input, { status: "error" });
+          throw error;
+        });
+        setupKey.settled(input, result);
 
         switch (result.status) {
           case "error":
