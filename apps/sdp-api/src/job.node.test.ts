@@ -445,7 +445,7 @@ describe("runCronJob", () => {
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(pollRingsIndexing).toHaveBeenCalledWith(env);
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
     // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
     expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledExactlyOnceWith(env);
@@ -504,7 +504,7 @@ describe("runCronJob", () => {
         expect(trackPendingDeposits).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-        expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+        expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
         expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
@@ -562,7 +562,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("ramp inbox down");
 
     expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -571,7 +571,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("photon down");
 
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -814,7 +814,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("sponsorship down");
 
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
@@ -836,7 +836,7 @@ describe("runCronJob", () => {
     });
 
     expect(trackPendingWithdrawals).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
   });
 
   it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {

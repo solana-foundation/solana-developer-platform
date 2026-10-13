@@ -9,6 +9,7 @@ import {
 } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db";
+import { runInJobClusterScope } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -341,17 +342,23 @@ describe("Unified earn movement ledger (postgres)", () => {
       }
 
       const claimIds = async (limit: number) =>
-        (await ledger.claimUnvaluedKaminoDeposits({ limit, retryBefore })).map((row) => row.id);
+        (
+          await runInJobClusterScope("sandbox", () =>
+            ledger.claimUnvaluedKaminoDeposits({ limit, retryBefore })
+          )
+        ).map((row) => row.id);
       expect(new Set(await claimIds(2))).toEqual(new Set(untouched));
       expect(new Set(await claimIds(2))).toEqual(new Set(retried.slice(0, 2)));
       expect(await claimIds(2)).toEqual(retried.slice(2));
       expect(await claimIds(2)).toEqual([]);
       // Failed observations are delayed, never discarded or treated as valued.
       expect(
-        await ledger.claimUnvaluedKaminoDeposits({
-          limit: 5,
-          retryBefore: new Date(Date.now() + 1_000).toISOString(),
-        })
+        await runInJobClusterScope("sandbox", () =>
+          ledger.claimUnvaluedKaminoDeposits({
+            limit: 5,
+            retryBefore: new Date(Date.now() + 1_000).toISOString(),
+          })
+        )
       ).toHaveLength(5);
     });
 
@@ -483,10 +490,12 @@ describe("Unified earn movement ledger (postgres)", () => {
           shares_out: null,
         });
         expect(
-          await migratedLedger.claimUnvaluedKaminoDeposits({
-            limit: 1,
-            retryBefore: new Date().toISOString(),
-          })
+          await runInJobClusterScope("sandbox", () =>
+            migratedLedger.claimUnvaluedKaminoDeposits({
+              limit: 1,
+              retryBefore: new Date().toISOString(),
+            })
+          )
         ).toHaveLength(1);
         expect(
           await migratedLedger.recordKaminoDepositReceipt({
@@ -1271,6 +1280,23 @@ describe("Unified earn movement ledger (postgres)", () => {
       await getDb(env).prepare("DELETE FROM earn_movements").run();
     });
 
+    it("claims only the open cluster scope's environment", async () => {
+      const sandboxMovement = await ledger.createSignedVaultDepositIntent(intent());
+      const productionMovement = await ledger.createSignedVaultDepositIntent(
+        intent({ projectId: `${PROJECT}_production`, environment: "production" })
+      );
+
+      const productionClaim = await runInJobClusterScope("production", () =>
+        ledger.claimUnsettledVaultMovements(4)
+      );
+      const sandboxClaim = await runInJobClusterScope("sandbox", () =>
+        ledger.claimUnsettledVaultMovements(4)
+      );
+
+      expect(productionClaim.map((row) => row.id)).toEqual([productionMovement.movement.id]);
+      expect(sandboxClaim.map((row) => row.id)).toEqual([sandboxMovement.movement.id]);
+    });
+
     it("prioritizes blockhash-bound work over older confirmed rows", async () => {
       const db = getDb(env);
       const confirmed = await ledger.createSignedVaultDepositIntent(intent());
@@ -1294,8 +1320,9 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind("1900-01-02T00:00:00.000Z", requested.movement.id)
         .run();
 
-      const queued =
-        await createPostgresEarnMovementsRepository(db).claimUnsettledVaultMovements(1);
+      const queued = await runInJobClusterScope("sandbox", () =>
+        createPostgresEarnMovementsRepository(db).claimUnsettledVaultMovements(1)
+      );
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({ id: requested.movement.id, status: "requested" });
     });
@@ -1322,7 +1349,9 @@ describe("Unified earn movement ledger (postgres)", () => {
       // the blockhash-sensitive queue and one is guaranteed to finalization.
       // The former absolute priority returned four requested rows forever.
       const repository = createPostgresEarnMovementsRepository(db);
-      const queued = await repository.claimUnsettledVaultMovements(4);
+      const queued = await runInJobClusterScope("sandbox", () =>
+        repository.claimUnsettledVaultMovements(4)
+      );
       expect(queued).toHaveLength(4);
       expect(queued.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(queued).toContainEqual(expect.objectContaining({ id: confirmed.movement.id }));
@@ -1360,12 +1389,16 @@ describe("Unified earn movement ledger (postgres)", () => {
         movementId: older.movement.id,
         organizationId: ORG,
       });
-      const first = await repository.claimUnsettledVaultMovements(4);
+      const first = await runInJobClusterScope("sandbox", () =>
+        repository.claimUnsettledVaultMovements(4)
+      );
       expect(first.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(first.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: older.movement.id }),
       ]);
-      const second = await repository.claimUnsettledVaultMovements(4);
+      const second = await runInJobClusterScope("sandbox", () =>
+        repository.claimUnsettledVaultMovements(4)
+      );
       expect(second.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(second.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: newer.movement.id }),
@@ -1381,7 +1414,9 @@ describe("Unified earn movement ledger (postgres)", () => {
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:02:00.000Z",
       });
-      const third = await repository.claimUnsettledVaultMovements(4);
+      const third = await runInJobClusterScope("sandbox", () =>
+        repository.claimUnsettledVaultMovements(4)
+      );
       expect(third.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: older.movement.id }),
       ]);

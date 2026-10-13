@@ -322,10 +322,10 @@ async function buildComplianceProbe(
   signerAssets: SignerAssets,
   destinationOwner: Address
 ): Promise<ComplianceProbe> {
-  const reader = createWisdomTreeChainReader(SURFPOOL_RPC_URL);
+  const reader = createWisdomTreeChainReader(createSolanaRpc(SURFPOOL_RPC_URL));
   const plan = await buildWisdomTreeRedemptionPlan(
     reader,
-    { cluster: "mainnet-beta", rpcUrl: SURFPOOL_RPC_URL },
+    { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
     {
       fund: WTGXX,
       owner: signer,
@@ -515,7 +515,7 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
         throw new Error("WisdomTree Connect returned the signer itself as an on-receipt wallet");
       }
 
-      const reader = createWisdomTreeChainReader(SURFPOOL_RPC_URL);
+      const reader = createWisdomTreeChainReader(createSolanaRpc(SURFPOOL_RPC_URL));
       const freshRecipient = await generateKeyPairSigner();
       const complianceProbe = await buildComplianceProbe(
         signer,
@@ -538,7 +538,7 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
       const [deposit, redemption] = await Promise.all([
         buildWisdomTreeDepositPlan(
           reader,
-          { cluster: "mainnet-beta", rpcUrl: SURFPOOL_RPC_URL },
+          { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
           {
             fund: WTGXX,
             owner: signer,
@@ -550,7 +550,7 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
         ),
         buildWisdomTreeRedemptionPlan(
           reader,
-          { cluster: "mainnet-beta", rpcUrl: SURFPOOL_RPC_URL },
+          { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
           {
             fund: WTGXX,
             owner: signer,

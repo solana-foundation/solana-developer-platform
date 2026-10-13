@@ -3,7 +3,7 @@ import {
   WISDOMTREE_FUNDS,
   WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS,
 } from "@sdp/types/wisdomtree-programs";
-import { address, createNoopSigner } from "@solana/kit";
+import { address, createNoopSigner, createSolanaRpc } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import { SdpWisdomTreeError } from "./errors";
@@ -21,7 +21,10 @@ const SPL_TOKEN = SPL_TOKEN_PROGRAMS["spl-token"];
 const OWNER = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 
-const runtime: WisdomTreeRuntime = { cluster: "mainnet-beta", rpcUrl: "http://offline.invalid" };
+const runtime: WisdomTreeRuntime = {
+  cluster: "mainnet-beta",
+  rpc: createSolanaRpc("http://offline.invalid"),
+};
 
 async function ata(owner: string, mint: string, tokenProgram: string): Promise<string> {
   const [derived] = await findAssociatedTokenPda({

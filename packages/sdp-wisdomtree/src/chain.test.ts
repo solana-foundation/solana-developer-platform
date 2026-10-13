@@ -1,10 +1,9 @@
-import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
   WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS,
 } from "@sdp/types/wisdomtree-programs";
-import { address, createNoopSigner, getAddressEncoder } from "@solana/kit";
+import { address, createNoopSigner, createSolanaRpc, getAddressEncoder } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWisdomTreeChainReader } from "./chain";
@@ -26,7 +25,8 @@ const OWNER = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 const RPC_URL = "http://rpc.invalid";
 const SLOT = 7;
-const runtime: WisdomTreeRuntime = { cluster: "mainnet-beta", rpcUrl: RPC_URL };
+const rpc = createSolanaRpc(RPC_URL);
+const runtime: WisdomTreeRuntime = { cluster: "mainnet-beta", rpc };
 const encoder = getAddressEncoder();
 
 type Accounts = Record<string, { owner: string; data: Uint8Array }>;
@@ -53,14 +53,11 @@ function answer(accounts: Accounts, init: RequestInit | undefined): Response {
   return Response.json({ jsonrpc: "2.0", id: body.id, result });
 }
 
-/** Serves `accounts` to kit through a stubbed global fetch; `failures` reject the first calls. */
-function stubChain(accounts: Accounts, failures: Error[] = []) {
-  const queued = [...failures];
-  const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-    const failure = queued.shift();
-    if (failure) throw failure;
-    return answer(accounts, init);
-  });
+/** Serves `accounts` to kit through a stubbed global fetch. */
+function stubChain(accounts: Accounts) {
+  const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+    answer(accounts, init)
+  );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -69,12 +66,6 @@ function sentBodies(fetchMock: ReturnType<typeof stubChain>) {
   return fetchMock.mock.calls.map(
     ([, init]) => JSON.parse(String(init?.body)) as { method: string; params: unknown[] }
   );
-}
-
-function socketDeath(): TypeError {
-  return new TypeError("fetch failed", {
-    cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
-  });
 }
 
 async function ata(owner: string, mint: string, tokenProgram: string): Promise<string> {
@@ -102,7 +93,7 @@ describe("createWisdomTreeChainReader", () => {
   it("reads several accounts in one getMultipleAccounts, in the order asked", async () => {
     const fetchMock = stubChain({ [OWNER]: { owner: TOKEN_2022, data: Uint8Array.from([1, 2]) } });
     await expect(
-      createWisdomTreeChainReader(RPC_URL).getAccounts([address(OWNER), address(ON_RECEIPT)])
+      createWisdomTreeChainReader(rpc).getAccounts([address(OWNER), address(ON_RECEIPT)])
     ).resolves.toEqual([{ owner: TOKEN_2022, data: Uint8Array.from([1, 2]) }, null]);
     expect(sentBodies(fetchMock)).toEqual([
       expect.objectContaining({
@@ -112,37 +103,18 @@ describe("createWisdomTreeChainReader", () => {
     ]);
   });
 
-  it("re-sends a read once when its pooled socket died before any response", async () => {
-    const fetchMock = stubChain({ [OWNER]: { owner: TOKEN_2022, data: Uint8Array.from([3]) } }, [
-      socketDeath(),
-    ]);
-    await expect(createWisdomTreeChainReader(RPC_URL).getAccount(address(OWNER))).resolves.toEqual({
-      owner: TOKEN_2022,
-      data: Uint8Array.from([3]),
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the minimum-slot scope on the re-sent read", async () => {
-    const fetchMock = stubChain({}, [socketDeath()]);
-    await withMinimumRpcSlot(SLOT, () =>
-      createWisdomTreeChainReader(RPC_URL).getAccounts([address(OWNER)])
+  it("reports a failed read as an unreadable vault", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+        });
+      })
     );
-    expect(sentBodies(fetchMock).map((body) => body.params[1])).toEqual([
-      expect.objectContaining({ commitment: "confirmed", minContextSlot: SLOT }),
-      expect.objectContaining({ commitment: "confirmed", minContextSlot: SLOT }),
-    ]);
-  });
-
-  it("does not re-send any other transport failure", async () => {
-    const refused = new TypeError("fetch failed", {
-      cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
-    });
-    const fetchMock = stubChain({}, [refused]);
-    await expect(
-      createWisdomTreeChainReader(RPC_URL).getAccount(address(OWNER))
-    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(createWisdomTreeChainReader(rpc).getAccount(address(OWNER))).rejects.toMatchObject(
+      { code: "VAULT_UNREADABLE" }
+    );
   });
 });
 
@@ -151,7 +123,7 @@ describe("WisdomTree builds through the real chain reader", () => {
     const fetchMock = stubChain({
       [WTGXX.mint]: { owner: TOKEN_2022, data: wtgxxMintAccountData() },
     });
-    await buildWisdomTreeDepositPlan(createWisdomTreeChainReader(RPC_URL), runtime, {
+    await buildWisdomTreeDepositPlan(createWisdomTreeChainReader(rpc), runtime, {
       fund: WTGXX,
       owner: createNoopSigner(address(OWNER)),
       onReceiptWallet: address(ON_RECEIPT),
@@ -182,17 +154,13 @@ describe("WisdomTree builds through the real chain reader", () => {
         data: fundAccount(ON_RECEIPT),
       },
     });
-    const plan = await buildWisdomTreeRedemptionPlan(
-      createWisdomTreeChainReader(RPC_URL),
-      runtime,
-      {
-        fund: WTGXX,
-        owner: createNoopSigner(address(OWNER)),
-        onReceiptWallet: address(ON_RECEIPT),
-        depositMint: address(USDC),
-        shares: "1",
-      }
-    );
+    const plan = await buildWisdomTreeRedemptionPlan(createWisdomTreeChainReader(rpc), runtime, {
+      fund: WTGXX,
+      owner: createNoopSigner(address(OWNER)),
+      onReceiptWallet: address(ON_RECEIPT),
+      depositMint: address(USDC),
+      shares: "1",
+    });
     expect(plan.instructions.at(-1)?.accounts).toHaveLength(8);
     expect(sentBodies(fetchMock).map((body) => body.method)).toEqual(["getMultipleAccounts"]);
   });
