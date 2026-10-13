@@ -1,4 +1,0 @@
-export const MONEYGRAM_SDK_VERSION =
-  "c3ae724777935c9b2d5ed8b87aa465988915a53283efb56b254a148ec5777436";
-
-export const MONEYGRAM_SDK_URL = `/api/vendor/moneygram/sdk/${MONEYGRAM_SDK_VERSION}`;

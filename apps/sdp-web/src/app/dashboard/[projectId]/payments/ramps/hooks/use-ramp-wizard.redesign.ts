@@ -7,11 +7,7 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
-import type {
-  CollectedFieldData,
-  PayoutRequirementAccount,
-  RampDirection,
-} from "@sdp/types/ramp-requirements";
+import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -56,9 +52,6 @@ export interface RampQuotePayloadArgs {
   selectedRampPair: SelectedRampPair;
   assetRail: CryptoRailId;
   collectedData: CollectedFieldData;
-  selectedProviderAccountId: string | null;
-  /** Explicitly picked saved payout account; its corridor overrides the collected destination country. */
-  selectedPayoutAccount: PayoutRequirementAccount | null;
   rampsMemo: Record<string, string>;
 }
 
@@ -298,9 +291,7 @@ export function useRampWizard<TId extends string>(
 
   const isLastStep = stepIndex === steps.length - 1;
 
-  const createQuoteForCurrentSelection = async (
-    providerAccountId: string | null
-  ): Promise<{
+  const createQuoteForCurrentSelection = async (): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
@@ -316,26 +307,12 @@ export function useRampWizard<TId extends string>(
         selectedRampPair,
         assetRail: selectedRampPair.assetRail,
         collectedData: requirements.collectedData,
-        selectedProviderAccountId: providerAccountId,
-        selectedPayoutAccount: requirements.selectedPayoutAccount,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
       t
     );
     setCreatedQuote(created);
     return created;
-  };
-
-  const refreshQuote = async () => {
-    try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
-    } catch (error) {
-      toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
-        description:
-          error instanceof Error ? error.message : t("DashboardPayments.ramps.quoteRequestFailed"),
-        position: "bottom-right",
-      });
-    }
   };
 
   // Only auto-fire the quote while the user sits on the transaction stage —
@@ -348,10 +325,10 @@ export function useRampWizard<TId extends string>(
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const quoteCreationAttempted = useRef(false);
-  const runQuoteCreation = async (providerAccountId: string | null) => {
+  const runQuoteCreation = async () => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(providerAccountId);
+      await createQuoteForCurrentSelection();
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
@@ -359,13 +336,13 @@ export function useRampWizard<TId extends string>(
       setQuoteCreationRetrying(false);
     }
   };
-  const retryQuoteCreation = () => void runQuoteCreation(requirements.selectedProviderAccountId);
-  const maybeCreateQuote = (providerAccountId: string | null) => {
+  const retryQuoteCreation = () => void runQuoteCreation();
+  const maybeCreateQuote = () => {
     if (quoteCreationAttempted.current) {
       return;
     }
     quoteCreationAttempted.current = true;
-    void runQuoteCreation(providerAccountId);
+    void runQuoteCreation();
   };
 
   // Readiness observed by the status poll while the user sits on the transaction
@@ -374,14 +351,13 @@ export function useRampWizard<TId extends string>(
   // at most one quote per wizard instance. A genuine network side effect on data
   // arrival — not derived state — hence the effect.
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
-  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
   // react-doctor-disable-next-line no-fetch-in-effect, no-set-state-after-await-in-effect -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
   useEffect(() => {
     if (!isLastStep || onboardingStatus !== "ready") {
       return;
     }
     // react-doctor-disable-next-line no-pass-live-state-to-parent -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
-    maybeCreateQuote(resolvedProviderAccountId);
+    maybeCreateQuote();
   });
 
   const advanceRequirementsAndProceed = async () => {
@@ -563,9 +539,6 @@ export function useRampWizard<TId extends string>(
     collectedData: requirements.collectedData,
     setCollectedField: requirements.setField,
     requirementFields: requirements.fields,
-    selectedProviderAccountId: requirements.selectedProviderAccountId,
-    payoutAccounts: requirements.payoutAccounts,
-    selectPayoutAccount: requirements.selectPayoutAccount,
     requirementsBlocker: requirements.blockReason,
     liveWallets,
     walletsLoading,
@@ -579,7 +552,6 @@ export function useRampWizard<TId extends string>(
     quoteTransferId,
     memoRows,
     setMemoRows,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,

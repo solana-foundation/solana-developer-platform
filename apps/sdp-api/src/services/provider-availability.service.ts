@@ -244,19 +244,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return prod || sandbox;
       },
     },
-    lightspark: {
-      label: "Lightspark",
-      isConfigured: (env, testMode) => {
-        const prod = hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]);
-        const sandbox = hasAllEnv(env, [
-          "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID",
-          "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET",
-        ]);
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
     bvnk: {
       label: "BVNK",
       isConfigured: (env, testMode) => {
@@ -273,17 +260,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         if (testMode === true) return sandbox;
         if (testMode === false) return prod;
         return prod || sandbox;
-      },
-    },
-    moneygram: {
-      label: "MoneyGram",
-      isConfigured: (env, testMode) => {
-        const sandbox = hasAllEnv(env, [
-          "MONEYGRAM_SANDBOX_PUBLIC_KEY",
-          "MONEYGRAM_SANDBOX_SECRET_KEY",
-        ]);
-        if (testMode === false) return false;
-        return sandbox;
       },
     },
     coinbase: {

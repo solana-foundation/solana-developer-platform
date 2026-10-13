@@ -615,17 +615,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -726,7 +715,7 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter ramp transfers by provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "moonpay",
             "required": false,
             "kind": "select",
             "options": [
@@ -735,16 +724,8 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "moneygram",
-                "value": "moneygram"
               },
               {
                 "label": "coinbase",
@@ -912,17 +893,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -1007,17 +977,6 @@
                 "score": "0.12",
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
@@ -1173,17 +1132,6 @@
                   "score": "0.12",
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                },
-                "moneygram": {
-                  "customerId": "mg_profile_example",
-                  "transactionId": "mgi_tx_example",
-                  "mgiTransactionId": "mgi_correlation_example",
-                  "referenceNumber": "12345678",
-                  "payoutAmount": 25,
-                  "payoutStatus": "completed",
-                  "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                  "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                  "lastWidgetError": "Transaction cancelled by user"
                 },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-02T00:00:00.000Z"
@@ -1409,17 +1357,6 @@
                   "score": "0.12",
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                },
-                "moneygram": {
-                  "customerId": "mg_profile_example",
-                  "transactionId": "mgi_tx_example",
-                  "mgiTransactionId": "mgi_correlation_example",
-                  "referenceNumber": "12345678",
-                  "payoutAmount": 25,
-                  "payoutStatus": "completed",
-                  "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                  "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                  "lastWidgetError": "Transaction cancelled by user"
                 },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-02T00:00:00.000Z"
@@ -1967,17 +1904,6 @@
                 "score": "0.12",
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
-              },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
               },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
@@ -2923,132 +2849,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -3059,80 +2881,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -3143,168 +2905,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -3315,200 +2941,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -3555,16 +3025,8 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "moneygram",
-                "value": "moneygram"
               },
               {
                 "label": "coinbase",
@@ -3588,7 +3050,7 @@
               {
                 "source": "USD",
                 "dest": "usdc.solana",
-                "providers": ["moonpay", "lightspark"]
+                "providers": ["moonpay", "stripe"]
               }
             ],
             "providerDetails": {
@@ -3661,132 +3123,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -3797,80 +3155,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -3881,168 +3179,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -4053,200 +3215,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -4263,16 +3269,8 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "moneygram",
-                "value": "moneygram"
               },
               {
                 "label": "coinbase",
@@ -4350,36 +3348,20 @@
               "deliveryMode": "hosted",
               "paymentInstructions": [
                 {
-                  "provider": "lightspark",
-                  "kind": "crypto_deposit",
-                  "destinationAddress": "So11111111111111111111111111111111111111112",
-                  "cryptoCurrency": "USDC",
+                  "provider": "bvnk",
+                  "kind": "fiat_funding",
+                  "onboardingStatus": "ready",
+                  "fiatCurrency": "USD",
+                  "beneficiaryAddress": "11111111111111111111111111111111",
                   "network": "SOLANA",
-                  "accountOrWalletInfo": {
-                    "accountType": "USD_ACCOUNT",
-                    "accountNumber": "0000000000000000",
-                    "routingNumber": "000000000",
-                    "paymentRails": ["ACH", "WIRE"],
-                    "reference": "quote-reference-example",
-                    "bankName": "Example Bank",
-                    "address": "ExampleSolanaWalletAddress11111111111111111",
-                    "assetType": "USDC"
-                  }
+                  "paymentReference": "SDP-ONRAMP xfr_9f3b1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
+                  "remittanceInformationPrefix": "LCA-ONRAMP",
+                  "bankAccount": {
+                    "routingNumber": "021000021"
+                  },
+                  "instructionsNotes": "example"
                 }
-              ],
-              "sendingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "receivingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "feeCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "expiresAt": "2025-01-01T00:00:00.000Z"
+              ]
             },
             "transferId": "transfer_example"
           },
@@ -4799,7 +3781,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "releaseModule": "ramps",
         "pathFields": [
           {
@@ -4873,132 +3855,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -5009,80 +3887,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -5093,168 +3911,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -5265,200 +3947,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -5467,13 +3993,6 @@
             "label": "destinationCustodyWalletId",
             "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
-            "required": false
-          },
-          {
-            "key": "destinationCountry",
-            "label": "destinationCountry",
-            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
-            "defaultValue": "US",
             "required": false
           }
         ],
@@ -5657,7 +4176,7 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter by ramp provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "bvnk",
             "required": false,
             "kind": "select",
             "options": [
@@ -5666,16 +4185,8 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "moneygram",
-                "value": "moneygram"
               },
               {
                 "label": "coinbase",
@@ -6707,17 +5218,14 @@
             "accounts": [
               {
                 "id": "counterparty_provider_account_example",
-                "provider": "lightspark",
-                "kind": "payout_account",
+                "provider": "bvnk",
+                "kind": "funding_wallet",
                 "fiatCurrency": "USD",
                 "destinationCountry": "US",
                 "paymentRail": "ACH",
                 "status": "active",
                 "providerStatus": "ACTIVE",
                 "createdAt": "2025-01-01T00:00:00.000Z",
-                "bankName": "Example Bank",
-                "accountNumberLast4": "6789",
-                "paymentRails": ["ACH", "WIRE"],
                 "customerLink": {
                   "provider": "bvnk",
                   "id": "counterparty_provider_account_customer",

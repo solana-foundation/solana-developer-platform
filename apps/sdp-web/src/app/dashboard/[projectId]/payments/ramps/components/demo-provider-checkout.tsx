@@ -7,7 +7,7 @@ import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 
 /**
  * Demo mode's stand-in for a provider's own checkout (MoonPay's and Coinbase's pages, Stripe's
- * and MoneyGram's widgets), which can't open on sample data. A deposit is paid with the footer's
+ * widget), which can't open on sample data. A deposit is paid with the footer's
  * Simulate deposit; a payout's crypto is sent with its Send button, as for a bank payout. Either
  * way the transfer then settles and the flow finishes on its own completion screen.
  */

@@ -64,15 +64,7 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/lib/ramps.ts:39:23:Lightspark",
-    "reason": "Ramp provider brand name"
-  },
-  {
     "candidate": "src/lib/ramps.ts:40:17:BVNK",
-    "reason": "Ramp provider brand name"
-  },
-  {
-    "candidate": "src/lib/ramps.ts:41:22:MoneyGram",
     "reason": "Ramp provider brand name"
   },
   {

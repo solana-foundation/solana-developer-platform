@@ -54,7 +54,6 @@ import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -289,9 +288,6 @@ async function updateOnchainTransferForRamp(
   // A provider that failed or expired the sale no longer takes this deposit.
   if (existing.status !== "awaiting_payment") {
     throw conflict(`Ramp transfer is no longer awaiting payment (status: ${existing.status})`);
-  }
-  if (isRampQuoteBindingExpired(existing)) {
-    throw conflict("Ramp quote has expired; create a new quote before sending funds.");
   }
 
   const db = getDb(c.env);

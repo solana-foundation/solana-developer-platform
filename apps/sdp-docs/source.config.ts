@@ -20,9 +20,7 @@ export const docs = defineDocs({
  */
 const ROTATOR_PROVIDERS = [
   "moonpay",
-  "lightspark",
   "bvnk",
-  "moneygram",
   "coinbase",
   "stripe",
 ] as const satisfies readonly RampProviderId[];

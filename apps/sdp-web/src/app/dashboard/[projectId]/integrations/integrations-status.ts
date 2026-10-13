@@ -35,9 +35,7 @@ export interface IntegrationEntry<TProvider extends string = string> {
 
 const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
   moonpay: "Shared.integrations.rampMoonpayDescription",
-  lightspark: "Shared.integrations.rampLightsparkDescription",
   bvnk: "Shared.integrations.rampBvnkDescription",
-  moneygram: "Shared.integrations.rampMoneygramDescription",
   coinbase: "Shared.integrations.rampCoinbaseDescription",
   stripe: "Shared.integrations.rampStripeDescription",
 };
@@ -51,9 +49,7 @@ const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
 
 export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",
-  lightspark: "Lightspark",
   bvnk: "BVNK",
-  moneygram: "MoneyGram",
   coinbase: "Coinbase",
   stripe: "Stripe",
 };

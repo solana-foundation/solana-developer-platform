@@ -4,8 +4,6 @@ import {
   payments,
   rampProviderBvnk,
   rampProviderCoinbase,
-  rampProviderLightspark,
-  rampProviderMoneygram,
   rampProviderMoonpay,
   rampProviderStripe,
 } from "@/flags";
@@ -16,9 +14,7 @@ export type RampProviderFlagReads = Record<RampProviderId, FlagRead>;
 
 const RAMP_PROVIDER_FLAGS = {
   moonpay: rampProviderMoonpay,
-  lightspark: rampProviderLightspark,
   bvnk: rampProviderBvnk,
-  moneygram: rampProviderMoneygram,
   coinbase: rampProviderCoinbase,
   stripe: rampProviderStripe,
 } as const satisfies RampProviderFlagReads;

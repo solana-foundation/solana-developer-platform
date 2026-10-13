@@ -238,48 +238,6 @@ export const transferInitiatorSchema = z
   })
   .openapi({ description: "Initiator metadata for the transfer." });
 
-export const moneygramTransferDetailsSchema = z
-  .object({
-    customerId: z.string().optional().openapi({
-      description:
-        "MoneyGram profile id for the counterparty; matches the MoneyGram customer_link provider account reference.",
-      example: "mg_profile_example",
-    }),
-    transactionId: z.string().optional().openapi({
-      description: "MoneyGram xRamps transaction identifier.",
-      example: "mgi_tx_example",
-    }),
-    mgiTransactionId: z.string().optional().openapi({
-      description: "MoneyGram-side transaction identifier used to correlate status webhooks.",
-      example: "mgi_correlation_example",
-    }),
-    referenceNumber: z.string().optional().openapi({
-      description: "Cash pickup reference number issued by MoneyGram.",
-      example: "12345678",
-    }),
-    payoutAmount: z.number().optional().openapi({
-      description: "Fiat payout amount reported by MoneyGram.",
-      example: 25,
-    }),
-    payoutStatus: z.string().optional().openapi({
-      description: "MoneyGram payout status.",
-      example: "completed",
-    }),
-    cryptoTransferId: z.string().optional().openapi({
-      description: "SDP transfer id for the on-chain USDC leg.",
-      example: "xfr_moneygram_crypto_leg_example",
-    }),
-    solanaTxSignature: z.string().optional().openapi({
-      description: "Solana transaction signature for the USDC transfer.",
-      example: "sig_moneygram_usdc_transfer_example",
-    }),
-    lastWidgetError: z.string().optional().openapi({
-      description: "Last MoneyGram widget error recorded for this transfer.",
-      example: "Transaction cancelled by user",
-    }),
-  })
-  .openapi({ description: "MoneyGram-specific transfer metadata." });
-
 /**
  * Provider-reported ramp settlement economics, mirroring the
  * `RampTransferSettlement` union in `@sdp/types`. BVNK on-ramp transfers
@@ -309,31 +267,6 @@ const moonpayRampSettlementSchema = z
     failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
   })
   .openapi({ description: "MoonPay on-ramp settlement economics." });
-
-const lightsparkRampSettlementSchema = z
-  .object({
-    provider: z.literal("lightspark"),
-    status: z.enum(["COMPLETED", "FAILED", "EXPIRED", "REFUND_FAILED"]),
-    sentAmount: z
-      .object({
-        amount: z.number(),
-        currencyCode: z.string(),
-        decimals: z.number(),
-      })
-      .openapi({ description: "Amount sent from the payer." }),
-    receivedAmount: z
-      .object({
-        amount: z.number(),
-        currencyCode: z.string(),
-        decimals: z.number(),
-      })
-      .openapi({ description: "Amount received by the payee." }),
-    exchangeRate: z.number().openapi({ description: "Exchange rate." }),
-    fees: z.number().openapi({ description: "Total fees." }),
-    settledAt: z.string().optional().openapi({ description: "Settlement timestamp." }),
-    failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
-  })
-  .openapi({ description: "Lightspark off-ramp settlement economics." });
 
 const coinbaseRampSettlementSchema = z
   .object({
@@ -461,7 +394,6 @@ const bvnkSettlementSchema = z.union([
 
 const rampTransferSettlementSchema = z.union([
   moonpayRampSettlementSchema,
-  lightsparkRampSettlementSchema,
   coinbaseRampSettlementSchema,
   bvnkSettlementSchema,
 ]);
@@ -574,9 +506,6 @@ export const transferSchema = z
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
-    moneygram: moneygramTransferDetailsSchema.optional().openapi({
-      description: "MoneyGram-specific details for MoneyGram ramp transfers.",
-    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",
@@ -1512,7 +1441,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     provider: withOpenApi(listTransfersQuerySchemaBase.shape.provider, {
       description: "Filter ramp transfers by provider.",
-      example: "lightspark",
+      example: "moonpay",
     }),
     providerReference: withOpenApi(listTransfersQuerySchemaBase.shape.providerReference, {
       description:
@@ -1584,59 +1513,6 @@ export const paymentOfframpCurrenciesQuerySchema = listOfframpCurrenciesQuerySch
     }),
   })
   .openapi({ description: "Off-ramp currency support query parameters." });
-
-const lightsparkRampPaymentInstructionSchema = z.object({
-  provider: z.literal("lightspark").openapi({
-    description: "Provider that produced this instruction.",
-    example: "lightspark",
-  }),
-  kind: z.literal("crypto_deposit").optional().openapi({
-    description: "Present when the instruction contains normalized crypto-deposit fields.",
-    example: "crypto_deposit",
-  }),
-  destinationAddress: withOpenApi(solanaAddressSchema.optional(), {
-    description: "Normalized Solana address to fund for crypto-deposit manual instructions.",
-  }),
-  cryptoCurrency: withOpenApi(cryptoAssetSymbolSchema.optional(), {
-    description: "Normalized crypto asset to send for crypto-deposit manual instructions.",
-    example: "USDC",
-  }),
-  network: withOpenApi(cryptoRailNetworkSchema.optional(), {
-    description: "Normalized crypto network for crypto-deposit manual instructions.",
-    example: "SOLANA",
-  }),
-  reference: z.string().optional().openapi({
-    description: "Provider-side reference or memo required to match the deposit, when applicable.",
-  }),
-  accountOrWalletInfo: z
-    .object({
-      accountType: z.string().openapi({ example: "USD_ACCOUNT" }),
-      accountNumber: z.string().optional().openapi({ example: "0000000000000000" }),
-      routingNumber: z.string().optional().openapi({ example: "000000000" }),
-      paymentRails: z
-        .array(z.string())
-        .optional()
-        .openapi({ example: ["ACH", "WIRE"] }),
-      reference: z.string().optional().openapi({ example: "quote-reference-example" }),
-      bankName: z.string().optional().openapi({ example: "Example Bank" }),
-      address: z
-        .string()
-        .optional()
-        .openapi({ example: "ExampleSolanaWalletAddress11111111111111111" }),
-      assetType: withOpenApi(cryptoAssetSymbolSchema.optional(), { example: "USDC" }),
-    })
-    .openapi({
-      description: "Lightspark bank account or crypto wallet details for funding the ramp.",
-    }),
-  instructionsNotes: z
-    .string()
-    .optional()
-    .openapi({ description: "Additional human-readable funding instructions." }),
-  isPlatformAccount: z
-    .boolean()
-    .optional()
-    .openapi({ description: "Whether the payment instruction belongs to a platform account." }),
-});
 
 const bvnkFiatFundingInstructionSchema = z.object({
   provider: z.literal("bvnk").openapi({
@@ -1731,21 +1607,7 @@ const bvnkRampPaymentInstructionSchema = z.discriminatedUnion("kind", [
   bvnkCryptoDepositInstructionSchema,
 ]);
 
-const rampPaymentInstructionSchema = z.union([
-  lightsparkRampPaymentInstructionSchema,
-  bvnkRampPaymentInstructionSchema,
-]);
-
-const rampQuoteCurrencySchema = z.object({
-  code: z.string().openapi({ description: "Provider currency code.", example: "USDC" }),
-  decimals: z
-    .number()
-    .int()
-    .min(0)
-    .openapi({ description: "Provider decimal places for minor-unit amounts.", example: 2 }),
-  name: z.string().optional().openapi({ description: "Provider currency display name." }),
-  symbol: z.string().optional().openapi({ description: "Provider currency symbol." }),
-});
+const rampPaymentInstructionSchema = bvnkRampPaymentInstructionSchema;
 
 const onrampQuoteSchema = z
   .object({
@@ -1770,33 +1632,6 @@ const onrampQuoteSchema = z
     paymentInstructions: z.array(rampPaymentInstructionSchema).optional().openapi({
       description: "Funding instructions for `manual_instructions` delivery (e.g. BVNK on-ramp).",
     }),
-    exchangeRate: z
-      .number()
-      .optional()
-      .openapi({ description: "Units of destination crypto per unit of source fiat." }),
-    totalSendingAmount: z.number().optional().openapi({
-      description: "Total sending amount in fiat smallest units, including provider fees.",
-    }),
-    sendingCurrency: rampQuoteCurrencySchema.optional().openapi({
-      description: "Currency metadata for `totalSendingAmount`.",
-    }),
-    totalReceivingAmount: z
-      .number()
-      .optional()
-      .openapi({ description: "Final crypto amount received in smallest units." }),
-    receivingCurrency: rampQuoteCurrencySchema.optional().openapi({
-      description: "Currency metadata for `totalReceivingAmount`.",
-    }),
-    feesIncluded: z
-      .number()
-      .optional()
-      .openapi({ description: "Fees included in the sending amount, in fiat smallest units." }),
-    feeCurrency: rampQuoteCurrencySchema.optional().openapi({
-      description: "Currency metadata for `feesIncluded`.",
-    }),
-    expiresAt: isoDateTimeSchema
-      .optional()
-      .openapi({ description: "Timestamp when the quote expires." }),
     clientSecret: z
       .string()
       .optional()
@@ -1826,7 +1661,7 @@ const onrampCurrencyPairSchema = z
     }),
     providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({
       description: "Providers that support this on-ramp pair.",
-      example: ["moonpay", "lightspark"],
+      example: ["moonpay", "stripe"],
     }),
   })
   .openapi({ description: "Provider support for one fiat-to-crypto on-ramp pair." });

@@ -4,7 +4,6 @@ import {
   isBvnkCustomerVerified,
   normalizeBvnkCurrencyAndNetwork,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { readLightsparkPurposeOfPayment } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import { getCryptoRailAssetLabel, type PaymentRampQuote } from "@sdp/types";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -25,7 +24,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
-import { lightsparkProviderCustomerId } from "../providers/lightspark";
 import {
   buildProviderDetails,
   type CreateOnrampQuoteBody,
@@ -88,7 +86,6 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   return success(c, { estimates });
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: provider dispatch keeps each on-ramp integration explicit, including its persistence and failure semantics.
 export async function createOnrampQuote(c: AppContext): Promise<Response> {
   const {
     body: input,
@@ -173,24 +170,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       }
       break;
     }
-    case "lightspark": {
-      const customerId = await lightsparkProviderCustomerId(c, counterparty, projectId);
-      const purposeOfPayment = readLightsparkPurposeOfPayment(counterparty.provider_data);
-      if (customerId === null || purposeOfPayment === null) {
-        throw counterpartyNotProvisioned("lightspark", "onramp");
-      }
-      quote = await RAMP_PROVIDER_CLIENTS.lightspark.createOnrampQuote(rampRuntime(c), {
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        destinationWalletAddress,
-        externalCustomerId: counterparty.id,
-        customerId,
-        purposeOfPayment,
-        description: reservedTransferId,
-      });
-      break;
-    }
     case "bvnk": {
       if (input.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
         throw badRequest("BVNK on-ramp funding is USD only.");
@@ -246,17 +225,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
       });
       quote = bvnkResult.quote;
-      break;
-    }
-    case "moneygram": {
-      quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOnrampQuote(rampRuntime(c), {
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        destinationWalletAddress,
-        externalCustomerId: counterparty.id,
-        paymentTransferId: reservedTransferId,
-      });
       break;
     }
     case "coinbase": {

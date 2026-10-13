@@ -47,7 +47,6 @@ const PROVIDER_ACCOUNT_COLUMN_KEYS = [
   "DashboardPayments.counterparty.detail.provider",
   "DashboardPayments.counterparty.detail.corridor",
   "DashboardPayments.counterparty.detail.rail",
-  "DashboardPayments.counterparty.detail.bank",
   "DashboardPayments.counterparty.detail.account",
   "DashboardPayments.counterparty.detail.status",
 ] as const;
@@ -57,26 +56,16 @@ function isBvnkFundingWalletStatus(value: string): value is BvnkFundingWalletSta
 }
 
 /**
- * Picks the status to display for a provider account: enriched payout accounts show SDP's
- * status, everything else shows the provider's own status when one exists.
+ * Picks the status to display for a provider account: the provider's own status when one
+ * exists, otherwise SDP's.
  *
  * @param account - The provider account or customer link.
  * @returns The status string to render.
  */
 function providerAccountStatus(
-  account: Pick<
-    CounterpartyProviderAccount,
-    "status" | "providerStatus" | "bankName" | "accountNumberLast4" | "paymentRails"
-  >
+  account: Pick<CounterpartyProviderAccount, "status" | "providerStatus">
 ): string {
-  const hasEnrichment =
-    account.bankName !== undefined ||
-    account.accountNumberLast4 !== undefined ||
-    account.paymentRails !== undefined;
-  if (hasEnrichment || account.providerStatus === null) {
-    return account.status;
-  }
-  return account.providerStatus;
+  return account.providerStatus === null ? account.status : account.providerStatus;
 }
 
 /**
@@ -127,7 +116,7 @@ function FundingWalletBalance({ account }: { account: CounterpartyProviderAccoun
   );
 }
 
-/** A funding wallet's cells: its currency, no rail or bank, and its balance in the account column. */
+/** A funding wallet's cells: its currency, no rail, and its balance in the account column. */
 function FundingWalletCells({ account }: { account: CounterpartyProviderAccount }) {
   const t = useTranslations();
   return (
@@ -144,9 +133,6 @@ function FundingWalletCells({ account }: { account: CounterpartyProviderAccount 
       <TableCell className="text-body">
         <Missing />
       </TableCell>
-      <TableCell className="text-body">
-        <Missing />
-      </TableCell>
       <TableCell className="text-body text-secondary">
         <FundingWalletBalance account={account} />
       </TableCell>
@@ -154,10 +140,8 @@ function FundingWalletCells({ account }: { account: CounterpartyProviderAccount 
   );
 }
 
-/** A payout account's cells: its corridor, rail, bank and the last four of its account number. */
+/** A stored payout account's cells: its corridor and rail; nothing in the account column. */
 function PayoutAccountCells({ account }: { account: CounterpartyProviderAccount }) {
-  const rail =
-    account.paymentRail === null ? account.paymentRails?.join(", ") : account.paymentRail;
   return (
     <>
       <TableCell className="truncate text-body text-secondary">
@@ -170,17 +154,10 @@ function PayoutAccountCells({ account }: { account: CounterpartyProviderAccount 
         )}
       </TableCell>
       <TableCell className="truncate text-body text-secondary">
-        {rail === undefined ? <Missing /> : rail}
+        {account.paymentRail === null ? <Missing /> : account.paymentRail}
       </TableCell>
-      <TableCell className="truncate text-body text-secondary">
-        {account.bankName === undefined ? <Missing /> : account.bankName}
-      </TableCell>
-      <TableCell className="text-body whitespace-nowrap text-secondary tabular-nums">
-        {account.accountNumberLast4 === undefined ? (
-          <Missing />
-        ) : (
-          `···· ${account.accountNumberLast4}`
-        )}
+      <TableCell className="text-body">
+        <Missing />
       </TableCell>
     </>
   );
@@ -204,9 +181,6 @@ function CustomerLinkCells({ link }: { link: CounterpartyProviderCustomerLink | 
       <TableCell className="text-body">
         <Missing />
       </TableCell>
-      <TableCell className="text-body">
-        <Missing />
-      </TableCell>
       <TableCell className="text-body text-secondary">
         <span className="inline-flex items-center gap-1.5">
           {t("DashboardPayments.counterparty.detail.customerProfile")}
@@ -223,7 +197,7 @@ function CustomerLinkCells({ link }: { link: CounterpartyProviderCustomerLink | 
   );
 }
 
-/** The corridor, rail, bank and account cells of one provider-account row, by its kind. */
+/** The corridor, rail and account cells of one provider-account row, by its kind. */
 function ProviderAccountCells({ account }: { account: CounterpartyProviderAccount }) {
   if (account.kind === "funding_wallet") {
     return <FundingWalletCells account={account} />;

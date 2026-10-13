@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import type { PaymentRampQuote } from "@sdp/types";
-import { RAMP_FIAT_CURRENCIES, RAMP_PROVIDER_SUPPORT_DETAILS } from "@sdp/types/generated/ramp";
+import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import { addDecimalAmounts, subtractDecimalAmounts } from "../../../decimal";
 import { SdpPaymentsError } from "../../../errors";
@@ -214,15 +214,15 @@ describe("MoonpayRampClient on-ramp limits", () => {
 
   it("refuses a fiat currency with no MoonPay on-ramp row", async () => {
     refuseProviderCalls();
-    const unlisted = RAMP_FIAT_CURRENCIES.find(
-      (currency) => !Object.hasOwn(MOONPAY_ONRAMP_CURRENCIES, currency)
-    );
-    assert.ok(unlisted);
+    const unlisted: string = "XAF";
+    assert.equal(Object.hasOwn(MOONPAY_ONRAMP_CURRENCIES, unlisted), false);
 
     await assert.rejects(
       new MoonpayRampClient().createOnrampQuote(runtimeContext, {
         ...onrampInput,
-        fiatCurrency: unlisted,
+        // SAFETY: every RampFiatCurrency has a MoonPay row today, so the guard
+        // under test is fed a code from outside the type on purpose.
+        fiatCurrency: unlisted as RampFiatCurrency,
       }),
       isBadRequest(new RegExp(`^MoonPay on-ramp does not support ${unlisted}$`))
     );

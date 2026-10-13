@@ -283,15 +283,6 @@ export interface Env extends ManagedRpcEnv {
   MOONPAY_WEBHOOK_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
-  // Lightspark Grid ramps configuration
-  LIGHTSPARK_GRID_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_API_BASE_URL?: string;
-  LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
-
   // BVNK ramps configuration
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
@@ -301,10 +292,6 @@ export interface Env extends ManagedRpcEnv {
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
-
-  // MoneyGram ramps configuration
-  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
-  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
 
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.

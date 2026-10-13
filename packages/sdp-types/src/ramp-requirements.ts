@@ -103,48 +103,11 @@ export function offeredFiatCurrencies(
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
 export type CollectedFieldData = Record<string, string>;
 
-/** An existing payout external account for the corridor's fiat currency. */
-export interface PayoutRequirementAccount {
-  id: string;
-  destinationCountry: CountryCode;
-  paymentRail: string | null;
-  /** Provider-reported external-account status (e.g. Grid's CREATED/ACTIVE). */
-  status: string;
-  bankName?: string;
-  accountNumberLast4?: string;
-}
-
-/**
- * Destination-first payout collection: the client collects a destination
- * country from `countryRails` keys, offers that country's rails, then renders
- * exactly `railFields[rail]` with true per-rail requiredness. `accounts` lists
- * corridor accounts that already exist so the client can reuse one instead of
- * collecting bank fields again.
- */
-export interface PayoutRequirementTree {
-  countryRails: Partial<Record<CountryCode, RequirementOption[]>>;
-  railFields: Record<string, RequirementField[]>;
-  accounts: PayoutRequirementAccount[];
-}
-
 // TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
-  | { provider: Exclude<RampProviderId, "lightspark">; status: "ready" }
-  | { provider: "lightspark"; direction: "onramp"; status: "ready" }
-  | {
-      provider: "lightspark";
-      direction: "offramp";
-      status: "ready";
-      /** Payout account resolved for the corridor, for explicit quote selection. */
-      providerAccountId: string;
-      /** Corridor tree for destination re-selection; present on requirements GET answers, omitted by advances. */
-      payout?: PayoutRequirementTree;
-    }
+  | { provider: RampProviderId; status: "ready" }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
-  | { provider: "lightspark"; status: "onboarding_not_started" }
-  | { provider: "lightspark"; status: "collect_counterparty"; fields: RequirementField[] }
-  | { provider: "lightspark"; status: "collect_account"; payout: PayoutRequirementTree }
   | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
   | {
       provider: "bvnk";
@@ -238,12 +201,10 @@ export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
 
 /**
  * Requirement statuses answered on the client's requirements step before the
- * provider can advance: field collection, payout-account selection, or
- * agreement consent.
+ * provider can advance: field collection or agreement consent.
  */
 export const COLLECT_STAGE_STATUSES = [
   ...COLLECT_FIELDS_STATUSES,
-  "collect_account",
   "counterparty_collect_agreement",
 ] as const;
 
@@ -261,7 +222,7 @@ export function isCollectStageStatus(
   return COLLECT_STAGE_STATUSES.some((candidate) => candidate === status);
 }
 
-/** Collect-stage requirements whose answer carries a field set rather than a payout tree or agreements. */
+/** Collect-stage requirements whose answer carries a field set rather than agreements. */
 export type CollectFieldsRequirements = Extract<
   CounterpartyRequirements,
   { status: CollectFieldsStatus }

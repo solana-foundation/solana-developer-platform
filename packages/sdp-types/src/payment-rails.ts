@@ -71,24 +71,6 @@ export function rampProviderServesCountry(
   }
 }
 
-/** One payout-account input field and its provider-declared validation. */
-export interface RampPayoutFieldSpec {
-  required: boolean;
-  pattern?: string;
-  minLength?: number;
-  maxLength?: number;
-  /** Enumerated values when the provider declares the field as a closed set. */
-  values?: readonly string[];
-  /** UI input mask ("#" per character); presentation-only, stripped before validation. */
-  mask?: string;
-}
-
-/** Payout external-account shape for one fiat currency: rail -> field key -> spec. */
-export interface RampPayoutAccountSpec {
-  accountType: string;
-  rails: Readonly<Record<string, Readonly<Record<string, RampPayoutFieldSpec>>>>;
-}
-
 export interface RampCurrencyLimit {
   min: string | null;
   max: string | null;
@@ -99,6 +81,164 @@ export interface RampProviderDirectionSupport {
   countrySupport: RampCountrySupport;
   entityTypes: readonly CounterpartyEntityType[];
 }
+
+/**
+ * Fiat currencies a stablecoin can be pegged to. Kept apart from
+ * `RAMP_FIAT_CURRENCIES` so retiring a ramp provider never narrows issuance.
+ */
+export const FIAT_PEG_CURRENCIES = [
+  "AED",
+  "AFN",
+  "ALL",
+  "AMD",
+  "AOA",
+  "ARS",
+  "AUD",
+  "AWG",
+  "BAM",
+  "BBD",
+  "BDT",
+  "BHD",
+  "BIF",
+  "BMD",
+  "BND",
+  "BOB",
+  "BRL",
+  "BSD",
+  "BTN",
+  "BWP",
+  "BZD",
+  "CAD",
+  "CDF",
+  "CHF",
+  "CLP",
+  "CNY",
+  "COP",
+  "CRC",
+  "CUP",
+  "CVE",
+  "CZK",
+  "DJF",
+  "DKK",
+  "DOP",
+  "DZD",
+  "EGP",
+  "ERN",
+  "ETB",
+  "EUR",
+  "FJD",
+  "FKP",
+  "GBP",
+  "GEL",
+  "GHS",
+  "GIP",
+  "GMD",
+  "GNF",
+  "GTQ",
+  "GYD",
+  "HKD",
+  "HNL",
+  "HTG",
+  "HUF",
+  "IDR",
+  "ILS",
+  "INR",
+  "IQD",
+  "IRR",
+  "ISK",
+  "JMD",
+  "JOD",
+  "JPY",
+  "KES",
+  "KGS",
+  "KHR",
+  "KMF",
+  "KPW",
+  "KRW",
+  "KWD",
+  "KYD",
+  "KZT",
+  "LAK",
+  "LBP",
+  "LKR",
+  "LRD",
+  "LSL",
+  "LYD",
+  "MAD",
+  "MDL",
+  "MGA",
+  "MKD",
+  "MMK",
+  "MNT",
+  "MOP",
+  "MRU",
+  "MUR",
+  "MVR",
+  "MWK",
+  "MXN",
+  "MYR",
+  "MZN",
+  "NAD",
+  "NGN",
+  "NIO",
+  "NOK",
+  "NPR",
+  "NZD",
+  "OMR",
+  "PAB",
+  "PEN",
+  "PGK",
+  "PHP",
+  "PKR",
+  "PLN",
+  "PYG",
+  "QAR",
+  "RON",
+  "RSD",
+  "RUB",
+  "RWF",
+  "SAR",
+  "SBD",
+  "SCR",
+  "SDG",
+  "SEK",
+  "SGD",
+  "SHP",
+  "SLE",
+  "SOS",
+  "SRD",
+  "SSP",
+  "STN",
+  "SYP",
+  "SZL",
+  "THB",
+  "TJS",
+  "TND",
+  "TOP",
+  "TRY",
+  "TTD",
+  "TWD",
+  "TZS",
+  "UAH",
+  "UGX",
+  "USD",
+  "UYU",
+  "UZS",
+  "VND",
+  "VUV",
+  "WST",
+  "XAF",
+  "XCD",
+  "XOF",
+  "XPF",
+  "YER",
+  "ZAR",
+  "ZMW",
+] as const;
+export type FiatPegCurrency = (typeof FIAT_PEG_CURRENCIES)[number];
+
+/** Any fiat code SDP renders: a ramp currency or a stablecoin peg. */
+export type FiatCurrencyCode = RampFiatCurrency | FiatPegCurrency;
 
 let fiatDisplayNames: Intl.DisplayNames | undefined;
 let countryDisplayNamesInstance: Intl.DisplayNames | undefined;
@@ -118,7 +258,7 @@ function getCountryDisplayNames(): Intl.DisplayNames {
 }
 
 /** CLDR English name for a supported fiat currency, e.g. "MXN" → "Mexican Peso". */
-export function fiatCurrencyDisplayName(code: RampFiatCurrency): string {
+export function fiatCurrencyDisplayName(code: FiatCurrencyCode): string {
   const displayName = getFiatDisplayNames().of(code);
   if (displayName === undefined) {
     throw new Error(`Intl.DisplayNames did not return a currency name for ${code}.`);
@@ -199,6 +339,6 @@ export function regionFlagEmoji(code: string): string | null {
  * assigns supranational and commodity codes (XCD, XAU, …) the user-assigned
  * alpha-2 ranges, and CLDR pseudo-regions are excluded by the same rule.
  */
-export function fiatCurrencyFlagEmoji(code: RampFiatCurrency): string | null {
+export function fiatCurrencyFlagEmoji(code: FiatCurrencyCode): string | null {
   return regionFlagEmoji(code.slice(0, 2));
 }

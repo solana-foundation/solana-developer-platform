@@ -1,34 +1,20 @@
 "use client";
 
-import type { PaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
-import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
+import type { PaymentRampInstruction } from "@sdp/types";
 import {
-  ArrowDownLeft,
   CheckCircle2Icon,
   Clock3,
-  CoinsIcon,
   CopyIcon,
-  DollarSignIcon,
   LandmarkIcon,
   Loader2,
   ShieldCheckIcon,
-  WalletIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  formatMinorCurrencyAmount,
-  formatRampQuoteExpiry,
-  formatRampQuoteTimeRemaining,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
-
-type ManualQuote = Extract<PaymentRampQuote, { deliveryMode: "manual_instructions" }>;
-type LightsparkQuote = Extract<ManualQuote, { provider: "lightspark" }>;
 
 async function copyPaymentInstruction(
   label: string,
@@ -109,110 +95,6 @@ export function QuoteSummaryField({
   );
 }
 
-function QuoteExpiryTabLabel({ expiresAt }: { expiresAt?: string }) {
-  const t = useTranslations();
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const timeRemaining = formatRampQuoteTimeRemaining(expiresAt, nowMs, t);
-
-  useEffect(() => {
-    if (!expiresAt) {
-      return;
-    }
-
-    setNowMs(Date.now());
-    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [expiresAt]);
-
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{t("DashboardPayments.manualInstructions.instructions")}</span>
-      {timeRemaining ? (
-        <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
-          {timeRemaining}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function ManualQuoteSummary({
-  quote,
-  fiatCurrency,
-  cryptoToken,
-}: {
-  quote: LightsparkQuote;
-  fiatCurrency: string;
-  cryptoToken: string;
-}) {
-  const t = useTranslations();
-  const finalAmount = formatMinorCurrencyAmount(
-    quote.totalReceivingAmount,
-    quote.receivingCurrency.code,
-    quote.receivingCurrency.decimals
-  );
-  const sendingAmount = formatMinorCurrencyAmount(
-    quote.totalSendingAmount,
-    quote.sendingCurrency.code,
-    quote.sendingCurrency.decimals
-  );
-  const feesIncluded = formatMinorCurrencyAmount(
-    quote.feesIncluded,
-    quote.feeCurrency.code,
-    quote.feeCurrency.decimals
-  );
-  const exchangeRate =
-    quote.exchangeRate !== undefined
-      ? `1 ${fiatCurrency.toUpperCase()} = ${quote.exchangeRate} ${cryptoToken}`
-      : null;
-  const expiresAt = formatRampQuoteExpiry(quote.expiresAt);
-
-  if (!finalAmount && !sendingAmount && !feesIncluded && !exchangeRate && !expiresAt) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-4 text-left">
-      <div>
-        <p className="text-sm font-medium text-primary">
-          {t("DashboardPayments.manualInstructions.quoteSummary")}
-        </p>
-        <p className="mt-1 text-sm text-tertiary">
-          {t("DashboardPayments.manualInstructions.quoteSummaryDescription")}
-        </p>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <QuoteSummaryField
-          icon={<CoinsIcon className="size-4" />}
-          label={t("DashboardPayments.manualInstructions.finalAmount")}
-          value={finalAmount}
-        />
-        <QuoteSummaryField
-          icon={<WalletIcon className="size-4" />}
-          label={t("DashboardPayments.manualInstructions.depositAmount")}
-          value={sendingAmount}
-        />
-        <QuoteSummaryField
-          icon={<DollarSignIcon className="size-4" />}
-          label={t("DashboardPayments.manualInstructions.feesIncluded")}
-          value={feesIncluded}
-        />
-        <QuoteSummaryField
-          icon={<ArrowDownLeft className="size-4" />}
-          label={t("DashboardPayments.manualInstructions.exchangeRate")}
-          value={exchangeRate}
-        />
-        <QuoteSummaryField
-          icon={<Clock3 className="size-4" />}
-          label={t("DashboardPayments.manualInstructions.expires")}
-          value={expiresAt}
-        />
-      </div>
-    </div>
-  );
-}
-
-type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
 type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
 
 export interface InstructionAction {
@@ -258,69 +140,6 @@ function InstructionBadge({ children }: { children: ReactNode }) {
     <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
       {children}
     </span>
-  );
-}
-
-function LightsparkInstruction({
-  instruction,
-  showAction,
-  action,
-}: {
-  instruction: LightsparkInstructionType;
-  showAction: boolean;
-  action?: InstructionAction;
-}) {
-  const t = useTranslations();
-  const info = instruction.accountOrWalletInfo;
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>{info.accountType.replaceAll("_", " ")}</InstructionBadge>
-          {info.assetType ? <InstructionBadge>{info.assetType}</InstructionBadge> : null}
-        </InstructionBadges>
-        {showAction && action ? <InstructionActionButton action={action} /> : null}
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.bankName")}
-          value={info.bankName}
-        />
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.routingNumber")}
-          value={info.routingNumber}
-        />
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.accountNumber")}
-          value={info.accountNumber}
-        />
-        <PaymentInstructionField
-          label={t("DashboardPayments.manualInstructions.walletAddress")}
-          value={info.address}
-          className="lg:col-span-2"
-        />
-      </div>
-      <PaymentInstructionField
-        label={t("DashboardPayments.manualInstructions.reference")}
-        value={info.reference}
-      />
-      {info.paymentRails?.length ? (
-        <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-            {t("DashboardPayments.manualInstructions.supportedRails")}
-          </p>
-          <p className="mt-1 text-sm text-primary">{info.paymentRails.join(", ")}</p>
-        </div>
-      ) : null}
-      {instruction.instructionsNotes ? (
-        <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-            {t("DashboardPayments.manualInstructions.notes")}
-          </p>
-          <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -488,17 +307,11 @@ function BvnkInstruction({
 
 export function ManualInstructionsQuote({
   amount,
-  quote,
-  fiatCurrency,
-  cryptoToken,
   instructions,
   action,
   description,
 }: {
   amount: string;
-  quote: ManualQuote;
-  fiatCurrency: string;
-  cryptoToken: string;
   instructions: PaymentRampInstruction[];
   /** Button rendered in the instruction header (for example, an on-ramp simulation action). */
   action?: InstructionAction;
@@ -506,32 +319,17 @@ export function ManualInstructionsQuote({
   description?: string;
 }) {
   const t = useTranslations();
-  const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
-
-  const instructionList = instructions.map((instruction, index) =>
-    instruction.provider === "bvnk" ? (
-      <BvnkInstruction
-        key={
-          instruction.kind === "crypto_deposit"
-            ? instruction.destinationAddress
-            : instruction.beneficiaryAddress
-        }
-        instruction={instruction}
-        action={action}
-      />
-    ) : (
-      <LightsparkInstruction
-        key={
-          instruction.accountOrWalletInfo.reference ??
-          instruction.accountOrWalletInfo.address ??
-          "lightspark"
-        }
-        instruction={instruction}
-        showAction={index === 0}
-        action={action}
-      />
-    )
-  );
+  const instructionList = instructions.map((instruction) => (
+    <BvnkInstruction
+      key={
+        instruction.kind === "crypto_deposit"
+          ? instruction.destinationAddress
+          : instruction.beneficiaryAddress
+      }
+      instruction={instruction}
+      action={action}
+    />
+  ));
 
   return (
     <div className="flex flex-col">
@@ -554,40 +352,7 @@ export function ManualInstructionsQuote({
         </div>
       </div>
 
-      {quote.provider === "lightspark" ? (
-        <>
-          <Tabs
-            className="mt-6"
-            value={activeTab}
-            onValueChange={(value) => {
-              if (value === "instructions" || value === "summary") {
-                setActiveTab(value);
-              }
-            }}
-          >
-            <TabList>
-              <Tab value="instructions">
-                <QuoteExpiryTabLabel expiresAt={quote.expiresAt} />
-              </Tab>
-              <Tab value="summary">{t("DashboardPayments.manualInstructions.quoteSummary")}</Tab>
-            </TabList>
-          </Tabs>
-
-          <div className="mt-6">
-            {activeTab === "instructions" ? (
-              instructionList
-            ) : (
-              <ManualQuoteSummary
-                quote={quote}
-                fiatCurrency={fiatCurrency}
-                cryptoToken={cryptoToken}
-              />
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="mt-6">{instructionList}</div>
-      )}
+      <div className="mt-6">{instructionList}</div>
     </div>
   );
 }

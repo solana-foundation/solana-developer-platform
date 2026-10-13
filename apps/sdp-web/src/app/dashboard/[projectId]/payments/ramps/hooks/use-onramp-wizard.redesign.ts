@@ -74,14 +74,9 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
-/**
- * Whether the provider's sandbox can simulate this quote's pay-in: Lightspark's always, BVNK's
- * once its funding account is ready.
- */
+/** Whether the provider's sandbox can simulate this quote's pay-in: BVNK's once its funding account is ready. */
 function canSimulateQuote(quote: PaymentRampQuote): boolean {
   switch (quote.provider) {
-    case "lightspark":
-      return true;
     case "bvnk":
       return (
         quote.deliveryMode === "manual_instructions" &&

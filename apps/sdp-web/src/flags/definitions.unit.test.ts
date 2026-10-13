@@ -23,6 +23,7 @@ const FLAG_CAPS = {
   homepageOpenSignup: "uncapped",
   newDesign: "uncapped",
   paymentsDemoMode: "uncapped",
+  newDesignWallets: "uncapped",
   newDesignContacts: "uncapped",
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
@@ -36,9 +37,7 @@ const FLAG_CAPS = {
   dvp: { module: "dvp" },
   earn: { module: "earn" },
   rampProviderMoonpay: { rampProvider: "moonpay" },
-  rampProviderLightspark: { rampProvider: "lightspark" },
   rampProviderBvnk: { rampProvider: "bvnk" },
-  rampProviderMoneygram: { rampProvider: "moneygram" },
   rampProviderCoinbase: { rampProvider: "coinbase" },
   rampProviderStripe: { rampProvider: "stripe" },
 } as const satisfies Record<keyof DashboardFlags, FlagCap>;
@@ -87,9 +86,7 @@ const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)
 
 const RAMP_PROVIDER_FLAG_NAMES = {
   moonpay: "rampProviderMoonpay",
-  lightspark: "rampProviderLightspark",
   bvnk: "rampProviderBvnk",
-  moneygram: "rampProviderMoneygram",
   coinbase: "rampProviderCoinbase",
   stripe: "rampProviderStripe",
 } as const satisfies Record<RampProviderId, keyof DashboardFlags>;
@@ -118,6 +115,7 @@ describe("defineDashboardFlags", () => {
         "homepageOpenSignup",
         "newDesign",
         "paymentsDemoMode",
+        "newDesignWallets",
         "newDesignContacts",
         "newDesignPayDeposit",
         "newDesignActivity",

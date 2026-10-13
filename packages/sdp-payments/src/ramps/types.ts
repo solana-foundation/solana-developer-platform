@@ -1,7 +1,6 @@
 import type {
   Counterparty,
   CounterpartyProviderData,
-  CountryCode,
   PaymentRampEstimate,
   PaymentRampQuote,
   RampCryptoDeposit,
@@ -14,51 +13,22 @@ import {
   type CryptoRailId,
   type RampCountrySupport,
   type RampCurrencyLimit,
-  type RampPayoutAccountSpec,
-  type RampPayoutFieldSpec,
   SOLANA_CRYPTO_RAILS,
 } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type {
-  CollectedFieldData,
-  CounterpartyRequirements,
-  PayoutRequirementAccount,
-} from "@sdp/types/ramp-requirements";
+import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import type { BvnkComplianceInput } from "./providers/bvnk/schemas";
-import type { LightsparkPurposeOfPayment } from "./providers/lightspark/provider-data";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export type { BvnkCustomerResolution } from "./providers/bvnk/provider-data";
 export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
-export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
 export type { StripeCustomerInfo } from "./providers/stripe/client";
-
-export const rampPayoutFieldSchema = z
-  .object({
-    required: z.boolean(),
-    pattern: z.string().optional(),
-    minLength: z.number().int().optional(),
-    maxLength: z.number().int().optional(),
-    values: z.array(z.string()).optional(),
-    mask: z.string().optional(),
-  })
-  .strict() satisfies z.ZodType<RampPayoutFieldSpec>;
-
-export const rampPayoutAccountSchema = z
-  .object({
-    accountType: z.string(),
-    rails: z.record(z.string(), z.record(z.string(), rampPayoutFieldSchema)),
-  })
-  .strict() satisfies z.ZodType<RampPayoutAccountSpec>;
 
 export interface ProviderDirectionSupportSnapshot {
   currencies: Readonly<Record<string, RampCurrencyLimit>>;
   cryptos: readonly CryptoRailId[];
   countrySupport?: RampCountrySupport;
-  accounts?: Readonly<Record<string, RampPayoutAccountSpec>>;
-  /** Country-agnostic SWIFT payout account, deliverable to any covered country. */
-  swiftAccount?: RampPayoutAccountSpec;
 }
 
 export interface ProviderRailSupportSnapshot {
@@ -87,8 +57,6 @@ const providerDirectionSupportSnapshotSchema = z.object({
   currencies: z.record(z.string(), rampCurrencyLimitSchema),
   cryptos: z.array(z.enum(SOLANA_CRYPTO_RAILS)),
   countrySupport: rampCountrySupportSchema.optional(),
-  accounts: z.record(z.string(), rampPayoutAccountSchema).optional(),
-  swiftAccount: rampPayoutAccountSchema.optional(),
 }) satisfies z.ZodType<ProviderDirectionSupportSnapshot>;
 
 export const providerRailSupportSnapshotSchema = z.object({
@@ -211,14 +179,6 @@ export interface RampRuntimeContext {
   mode: SdpEnvironment;
 }
 
-export interface RampExternalAccountDetails {
-  platformAccountId: string;
-  providerStatus: string;
-  bankName?: string;
-  accountNumberLast4?: string;
-  paymentRails: string[];
-}
-
 export interface RampEstimateOnrampInput {
   assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
@@ -240,10 +200,6 @@ export interface RampOnrampQuoteInput {
   externalCustomerId: string;
   /** Handler-reserved SDP payment transfer id for provider correlation. */
   paymentTransferId?: string;
-  /** Handler-resolved Grid customer id (Lightspark); resolved via DB + getOrCreateCustomer. */
-  customerId?: string;
-  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
-  purposeOfPayment?: LightsparkPurposeOfPayment;
   bvnkCompliance?: BvnkComplianceInput;
   /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
   email?: string;
@@ -264,11 +220,6 @@ export interface RampOfframpQuoteInput {
   /** Handler-generated SDP payment transfer id for provider caller-defined references. */
   paymentTransferId?: string;
   externalCustomerId: string;
-  customerId?: string;
-  /** Handler-resolved purpose-of-payment code stored during counterparty onboarding (Lightspark). */
-  purposeOfPayment?: LightsparkPurposeOfPayment;
-  /** Handler-resolved Grid external payout account id (Lightspark). */
-  payoutAccountId?: string;
   /** Handler-resolved BVNK customer funding wallet id the channel credits. */
   bvnkFundingWalletId?: string;
   bvnkCompliance?: BvnkComplianceInput;
@@ -290,8 +241,6 @@ export type ValidateCounterpartyOptions =
       cryptoToken?: string;
       fiatCurrency?: RampFiatCurrency;
       cryptoRail?: CryptoRailId;
-      payoutAccounts?: readonly PayoutRequirementAccount[];
-      destinationCountry?: CountryCode;
       providerCustomerReference?: string;
       collectedData?: CollectedFieldData;
     };
@@ -327,10 +276,6 @@ export interface RampProvider {
     ctx: RampRuntimeContext,
     input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote>;
-  listExternalAccountDetails?(
-    ctx: RampRuntimeContext,
-    input: { providerCustomerReference: string; fiatCurrency: string }
-  ): Promise<RampExternalAccountDetails[]>;
   validateCounterparty(
     counterparty: Counterparty,
     options: ValidateCounterpartyOptions

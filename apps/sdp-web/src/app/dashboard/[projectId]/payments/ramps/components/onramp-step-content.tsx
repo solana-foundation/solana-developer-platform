@@ -1,7 +1,6 @@
 "use client";
 
 import { isTerminalRampTransferStatus } from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
@@ -11,7 +10,6 @@ import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -60,7 +58,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
@@ -128,7 +125,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     ) : (
       <fieldset disabled={isAdvancing} className="min-w-0">
         <RequirementsFields
-          provider={fields.provider}
           fields={requirementFields}
           values={collectedData}
           onChange={setCollectedField}
@@ -172,27 +168,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     );
   }
 
-  if (currentStepId === "PROVIDER" && quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <MoneygramRampWidget
-        direction="onramp"
-        quote={quote}
-        transferId={wizard.quoteTransferId}
-        sourceWalletId={selectedWallet.id}
-        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-        sourceWalletAddress={selectedWallet.publicKey}
-        sourceTokenMint={null}
-        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-        cryptoAmount={fields.amount.trim()}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        onSessionExpiring={refreshQuote}
-      />
-    );
-  }
-
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
       <div className="space-y-6">
@@ -212,17 +187,8 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
   }
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
-    // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
     if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
       return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
-    }
-
-    if (!quote.paymentInstructions) {
-      return (
-        <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
-          {t("DashboardPayments.ramps.quoteMissingInstructions")}
-        </div>
-      );
     }
 
     const labels = simulateActionLabels(quote.provider, t);
@@ -240,9 +206,6 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     return (
       <ManualInstructionsQuote
         amount={fields.amount.trim()}
-        quote={quote}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
         instructions={quote.paymentInstructions}
         action={simulateAction}
       />

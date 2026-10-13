@@ -1,6 +1,7 @@
 import {
   isRetiredRampProviderId,
   type PaymentSubscriptionCollectionAttempt,
+  type PersistedRampProviderId,
   type RampCryptoDeposit,
   type RampTransferSettlement,
 } from "@sdp/types";
@@ -10,7 +11,6 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { mapMoneygramTransferDetails } from "./mappers/moneygram";
 import { bvnkProviderReference } from "./ramps/providers/bvnk";
 
 /**
@@ -28,8 +28,6 @@ function rampProviderReference(row: TransferRow): string | undefined {
     case "bvnk":
       return bvnkProviderReference(row);
     case "moonpay":
-    case "lightspark":
-    case "moneygram":
     case "coinbase":
     case "stripe":
       return row.provider_reference === null ? undefined : row.provider_reference;
@@ -44,6 +42,27 @@ function rampProviderReference(row: TransferRow): string | undefined {
       return exhaustive;
     }
   }
+}
+
+/**
+ * The settlement a ramp transfer row presents. A retired provider's settlement
+ * shape left the response contract with its code, so its rows read without
+ * one; the stored value stays in `provider_data`.
+ *
+ * @param provider - The transfer's ramp provider.
+ * @param providerData - The transfer row's stored provider data.
+ * @returns The settlement to present, or undefined when there is none to show.
+ */
+function rampTransferSettlement(
+  provider: PersistedRampProviderId,
+  providerData: TransferRow["provider_data"]
+): RampTransferSettlement | undefined {
+  if (isRetiredRampProviderId(provider)) {
+    return undefined;
+  }
+  // SAFETY: `provider_data.settlement` is only ever written from a live
+  // provider's typed settlement event (`applyRampSettlementEvent`).
+  return providerData.settlement as RampTransferSettlement | undefined;
 }
 
 export function mapTransferRow(row: TransferRow) {
@@ -93,9 +112,8 @@ export function mapTransferRow(row: TransferRow) {
     throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
   }
 
-  const settlement = row.provider_data.settlement as RampTransferSettlement | undefined;
+  const settlement = rampTransferSettlement(row.provider, row.provider_data);
   const cryptoDeposit = row.provider_data.cryptoDeposit as RampCryptoDeposit | null | undefined;
-  const moneygram = mapMoneygramTransferDetails(row);
   const providerReference = rampProviderReference(row);
   return {
     ...base,
@@ -106,7 +124,6 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
-    ...(moneygram ? { moneygram } : {}),
   };
 }
 

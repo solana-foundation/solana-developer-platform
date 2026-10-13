@@ -149,32 +149,4 @@ describe("ramp currency provider details", () => {
       }
     }
   });
-
-  it("returns no pairs when the provider query filter names a provider un-surfaced in this environment", async () => {
-    const response = await buildApp("production").request(
-      "/v1/payments/ramps/onramp/currency?provider=moneygram",
-      {},
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const data = await responseData(response);
-
-    expect(data.pairs).toEqual([]);
-    expect(data.providerDetails).toEqual({});
-  });
-
-  it("returns pairs for the same provider where its environment surfaces it", async () => {
-    const response = await buildApp("sandbox").request(
-      "/v1/payments/ramps/onramp/currency?provider=moneygram",
-      {},
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const data = await responseData(response);
-
-    expect(data.pairs.length).toBeGreaterThan(0);
-    expect(data.providerDetails).toHaveProperty("moneygram");
-  });
 });

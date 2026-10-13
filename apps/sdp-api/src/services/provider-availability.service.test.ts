@@ -82,8 +82,6 @@ const providerEnvKeys = [
   "CHAINALYSIS_API_KEY",
   "MOONPAY_API_KEY",
   "MOONPAY_SECRET_KEY",
-  "LIGHTSPARK_GRID_CLIENT_ID",
-  "LIGHTSPARK_GRID_CLIENT_SECRET",
   "BVNK_HAWK_AUTH_ID",
   "BVNK_HAWK_SECRET_KEY",
   "BVNK_WALLET_ID",
@@ -253,7 +251,6 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.custody.para).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
-    expect(resolved.providers.ramps.lightspark).toBe(true);
   });
 
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
@@ -283,7 +280,6 @@ describe("provider-availability.service", () => {
       configured: true,
       enabled: true,
     });
-    expect(availability.providers.ramps.lightspark.entitled).toBe(true);
   });
 
   it("admits an organization's enabled custody provider", async () => {
@@ -506,7 +502,6 @@ describe("provider-availability.service", () => {
       enabled: false,
     });
     expect(availability.providers.compliance.range.entitled).toBe(false);
-    expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
   });
 

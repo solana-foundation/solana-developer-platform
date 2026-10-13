@@ -452,7 +452,7 @@ describe("Ramp webhook event inbox", () => {
 
   describe("with one ramp provider in the release channel and another out", () => {
     // Today every provider is `experimental`, so `beta` would leave them all out:
-    // these stages put MoonPay in `beta` and keep Lightspark out of it.
+    // these stages put MoonPay in `beta` and keep Stripe out of it.
     const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
     const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
@@ -468,7 +468,7 @@ describe("Ramp webhook event inbox", () => {
       expect(await readTransferStatus()).toBe("completed");
 
       const refused = await betaApp.request(
-        "/webhooks/payments/ramps/sandbox/lightspark",
+        "/webhooks/payments/ramps/sandbox/stripe",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
         betaEnv()
       );
@@ -493,17 +493,17 @@ describe("Ramp webhook event inbox", () => {
         payload: completedPayload,
       });
       const excludedPending = await events.insertEvent({
-        provider: "lightspark",
+        provider: "stripe",
         environment: "sandbox",
         payload: { excluded: "pending" },
       });
       const excludedExhausted = await events.insertEvent({
-        provider: "lightspark",
+        provider: "stripe",
         environment: "sandbox",
         payload: { excluded: "exhausted" },
       });
       const excludedParked = await events.insertEvent({
-        provider: "lightspark",
+        provider: "stripe",
         environment: "sandbox",
         payload: { excluded: "parked" },
       });

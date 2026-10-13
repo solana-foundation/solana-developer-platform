@@ -83,15 +83,6 @@ export interface GetCounterpartyProviderAccountInput {
   provider: RampProviderId;
 }
 
-export interface ListActiveExternalAccountsInput extends GetCounterpartyProviderAccountInput {
-  fiatCurrency: string;
-  destinationCountry: CountryCode;
-}
-
-export interface ListExternalAccountsInput extends GetCounterpartyProviderAccountInput {
-  fiatCurrency: string;
-}
-
 export interface ListProviderAccountsInput {
   organizationId: string;
   projectId: string;
@@ -184,10 +175,6 @@ export interface AssignCustomerLinkReferenceInput extends GetCounterpartyProvide
   metadata: Record<string, unknown>;
 }
 
-export interface GetExternalAccountByIdInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-}
-
 export interface SetCustomerLinkSessionInput extends GetCounterpartyProviderAccountInput {
   id: string;
   /** The minted agreement session, CAS-written only while the row carries none yet. */
@@ -208,27 +195,6 @@ export interface MarkCustomerLinkSessionTimestampInput extends GetCounterpartyPr
   sessionReference: string;
   field: BvnkSessionTimestampField;
   timestamp: string;
-}
-
-export interface InsertPendingExternalAccountInput extends ListActiveExternalAccountsInput {
-  providerCustomerReference: string;
-  paymentRail: string;
-}
-
-export interface CompleteExternalAccountInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  externalAccountReference: string;
-  providerStatus: string;
-}
-
-export interface UpdateExternalAccountStatusInput extends GetCounterpartyProviderAccountInput {
-  id: string;
-  providerStatus: string;
-  paymentRail?: string;
-}
-
-export interface ArchiveExternalAccountInput extends GetCounterpartyProviderAccountInput {
-  id: string;
 }
 
 export interface CounterpartyProviderAccountsRepository {
@@ -384,26 +350,6 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Lists active external accounts for one payout corridor.
-   *
-   * @param input - Tenant scope, counterparty, provider, currency, and country.
-   * @returns All active external account rows for the corridor.
-   */
-  listActiveExternalAccounts(
-    input: ListActiveExternalAccountsInput
-  ): Promise<CounterpartyProviderAccountRow[]>;
-
-  /**
-   * Reads one external account by id within its counterparty and tenant scope.
-   *
-   * @param input - Tenant scope, counterparty, provider, and row id.
-   * @returns The external account row, or null when it is outside the scope.
-   */
-  getExternalAccountById(
-    input: GetExternalAccountByIdInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
    * CAS-writes the minted agreement session onto a customer-link row. The
    * update matches only while the row still carries no session, so a
    * concurrent mint that stored one first makes this return null instead of
@@ -441,14 +387,6 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Lists active external accounts for one counterparty and fiat currency.
-   *
-   * @param input - Tenant scope, counterparty, provider, and currency.
-   * @returns Active corridor rows with provider statuses.
-   */
-  listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
-
-  /**
    * Lists all payout-account, customer-link, and funding-wallet rows for one
    * counterparty. Corridor filters apply to payout accounts and funding
    * wallets (which carry a fiat currency); customer links carry no corridor
@@ -458,44 +396,4 @@ export interface CounterpartyProviderAccountsRepository {
    * @returns Active and archived rows in creation order.
    */
   listProviderAccounts(input: ListProviderAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
-
-  /**
-   * Inserts an active corridor row before provider account creation.
-   *
-   * @param input - Tenant scope, corridor, provider customer reference, and payment rail.
-   * @returns The inserted row.
-   */
-  insertPendingExternalAccount(
-    input: InsertPendingExternalAccountInput
-  ): Promise<CounterpartyProviderAccountRow>;
-
-  /**
-   * Stores the provider reference and status on a reserved corridor row.
-   *
-   * @param input - Tenant scope, row id, provider reference, and status.
-   * @returns The completed row or null when it is outside the scope.
-   */
-  completeExternalAccount(
-    input: CompleteExternalAccountInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * Mirrors the current provider status and, when provided, payment rail for an active corridor row.
-   *
-   * @param input - Tenant scope, row id, provider status, and optional payment rail.
-   * @returns The updated row or null when it is outside the scope.
-   */
-  updateExternalAccountStatus(
-    input: UpdateExternalAccountStatusInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
-
-  /**
-   * Archives an active corridor row.
-   *
-   * @param input - Tenant scope and row id.
-   * @returns The archived row or null when it is outside the scope.
-   */
-  archiveExternalAccount(
-    input: ArchiveExternalAccountInput
-  ): Promise<CounterpartyProviderAccountRow | null>;
 }

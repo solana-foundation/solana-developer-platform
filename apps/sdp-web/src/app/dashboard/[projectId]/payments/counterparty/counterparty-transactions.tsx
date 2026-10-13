@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  MoneygramTransferDetails,
   PaymentTransferSummary,
   PaymentTransferType,
   PersistedRampProviderId,
@@ -27,9 +26,8 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
+import { formatRelativeTime } from "../../activity-format-utils";
 import {
-  formatDisplayAmount,
   formatPaymentTransferType,
   formatTimestamp,
   resolveTransferFlow,
@@ -187,70 +185,6 @@ function DetailRow({
   );
 }
 
-function MoneygramDetailRows({
-  moneygram,
-  fiatCurrency,
-}: {
-  moneygram: MoneygramTransferDetails;
-  fiatCurrency: string | undefined;
-}) {
-  const t = useTranslations();
-  return (
-    <>
-      {moneygram.referenceNumber ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.cashPickupCode")}
-          value={moneygram.referenceNumber}
-          mono
-          copyValue={moneygram.referenceNumber}
-        />
-      ) : null}
-      {moneygram.transactionId ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.moneygramTransactionId")}
-          value={moneygram.transactionId}
-          mono
-          copyValue={moneygram.transactionId}
-        />
-      ) : null}
-      {moneygram.payoutStatus ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.payoutStatus")}
-          value={toTitleCase(moneygram.payoutStatus)}
-        />
-      ) : null}
-      {moneygram.payoutAmount !== undefined && fiatCurrency ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.payoutAmount")}
-          value={formatDisplayAmount(String(moneygram.payoutAmount), fiatCurrency)}
-        />
-      ) : null}
-      {moneygram.cryptoTransferId ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.cryptoTransferId")}
-          value={moneygram.cryptoTransferId}
-          mono
-          copyValue={moneygram.cryptoTransferId}
-        />
-      ) : null}
-      {moneygram.solanaTxSignature ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.solanaSignature")}
-          value={shortenAddress(moneygram.solanaTxSignature)}
-          mono
-          copyValue={moneygram.solanaTxSignature}
-        />
-      ) : null}
-      {moneygram.lastWidgetError ? (
-        <DetailRow
-          label={t("DashboardPayments.transferDetails.moneygramError")}
-          value={moneygram.lastWidgetError}
-        />
-      ) : null}
-    </>
-  );
-}
-
 function TransferDetailRows({
   transfer,
   counterpartyName,
@@ -358,9 +292,6 @@ function TransferDetailRows({
           copyValue={row.copyValue}
         />
       ))}
-      {transfer.moneygram !== undefined ? (
-        <MoneygramDetailRows moneygram={transfer.moneygram} fiatCurrency={transfer.fiatCurrency} />
-      ) : null}
       {transfer.updatedAt ? (
         <DetailRow
           label={t("DashboardPayments.transferDetails.lastUpdated")}
@@ -384,8 +315,7 @@ export function TransferDetailModal({
   const cluster = useSolanaCluster();
   const [memoJsonOpen, setMemoJsonOpen] = useState(false);
   const isInbound = isInboundTransfer(transfer);
-  const signature =
-    transfer.signature !== null ? transfer.signature : transfer.moneygram?.solanaTxSignature;
+  const signature = transfer.signature;
   const flow = resolveTransferFlow(transfer);
 
   return (

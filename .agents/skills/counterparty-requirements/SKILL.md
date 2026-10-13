@@ -32,7 +32,7 @@ All provider-side counterparty state is rows in this table — one row per provi
 | `kind` | What the row represents: `customer_link` (the provider-side customer; one active per `(counterparty, provider)`, enforced by partial unique index), `payout_account` (off-ramp destination account), `funding_wallet` (on-ramp funding resource), `merchant_wallet` (merchant-owned provider wallet). Pick the kind that matches the resource; do not invent parallel storage. |
 | `provider_customer_reference` | The provider's customer id the resource belongs to. Required on every row. |
 | `external_account_reference` | The provider's own id for the resource (account/wallet id). `null` on `customer_link` rows. This is the value quote calls pass upstream. |
-| `fiat_currency`, `destination_country`, `payment_rail` | The corridor. Set on corridor-scoped kinds; `null` where not applicable. Multiple active rows per corridor — including per rail — are legal; there is no corridor uniqueness, so selection is explicit (`providerAccountId`), never assumed. |
+| `fiat_currency`, `destination_country`, `payment_rail` | The corridor. Set on corridor-scoped kinds; `null` where not applicable. There is no corridor uniqueness: several active rows can share one. |
 | `provider_status` | The provider-reported lifecycle status, stored verbatim. Gate on it with a provider-side predicate before using the row in a quote; treat unknown values as not-ready. |
 | `status` | SDP soft delete: `active` / `archived`. Replacement = archive + create a new row; never hard-delete, never update in place to repoint a resource. |
 | `metadata` | Kind-discriminated JSON, schema-validated on write against the per-kind metadata schemas in the repository file. Provider references and state only — **never PII, never bank details**. |
@@ -46,37 +46,24 @@ All provider-side counterparty state is rows in this table — one row per provi
 validateCounterparty(counterparty: Counterparty, options: ValidateCounterpartyOptions): CounterpartyRequirements
 ```
 
-`ValidateCounterpartyOptions` is direction-discriminated (`packages/sdp-payments/src/ramps/types.ts`): both arms carry `providerData` (legacy), `providerCustomerReference` (the handler-resolved `customer_link` reference), `cryptoToken?`, and `fiatCurrency?`; the offramp arm adds `cryptoRail?`, `payoutAccounts?` (handler-listed active corridor accounts), and `destinationCountry?` (the corridor the requirements GET is asked for). Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in the client; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
+`ValidateCounterpartyOptions` is direction-discriminated (`packages/sdp-payments/src/ramps/types.ts`): both arms carry `providerData` (legacy), `providerCustomerReference` (the handler-resolved `customer_link` reference), `cryptoToken?`, and `fiatCurrency?`; the offramp arm adds `cryptoRail?`. Trivial bodies (`readyCounterparty(...)`, or an `unsupported` guard) stay inline in the client; non-trivial decisions delegate to `providers/<id>/counterparty.ts`.
 
 Status events every provider gets:
 
-- `{ status: "ready" }` — good to quote. The lightspark offramp arm is richer: `providerAccountId` (required — the corridor's resolved payout account, passed back for explicit quote selection) plus `payout?` (the tree, present on GET answers so the client can keep rendering the destination selector; advances omit it).
+- `{ status: "ready" }` — good to quote.
 - `{ status: "collect"; fields: RequirementField[] }` — need input first.
 - `{ status: "unsupported"; reason }` — this counterparty/corridor can't be served, and why.
 
-The full status union, discriminated on `(provider, status)` (lightspark's `ready` also splits on `direction`):
+The full status union, discriminated on `(provider, status)`:
 
 | Provider | Statuses |
 |---|---|
 | every provider | `ready`, `collect(fields)`, `unsupported(reason)` |
-| lightspark | `onboarding_not_started`, `collect_counterparty(fields)`, `collect_account(payout: PayoutRequirementTree)`, offramp `ready(providerAccountId, payout?)` |
 | bvnk | `onboarding_not_started`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning`, `provisioning_failed` |
 
 The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src/ramp-requirements.ts` — re-read it before editing; this table goes stale. Extend it only when generic `ready` / `collect` / `unsupported` cannot represent the provider.
 
-`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts` (`readyCounterparty` covers non-lightspark providers; lightspark readiness uses `lightsparkOnrampReady` / `lightsparkOfframpReady` from its provider file); don't hand-roll the shape.
-
-## The payout tree (offramp account reuse)
-
-`collect_account` carries a `PayoutRequirementTree` — destination-first collection:
-
-- `countryRails`: destination country → rail options for the corridor.
-- `railFields`: rail → fields with true per-rail requiredness.
-- `accounts`: the counterparty's existing active accounts for the corridor, `{ id, destinationCountry, paymentRail, status, bankName?, accountNumberLast4? }`.
-
-Reuse is server-decided, not client-chosen: the requirements GET accepts an optional `destinationCountry` (lightspark offramp only — the offramp query arm discriminates on provider), and a corridor with exactly one active account answers `ready(providerAccountId, payout)` instead of `collect_account`. Multiple active corridor accounts are ambiguous and rejected, mirroring `selectLightsparkPayoutAccount`. The dashboard keys its requirements fetch on the collected destination country, so every country change re-asks the server; readiness is never client-derived from the tree.
-
-Display info (`bankName`, `accountNumberLast4`) comes from JIT provider enrichment via the optional `listExternalAccountDetails` provider method — masked server-side, never persisted; absent fields stay absent (typed optional), never defaulted.
+`RequirementField` kinds (same module): `text`, `select`, `country`, `date`, and `address` (nested dotted-key parts). `country` is codes-only on the wire — the server never inlines a country option list; the client renders its own dropdown from `COUNTRIES` with flag labels; values are ISO 3166-1 alpha-2 both ways. Build fields with `textField`, `selectField`, `countryField`, `dateField`, and `readyCounterparty` from `packages/sdp-payments/src/ramps/requirements.ts`; don't hand-roll the shape.
 
 ## The decision (archetypes)
 
@@ -84,7 +71,6 @@ Simplest first — pick the closest and mirror its decision function:
 
 - Always `readyCounterparty(...)` — no KYC gating.
 - `collect` KYC fields, `ready` once the provider verifies the customer.
-- Customer link first (`collect_counterparty`), then per-corridor payout collection (`collect_account` with the payout tree; a corridor whose active account already exists answers `ready` straight from the GET), then `ready`.
 - Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by webhook events.
 
 ## The advance / submit flow
@@ -92,7 +78,7 @@ Simplest first — pick the closest and mirror its decision function:
 Both requirement routes must admit the provider before its client can run:
 
 - `GET /v1/counterparties/:counterpartyId/requirements`: update the direction-specific provider lists in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
-- `POST /v1/counterparties/:counterpartyId/requirements`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`. An offramp arm may also take `providerAccountId?` — an advance that selects an existing corridor account instead of collecting bank fields.
+- `POST /v1/counterparties/:counterpartyId/requirements`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 
 The POST handler re-runs `validateCounterparty`, validates submitted `collectedData`, then calls `advanceCounterpartyRequirements` in `apps/sdp-api/src/routes/payments/ramps/shared.ts`, which dispatches to the DB-side `ensure*` helper. The helper's job: provider HTTP with the collected PII, then persist the *result* as a `counterparty_provider_accounts` row.
 
@@ -100,11 +86,11 @@ The POST handler re-runs `validateCounterparty`, validates submitted `collectedD
 
 ## Listing accounts
 
-`GET /v1/counterparties/:id/provider-accounts` (own route module, `apps/sdp-api/src/routes/counterparty-provider-accounts/`) lists the rows with JIT enrichment (`enrichCounterpartyProviderAccounts`): providers implementing `listExternalAccountDetails` contribute `bankName` / `accountNumberLast4` / `paymentRails` per request; nothing enriched is written back. The surface is provider-generic — never special-case a provider in the endpoint, response schema, or UI.
+`GET /v1/counterparties/:id/provider-accounts` (own route module, `apps/sdp-api/src/routes/counterparty-provider-accounts/`) lists the rows as stored, adding each referenced BVNK funding wallet's live balance; nothing read live is written back. A retired provider's rows still list. The surface is provider-generic — never special-case a provider in the endpoint, response schema, or UI.
 
 ## Gating
 
-Quotes consume the provisioned state: an offramp quote resolves the payout account explicitly (`providerAccountId`) or from the corridor's active rows; a verification-gated provider needs its active `customer_link` and any required resource rows. If it's not there, the quote throws `counterpartyNotProvisioned` — it does not fall back to an ungated quote.
+Quotes consume the provisioned state: a verification-gated provider needs its active `customer_link` and any required resource rows (a BVNK off-ramp also needs its provisioned `funding_wallet`). If it's not there, the quote throws `counterpartyNotProvisioned` — it does not fall back to an ungated quote.
 
 ## Rules + verify
 
