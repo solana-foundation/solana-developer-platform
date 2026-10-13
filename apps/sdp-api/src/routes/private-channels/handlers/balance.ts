@@ -5,11 +5,9 @@ import { success } from "@/lib/response";
 import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
 import { getChannelBalance, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { AppContext } from "../context";
-import {
-  getPrivateChannelInstanceRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
+import { getPrivateChannelInstanceRepository } from "../context";
 import { balanceQuerySchema } from "../schemas";
 
 /**
@@ -61,7 +59,7 @@ export async function getPrivateChannelBalance(c: AppContext) {
       projectId,
       userId: auth.userId,
     });
-    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+    const projectRpc = loadProjectRpcClient();
 
     const balance = await getChannelBalance(c.env, {
       instance,

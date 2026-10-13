@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -186,8 +188,26 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       expectedStatus: "confirmed",
     });
 
-    const nonTerminal = await repo.listNonTerminal(10);
+    const nonTerminal = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      repo.listNonTerminal(10)
+    );
     expect(nonTerminal.map((r) => r.id)).toEqual([a.id]);
+  });
+
+  it("listNonTerminal reads only the open cluster scope's environment", async () => {
+    await seedInstance("inst_pcw_production", TEST_PRODUCTION_PROJECT_ID);
+    const sandboxRow = await seed();
+    const productionRow = await seed({
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      instanceId: "inst_pcw_production",
+    });
+    const nonTerminalIn = async (environment: SdpEnvironment) =>
+      (
+        await runInClusterScope({ projectId: null, environment }, () => repo.listNonTerminal(10))
+      ).map((row) => row.id);
+
+    expect(await nonTerminalIn("sandbox")).toEqual([sandboxRow.id]);
+    expect(await nonTerminalIn("production")).toEqual([productionRow.id]);
   });
 
   it("patchContext merges into the JSONB atomically", async () => {

@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   createKeyPairFromPrivateKeyBytes,
   getAddressFromPublicKey,
@@ -8,7 +9,7 @@ import {
   type SignatureBytes,
   signBytes,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it } from "vitest";
+import { aroundEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
@@ -24,6 +25,7 @@ import {
 } from "@/test/fixtures/in-memory-rings-gateway";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { unsignedRingsTransaction } from "@/test/fixtures/rings-transactions";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -94,6 +96,10 @@ function serviceWith(gateway: InMemoryRingsGateway) {
 }
 
 describe("pollRingsIndexing", () => {
+  const rpc = installClusterRpcStub();
+
+  aroundEach((runTest) => runInClusterScope({ projectId: null, environment: "sandbox" }, runTest));
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     jobEnv = {
@@ -676,22 +682,23 @@ describe("pollRingsIndexing", () => {
     });
   });
 
-  it("never hands a tenant connection's RPC to its chain reads", async () => {
-    // The fixture seeds an active default connection, which an earlier
-    // implementation resolved globally and handed to both readers. The
-    // judgments those reads back — expiry escalation, manual reconciliation —
-    // must come from the platform endpoint, so the reader input carries no
-    // tenant URL even while a resolvable connection exists.
-    const seen: Array<Record<string, unknown>> = [];
-    await pollRingsIndexing(jobEnv, {
-      createService: () => serviceWith(ringsGateway({})),
-      readBlockHeight: async (input) => {
-        seen.push({ ...input });
-        return null;
-      },
-    });
+  it("reads the chain from the scope's managed pool, never a tenant connection's RPC", async () => {
+    rpc.answer("getBlockHeight", 1);
 
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toEqual({ env: jobEnv });
+    await pollRingsIndexing(jobEnv, { createService: () => serviceWith(ringsGateway({})) });
+
+    expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getBlockHeight" });
+  });
+});
+
+describe("pollRingsIndexing on a cluster Rings does not serve", () => {
+  const rpc = installClusterRpcStub();
+
+  it("returns from a mainnet run before reading the chain", async () => {
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      pollRingsIndexing({ ...env, HELIUS_RINGS_ENABLED: "true" })
+    );
+
+    expect(rpc.calls).toEqual([]);
   });
 });
