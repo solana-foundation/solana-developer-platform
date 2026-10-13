@@ -385,7 +385,12 @@ export interface PaymentsRepository {
   /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
-   * a different occupied reference is never overwritten.
+   * a different occupied reference is never overwritten. A system caller (a
+   * provider webhook) only reaches transfers in the open cluster scope's
+   * environment, so an event delivered to one environment's webhook never
+   * stamps the other environment's transfer.
+   *
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` for a system caller outside a cluster scope.
    */
   setProviderReferenceIfEmpty(input: {
     transferId: string;
