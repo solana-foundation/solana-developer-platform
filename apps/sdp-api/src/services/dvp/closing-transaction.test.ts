@@ -1,17 +1,23 @@
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
-import { address, createSolanaRpc, getBase58Decoder, signature } from "@solana/kit";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
+import { address, getBase58Decoder, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getSignaturesForAddress = vi.hoisted(() => vi.fn());
 const getTransaction = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({ getSignaturesForAddress, getTransaction }));
+vi.mock("@sdp/rpc/solana", async (original) => ({
+  ...(await original<typeof import("@sdp/rpc/solana")>()),
+  getSignaturesForAddress,
+  getTransaction,
+}));
 
 const { CREATE_TIME_SKEW_SECONDS, resolveDvpClose, TRANSACTION_LOOKUP_CONCURRENCY } = await import(
   "./closing-transaction"
 );
 const SWAP = address("11111111111111111111111111111111");
-const RPC = createSolanaRpc("http://localhost");
+const RPC = createEndpointRpc("http://localhost", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
 const SIGNATURE = signature(
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
 );

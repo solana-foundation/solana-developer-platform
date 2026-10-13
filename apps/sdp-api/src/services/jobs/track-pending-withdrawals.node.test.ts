@@ -189,7 +189,7 @@ describe("trackPendingWithdrawals", () => {
 
     await track();
 
-    expect(createChannelGatewayRpc).toHaveBeenCalledWith(expect.anything(), "http://gw-live");
+    expect(createChannelGatewayRpc).toHaveBeenCalledWith("http://gw-live");
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
     );

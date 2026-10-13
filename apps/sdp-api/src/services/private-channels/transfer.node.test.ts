@@ -208,7 +208,7 @@ beforeEach(async () => {
   vi.spyOn(repositories, "createPrivateChannelTransferRepository").mockReturnValue(repo);
   vi.spyOn(balanceService, "getChannelBalance").mockResolvedValue(makeBalance());
   vi.spyOn(gatewayAuthService, "withGatewayRpc").mockImplementation(
-    async (_env, _gatewayUrl, _context, run) => run(GATEWAY_RPC as never)
+    async (_gatewayUrl, _context, run) => run(GATEWAY_RPC as never)
   );
   vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
     blockhash: BLOCKHASH,

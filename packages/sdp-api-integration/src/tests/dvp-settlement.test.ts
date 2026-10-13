@@ -23,6 +23,7 @@ import {
   TEST_ORG,
   TEST_PROJECT,
 } from "../helpers/integration";
+import { requireIntegrationLaneRpc } from "../helpers/kora-lane";
 
 const { createOrgSignerForCustodyWallet, createSigningService, CustodyConfigStore, getDb } =
   apiTestSupport;
@@ -69,19 +70,11 @@ function baseUnits(amount: number): string {
 }
 
 /** Reads a token account balance straight from the cluster. */
-async function tokenBalance(address: string): Promise<bigint> {
-  const response = await fetch(env.SOLANA_RPC_URL as string, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getTokenAccountBalance",
-      params: [address],
-    }),
-  });
-  const body = (await response.json()) as { result?: { value?: { amount?: string } } };
-  return BigInt(body.result?.value?.amount ?? "0");
+async function tokenBalance(tokenAccount: string): Promise<bigint> {
+  const { value } = await requireIntegrationLaneRpc()
+    .getTokenAccountBalance(address(tokenAccount))
+    .send();
+  return BigInt(value.amount);
 }
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and funding", () => {

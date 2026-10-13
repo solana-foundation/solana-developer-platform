@@ -4,11 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrivateChannelDepositRepository, PrivateChannelDepositRow } from "@/db/repositories";
 
 // Mock the RPC transport so we can simulate confirm outcomes + transport errors.
-const { createRpc, confirmTransaction } = vi.hoisted(() => ({
-  createRpc: vi.fn(() => ({})),
-  confirmTransaction: vi.fn(),
-}));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc, confirmTransaction }));
+const { confirmTransaction } = vi.hoisted(() => ({ confirmTransaction: vi.fn() }));
+vi.mock("@sdp/rpc/solana", () => ({ confirmTransaction }));
 
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 
@@ -26,7 +23,6 @@ function makeRepo() {
 }
 
 beforeEach(() => {
-  createRpc.mockClear();
   confirmTransaction.mockClear();
 });
 

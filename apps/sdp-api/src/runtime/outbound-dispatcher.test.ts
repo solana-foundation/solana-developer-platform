@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
-import { createRpc } from "@sdp/rpc/solana";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import type { Base64EncodedWireTransaction, Slot } from "@solana/kit";
 import {
   Agent,
@@ -200,7 +201,7 @@ describe("outbound dispatcher", () => {
   }, 10_000);
 
   it.runIf(runtimeBundlesUndici7)(
-    "is the pool createRpc uses once installed, and its send passes a read burst",
+    "is the pool an SDP RPC client uses once installed, and its send passes a read burst",
     async () => {
       const server = await startHoldingServer();
       previous = getGlobalDispatcher();
@@ -208,7 +209,7 @@ describe("outbound dispatcher", () => {
       if (installed) dispatchers.push(installed);
       try {
         expect(getGlobalDispatcher()).toBe(installed);
-        const rpc = createRpc({}, { rpcUrl: server.url });
+        const rpc = createEndpointRpc(server.url, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
         // Distinct reads: kit coalesces identical requests made together.
         const reads = Array.from({ length: BURST }, (_, lane) =>
           rpc.getBlockTime(BigInt(lane) as Slot).send()

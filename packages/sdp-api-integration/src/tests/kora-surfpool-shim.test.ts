@@ -1,5 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -12,7 +12,7 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { env, RUN_INTEGRATION_TESTS } from "../helpers/integration";
-import { requireIntegrationLaneKora } from "../helpers/kora-lane";
+import { requireIntegrationLaneKora, requireIntegrationLaneRpc } from "../helpers/kora-lane";
 
 const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraAdapter, KoraClient } = apiTestSupport;
 
@@ -26,7 +26,7 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     const adapter = new KoraAdapter({ rpcUrl });
     const config = await new KoraClient({ rpcUrl }).getConfig();
     expect(config.validation_config.allowed_programs).toContain(DVP_SWAP_PROGRAM_PROGRAM_ADDRESS);
-    const rpc = createRpc(env);
+    const rpc = requireIntegrationLaneRpc();
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const instruction = {
@@ -54,7 +54,7 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     const { rpcUrl } = requireIntegrationLaneKora();
 
     const adapter = new KoraAdapter({ rpcUrl });
-    const rpc = createRpc(env);
+    const rpc = requireIntegrationLaneRpc();
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const instruction = {

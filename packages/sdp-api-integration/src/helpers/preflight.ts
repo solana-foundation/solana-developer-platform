@@ -1,15 +1,18 @@
 import { apiTestSupport } from "@sdp/api/test-support";
 import { probeGatewayHealth } from "@sdp/private-channels";
+import { withTransientRpcRetry } from "@sdp/rpc";
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import { address as toAddress } from "@solana/kit";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
-import { getIntegrationLaneKora } from "./kora-lane";
+import {
+  getIntegrationLaneKora,
+  getIntegrationLaneRpc,
+  laneRpcPoolEnvKeyPattern,
+} from "./kora-lane";
 import { privateChannelProbeTransport } from "./private-channels";
 
 const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraClient } = apiTestSupport;
-
-type SolanaRpcResponse<T> =
-  | { jsonrpc: "2.0"; id: number; result: T }
-  | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
 const PRECHECK_CACHE_KEY = "__sdp_integration_preflight__";
 // biome-ignore lint/security/noSecrets: Public Solana program ID, not a secret.
@@ -22,6 +25,7 @@ const REQUIRED_SURFPOOL_ALLOWED_PROGRAMS = [
   MEMO_PROGRAM_ADDRESS,
 ] as const;
 const REQUIRED_LIVE_KORA_ALLOWED_PROGRAMS = [MEMO_PROGRAM_ADDRESS] as const;
+const SOLANA_RPC_PREFLIGHT_TIMEOUT_MS = 15_000;
 
 type PreflightState = {
   promise: Promise<void>;
@@ -89,7 +93,7 @@ async function runPreflight(): Promise<void> {
 async function preflightDvpSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
-  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (!getIntegrationLaneRpc()) missing.push(laneRpcPoolEnvKeyPattern());
   const laneKora = getIntegrationLaneKora();
   if (!laneKora.rpcUrl) missing.push(laneKora.rpcUrlEnvKey);
   if (integrationCustodyProvider === "local" && !env.CUSTODY_PRIVATE_KEY) {
@@ -109,11 +113,6 @@ async function preflightSpcSuite(): Promise<void> {
   const missing: string[] = [];
   const gatewayUrl = readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
   if (!gatewayUrl) missing.push("PRIVATE_CHANNEL_GATEWAY_URL");
-  // The gateway client is built through @sdp/rpc, which resolves a configured Solana
-  // endpoint even though the requests go to the gateway. Without it the suite fails
-  // per-test with "No Solana RPC endpoint is configured", which reads like a gateway
-  // outage; name it here instead.
-  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
 
   if (missing.length > 0) {
     throw new Error(
@@ -157,7 +156,8 @@ function getRequestedSuites(): Set<string> | null {
 async function preflightKoraSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
-  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  const laneRpc = getIntegrationLaneRpc();
+  if (!laneRpc) missing.push(laneRpcPoolEnvKeyPattern());
   const laneKora = getIntegrationLaneKora();
   if (!laneKora.rpcUrl) missing.push(laneKora.rpcUrlEnvKey);
   if (integrationCustodyProvider === "local") {
@@ -174,9 +174,8 @@ async function preflightKoraSuite(): Promise<void> {
   }
 
   // Narrow optional env vars to concrete strings (Biome forbids non-null assertions).
-  const solanaRpcUrl = env.SOLANA_RPC_URL;
   const koraUrl = laneKora.rpcUrl;
-  if (!solanaRpcUrl || !koraUrl) {
+  if (!laneRpc || !koraUrl) {
     // This should be unreachable because of the `missing` check above.
     throw new Error("Integration preflight internal error: required env vars were missing.");
   }
@@ -190,7 +189,7 @@ async function preflightKoraSuite(): Promise<void> {
   // These are independent read-only checks. Run them together so the two Kora
   // requests cannot consume the setup hook budget ahead of the bounded RPC retries.
   const [, config, payerSignerResp] = await Promise.all([
-    assertSolanaRpcHealthy(solanaRpcUrl),
+    assertSolanaRpcHealthy(laneRpc),
     withLabel("Kora.getConfig", () => koraClient.getConfig()),
     withLabel("Kora.getPayerSigner", () => koraClient.getPayerSigner()),
   ]);
@@ -219,7 +218,7 @@ async function preflightKoraSuite(): Promise<void> {
     );
   }
 
-  const feePayerLamports = await solanaGetBalance(solanaRpcUrl, feePayerAddress);
+  const feePayerLamports = await solanaGetBalance(laneRpc, feePayerAddress);
   const minLamports = getKoraMinBalanceLamports();
   if (feePayerLamports < minLamports) {
     throw new Error(
@@ -266,90 +265,24 @@ function getKoraMinBalanceLamports(): number {
   return 1_000_000;
 }
 
-async function assertSolanaRpcHealthy(rpcUrl: string): Promise<void> {
-  type LatestBlockhash = {
-    value: { blockhash: string; lastValidBlockHeight: number };
-  };
-  const resp = await solanaRpc<LatestBlockhash>(rpcUrl, "getLatestBlockhash", [
-    { commitment: "confirmed" },
-  ]);
-  const blockhash = resp?.value?.blockhash;
-  if (!blockhash) {
+async function assertSolanaRpcHealthy(rpc: SolanaRpc): Promise<void> {
+  const response = await withTransientRpcRetry(() =>
+    rpc
+      .getLatestBlockhash({ commitment: "confirmed" })
+      .send({ abortSignal: AbortSignal.timeout(SOLANA_RPC_PREFLIGHT_TIMEOUT_MS) })
+  );
+  if (!response.value.blockhash) {
     throw new Error("Solana RPC preflight failed: missing blockhash");
   }
 }
 
-async function solanaGetBalance(rpcUrl: string, address: string): Promise<number> {
-  type Balance = { value: number };
-  const resp = await solanaRpc<Balance>(rpcUrl, "getBalance", [
-    address,
-    { commitment: "confirmed" },
-  ]);
-  return resp.value ?? 0;
-}
-
-async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  // Preflight performs sequential RPC checks inside a 120-second setup hook.
-  // Keep the retry budget below that deadline while still retrying transient errors.
-  const maxRetries = 2;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await withTimeout(
-        15_000,
-        fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body })
-      );
-
-      const responseText = await res.text();
-      let json: SolanaRpcResponse<T>;
-      try {
-        json = JSON.parse(responseText) as SolanaRpcResponse<T>;
-      } catch (error) {
-        const parseMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Solana RPC returned ${res.status} with empty/invalid body calling ${method}: ${parseMessage}`
-        );
-      }
-      if ("error" in json) {
-        throw new Error(`Solana RPC error calling ${method}: ${json.error.message}`);
-      }
-      return json.result;
-    } catch (error) {
-      if (attempt < maxRetries && isRetryableSolanaRpcError(error)) {
-        await sleep((attempt + 1) * 500);
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error(`Solana RPC error calling ${method}`);
-}
-
-function isRetryableSolanaRpcError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("empty/invalid body") ||
-    message.includes("internal error") ||
-    message.includes("unable to complete request") ||
-    message.includes("request timed out") ||
-    message.includes("timed out") ||
-    message.includes("service unavailable") ||
-    message.includes("try again") ||
-    message.includes("too many requests") ||
-    message.includes("429") ||
-    message.includes("500") ||
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("504")
+async function solanaGetBalance(rpc: SolanaRpc, address: string): Promise<number> {
+  const response = await withTransientRpcRetry(() =>
+    rpc
+      .getBalance(toAddress(address), { commitment: "confirmed" })
+      .send({ abortSignal: AbortSignal.timeout(SOLANA_RPC_PREFLIGHT_TIMEOUT_MS) })
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return Number(response.value);
 }
 
 async function withTimeout<T>(ms: number, promise: Promise<T>): Promise<T> {

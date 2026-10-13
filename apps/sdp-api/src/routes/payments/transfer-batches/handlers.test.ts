@@ -7,7 +7,6 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
   address,
-  createDefaultRpcTransport,
   createNoopSigner,
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
@@ -33,11 +32,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import {
-  CLUSTER_RPC_URLS,
-  installClusterRpcResponder,
-  tokenAccountsByOwnerResult,
-} from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -51,7 +46,6 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
@@ -440,9 +434,6 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    createRpcMock.mockReturnValue(
-      solanaRpc.createRpcFromTransport(createDefaultRpcTransport({ url: CLUSTER_RPC_URLS.devnet }))
-    );
     rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,

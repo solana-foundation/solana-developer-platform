@@ -1,6 +1,7 @@
 "use client";
 
-import { privateChannelInstanceInputSchema, SANDBOX_DEFAULTS } from "@sdp/private-channels";
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels/schema";
 import type {
   PrivateChannelInstance,
   PrivateChannelInstanceInput,

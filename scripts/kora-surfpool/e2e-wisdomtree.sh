@@ -45,7 +45,6 @@ if [ "${SDP_WISDOMTREE_SURFPOOL_IN_CONTAINER:-}" != "1" ]; then
 fi
 
 export SURFPOOL_REMOTE_RPC_URL="${WISDOMTREE_SURFPOOL_MAINNET_RPC_URL}"
-export SOLANA_NETWORK=mainnet-beta
 export WISDOMTREE_SURFPOOL_E2E=true
 
 STATE_DIR="$(mktemp -d /tmp/sdp-wisdomtree-surfpool.XXXXXX)"

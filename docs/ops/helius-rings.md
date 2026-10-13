@@ -39,7 +39,9 @@ configuration without changing this schema.
 | Variable | Meaning |
 | --- | --- |
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
-| `SOLANA_NETWORK` | Must be `devnet`. |
+
+Rings serves devnet only: a request whose cluster scope is not devnet (any
+Production project) is refused (`ringsServesScopeCluster`).
 
 ### Where the shielded keys come from
 
@@ -203,10 +205,10 @@ a custom ring.
 
 If a USDC shield fails with `InvalidSettlementAccounts` (custom 7009), the
 pool's `splAssetRegistry`/`splAssetVault` PDAs for that mint do not exist on
-the cluster. Confirm with
-`pnpm exec tsx packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts`; it
-is a deployment gap, not an SDP bug, and withdraw cannot land until it is
-closed.
+the cluster. Confirm by deriving them with `getSplAssetRegistryAddress` and
+`getSplAssetVaultAddress` (`@heliuslabs/zolana/addresses`) and looking each up
+with `solana account <address> --url devnet`; a missing account is a
+deployment gap, not an SDP bug, and withdraw cannot land until it is closed.
 
 ## Broadcast ambiguity (shield)
 

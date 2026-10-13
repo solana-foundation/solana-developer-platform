@@ -17,6 +17,7 @@ import {
   createClusterJsonRpcFetch,
   createClusterReadRpc,
   createClusterRpc,
+  createEndpointRpc,
   type DasGetAssetBatchParams,
   type DasSearchAssetsParams,
   type DasSearchAssetsResult,
@@ -1109,5 +1110,20 @@ describe("createClusterJsonRpcFetch", () => {
       }
     );
     assert.deepEqual(calls, []);
+  });
+});
+
+describe("createEndpointRpc", () => {
+  isolateManagedPool();
+
+  it("sends only to its own endpoint without a genesis probe, even inside a scope with a pool", async () => {
+    const pool = "https://devnet-pool-beside-endpoint.example.test";
+    const endpointUrl = "https://channel-gateway-endpoint.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: pool });
+    const calls = stubEndpoints({ [pool]: SERVES_DEVNET, [endpointUrl]: SERVES_DEVNET });
+    const rpc = createEndpointRpc(endpointUrl, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
+
+    assert.equal(await runInClusterScope(SANDBOX, () => rpc.getSlot().send()), BigInt(SLOT));
+    assert.deepEqual(calls, [slotRead(endpointUrl)]);
   });
 });

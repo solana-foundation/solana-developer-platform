@@ -1,4 +1,6 @@
-import { type Address, address, createSolanaRpc, type TransactionSigner } from "@solana/kit";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
+import { type Address, address, type TransactionSigner } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
@@ -165,8 +167,8 @@ const owner = { address: OWNER } as TransactionSigner;
 const DEVNET_RPC_URL = "https://devnet.kamino-oracle-free.test";
 const runtime = {
   cluster: "devnet" as const,
-  rpc: createSolanaRpc(DEVNET_RPC_URL),
-  readRpc: createSolanaRpc(DEVNET_RPC_URL),
+  rpc: createEndpointRpc(DEVNET_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+  readRpc: createEndpointRpc(DEVNET_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
 };
 
 async function answerChainRead(method: string, params: unknown): Promise<unknown> {

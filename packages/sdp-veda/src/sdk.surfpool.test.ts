@@ -1,11 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { Instruction } from "@solana/kit";
 import {
   address,
   appendTransactionMessageInstructions,
-  createSolanaRpc,
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
@@ -49,7 +50,12 @@ import type { VedaInstructionPlan, VedaRuntime } from "./types";
  * private solve-authority signer, which a fork does not and must not impersonate.
  */
 const ENABLED = process.env.VEDA_SURFPOOL_E2E === "true";
-const RPC_URL = process.env.SOLANA_RPC_URL;
+const RPC_URL = process.env.SURFPOOL_RPC_URL;
+
+function requireRpcUrl(): string {
+  if (!RPC_URL) throw new Error("SURFPOOL_RPC_URL is required for the Veda Surfpool proof");
+  return RPC_URL;
+}
 const DEPOSIT_AMOUNT = "2";
 const FUNDED_USDC_ATOMS = 10_000_000n;
 const OWNER_LAMPORTS = 10_000_000_000;
@@ -65,8 +71,7 @@ type SimulationValue = {
 };
 
 async function rpcCall<T>(method: string, params: readonly unknown[] = []): Promise<T> {
-  if (!RPC_URL) throw new Error("SOLANA_RPC_URL is required for the Veda Surfpool proof");
-  const response = await fetch(RPC_URL, {
+  const response = await fetch(requireRpcUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -147,7 +152,7 @@ async function setSurfpoolClockUnixSecond(timestamp: bigint): Promise<void> {
 }
 
 async function proxyRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  if (!RPC_URL) throw new Error("SOLANA_RPC_URL is required for the Veda Surfpool proof");
+  const rpcUrl = requireRpcUrl();
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -157,7 +162,7 @@ async function proxyRequest(request: IncomingMessage, response: ServerResponse):
     method?: string;
     params?: Array<Record<string, unknown> | unknown>;
   };
-  const upstream = await fetch(RPC_URL, {
+  const upstream = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,
@@ -257,7 +262,7 @@ async function compilePlan(
   owner: Awaited<ReturnType<typeof generateKeyPairSigner>>
 ) {
   expect(plan.lookupTables).toEqual([]);
-  const rpc = createSolanaRpc(RPC_URL ?? "");
+  const rpc = createEndpointRpc(requireRpcUrl(), { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
   const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -272,7 +277,7 @@ async function simulatePlan(
   plan: VedaInstructionPlan,
   owner: Awaited<ReturnType<typeof generateKeyPairSigner>>
 ): Promise<SimulationValue> {
-  const rpc = createSolanaRpc(RPC_URL ?? "");
+  const rpc = createEndpointRpc(requireRpcUrl(), { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
   const wire = await compilePlan(plan, owner);
   const simulation = await rpc.simulateTransaction(wire, { encoding: "base64" }).send();
   return simulation.value;
@@ -282,7 +287,7 @@ async function sendPlan(
   plan: VedaInstructionPlan,
   owner: Awaited<ReturnType<typeof generateKeyPairSigner>>
 ): Promise<string> {
-  const rpc = createSolanaRpc(RPC_URL ?? "");
+  const rpc = createEndpointRpc(requireRpcUrl(), { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
   const wire = await compilePlan(plan, owner);
   const simulation = await rpc.simulateTransaction(wire, { encoding: "base64" }).send();
   expect(
@@ -320,9 +325,9 @@ async function accountExists(account: string): Promise<boolean> {
 }
 
 describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () => {
-  let providerRpcUrl = RPC_URL ?? "";
+  let providerRpcUrl: string;
   const runtime = (): VedaRuntime => {
-    const rpc = createSolanaRpc(providerRpcUrl);
+    const rpc = createEndpointRpc(providerRpcUrl, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
     return { cluster: "devnet", rpc, readRpc: rpc };
   };
   const config = vedaClusterConfig("devnet");
@@ -338,6 +343,7 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
   }
 
   beforeAll(async () => {
+    providerRpcUrl = requireRpcUrl();
     if (!vault) throw new Error("The Veda devnet deployment has no configured vault");
     owner = await generateKeyPairSigner();
 

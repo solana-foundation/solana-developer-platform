@@ -39,7 +39,6 @@ import type {
   PrivateChannelTransferRow,
 } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
-import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { describeTransactionErr } from "./tx-error";
 
@@ -59,7 +58,6 @@ const TRANSFER_CONFIRM_POLL_INTERVAL_MS = 250;
  *  - transport error / never appeared → no change (stays `submitted`); returns `null`.
  */
 export async function confirmAndPersistTransfer(
-  env: Env,
   repo: PrivateChannelTransferRepository,
   input: {
     transferId: string;
@@ -70,15 +68,11 @@ export async function confirmAndPersistTransfer(
   }
 ): Promise<PrivateChannelTransferRow | null> {
   try {
-    const confirmation = await withGatewayRpc(
-      env,
-      input.gatewayUrl,
-      input.gatewayAuth,
-      (gatewayRpc) =>
-        confirmTransaction(gatewayRpc, input.signature, {
-          timeoutMs: TRANSFER_CONFIRM_TIMEOUT_MS,
-          pollIntervalMs: TRANSFER_CONFIRM_POLL_INTERVAL_MS,
-        })
+    const confirmation = await withGatewayRpc(input.gatewayUrl, input.gatewayAuth, (gatewayRpc) =>
+      confirmTransaction(gatewayRpc, input.signature, {
+        timeoutMs: TRANSFER_CONFIRM_TIMEOUT_MS,
+        pollIntervalMs: TRANSFER_CONFIRM_POLL_INTERVAL_MS,
+      })
     );
     if (confirmation.err) {
       return repo.updateTransfer({

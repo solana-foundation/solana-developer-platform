@@ -15,7 +15,7 @@ const EXPLORER_ORIGIN = "https://explorer.solana.com";
  * Read as a literal member expression because Next only inlines a
  * `NEXT_PUBLIC_*` value at build time when it can see the whole name.
  *
- * Deliberately NOT derived from the API's own `SOLANA_RPC_URL`. Provider
+ * Deliberately NOT derived from the API's own RPC pool. Provider
  * endpoints carry an API key in the query string, and copying one into a public
  * href would publish that credential on every page that links a signature. This
  * is a separate variable precisely so setting it is a decision.

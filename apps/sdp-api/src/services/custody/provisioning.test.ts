@@ -959,7 +959,6 @@ function createParaEnv(overrides: Partial<Env> = {}): Env {
 function createUtilaEnv(overrides: Partial<Env> = {}): Env {
   return {
     ENVIRONMENT: "development",
-    SOLANA_NETWORK: "devnet",
     UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
     UTILA_VAULT_ID: "vaults/vault_123",

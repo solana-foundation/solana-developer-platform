@@ -152,7 +152,7 @@ describe("SPC gateway auth — KV cache + 401 retry (Redis KV + Postgres)", () =
     const firstToken = auth?.current;
 
     let attempts = 0;
-    const result = await withGatewayRpc(testEnv, GATEWAY_URL, auth, async (rpc) => {
+    const result = await withGatewayRpc(GATEWAY_URL, auth, async (rpc) => {
       attempts += 1;
       if (attempts === 1) {
         throw rpcHttpError(401);
@@ -174,7 +174,7 @@ describe("SPC gateway auth — KV cache + 401 retry (Redis KV + Postgres)", () =
 
     let attempts = 0;
     await expect(
-      withGatewayRpc(testEnv, GATEWAY_URL, auth, async () => {
+      withGatewayRpc(GATEWAY_URL, auth, async () => {
         attempts += 1;
         throw { context: { statusCode: 500 } };
       })

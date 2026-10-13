@@ -115,7 +115,7 @@ function harness(scope: SponsorshipScope = SCOPE) {
   const feePayment = runInClusterScope(
     { projectId: scope.projectId, environment: scope.environment },
     () =>
-      new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
+      new BudgetedFeePayment({} as Env, scope, provider, {
         repository,
         budgetRedis,
         getNetworkFee: vi.fn().mockResolvedValue(5_000n),

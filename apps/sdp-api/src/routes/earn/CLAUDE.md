@@ -1456,10 +1456,10 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** Explicit `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`
-pins remain isolated. Otherwise, executing provider read/build operations use
-the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
-must prove its genesis hash before SDK work. Transient nested transport errors
+**Per-cluster RPC.** Executing provider read/build operations use the open
+cluster scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`)
+through the door (`@sdp/rpc/factory`). Each endpoint must prove its genesis
+hash before SDK work. Transient nested transport errors
 may retry the unsigned read/build within the same workflow deadline; deterministic
 refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
 `readVaultPositions` throw an `AggregateError` cause) retries only when every

@@ -200,7 +200,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     await inClusterScope("sandbox", () =>
       reconcileSponsorshipBudgets(
-        { SOLANA_NETWORK: "devnet", KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env,
+        { KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env,
         deps
       )
     );
@@ -219,17 +219,14 @@ describe("reconcileSponsorshipBudgets", () => {
 
     await expect(
       inClusterScope("production", () =>
-        reconcileSponsorshipBudgets(
-          { SOLANA_NETWORK: "devnet", KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env,
-          {
-            repository,
-            budgetRedis,
-            getTransaction,
-            isBlockhashValid,
-            now: () => new Date("2026-08-03T10:05:00.000Z"),
-            sleep: vi.fn().mockResolvedValue(undefined),
-          }
-        )
+        reconcileSponsorshipBudgets({ KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env, {
+          repository,
+          budgetRedis,
+          getTransaction,
+          isBlockhashValid,
+          now: () => new Date("2026-08-03T10:05:00.000Z"),
+          sleep: vi.fn().mockResolvedValue(undefined),
+        })
       )
     ).rejects.toMatchObject({
       message: "Kora security configuration is unavailable",
@@ -458,7 +455,7 @@ describe("reconcileSponsorshipBudgets", () => {
     const sleep = vi.fn().mockResolvedValue(undefined);
     await expect(
       inClusterScope("sandbox", () =>
-        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        reconcileSponsorshipBudgets({} as Env, {
           repository,
           budgetRedis,
           getTransaction,
@@ -489,7 +486,7 @@ describe("reconcileSponsorshipBudgets", () => {
     repository.recordProviderConfigFailure.mockResolvedValue(3);
     await expect(
       inClusterScope("sandbox", () =>
-        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        reconcileSponsorshipBudgets({} as Env, {
           repository,
           budgetRedis,
           getTransaction,
@@ -524,7 +521,7 @@ describe("reconcileSponsorshipBudgets", () => {
       .mockResolvedValue(PROVIDER_CONFIGURATION);
     await expect(
       inClusterScope("sandbox", () =>
-        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        reconcileSponsorshipBudgets({} as Env, {
           repository,
           budgetRedis,
           getTransaction,
@@ -695,7 +692,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     await expect(
       inClusterScope("sandbox", () =>
-        reconcileSponsorshipBudgets({ SOLANA_NETWORK: "devnet" } as Env, {
+        reconcileSponsorshipBudgets({} as Env, {
           repository,
           budgetRedis,
           getTransaction,

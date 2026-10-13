@@ -14,8 +14,17 @@ import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
 import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as RpcModule from "@sdp/rpc/solana";
-import type { Address, Signature, TransactionSigner } from "@solana/kit";
-import * as Kit from "@solana/kit";
+import {
+  type Address,
+  compileTransaction,
+  createNoopSigner,
+  generateKeyPairSigner,
+  getBase64EncodedWireTransaction,
+  getTransactionEncoder,
+  type Signature,
+  signTransactionMessageWithSigners,
+  type TransactionSigner,
+} from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as Signers from "@solana/signers";
 import { findMintConfigPda, parseSetAuthorityInstruction } from "@solana/token-acl-sdk";
@@ -25,6 +34,24 @@ import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
+vi.mock("@solana/kit", async (importOriginal) => {
+  const kit = await importOriginal<typeof import("@solana/kit")>();
+  return {
+    ...kit,
+    compileTransaction: vi.fn(kit.compileTransaction),
+    getBase64EncodedWireTransaction: vi.fn(kit.getBase64EncodedWireTransaction),
+    getTransactionEncoder: vi.fn(kit.getTransactionEncoder),
+    signTransactionMessageWithSigners: vi.fn(kit.signTransactionMessageWithSigners),
+  };
+});
+
+function resetKitSpies(): void {
+  vi.mocked(compileTransaction).mockReset();
+  vi.mocked(getBase64EncodedWireTransaction).mockReset();
+  vi.mocked(getTransactionEncoder).mockReset();
+  vi.mocked(signTransactionMessageWithSigners).mockReset();
+}
+
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
 // is irrelevant; we only care which arguments the service hands it.
 const FAKE_FULL_TX = { __sentinel: "full-tx", instructions: [] } as const;
@@ -32,7 +59,7 @@ const FAKE_LIST_ADDRESS = "List1111111111111111111111111111111111111" as Address
 // Structurally-valid placeholder addresses for helper defaults, so callers that
 // don't override these still get a well-formed CreateTokenOptions.
 const PLACEHOLDER_MINT_AUTHORITY = "Mint1111111111111111111111111111111111111" as Address;
-const PLACEHOLDER_FEE_PAYER = Kit.createNoopSigner(
+const PLACEHOLDER_FEE_PAYER = createNoopSigner(
   "Fee11111111111111111111111111111111111111" as Address
 );
 
@@ -118,8 +145,8 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   let builderSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    signer = await Kit.generateKeyPairSigner();
-    koraAddress = (await Kit.generateKeyPairSigner()).address;
+    signer = await generateKeyPairSigner();
+    koraAddress = (await generateKeyPairSigner()).address;
     fee = makeFeePayment(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
@@ -150,6 +177,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    resetKitSpies();
   });
 
   /** custody signs the mint authority; sRFC-37 enabled with a real freeze authority. */
@@ -166,7 +194,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   it.each(["stablecoin", "arcade", "tokenized-security", "custom"] as const)(
     "initializes the selected metadata authority for %s",
     async (template) => {
-      const metadataSigner = await Kit.generateKeyPairSigner();
+      const metadataSigner = await generateKeyPairSigner();
       const arcade = vi
         .spyOn(MosaicSdk, "createArcadeTokenInitTransaction")
         .mockResolvedValue(FAKE_FULL_TX as never);
@@ -203,7 +231,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   );
 
   it("uses the selected metadata signer for the URI follow-up after an oversized create", async () => {
-    const metadataSigner = await Kit.generateKeyPairSigner();
+    const metadataSigner = await generateKeyPairSigner();
     vi.mocked(
       MosaicService.prototype as unknown as PacketSizeProto
     ).exceedsPacketSize.mockResolvedValue(true);
@@ -234,7 +262,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   });
 
   it("assigns a distinct Token ACL freeze controller atomically after template setup", async () => {
-    const freezeAuthority = (await Kit.generateKeyPairSigner()).address;
+    const freezeAuthority = (await generateKeyPairSigner()).address;
     const setupInstruction = { programAddress: signer.address };
     builderSpy.mockResolvedValueOnce({ ...FAKE_FULL_TX, instructions: [setupInstruction] });
     const submit = vi
@@ -298,7 +326,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     });
 
     it("falls back to options.feePayer when no fee sponsor is configured", async () => {
-      const ownFeePayer = await Kit.generateKeyPairSigner();
+      const ownFeePayer = await generateKeyPairSigner();
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
         sandboxMosaicRpc(),
@@ -326,10 +354,10 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       // A prepared transaction is submitted by the client, who cannot sign as
       // Kora — so the fee payer must stay options.feePayer, not the sponsor.
       const compileSpy = vi
-        .spyOn(Kit, "compileTransaction")
+        .mocked(compileTransaction)
         .mockReturnValue({ __sentinel: "compiled" } as never);
       const wireSpy = vi
-        .spyOn(Kit, "getBase64EncodedWireTransaction")
+        .mocked(getBase64EncodedWireTransaction)
         .mockReturnValue("base64-tx" as never);
 
       const result = await service.prepareCreateToken(srfc37Options());
@@ -367,7 +395,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const partialSpy = vi
         .spyOn(Signers, "partiallySignTransactionMessageWithSigners")
         .mockResolvedValue({ __sentinel: "partial-tx" } as never);
-      vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
+      vi.mocked(getTransactionEncoder).mockReturnValue({
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
       const confirmSpy = vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
@@ -394,7 +422,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       vi.spyOn(Signers, "partiallySignTransactionMessageWithSigners").mockResolvedValue({
         __sentinel: "partial-tx",
       } as never);
-      vi.spyOn(Kit, "getTransactionEncoder").mockReturnValue({
+      vi.mocked(getTransactionEncoder).mockReturnValue({
         encode: () => new Uint8Array([1, 2, 3]),
       } as never);
       const onChainError = { InstructionError: [0, { Custom: 6001 }] };
@@ -432,10 +460,10 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
         { transactionFailedError: transactionFailed }
       );
 
-      vi.spyOn(Kit, "signTransactionMessageWithSigners").mockResolvedValue({
+      vi.mocked(signTransactionMessageWithSigners).mockResolvedValue({
         __sentinel: "signed-tx",
       } as never);
-      vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+      vi.mocked(getBase64EncodedWireTransaction).mockReturnValue("base64-tx" as never);
       const onChainError = { InstructionError: [1, { Custom: 42 }] };
       vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
         signature: directSignature,
@@ -473,7 +501,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       // Mint authority distinct from the service signer: the patched mosaic-sdk
       // seeds the list-config PDA from the mint authority, so the derivation must
       // follow it — deriving from `this.signer` would produce the wrong address.
-      const mintAuthority = (await Kit.generateKeyPairSigner()).address;
+      const mintAuthority = (await generateKeyPairSigner()).address;
       expect(mintAuthority).not.toBe(signer.address);
 
       const result = await service.createToken(
@@ -553,11 +581,11 @@ describe("MosaicService mint and transfer — fee payer", () => {
   installClusterRpcStub();
 
   beforeEach(async () => {
-    signer = await Kit.generateKeyPairSigner();
-    clientAddress = (await Kit.generateKeyPairSigner()).address;
-    koraAddress = (await Kit.generateKeyPairSigner()).address;
-    mint = (await Kit.generateKeyPairSigner()).address;
-    destination = (await Kit.generateKeyPairSigner()).address;
+    signer = await generateKeyPairSigner();
+    clientAddress = (await generateKeyPairSigner()).address;
+    koraAddress = (await generateKeyPairSigner()).address;
+    mint = (await generateKeyPairSigner()).address;
+    destination = (await generateKeyPairSigner()).address;
     fee = makeFeePayment(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
@@ -578,8 +606,8 @@ describe("MosaicService mint and transfer — fee payer", () => {
     vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
       tokenAccount: destination,
     } as never);
-    vi.spyOn(Kit, "compileTransaction").mockReturnValue({ __sentinel: "compiled" } as never);
-    vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+    vi.mocked(compileTransaction).mockReturnValue({ __sentinel: "compiled" } as never);
+    vi.mocked(getBase64EncodedWireTransaction).mockReturnValue("base64-tx" as never);
     submitSpy = vi
       .spyOn(MosaicService.prototype as unknown as SignAndSubmitProto, "signAndSubmit")
       .mockResolvedValue({ signature: "sig", slot: 1n });
@@ -587,6 +615,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    resetKitSpies();
   });
 
   function feePayerAddress(feePayer: unknown): Address {

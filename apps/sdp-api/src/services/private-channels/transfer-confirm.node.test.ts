@@ -4,22 +4,18 @@ import type {
   PrivateChannelTransferRepository,
   PrivateChannelTransferRow,
 } from "@/db/repositories";
-import type { Env } from "@/types/env";
 
 // Mock the RPC transport so we can simulate confirm outcomes + transport errors.
 const { confirmTransaction } = vi.hoisted(() => ({ confirmTransaction: vi.fn() }));
 vi.mock("@sdp/rpc/solana", () => ({ confirmTransaction }));
 
 const { withGatewayRpc } = vi.hoisted(() => ({
-  withGatewayRpc: vi.fn(async (_env, _url, _ctx, run: (rpc: unknown) => Promise<unknown>) =>
-    run({})
-  ),
+  withGatewayRpc: vi.fn(async (_url, _ctx, run: (rpc: unknown) => Promise<unknown>) => run({})),
 }));
 vi.mock("./auth/gateway-auth", () => ({ withGatewayRpc }));
 
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 
-const env = {} as Env;
 const SIGNATURE = "sig-transfer-1" as Signature;
 
 function makeRepo() {
@@ -37,7 +33,7 @@ function makeRepo() {
 }
 
 function run(repo: PrivateChannelTransferRepository) {
-  return confirmAndPersistTransfer(env, repo, {
+  return confirmAndPersistTransfer(repo, {
     transferId: "pct_1",
     gatewayUrl: "https://gateway",
     signature: SIGNATURE,

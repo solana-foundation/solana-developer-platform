@@ -15,6 +15,7 @@
  */
 
 import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-channels";
+import { createEndpointRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { getDepositInstructionAsync } from "@sdp/spc-escrow";
 import { getBase58Codec } from "@solana/codecs";
@@ -30,7 +31,6 @@ import {
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   getChainRpcUrl,
   getDepositAmountBaseUnits,
@@ -71,7 +71,7 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const owner = signer.address;
       const amount = getDepositAmountBaseUnits();
 
-      const gatewayRpc = createChannelGatewayRpc(env, getGatewayUrl());
+      const gatewayRpc = createChannelGatewayRpc(getGatewayUrl());
       const baseline = await readChannelAmount(gatewayRpc, owner, DEVNET_USDC);
 
       // Build the escrow deposit (payer + user are the same funded keypair).
@@ -85,7 +85,9 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       });
 
       // Sign + broadcast + confirm on the instance chain (devnet).
-      const chainRpc = solanaRpc.createRpc(env, { rpcUrl: getChainRpcUrl() });
+      const chainRpc = createEndpointRpc(getChainRpcUrl(), {
+        timeoutMs: solanaRpc.DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+      });
       const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
         chainRpc,
         "confirmed"
