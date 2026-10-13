@@ -224,6 +224,29 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@sdp/rpc/solana": {
+                    "importNames": [
+                      "createRpc",
+                      "createClusterRpc",
+                      "createRpcFromTransport",
+                      "createRpcForSdk",
+                      "createFailoverTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createSolanaRpcSubscriptions",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@sdp/rpc/scope": {
                     "allowImportNames": ["currentClusterScope", "ClusterScope"],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
@@ -241,11 +264,7 @@
         "**/apps/sdp-api/**/test/**/*.ts",
         "**/packages/**/*.test.ts",
         "**/packages/**/*.spec.ts",
-        "**/packages/**/test/**/*.ts",
-        "**/apps/sdp-api/src/middleware/project-context.ts",
-        "**/apps/sdp-api/src/services/jobs/track-pending-transfers.ts",
-        "**/apps/sdp-api/src/routes/pay.ts",
-        "**/apps/sdp-api/src/routes/earn/index.ts"
+        "**/packages/**/test/**/*.ts"
       ],
       "linter": {
         "rules": {
@@ -260,6 +279,109 @@
                       "ClusterScope",
                       "runInClusterScope"
                     ],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/apps/sdp-api/src/middleware/project-context.ts",
+        "**/apps/sdp-api/src/routes/pay.ts",
+        "**/apps/sdp-api/src/routes/earn/index.ts",
+        "**/apps/sdp-api/src/services/jobs/track-pending-transfers.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/solana": {
+                    "importNames": [
+                      "createRpc",
+                      "createClusterRpc",
+                      "createRpcFromTransport",
+                      "createRpcForSdk",
+                      "createFailoverTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createSolanaRpcSubscriptions",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": [
+                      "currentClusterScope",
+                      "ClusterScope",
+                      "runInClusterScope"
+                    ],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/packages/sdp-rpc/src/**/*.ts",
+        "**/apps/sdp-api/src/job.ts",
+        "**/apps/sdp-api/src/routes/earn/handlers/vault-reconciliation.ts",
+        "**/apps/sdp-api/src/services/earn/deposit-mint-guard.ts",
+        "**/apps/sdp-api/src/services/earn/execution-registry.ts",
+        "**/apps/sdp-api/src/services/earn/owner-token-balance.ts",
+        "**/apps/sdp-api/src/services/earn/vault-balance-read-context.ts",
+        "**/apps/sdp-api/src/services/earn/vault-execution.service.ts",
+        "**/apps/sdp-api/src/services/earn/vault-intent-execution.service.ts",
+        "**/apps/sdp-api/src/services/earn/vault-movement-reconciliation.service.ts",
+        "**/apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.ts",
+        "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
+        "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
+        "**/apps/sdp-api/src/services/jobs/reconcile-dvp-trades.ts",
+        "**/apps/sdp-api/src/services/jobs/reconcile-sponsorship-budgets.ts",
+        "**/apps/sdp-api/src/services/jobs/track-pending-withdrawals.ts",
+        "**/apps/sdp-api/src/services/payments/recurring-payments/activation.ts",
+        "**/apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
+        "**/apps/sdp-api/src/services/payments/recurring-payments/lifecycle.ts",
+        "**/apps/sdp-api/src/services/payments/recurring-payments/shared.ts",
+        "**/apps/sdp-api/src/services/payments/recurring-payments/update.ts",
+        "**/apps/sdp-api/src/services/private-channels/project-rpc.ts",
+        "**/apps/sdp-api/src/services/sponsorship-budget.service.ts",
+        "**/packages/sdp-api-integration/src/helpers/integration.ts",
+        "**/packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts",
+        "**/packages/sdp-kamino/src/rpc.ts",
+        "**/packages/sdp-payments/src/fee-payment/native.adapter.ts",
+        "**/packages/sdp-private-channels/src/gateway.ts",
+        "**/packages/sdp-veda/src/rpc.ts",
+        "**/packages/sdp-wisdomtree/src/chain.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   }
                 }

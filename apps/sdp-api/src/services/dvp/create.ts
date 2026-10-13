@@ -28,7 +28,7 @@ import { findDvpNonceTombstonePda, findSwapDvpPda, getCreateDvpInstruction } fro
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
@@ -513,10 +513,7 @@ export async function createDvpTrade(
           : some(input.earliestSettlementTimestamp),
     });
 
-    const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-      rpc,
-      "confirmed"
-    );
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayer(sponsor, m),
