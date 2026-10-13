@@ -28,12 +28,9 @@ import { z } from "zod";
  *   would un-write the just-claimed key.
  * - Entries are zod-parsed per row on read: the store is untrusted JSON
  *   written as often by an older build of this page as by the current one.
- * - HELD entries (a policy approval is pending on the key) never expire and
- *   are never evicted: the approval executor replays the original request
- *   with this exact key, so a resubmit under the same key is answered as a
- *   replay of what the approval recorded. A held entry carries the approval it
- *   waits on, so once that approval is decided the hold can be lifted and the
- *   next identical payment is a new one rather than a replay of the old.
+ * - HELD entries (a key pinned for a provider session, whose callback may
+ *   repeat) never expire and are never evicted: a resubmit under the same key
+ *   is answered as a replay of what was recorded.
  */
 
 /**
@@ -53,10 +50,8 @@ const storedEntrySchema = z.object({
   id: z.string().min(1),
   value: z.string().min(1),
   createdAt: z.number().finite(),
-  /** `null` = held by a live approval: no expiry while the tab lives. */
+  /** `null` = held: no expiry while the tab lives. */
   expiresAt: z.union([z.number().finite(), z.null()]).optional(),
-  /** The approval holding it, so the hold can be lifted once that approval ends. */
-  approvalRequestId: z.string().min(1).optional(),
 });
 
 type StoredEntry = z.infer<typeof storedEntrySchema>;
@@ -75,9 +70,8 @@ function isLiveEntry(entry: StoredEntry, now: number): boolean {
 /**
  * Bound the store by evicting EXPIRING entries only, with a floor of one so
  * the entry a caller just claimed (written as the last element) can never be
- * evicted by its own write. A held entry is never dropped: its count is
- * bounded by real approval requests a person raised in one tab, and losing
- * one mints a fresh key for an intent an approval already carries.
+ * evicted by its own write. A held entry is never dropped: losing one mints
+ * a fresh key for a request the provider session may still repeat.
  */
 function withinStorageBound(entries: readonly StoredEntry[]): StoredEntry[] {
   const held = entries.filter(isHeldEntry);
@@ -106,19 +100,11 @@ export interface PaymentIdempotencyStore {
    */
   claim(fingerprint: string): string;
   /**
-   * Pin a key while a policy approval holds the request (202 SIGNING_PENDING).
-   *
-   * The default TTL is calibrated to a broadcast, but an approval answers to a
-   * human and can take hours. The approval executor replays the ORIGINAL
-   * request with this exact key, so once it executes, a resubmit with the held
-   * key is answered as a replay of the recorded payment, and even a duplicate
-   * approval request created by an impatient resubmit collapses into that same
-   * replay when its execution carries the same key. Letting the key lapse
-   * instead would mint a fresh one, and a fresh key is a second payment.
+   * Pin a key so it never expires while the tab lives, for a request whose
+   * callback may repeat (a provider session). Letting the key lapse would mint
+   * a fresh one, and a fresh key is a second payment.
    */
-  hold(fingerprint: string, approvalRequestId?: string): void;
-  /** The approval a held key waits on, or null when this request holds none. */
-  heldApproval(fingerprint: string): string | null;
+  hold(fingerprint: string): void;
   /**
    * Retire a key once the API has ANSWERED for it: a recorded payment (any
    * terminal or processing status: the row exists, replays are safe) or a
@@ -213,22 +199,14 @@ export function createPaymentIdempotencyStore(storeKey: string): PaymentIdempote
       ]);
       return key;
     },
-    hold(fingerprint, approvalRequestId) {
+    hold(fingerprint) {
       const entries = readEntries();
       const held = entries.find((entry) => entry.id === fingerprint);
       if (!held) return;
       writeEntries([
         ...entries.filter((entry) => entry.id !== fingerprint),
-        {
-          ...held,
-          expiresAt: null,
-          ...(approvalRequestId === undefined ? {} : { approvalRequestId }),
-        },
+        { ...held, expiresAt: null },
       ]);
-    },
-    heldApproval(fingerprint) {
-      const held = readEntries().find((entry) => entry.id === fingerprint);
-      return held !== undefined && isHeldEntry(held) ? (held.approvalRequestId ?? null) : null;
     },
     release(fingerprint) {
       const entries = readEntries();

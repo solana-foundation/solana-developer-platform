@@ -1,7 +1,7 @@
-import type { RampProviderId, SdpEnvironment } from "@sdp/types";
+import type { PersistedRampProviderId, RampProviderId, SdpEnvironment } from "@sdp/types";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import { isRampProviderSurfaced } from "@sdp/types/provider-access";
+import { isRampProviderSurfaced, isRetiredRampProviderId } from "@sdp/types/provider-access";
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -27,7 +27,6 @@ export const RAMP_PROVIDER_LOGOS = {
   bvnk: "/provider-logos/bvnk.svg",
   moneygram: "/provider-logos/moneygram.svg",
   coinbase: "/provider-logos/coinbase-cdp.png",
-  mural: "/provider-logos/muralpay.svg",
   stripe: "/provider-logos/stripe.svg",
 } as const satisfies Record<RampProviderId, string>;
 
@@ -37,7 +36,6 @@ export const RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS = {
   bvnk: false,
   moneygram: false,
   coinbase: false,
-  mural: false,
   stripe: false,
 } as const satisfies Record<RampProviderId, boolean>;
 
@@ -47,7 +45,6 @@ export const RAMP_PROVIDER_WEBSITES = {
   bvnk: "https://www.bvnk.com",
   moneygram: "https://www.moneygram.com",
   coinbase: "https://www.coinbase.com/developer-platform",
-  mural: "https://www.muralpay.com",
   stripe: "https://stripe.com",
 } as const satisfies Record<RampProviderId, string>;
 
@@ -57,7 +54,6 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "bvnk", title: "BVNK" },
   { id: "moneygram", title: "MoneyGram" },
   { id: "coinbase", title: "Coinbase" },
-  { id: "mural", title: "Mural Pay" },
   { id: "stripe", title: "Stripe" },
 ];
 
@@ -143,6 +139,11 @@ export function rampPairKey(pair: SelectedRampPair): string {
   return `${pair.fiatCurrency}:${pair.assetRail}`;
 }
 
-export function getRampProviderLabel(provider: RampProviderId): string {
+export function getRampProviderLabel(provider: PersistedRampProviderId): string {
   return RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ?? provider;
+}
+
+/** A retired provider has no logo; its stored rows render with the label alone. */
+export function getRampProviderLogo(provider: PersistedRampProviderId): string | undefined {
+  return isRetiredRampProviderId(provider) ? undefined : RAMP_PROVIDER_LOGOS[provider];
 }

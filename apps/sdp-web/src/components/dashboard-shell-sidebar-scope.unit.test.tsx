@@ -55,7 +55,6 @@ function shell(newDesign: boolean) {
         issuance: true,
         markets: false,
         payments: true,
-        policies: false,
         privateChannels: false,
         ramps: false,
         newDesign,

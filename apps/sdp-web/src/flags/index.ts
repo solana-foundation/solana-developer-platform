@@ -46,7 +46,6 @@ export const {
   homepageOpenSignup,
   custody,
   issuance,
-  policies,
   assetProfiles,
   privateChannels,
   heliusRings,
@@ -55,6 +54,7 @@ export const {
   dvp,
   earn,
   newDesign,
+  paymentsDemoMode,
   newDesignContacts,
   newDesignPayDeposit,
   newDesignActivity,
@@ -63,6 +63,5 @@ export const {
   rampProviderBvnk,
   rampProviderMoneygram,
   rampProviderCoinbase,
-  rampProviderMural,
   rampProviderStripe,
 } = flags;

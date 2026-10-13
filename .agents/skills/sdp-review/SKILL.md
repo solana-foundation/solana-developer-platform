@@ -27,7 +27,7 @@ Four sections, bullets only, each bullet one line where possible. Plain language
 **Domains touched** — which SDP domains this crosses: issuance, ramps (per provider), payments/batches, custody wallets, counterparties/compliance, policy, auth/keys, webhooks, dashboard, docs. One bullet per domain with a half-line of what changed there.
 
 **Packages used** — two lists:
-- Workspace packages touched or consumed (`apps/sdp-api`, `apps/sdp-web`, `packages/sdp-types`, `@sdp/payments`, `@sdp/policy`, …) and what for.
+- Workspace packages touched or consumed (`apps/sdp-api`, `apps/sdp-web`, `packages/sdp-types`, `@sdp/payments`, …) and what for.
 - External dependencies newly added or leaned on in this change (from `package.json` diffs and new imports). No new deps → say so in one bullet.
 
 Keep the whole digest under ~30 bullets. If the change set is bigger than that, group by domain and compress — digestibility beats completeness.

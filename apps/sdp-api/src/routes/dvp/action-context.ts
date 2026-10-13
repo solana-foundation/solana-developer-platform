@@ -1,16 +1,9 @@
 /**
- * Resolving what a DvP write acts on, in one place, because two callers need
- * the same answer (PRO-1975).
+ * Resolving what a DvP write acts on, in one place, because the leg handlers
+ * (fund, reclaim) share the same answer.
  *
- * A policy gate has to refuse before it records an operation, so the extractor
- * resolves the trade and the signing wallet exactly as the handler will, and
- * the handler then asserts the gate judged the wallet it ended up with. That is
- * the issuance pattern (`routes/issuance/handlers/policy.ts`): resolve twice,
- * compare, refuse a signer the gate never saw.
- *
- * These two resolvers moved out of `handlers.ts` unchanged. They live here
- * rather than there so `policy.ts` can call them without importing the module
- * that imports it back.
+ * The resolution re-reads the binding from the database before anything is
+ * broadcast: the auth context can be an hour stale.
  */
 
 import type { Context } from "hono";

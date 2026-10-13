@@ -214,12 +214,6 @@ function ManualQuoteSummary({
 
 type LightsparkInstructionType = Extract<PaymentRampInstruction, { provider: "lightspark" }>;
 type BvnkInstructionType = Extract<PaymentRampInstruction, { provider: "bvnk" }>;
-type MuralInstructionType = Extract<PaymentRampInstruction, { provider: "mural" }>;
-
-function humanizeFieldLabel(key: string): string {
-  const spaced = key.replace(/([A-Z])/g, " $1").trim();
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
 
 export interface InstructionAction {
   loading: boolean;
@@ -492,40 +486,6 @@ function BvnkInstruction({
   );
 }
 
-function MuralInstruction({
-  instruction,
-  showAction,
-  action,
-}: {
-  instruction: MuralInstructionType;
-  showAction: boolean;
-  action?: InstructionAction;
-}) {
-  const t = useTranslations();
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>
-            {t("DashboardPayments.manualInstructions.payin", {
-              currency: instruction.fiatCurrency,
-            })}
-          </InstructionBadge>
-          {instruction.payinRails.map((rail) => (
-            <InstructionBadge key={rail}>{rail}</InstructionBadge>
-          ))}
-        </InstructionBadges>
-        {showAction && action ? <InstructionActionButton action={action} /> : null}
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        {Object.entries(instruction.bankDetails).map(([key, value]) => (
-          <PaymentInstructionField key={key} label={humanizeFieldLabel(key)} value={value} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function ManualInstructionsQuote({
   amount,
   quote,
@@ -557,13 +517,6 @@ export function ManualInstructionsQuote({
             : instruction.beneficiaryAddress
         }
         instruction={instruction}
-        action={action}
-      />
-    ) : instruction.provider === "mural" ? (
-      <MuralInstruction
-        key={`mural-${instruction.fiatCurrency}`}
-        instruction={instruction}
-        showAction={index === 0}
         action={action}
       />
     ) : (

@@ -155,19 +155,6 @@ export function defineDashboardFlags({
     ],
   });
 
-  const policies = flag<boolean, DashboardFlagEntities>({
-    key: "policies",
-    adapter: moduleAdapter("policies"),
-    identify,
-    defaultValue: flagDefault("POLICIES_ENABLED", false),
-    description:
-      "Show the Policies module, wallet-policy workspaces, and Approvals inbox. API key authoring remains available independently.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
   const assetProfiles = flag<boolean, DashboardFlagEntities>({
     key: "asset-profiles",
     adapter: moduleAdapter("issuance"),
@@ -272,6 +259,22 @@ export function defineDashboardFlags({
     ],
   });
 
+  const paymentsDemoMode = flag<boolean, DashboardFlagEntities>({
+    key: "payments-demo-mode",
+    adapter: vercel(),
+    identify,
+    defaultValue: flagDefault(
+      "SDP_FLAG_PAYMENTS_DEMO_MODE",
+      process.env.VERCEL_ENV !== "production"
+    ),
+    description:
+      "Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Requires the new-design flag, and serves only Payments pages on the new design.",
+    options: [
+      { value: false, label: "Hidden" },
+      { value: true, label: "Enabled" },
+    ],
+  });
+
   const newDesignContacts = newDesignModuleFlag(
     "contacts",
     "Payments' Contacts (the list, a new contact, one contact's page)"
@@ -288,14 +291,12 @@ export function defineDashboardFlags({
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
   const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
   const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
-  const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
   return {
     homepageOpenSignup,
     custody,
     issuance,
-    policies,
     assetProfiles,
     privateChannels,
     heliusRings,
@@ -304,6 +305,7 @@ export function defineDashboardFlags({
     dvp,
     earn,
     newDesign,
+    paymentsDemoMode,
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
@@ -312,7 +314,6 @@ export function defineDashboardFlags({
     rampProviderBvnk,
     rampProviderMoneygram,
     rampProviderCoinbase,
-    rampProviderMural,
     rampProviderStripe,
   };
 }

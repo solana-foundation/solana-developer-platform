@@ -6,14 +6,11 @@ import AllowlistLoading from "./allowlist/loading";
 import EditApiKeyLoading from "./api-keys/[keyId]/edit/loading";
 import ApiKeysLoading from "./api-keys/loading";
 import NewApiKeyLoading from "./api-keys/new/loading";
-import ApprovalDetailLoading from "./approvals/[approvalRequestId]/loading";
-import ApprovalsLoading from "./approvals/loading";
 import IssuanceOverviewLoading from "./issuance/(overview)/loading";
 import IssuanceDetailLoading from "./issuance/[tokenId]/loading";
 import IssuanceCreateLoading from "./issuance/create/loading";
 import { IssuancePageSkeleton } from "./issuance/issuance-page-skeleton";
 import { IssuancePlaygroundLoading } from "./issuance/issuance-playground-loading";
-import PoliciesLoading from "./policies/loading";
 import SettingsLoading from "./settings/loading";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -25,9 +22,6 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "api-keys-list",
   "api-key-new",
   "api-key-edit",
-  "policies",
-  "approvals-list",
-  "approval-detail",
   "allowlist",
   "settings",
 ];
@@ -41,9 +35,6 @@ function renderAllRouteLoadingStates(): string {
       <ApiKeysLoading />
       <NewApiKeyLoading />
       <EditApiKeyLoading />
-      <PoliciesLoading />
-      <ApprovalsLoading />
-      <ApprovalDetailLoading />
       <AllowlistLoading />
       <SettingsLoading />
     </I18nProvider>
@@ -144,9 +135,6 @@ describe("operations route loading states", () => {
   it("preserves the responsive and sticky geometry of the final routes", () => {
     const markup = renderAllRouteLoadingStates();
 
-    expect(markup).toContain("data-loading-mobile-rows");
-    expect(markup).toContain("data-loading-desktop-table");
-    expect(markup).toContain("data-loading-metadata-rail");
     expect(markup).toContain("data-loading-api-key-table");
     expect(markup).not.toContain("data-loading-settings-form");
     expect(markup).toContain("data-loading-settings-onboarding");

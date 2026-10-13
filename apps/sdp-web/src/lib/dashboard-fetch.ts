@@ -1,5 +1,6 @@
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
+import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -12,6 +13,18 @@ export interface DashboardFetchOptions {
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+let tabShowsDemo = false;
+
+/**
+ * Set by the dashboard shell: whether this tab is showing Payments demo mode, so the calls it
+ * makes say so (see {@link TAB_DEMO_HEADER_NAME}).
+ *
+ * @param on - True while the tab shows demo mode.
+ */
+export function setTabShowsDemo(on: boolean): void {
+  tabShowsDemo = on;
 }
 
 /**
@@ -30,6 +43,9 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
   const { projectId } = parseDashboardPathname(window.location.pathname);
   if (projectId !== null) {
     headers.set(PROJECT_HEADER_NAME, projectId);
+  }
+  if (tabShowsDemo) {
+    headers.set(TAB_DEMO_HEADER_NAME, "1");
   }
   return fetch(path, { ...init, headers });
 }

@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
@@ -22,18 +21,13 @@ export default async function EditApiKeyPage({ params }: { params: Promise<{ key
   }
 
   const client = await createSdpApiClient();
-  // Wallet controls follow the Policies module, as the API does, not the per-user policies flag.
-  const [apiKey, authoringWallets] = await Promise.all([
+  const [apiKey, wallets] = await Promise.all([
     fetchApiKeyForAuthoring(client, decodeURIComponent(keyId)),
-    fetchApiKeyAuthoringWallets(client, {
-      policiesInReleaseChannel: isModuleInDeploymentReleaseChannel("policies"),
-    }),
+    fetchApiKeyAuthoringWallets(client),
   ]);
   if (!apiKey) {
     notFound();
   }
 
-  return (
-    <ApiKeyAuthoringWorkspace mode="edit" authoringWallets={authoringWallets} initialKey={apiKey} />
-  );
+  return <ApiKeyAuthoringWorkspace mode="edit" wallets={wallets} initialKey={apiKey} />;
 }

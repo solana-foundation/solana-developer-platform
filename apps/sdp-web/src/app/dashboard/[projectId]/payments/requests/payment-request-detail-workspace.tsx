@@ -10,6 +10,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { shortenAddress } from "../payments-overview.utils";
@@ -50,10 +51,23 @@ function requestWhy(
 function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symbol: string }) {
   const t = useTranslations();
   const locale = useLocale();
+  const demo = usePaymentsDemo();
   // The link is on this origin; read after mount so the server render does not guess it.
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
   const payLink = `${origin}/pay/${request.publicToken}`;
+
+  // A demo request lives in this browser only, so the public pay page can't open its link.
+  if (demo) {
+    return (
+      <div className="flex flex-col gap-2 border-t border-border-default pt-4">
+        <span className="text-meta text-secondary">
+          {t("DashboardPayments.requestDetail.paymentLink")}
+        </span>
+        <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
+      </div>
+    );
+  }
 
   async function copyLink() {
     try {

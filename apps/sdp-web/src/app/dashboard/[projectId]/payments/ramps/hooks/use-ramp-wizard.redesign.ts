@@ -24,10 +24,13 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
   getApiError,
+  simulateDemoVerification,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -161,9 +164,14 @@ export function useRampWizard<TId extends string>(
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
+  const demo = usePaymentsDemo();
+  const demoAmount =
+    config.requirements.direction === "onramp"
+      ? DEMO_PREFILL_AMOUNTS.deposit
+      : DEMO_PREFILL_AMOUNTS.payout;
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
-    amount: "",
+    amount: demo ? demoAmount : "",
     provider: null,
     counterpartyId: initialCounterpartyId,
   });
@@ -413,10 +421,10 @@ export function useRampWizard<TId extends string>(
         toast.dismiss(toastId);
         return;
       }
-      // From the memo step (a provider with no fields to collect, such as a first Mural
-      // onboarding) an unfinished onboarding moves on too: the memo step has nowhere to show
-      // the terms or verification link, so staying would strand the user. The last step shows
-      // the onboarding and the readiness effect quotes once it reaches ready.
+      // From the memo step (a provider with no fields to collect) an unfinished onboarding
+      // moves on too: the memo step has nowhere to show the verification link, so staying
+      // would strand the user. The last step shows the onboarding and the readiness effect
+      // quotes once it reaches ready.
       // Reaching the transaction stage with derived readiness fires the quote
       // through the single readiness effect above.
       setStepIndex((current) => current + 1);
@@ -513,6 +521,25 @@ export function useRampWizard<TId extends string>(
     }
   };
 
+  // Demo mode's stand-in for the provider's hosted identity check: the provider approves the
+  // contact, and the status poll carries the flow through the provider's review from there.
+  const [verificationSimulating, setVerificationSimulating] = useState(false);
+  const simulateVerification = async () => {
+    const counterpartyId = fields.counterpartyId;
+    if (!demo || fields.provider !== "bvnk" || !counterpartyId) return;
+    setVerificationSimulating(true);
+    try {
+      await simulateDemoVerification({ provider: "bvnk", counterpartyId }, t);
+      await requirements.refreshOnboarding();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t("DashboardPayments.demo.verification.failed")
+      );
+    } finally {
+      setVerificationSimulating(false);
+    }
+  };
+
   const handleCounterpartyCreated = (created: Counterparty) => {
     setField("counterpartyId", created.id);
     void mutateCounterparties(
@@ -562,6 +589,10 @@ export function useRampWizard<TId extends string>(
     pendingAgreements: requirements.pendingAgreements,
     acceptedAgreements: requirements.acceptedAgreements,
     toggleAgreement: requirements.toggleAgreement,
+    /** Demo mode stands in for the provider's hosted identity check (BVNK's is the one it runs). */
+    verificationSimulationAvailable: demo && fields.provider === "bvnk",
+    verificationSimulating,
+    simulateVerification,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

@@ -15,7 +15,7 @@ export {
   isUnauthorizedRpcError,
   withTransientRpcRetry,
 } from "./transient";
-export type { KVStore, KVStoreSet, RpcEnv } from "./types";
+export type { KVStore, KVStoreSet, ManagedRpcEnv, RpcEnv } from "./types";
 export {
   type VerifyTransactionLandedOptions,
   type VerifyTransactionLandedResult,

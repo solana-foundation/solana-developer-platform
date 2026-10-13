@@ -5,7 +5,6 @@ import {
   normalizeBvnkCurrencyAndNetwork,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { readLightsparkPurposeOfPayment } from "@sdp/payments/ramps/providers/lightspark/provider-data";
-import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { getCryptoRailAssetLabel, type PaymentRampQuote } from "@sdp/types";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -20,16 +19,13 @@ import {
   internalError,
 } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
 import { lightsparkProviderCustomerId } from "../providers/lightspark";
-import { muralOnrampQuote, resolveMuralOnrampAccount } from "../providers/mural";
 import {
   buildProviderDetails,
   type CreateOnrampQuoteBody,
@@ -37,7 +33,7 @@ import {
   filterProviders,
   persistRampQuoteTransfer,
   providersFromPairs,
-  type RampQuotePolicyResolved,
+  type RampQuoteResolved,
   rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
@@ -55,14 +51,14 @@ type OnrampCurrencyPair = {
 };
 
 /**
- * Parse and resolve an on-ramp quote into its wallet-operation policy candidate.
+ * Parse and resolve an on-ramp quote for the request gate.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resolved resources, and raw payload.
+ * @returns The validated body and resolved resources.
  */
-export async function extractOnrampQuotePolicyCandidate(
+export async function extractOnrampQuoteRequest(
   c: ValidatedBodyContext<typeof createOnrampQuoteSchema>
-): Promise<PolicyGateExtraction> {
+): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
   const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
     c,
@@ -71,35 +67,7 @@ export async function extractOnrampQuotePolicyCandidate(
     input.destinationCustodyWalletId
   );
 
-  return {
-    candidate: {
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: scope.auth.apiKeyId,
-      actor: walletOperationActorFromAuth(scope.auth),
-      source: "api",
-      operationFamily: "ramp",
-      operationType: "ramp_onramp_quote",
-      asset: rampTransferTokenMint(input.assetRail, c.env),
-      amount: input.fiatAmount,
-      destination: walletAddress,
-      context: {},
-      providerExtensions: { provider: input.provider },
-    },
-    legs: [],
-    body: input,
-    resolved: { scope, projectId, counterparty, wallet, walletAddress },
-    rawPayload: {
-      provider: input.provider,
-      counterpartyId: input.counterpartyId,
-      fiatCurrency: input.fiatCurrency,
-      fiatAmount: input.fiatAmount,
-      assetRail: input.assetRail,
-    },
-    idempotencyKey: null,
-  };
+  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
 }
 
 export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnrampSchema>) {
@@ -131,16 +99,13 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       wallet: destinationWallet,
       walletAddress: destinationWalletAddress,
     },
-  } = getPolicyGateContext<CreateOnrampQuoteBody, RampQuotePolicyResolved>(c);
+  } = getRequestGateContext<CreateOnrampQuoteBody, RampQuoteResolved>(c);
 
-  await beginApprovedWalletOperationEffect(c);
-
-  // Requirements/policy have succeeded. Reserve the ID now so the provider
-  // quote and the eventual ledger row share the same internal transfer ID.
+  // Requirements have succeeded. Reserve the ID now so the provider
+  // quote and the eventual transfer row share the same internal transfer ID.
   const reservedTransferId = generatePaymentTransferId();
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
-  let transferProviderData: Record<string, unknown> | undefined;
   switch (input.provider) {
     case "moonpay": {
       const apiKey = c.get("apiKey");
@@ -283,18 +248,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       quote = bvnkResult.quote;
       break;
     }
-    case "mural": {
-      const account = await resolveMuralOnrampAccount(
-        c,
-        readMuralOrganization(counterparty.provider_data)
-      );
-      if (!account) {
-        throw counterpartyNotProvisioned("mural", "onramp");
-      }
-      quote = muralOnrampQuote({ account, fiatCurrency: input.fiatCurrency });
-      transferProviderData = { mural: { accountId: account.id } };
-      break;
-    }
     case "moneygram": {
       quote = await RAMP_PROVIDER_CLIENTS.moneygram.createOnrampQuote(rampRuntime(c), {
         assetRail: input.assetRail,
@@ -353,7 +306,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
         fiatAmount: input.fiatAmount,
         rampsMemo: input.rampsMemo,
-        providerData: transferProviderData,
       });
 
   return success(c, { quote, transferId });

@@ -41,7 +41,7 @@ function withGroup(endpoints: ApiPlaygroundEndpointConfig[], group: string) {
 }
 
 /**
- * The one playground for the Payments section: transfers, ramps and policies, then the
+ * The one playground for the Payments section: transfers and ramps, then the
  * contact and payment request endpoints, which lost their own playground tabs when those
  * pages became lists.
  */

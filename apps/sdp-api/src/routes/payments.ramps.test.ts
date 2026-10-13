@@ -230,6 +230,29 @@ describe("Payments routes — ramps", () => {
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
+  it("refuses ramp quotes from a key without counterparties:read", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+
+    for (const direction of ["onramp", "offramp"]) {
+      const response = await app.request(
+        `/v1/payments/ramps/${direction}/quote`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "moonpay", counterpartyId: "cpty_quote_permissions" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+    }
+  });
+
   it("rejects the retired symbol-shaped onramp estimate request", async () => {
     const response = await app.request(
       "/v1/payments/ramps/onramp/estimate",
@@ -723,135 +746,6 @@ describe("Payments routes — ramps", () => {
       provider_reference: null,
     });
   });
-  it("dry-runs an on-ramp quote with zero writes", async () => {
-    const counterpartyId = await seedCounterparty({ externalId: "moonpay_onramp_dry_run" });
-
-    const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Dry-Run": "true",
-        },
-        body: JSON.stringify({
-          provider: "moonpay",
-          counterpartyId,
-          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "sol.solana",
-          fiatCurrency: "USD",
-          fiatAmount: "120.50",
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: { decision: "allow", criteria: [] },
-    });
-    const [transferCount, operationCount] = await Promise.all([
-      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
-        count: number;
-      }>(),
-      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
-        count: number;
-      }>(),
-    ]);
-    expect(transferCount).toEqual({ count: 0 });
-    expect(operationCount).toEqual({ count: 0 });
-  });
-  it("dry-runs an off-ramp quote with zero writes", async () => {
-    const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_dry_run" });
-
-    const response = await app.request(
-      "/v1/payments/ramps/offramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Dry-Run": "true",
-        },
-        body: JSON.stringify({
-          provider: "moonpay",
-          counterpartyId,
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "sol.solana",
-          fiatCurrency: "USD",
-          cryptoAmount: "75.25",
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: { decision: "allow", criteria: [] },
-    });
-    const [transferCount, operationCount] = await Promise.all([
-      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
-        count: number;
-      }>(),
-      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
-        count: number;
-      }>(),
-    ]);
-    expect(transferCount).toEqual({ count: 0 });
-    expect(operationCount).toEqual({ count: 0 });
-  });
-
-  it("stops a denied ramp quote before provider and transfer side effects", async () => {
-    await getDb(env)
-      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
-      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
-      .run();
-    const policyResponse = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          defaultAction: "allow",
-          rules: [{ id: "deny-ramp-quotes", kind: "always", action: "deny" }],
-        }),
-      },
-      env
-    );
-    expect(policyResponse.status).toBe(200);
-    const counterpartyId = await seedCounterparty({ externalId: "moonpay_denied_quote" });
-
-    const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "moonpay",
-          counterpartyId,
-          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "sol.solana",
-          fiatCurrency: "USD",
-          fiatAmount: "120.50",
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(403);
-    const transferCount = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-      .first<{ count: number }>();
-    expect(transferCount).toEqual({ count: 0 });
-  });
-
   it("rejects a ramp quote memo with more than 20 fields", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_memo_limit" });
     const rampsMemo = Object.fromEntries(
@@ -1657,19 +1551,21 @@ describe("Payments routes — ramps", () => {
     provider: string;
     providerReference: string;
     status: string;
+    custodyWalletId?: string;
   }): Promise<void> {
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, wallet_id, custody_wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         input.id,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        input.custodyWalletId ?? null,
         "USDC",
         null,
         "offramp",
@@ -1909,26 +1805,123 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(required(row).status).toBe("awaiting_payment");
   });
+  describe("cancel wallet scope, for every provider", () => {
+    const cancelRampTransfer = (transferId: string) =>
+      app.request(
+        "/v1/payments/ramps/transfers/cancel",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId }),
+        },
+        env
+      );
+    const transferStatus = async (transferId: string) =>
+      required(
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+          .bind(transferId)
+          .first<{ status: string }>()
+      ).status;
+    const scopeKeyToTestWallet = () =>
+      seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+
+    it("denies a wallet-scoped key canceling MoonPay and Stripe transfers in another wallet", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, 'Sibling wallet', 'transfer', 'active')`
+        )
+        .bind(
+          "cwlt_cancel_sibling",
+          TEST_CONFIG_ID,
+          "wallet_cancel_sibling",
+          TEST_SOLANA_ADDRESSES.wallet2
+        )
+        .run();
+      await scopeKeyToTestWallet();
+
+      for (const provider of ["moonpay", "stripe"]) {
+        const transferId = `xfr_cancel_sibling_${provider}`;
+        await seedRampTransfer({
+          id: transferId,
+          provider,
+          providerReference: `${provider}_ref_cancel_sibling`,
+          status: "awaiting_payment",
+          custodyWalletId: "cwlt_cancel_sibling",
+        });
+
+        const res = await cancelRampTransfer(transferId);
+
+        expect(res.status).toBe(403);
+        expect(await transferStatus(transferId)).toBe("awaiting_payment");
+      }
+    });
+
+    it("lets a wallet-scoped key cancel a transfer in its own wallet", async () => {
+      await scopeKeyToTestWallet();
+      await seedRampTransfer({
+        id: "xfr_cancel_own_wallet",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_own_wallet",
+        status: "awaiting_payment",
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_own_wallet");
+
+      expect(res.status).toBe(200);
+      expect(await transferStatus("xfr_cancel_own_wallet")).toBe("canceled");
+    });
+
+    it("denies a wallet-scoped key canceling a transfer bound to no wallet", async () => {
+      await scopeKeyToTestWallet();
+      await seedRampTransfer({
+        id: "xfr_cancel_unbound_scoped",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_unbound_scoped",
+        status: "awaiting_payment",
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_unbound_scoped");
+
+      expect(res.status).toBe(403);
+      expect(await transferStatus("xfr_cancel_unbound_scoped")).toBe("awaiting_payment");
+    });
+
+    it("lets a key without wallet scope cancel a transfer bound to no wallet", async () => {
+      await seedRampTransfer({
+        id: "xfr_cancel_unbound_unscoped",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_unbound_unscoped",
+        status: "awaiting_payment",
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_unbound_unscoped");
+
+      expect(res.status).toBe(200);
+      expect(await transferStatus("xfr_cancel_unbound_unscoped")).toBe("canceled");
+    });
+  });
+
   describe("sandbox pay-in simulation", () => {
-    let originalMuralSandboxApiKey: string | undefined;
-    let originalMuralSandboxTransferApiKey: string | undefined;
     let originalCoinbaseApiKeyId: string | undefined;
     let originalCoinbaseApiKeySecret: string | undefined;
 
     beforeEach(() => {
-      originalMuralSandboxApiKey = env.MURAL_PAY_SANDBOX_API_KEY;
-      originalMuralSandboxTransferApiKey = env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY;
       originalCoinbaseApiKeyId = env.COINBASE_CDP_API_KEY_ID;
       originalCoinbaseApiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
-      env.MURAL_PAY_SANDBOX_API_KEY = "test-mural-simulation-api-key";
-      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = "test-mural-simulation-transfer-api-key";
       env.COINBASE_CDP_API_KEY_ID = "test-coinbase-simulation-api-key-id";
       env.COINBASE_CDP_API_KEY_SECRET = "test-coinbase-simulation-api-key-secret";
     });
 
     afterEach(() => {
-      env.MURAL_PAY_SANDBOX_API_KEY = originalMuralSandboxApiKey;
-      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = originalMuralSandboxTransferApiKey;
       env.COINBASE_CDP_API_KEY_ID = originalCoinbaseApiKeyId;
       env.COINBASE_CDP_API_KEY_SECRET = originalCoinbaseApiKeySecret;
     });
@@ -2278,23 +2271,6 @@ describe("Payments routes — ramps", () => {
         status: 400,
         message: "not available for provider: coinbase",
       },
-      {
-        name: "an unsupported Mural currency",
-        transferId: "xfr_sim_rejected_mural_eur",
-        seed: {
-          ...LIGHTSPARK_SIM_SEED,
-          provider: "mural",
-          providerReference: "Quote:mural-sim-eur",
-          fiatCurrency: "EUR",
-          fiatAmount: "1500.25",
-          providerData: { mural: { accountId: "acct_sim_1" } },
-        },
-        counterpartyProviderData: {
-          mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } },
-        },
-        status: 400,
-        message: "does not support EUR",
-      },
     ];
 
     it.each(REJECTED_BEFORE_CLAIM_CASES)(
@@ -2306,7 +2282,6 @@ describe("Payments routes — ramps", () => {
         const spies = [
           vi.spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend").mockResolvedValue({}),
           vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin").mockResolvedValue({}),
-          vi.spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin").mockResolvedValue({}),
         ];
 
         try {
@@ -2328,43 +2303,6 @@ describe("Payments routes — ramps", () => {
         }
       }
     );
-
-    it("derives the Mural account, rail, and amount in cents from the transfer", async () => {
-      const transferId = "xfr_mural_sim_1";
-      const counterpartyId = await seedCounterparty({
-        providerData: { mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } } },
-      });
-      await seedSimulatableTransfer({
-        id: transferId,
-        provider: "mural",
-        providerReference: "Quote:mural-sim-1",
-        fiatCurrency: "MXN",
-        fiatAmount: "1500.25",
-        counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: { mural: { accountId: "acct_sim_1" } },
-        type: "onramp",
-        status: "awaiting_payment",
-      });
-      const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
-
-      const res = await simulateRequest(transferId);
-
-      expect(res.status).toBe(204);
-      expect(simulateSpy).toHaveBeenCalledTimes(1);
-      expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
-        organizationId: "org_test_sim_1",
-        destinationAccountId: "acct_sim_1",
-        rail: "spei",
-        amountValue: "150025",
-        currencySymbol: "MXN",
-      });
-
-      simulateSpy.mockRestore();
-    });
 
     it("hides another tenant's transfer without calling Lightspark or changing the row", async () => {
       const transferId = "xfr_lightspark_sim_other_tenant";
@@ -3217,17 +3155,14 @@ describe("Payments routes — ramps", () => {
       );
     }
 
-    const NONEXISTENT_MURAL_SIMULATE_BODY = {
+    const NONEXISTENT_SIMULATE_BODY = {
       transferId: "xfr_does_not_exist",
     };
 
     it("refuses the sandbox simulator from a production-project Clerk", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(
-        TEST_PRODUCTION_PROJECT_ID,
-        NONEXISTENT_MURAL_SIMULATE_BODY
-      );
+      const res = await simulateAsClerk(TEST_PRODUCTION_PROJECT_ID, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { message: string } };
@@ -3237,7 +3172,7 @@ describe("Payments routes — ramps", () => {
     it("still lets sandbox-project Clerks past the environment guard", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: { code: string } };

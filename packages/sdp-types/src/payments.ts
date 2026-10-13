@@ -9,15 +9,7 @@ import type {
 } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
-import type {
-  PolicyDecision,
-  PolicyDefaultAction,
-  PolicyProfileStatus,
-  PolicyProviderSyncStatus,
-  PolicyRule,
-  WalletOperationStatus,
-} from "./policy";
-import type { RampProviderId } from "./provider-access";
+import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
@@ -30,29 +22,6 @@ export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
 export function assertNever(value: never): never {
   throw new Error(`Unexpected value: ${String(value)}`);
 }
-
-export const recurringPaymentPolicyPayloadSchema = z.discriminatedUnion("operationType", [
-  z.object({
-    operationType: z.literal("recurring_payment_create"),
-    counterpartyId: z.string(),
-    counterpartyAccountId: z.string(),
-    periodHours: z.number().int().positive(),
-  }),
-  z.object({
-    operationType: z.literal("recurring_payment_update"),
-    recurringPaymentId: z.string(),
-    counterpartyId: z.string(),
-    counterpartyAccountId: z.string(),
-    periodHours: z.number().int().positive(),
-  }),
-  z.object({
-    operationType: z.literal("recurring_payment_collection"),
-    recurringPaymentId: z.string(),
-    subscriptionId: z.string(),
-    collectionDueAt: z.string(),
-  }),
-]);
-export type RecurringPaymentPolicyPayload = z.infer<typeof recurringPaymentPolicyPayloadSchema>;
 
 export interface PaymentsDashboardWallet {
   id: string;
@@ -82,66 +51,6 @@ export interface PaymentsWalletAggregateEnvelope {
   error?: {
     message?: string;
   };
-}
-
-export interface PaymentWalletPolicy {
-  walletId: string;
-  defaultAction: PolicyDefaultAction;
-  rules: PolicyRule[];
-  controlProfile: PaymentWalletControlProfileSummary | null;
-  audit?: PaymentWalletPolicyAudit;
-}
-
-export interface PaymentWalletControlProfileSummary {
-  id: string;
-  status: PolicyProfileStatus;
-  activeRevisionId: string | null;
-  revisionId: string | null;
-  revisionNumber: number | null;
-  commitMessage: string | null;
-  defaultAction: PolicyDefaultAction;
-  rules: PolicyRule[];
-  providerMappingStatus: PolicyProviderSyncStatus;
-  createdAt: string;
-  updatedAt: string;
-  activatedAt: string | null;
-}
-
-export interface PaymentWalletPolicyEnvelope {
-  data?: {
-    policy?: PaymentWalletPolicy;
-  };
-  error?: {
-    message?: string;
-  };
-}
-
-export interface PaymentWalletPolicyAudit {
-  recentEvaluations: PaymentWalletPolicyAuditEntry[];
-}
-
-/**
- * Historical read model: rows predating a vocabulary trim keep their retired
- * operation family/type strings, so these fields are not narrowed to the live
- * enums.
- */
-export interface PaymentWalletPolicyAuditEntry {
-  walletOperationId: string;
-  policyEvaluationId: string;
-  operationFamily: string;
-  operationType: string;
-  asset: string | null;
-  amount: string | null;
-  destination: string | null;
-  status: WalletOperationStatus;
-  decision: PolicyDecision;
-  reasonCode: string;
-  reason: string | null;
-  requiresApproval: boolean;
-  approvalRequestId: string | null;
-  operationCreatedAt: string;
-  operationUpdatedAt: string;
-  evaluatedAt: string;
 }
 
 export const PAYMENT_TRANSFER_TYPES = ["transfer", "transfer_batch", "onramp", "offramp"] as const;
@@ -504,7 +413,8 @@ export interface PaymentTransferSummary {
   amount?: string;
   memo?: string;
   rampsMemo: Record<string, string>;
-  provider?: RampProviderId;
+  /** A retired provider's transfers still read, as stored. */
+  provider?: PersistedRampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
   providerReference?: string;
@@ -1302,25 +1212,7 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
-export const MURAL_SANDBOX_PAYIN_CURRENCIES = ["USD", "MXN", "BRL", "ARS"] as const;
-export type MuralSandboxPayinCurrency = (typeof MURAL_SANDBOX_PAYIN_CURRENCIES)[number];
-
-/** Narrows a fiat currency to the corridors Mural's sandbox payin simulation supports. */
-export function isMuralSandboxPayinCurrency(value: string): value is MuralSandboxPayinCurrency {
-  return (MURAL_SANDBOX_PAYIN_CURRENCIES as readonly string[]).includes(value);
-}
-
-export interface MuralPaymentRampInstruction {
-  provider: "mural";
-  fiatCurrency: string;
-  payinRails: string[];
-  bankDetails: Record<string, string>;
-}
-
-export type PaymentRampInstruction =
-  | LightsparkPaymentRampInstruction
-  | BvnkPaymentRampInstruction
-  | MuralPaymentRampInstruction;
+export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -1368,7 +1260,7 @@ export interface RampProviderEstimateFailure {
 
 /**
  * The staged-provider rule refused the provider for the project, so it was
- * never called: a policy outcome, not a fault. `reason` is the rule's
+ * never called: a refusal outcome, not a fault. `reason` is the rule's
  * machine-readable verdict, the same one its 403 carries as `details.reason`.
  */
 export interface RampProviderEstimateRefusal {
@@ -1476,11 +1368,6 @@ export type PaymentRampQuote =
       deliveryMode: "manual_instructions";
       /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
       paymentInstructions: BvnkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampQuote & {
-      provider: "mural";
-      deliveryMode: "manual_instructions";
-      paymentInstructions: MuralPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
       provider: "moonpay" | "bvnk";

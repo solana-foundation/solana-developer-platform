@@ -1,23 +1,20 @@
 /** Environment variables consumed by the Node API runtime. */
 
-import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
   AllowedOperation,
-  OrganizationEntitlements,
-  SdpRampProviderStages,
-} from "@sdp/types";
-import type { PolicyGateContext } from "@/middleware/policy-gate";
-import type { KVStoreSet } from "@/runtime/kv";
-import type { Observability } from "@/runtime/observability";
-import type {
   ApiKeyEnvironment,
+  OrganizationEntitlements,
   OrganizationRpcProvider,
   Permission,
-  WalletOperationHumanActorType,
+  SdpRampProviderStages,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { RequestGateContext } from "@/middleware/request-gate";
+import type { KVStoreSet } from "@/runtime/kv";
+import type { Observability } from "@/runtime/observability";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
@@ -305,14 +302,6 @@ export interface Env {
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
-  // Mural Pay ramps configuration
-  MURAL_PAY_API_KEY?: string;
-  MURAL_PAY_TRANSFER_API_KEY?: string;
-  MURAL_PAY_WEBHOOK_PUBLIC_KEY?: string;
-  MURAL_PAY_SANDBOX_API_KEY?: string;
-  MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
-  MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
-
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
   MONEYGRAM_SANDBOX_SECRET_KEY?: string;
@@ -367,10 +356,8 @@ declare module "hono" {
     projectEnvironment?: ApiKeyEnvironment;
     // Loaded once by authentication for every actor; see lib/production-entitlement.ts
     organizationEntitlements: OrganizationEntitlements;
-    approvedWalletOperationId?: string;
-    approvedWalletOperationAttemptId?: string;
-    // Set by policyGate middleware for gated routes
-    policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
+    // Set by requestGate middleware for gated routes
+    requestGate?: RequestGateContext;
     apiKey?: {
       id: string;
       organizationId: string;
@@ -387,14 +374,6 @@ declare module "hono" {
         custodyWalletId?: string;
         permissions: Permission[];
       }>;
-    };
-    // Original human actor of an approved wallet operation being replayed
-    approvedOperationActor?: {
-      operationId: string;
-      userId: string;
-      storedActorType: WalletOperationHumanActorType;
-      organizationId: string;
-      permissions: Permission[];
     };
     // Clerk auth context set by middleware
     clerk?: {

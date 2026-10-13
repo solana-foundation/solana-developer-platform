@@ -4,12 +4,6 @@ export {
   resolvePersistedRingsGateway,
   UnconfiguredRingsGateway,
 } from "./gateway";
-export {
-  buildRingsWalletOperationInput,
-  RINGS_ENVELOPE_KINDS,
-  type RingsEnvelopeKind,
-  ringsEnvelopeKind,
-} from "./policy-envelope";
 export { submitRingsOuterTransaction } from "./rpc-adapter";
 export {
   computeIntentKey,
@@ -18,7 +12,6 @@ export {
   HeliusRingsService,
   type HeliusRingsServiceDependencies,
   type HeliusRingsTenant,
-  type PrepareOperationContext,
   type ProvisionPrivateWalletInput,
   type WalletIdentityResult,
 } from "./service";

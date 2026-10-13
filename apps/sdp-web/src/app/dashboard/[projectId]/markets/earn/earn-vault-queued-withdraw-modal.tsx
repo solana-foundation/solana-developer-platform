@@ -37,7 +37,6 @@ import {
   fetchEarnVaultQueuedWithdrawalPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
-import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
@@ -150,16 +149,11 @@ function queueLockedUntil(
     : undefined;
 }
 
-function queuedWithdrawalSteps(
-  outcome: EarnVaultQueuedWithdrawalOutcome | null,
-  t: ReturnType<typeof useTranslations>
-): string[] {
+function queuedWithdrawalSteps(t: ReturnType<typeof useTranslations>): string[] {
   return [
     t("DashboardEarn.vaultWithdraw.flowDetails"),
     t("DashboardEarn.vaultWithdraw.flowReview"),
-    outcome?.kind === "approval_pending"
-      ? t("DashboardEarn.queuedWithdraw.flowApproval")
-      : t("DashboardEarn.queuedWithdraw.flowRequested"),
+    t("DashboardEarn.queuedWithdraw.flowRequested"),
   ];
 }
 
@@ -213,8 +207,7 @@ function useQueuedWithdrawalPreview(
 /**
  * Owns the value-moving request submission. Bookkeeping happens before
  * component-local state: the modal may have unmounted while the POST was in
- * flight. An approval pins this exact intent; ambiguous failures preserve its
- * retry key.
+ * flight. Ambiguous failures preserve the retry key.
  */
 function useQueuedWithdrawalSubmission(options: {
   onSubmissionStart?: VaultSubmissionObserver;
@@ -261,9 +254,7 @@ function useQueuedWithdrawalSubmission(options: {
       );
       if (result.ok) {
         setOutcome(result.data);
-        if (result.data.kind === "submitted") {
-          options.onRequested?.(result.data.withdrawalRequest);
-        }
+        options.onRequested?.(result.data.withdrawalRequest);
       } else {
         options.setError(result.error);
       }
@@ -462,22 +453,6 @@ function QueuedWithdrawalResult({
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
     </>
-  );
-}
-
-function QueuedWithdrawalApprovalResult({
-  onClose,
-  outcome,
-}: {
-  onClose: () => void;
-  outcome: Extract<EarnVaultQueuedWithdrawalOutcome, { kind: "approval_pending" }>;
-}) {
-  return (
-    <EarnVaultApprovalResult
-      approvalRequestId={outcome.approvalRequestId}
-      onClose={onClose}
-      walletOperationId={outcome.walletOperationId}
-    />
   );
 }
 
@@ -825,12 +800,10 @@ export function EarnVaultQueuedWithdrawModal({
       <div className="p-6">
         <EarnFlowStepper
           currentStep={queuedWithdrawalStepIndex(outcome, step)}
-          steps={queuedWithdrawalSteps(outcome, t)}
+          steps={queuedWithdrawalSteps(t)}
         />
         <EarnFlowTransition stepKey={queuedWithdrawalStepKey(outcome, step)}>
-          {outcome?.kind === "approval_pending" ? (
-            <QueuedWithdrawalApprovalResult onClose={onClose} outcome={outcome} />
-          ) : outcome?.kind === "submitted" ? (
+          {outcome ? (
             <QueuedWithdrawalResult
               environment={environment}
               onClose={onClose}

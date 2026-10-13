@@ -14,13 +14,13 @@ import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import {
   describeCronFailure,
@@ -69,6 +69,10 @@ vi.mock("@/cron/pending-transfers", () => ({
 
 vi.mock("@/cron/provider-credential-secret-cleanup", () => ({
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR: "sdp-api-cleanup-provider-credential-secrets",
+}));
+
+vi.mock("@/cron/ramp-transfers", () => ({
+  RAMP_TRANSFERS_MONITOR: "sdp-api-reconcile-ramp-transfers",
 }));
 
 vi.mock("@/cron/pending-deposits", () => ({
@@ -159,12 +163,12 @@ vi.mock("@/services/jobs/reconcile-earn-vault-movements", () => ({
   reconcileEarnVaultMovements: vi.fn(async () => {}),
 }));
 
-vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
-  reconcileDvpTrades: vi.fn(async () => {}),
+vi.mock("@/services/jobs/reconcile-ramp-transfers", () => ({
+  reconcileRampTransfers: vi.fn(async () => {}),
 }));
 
-vi.mock("@/services/policy/approved-operation-replay", () => ({
-  recoverApprovedWalletOperations: vi.fn(async () => {}),
+vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
+  reconcileDvpTrades: vi.fn(async () => {}),
 }));
 
 function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
@@ -203,9 +207,6 @@ describe("runCronJob", () => {
     vi.mocked(trackPendingTransfers)
       .mockReset()
       .mockResolvedValue(undefined as never);
-    vi.mocked(recoverApprovedWalletOperations)
-      .mockReset()
-      .mockResolvedValue(undefined as never);
     vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -219,6 +220,7 @@ describe("runCronJob", () => {
     vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
+    vi.mocked(reconcileRampTransfers).mockReset().mockResolvedValue(undefined);
     vi.mocked(detectOrphanedEarnSplitSwaps).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileDvpTrades).mockReset().mockResolvedValue(undefined);
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
@@ -374,6 +376,12 @@ describe("runCronJob", () => {
       });
       return { cleaned: 0, skipped: 0, failed: 0 };
     });
+    vi.mocked(reconcileRampTransfers).mockImplementationOnce(async () => {
+      expect(currentDatabaseIdentity()).toEqual({
+        kind: "system",
+        component: "job:sdp-api-reconcile-ramp-transfers",
+      });
+    });
 
     await runCronJob();
 
@@ -383,8 +391,13 @@ describe("runCronJob", () => {
     const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
     expect(sweepOrder).toBeLessThan(transfersOrder);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
-    expect(recoverApprovedWalletOperations).toHaveBeenCalledTimes(1);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+    // The same ramp list the in-process scheduler runs (cron/ramp-transfers.ts),
+    // right after the transfers tick.
+    expect(reconcileRampTransfers).toHaveBeenCalledExactlyOnceWith(env);
+    expect(transfersOrder).toBeLessThan(
+      vi.mocked(reconcileRampTransfers).mock.invocationCallOrder[0]
+    );
     expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(env, {
       deadlineMs: expect.any(Number),
     });
@@ -505,6 +518,16 @@ describe("runCronJob", () => {
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
   });
 
+  it("fails the job on a ramp reconciliation error but still runs the ticks after it", async () => {
+    vi.mocked(reconcileRampTransfers).mockRejectedValue(new Error("ramp inbox down"));
+
+    await expect(runCronJob()).rejects.toThrow("ramp inbox down");
+
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
   it("fails the job on a rings-poll error but still runs the ticks after it", async () => {
     vi.mocked(pollRingsIndexing).mockRejectedValue(new Error("photon down"));
 
@@ -582,6 +605,7 @@ describe("runCronJob", () => {
       "sdp-api-managed-poll-rings-indexing",
       "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",
+      "sdp-api-managed-reconcile-ramp-transfers",
       "sdp-api-managed-refresh-earn-metrics",
       "sdp-api-managed-retire-secrets",
       "sdp-api-managed-sync-earn-catalogue",

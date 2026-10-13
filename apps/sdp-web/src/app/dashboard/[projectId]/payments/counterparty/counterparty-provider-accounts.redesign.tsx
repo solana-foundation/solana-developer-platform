@@ -6,7 +6,7 @@ import {
   type CounterpartyProviderAccount,
   type CounterpartyProviderCustomerLink,
   type CounterpartyProviderCustomerLinkAgreement,
-  type RampProviderId,
+  type PersistedRampProviderId,
 } from "@sdp/types";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
@@ -235,7 +235,7 @@ function ProviderAccountCells({ account }: { account: CounterpartyProviderAccoun
 }
 
 /** One row of the table: a provider's customer record, or one account the provider holds. */
-type ProviderAccountRow = { key: string; provider: RampProviderId } & (
+type ProviderAccountRow = { key: string; provider: PersistedRampProviderId } & (
   | { kind: "customer"; link: CounterpartyProviderCustomerLink }
   | { kind: "account"; account: CounterpartyProviderAccount }
 );
@@ -250,7 +250,7 @@ type ProviderAccountRow = { key: string; provider: RampProviderId } & (
  */
 function providerAccountRows(accounts: CounterpartyProviderAccount[]): ProviderAccountRow[] {
   const rows: ProviderAccountRow[] = [];
-  const linkedProviders = new Set<RampProviderId>();
+  const linkedProviders = new Set<PersistedRampProviderId>();
   for (const account of accounts) {
     const link = account.customerLink;
     if (link !== undefined && !linkedProviders.has(account.provider)) {

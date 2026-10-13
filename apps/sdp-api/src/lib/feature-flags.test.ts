@@ -256,7 +256,6 @@ describe("release channels", () => {
         "recurring_payments",
         "ramps",
         "compliance",
-        "policies",
         "issuance",
         "markets",
         "earn",
@@ -264,7 +263,7 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "compliance"],
+      beta: ["custody", "payments", "recurring_payments", "compliance", "markets", "earn"],
       stable: ["custody", "payments", "recurring_payments", "compliance"],
     });
   });
@@ -301,7 +300,6 @@ describe("release channels", () => {
       bvnk: "beta",
       moneygram: "experimental",
       coinbase: "experimental",
-      mural: "experimental",
       stripe: "experimental",
     };
     expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);

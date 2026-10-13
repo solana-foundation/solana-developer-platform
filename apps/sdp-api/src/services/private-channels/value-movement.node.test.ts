@@ -16,6 +16,7 @@ import {
   mapPrivateChannelWithdrawalRow,
 } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
+import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createChannelDeposit, listChannelDeposits } from "./deposit";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
@@ -228,7 +229,7 @@ describe.each(["deposit", "withdrawal", "transfer"] as const)(
 );
 
 it("keeps the withdrawal signer across one 401 refresh and records the new signature before resending", async () => {
-  failSend = Object.assign(new Error("Unauthorized"), { context: { statusCode: 401 } });
+  failSend = rpcHttpError(401);
   refresh.mockImplementation(async () => {
     failSend = undefined;
     vi.mocked(solanaRpc.getRecentBlockhash).mockResolvedValue({

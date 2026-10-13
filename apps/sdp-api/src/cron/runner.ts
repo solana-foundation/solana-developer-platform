@@ -19,10 +19,6 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
-  APPROVED_WALLET_OPERATIONS_CRON,
-  runApprovedWalletOperationRecovery,
-} from "./approved-wallet-operations";
-import {
   EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_MONITOR,
   runEarnCatalogueSync,
@@ -52,6 +48,7 @@ import {
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
   runProviderCredentialSecretCleanup,
 } from "./provider-credential-secret-cleanup";
+import { RAMP_TRANSFERS_CRON, runRampTransfersReconciliation } from "./ramp-transfers";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -199,14 +196,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   tasks.push(
     scheduleSystemTask(
-      APPROVED_WALLET_OPERATIONS_CRON,
-      "cron:approved-wallet-operations",
-      runApprovedWalletOperationRecovery
-    )
-  );
-
-  tasks.push(
-    scheduleSystemTask(
       PENDING_TRANSFERS_CRON,
       "cron:pending-transfers",
       runPendingTransfersReconciliation
@@ -318,6 +307,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // an advisory written before an incident flag flip must keep being watched.
   tasks.push(
     scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
+  );
+
+  // The same ramp list the managed job runs (job.ts). Unconditional: replay
+  // skips providers the release channel leaves out.
+  tasks.push(
+    scheduleSystemTask(RAMP_TRANSFERS_CRON, "cron:ramp-transfers", runRampTransfersReconciliation)
   );
 
   return {

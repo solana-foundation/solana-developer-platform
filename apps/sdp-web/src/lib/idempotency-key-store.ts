@@ -275,15 +275,14 @@ export interface IdempotencyKeyStore {
    */
   claimReportingReuse(fingerprint: string): { key: string; wasReused: boolean };
   /**
-   * Pin a key for as long as an approval hold on it is live: an approval
-   * answers to a human and can take hours, far past the default TTL, and a
-   * lapsed key there resubmits into a SECOND approval request for one intent.
-   * The way OUT of a hold is the caller's: ask the server whether a movement
-   * exists for the key before reusing it (a movement means the key is spent),
-   * or a definitive API answer releasing it.
+   * Pin a key for as long as a provider session on it is live (a ramp widget
+   * the customer completes on the provider's side can take far longer than the
+   * default TTL, and a lapsed key there would resubmit the same intent under a
+   * fresh key). The way OUT of a hold is the caller's: a definitive API answer
+   * releasing it.
    */
   hold(fingerprint: string): void;
-  /** Whether this request's key is pinned by a live approval hold. */
+  /** Whether this request's key is pinned by a live hold. */
   isHeld(fingerprint: string): boolean;
   /** Persist before sending a POST. False means the caller must not send. */
   markUncertain(fingerprint: string): boolean;
@@ -298,66 +297,6 @@ export interface IdempotencyKeyStore {
   release(fingerprint: string): void;
 }
 
-type HeldIdempotencyKeyResolution =
-  | { kind: "key"; key: string; wasHeld: boolean; wasReused: boolean }
-  | { kind: "aborted" }
-  | { kind: "unavailable" };
-
-type HeldIdempotencyKeyLookup = { kind: "found" } | { kind: "absent" } | { kind: "unavailable" };
-
-/**
- * Resolve a reusable key without guessing whether an approval already spent it.
- *
- * `wasHeld` is load-bearing: an approval can execute between the preflight and
- * POST, so the response must distinguish that absorbed race from a fresh
- * submission.
- *
- * `wasReused` is load-bearing for a KEPT-key retry — a key a prior ambiguous
- * attempt (a 5xx, a lost answer, an unreadable 2xx) left live in the store. The
- * caller must resubmit the request-scoped state that key was MINTED with (the
- * vault flows' quote-derived floor), because the API's own idempotency
- * fingerprint includes that state: pairing the reused key with a freshly
- * derived value is refused with a 409, which the caller then reads as "nothing
- * was written" and retires — letting the next submit mint a fresh key while
- * the first attempt may already have executed. Both vault money flows use this
- * exact lifecycle.
- */
-export async function resolveHeldIdempotencyKey(
-  store: IdempotencyKeyStore,
-  fingerprint: string,
-  signal: AbortSignal,
-  fetchRecorded: (key: string) => Promise<HeldIdempotencyKeyLookup>
-): Promise<HeldIdempotencyKeyResolution> {
-  const claimed = store.claimReportingReuse(fingerprint);
-  const key = claimed.key;
-  if (!store.isHeld(fingerprint)) {
-    return { kind: "key", key, wasHeld: false, wasReused: claimed.wasReused };
-  }
-
-  const recorded = await fetchRecorded(key);
-  if (signal.aborted) return { kind: "aborted" };
-  if (recorded.kind === "unavailable") return { kind: "unavailable" };
-  if (recorded.kind === "absent") {
-    return { kind: "key", key, wasHeld: true, wasReused: claimed.wasReused };
-  }
-
-  // The hold is over and a movement was recorded under the key: this
-  // submission is a NEW intent, so it goes out under a fresh key with fresh
-  // request-scoped state — never a replay of the executed movement's. The
-  // reuse flag still rides the claim that produced the key: if the release
-  // above failed to land, the claim hands back the same key and the flag says
-  // so honestly.
-  store.release(fingerprint);
-  const fresh = store.claimReportingReuse(fingerprint);
-  return { kind: "key", key: fresh.key, wasHeld: false, wasReused: fresh.wasReused };
-}
-
-const definitivePolicyRefusalSchema = z.object({
-  error: z.object({
-    details: z.object({ intentOutcome: z.literal("denied"), idempotencyKey: z.string() }),
-  }),
-});
-
 type IdempotencyKeyOutcome =
   | { ok: true; status: number; data: { kind: string } }
   | { ok: false; status: number | null; body?: unknown };
@@ -371,13 +310,8 @@ type IdempotencyKeyOutcome =
  * retry into a SECOND on-chain movement, while a key held too long costs at
  * worst a replay the API reports honestly as `replayed`.
  *
- * - An approval hold IS an answer, but the write it gates has not been decided
- *   and is still keyed by this value — resubmitting under a fresh key would
- *   open a second approval request for the same intent. Not retiring; the
- *   caller pins it instead.
  * - A first-attempt 4xx may retire a fresh key. Once any earlier attempt is
- *   uncertain or awaiting approval, only a durable result or an explicit
- *   same-key terminal policy refusal resolves it. Later HTTP classes do not.
+ *   uncertain, only a durable result resolves it. Later HTTP classes do not.
  * - Everything else might have written: `status === null` is a transport
  *   failure, a 2xx whose body did not parse is an answer nobody could read,
  *   and a 5xx is the dangerous one — a gateway timing out downstream of an API
@@ -386,36 +320,26 @@ type IdempotencyKeyOutcome =
  */
 function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
   if (result.ok) {
-    return result.data?.kind !== "approval_pending";
+    return true;
   }
   return result.status !== null && result.status >= 400 && result.status < 500;
 }
 
 /**
- * Apply the shared retire, hold, or preserve rule to one API answer, and say
- * which was applied — callers keeping per-key state beside the store (the
- * deposit flow's floor memo) retire that state on exactly the same rule
- * rather than re-deriving it and drifting.
+ * Apply the shared retire-or-preserve rule to one API answer, and say which
+ * was applied — callers keeping per-key state beside the store (the deposit
+ * flow's floor memo) retire that state on exactly the same rule rather than
+ * re-deriving it and drifting.
  */
 export function applyIdempotencyKeyOutcome(
   store: IdempotencyKeyStore,
   fingerprint: string,
   result: IdempotencyKeyOutcome,
   wasUncertain = store.isUncertain(fingerprint) || store.isHeld(fingerprint)
-): "retired" | "held" | "kept" {
-  const refused =
-    !result.ok && result.status === 403
-      ? definitivePolicyRefusalSchema.safeParse(result.body)
-      : null;
-  const intentDenied =
-    refused?.success && refused.data.error.details.idempotencyKey === store.claim(fingerprint);
-  if (answerRetiresIdempotencyKey(result) && (result.ok || !wasUncertain || intentDenied)) {
+): "retired" | "kept" {
+  if (answerRetiresIdempotencyKey(result) && (result.ok || !wasUncertain)) {
     store.release(fingerprint);
     return "retired";
-  }
-  if (result.ok && result.data.kind === "approval_pending") {
-    store.hold(fingerprint);
-    return "held";
   }
   store.markUncertain(fingerprint);
   return "kept";

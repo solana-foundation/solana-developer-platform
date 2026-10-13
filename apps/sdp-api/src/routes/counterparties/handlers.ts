@@ -6,7 +6,6 @@ import {
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkCustomerStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampDirection } from "@sdp/types";
 import {
@@ -41,9 +40,9 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
-import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
+import { admitRamp } from "@/routes/payments/ramps/admission";
 import {
   type BvnkStoredStage,
   bvnkCustomerRequirementsFromMetadata,
@@ -52,7 +51,6 @@ import {
   presentBvnkStoredStage,
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/ramps/providers/bvnk";
-import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mural";
 import { advanceCounterpartyRequirements } from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
@@ -264,7 +262,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
-  assertRampProviderInChannel(c, query.data.provider);
+  await admitRamp(c, { need: "read", provider: query.data.provider });
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
@@ -275,13 +273,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   if (!counterparty) {
     throw notFound("Counterparty");
-  }
-
-  if (query.data.provider === "mural" && readMuralOrganization(counterparty.provider_data).id) {
-    return success(
-      c,
-      await resolveMuralRequirements(c, counterparty, projectId, query.data.direction)
-    );
   }
 
   if (query.data.provider === "bvnk" && query.data.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {

@@ -103,8 +103,9 @@ than by their container key, precisely because that container key is `address`.
 That has a consequence worth stating plainly, because it is the most likely way this policy
 develops a hole: **every provider spelling of the street line has to be listed by name.**
 Today that means SDP's own `line1`/`line2` (`CounterpartyAddress`), BVNK's
-`addressLine1`/`addressLine2` (`BvnkRuleEntityAddress`), and Mural's `address1` inside
-`physicalAddress` (`MuralPhysicalAddress`). A blanket `*Address` suffix rule is not available
+`addressLine1`/`addressLine2` (`BvnkRuleEntityAddress`), and `address1` inside
+`physicalAddress`, the shape a retired ramp provider submitted, kept so its logged history
+still scrubs. A blanket `*Address` suffix rule is not available
 as a shortcut: BVNK's `beneficiaryAddress` carries `destinationWalletAddress`, a crypto
 address. Adding a ramp provider means checking its address shape against
 `PII_KEYS` in `packages/sdp-redaction/src/policy.ts`.

@@ -14,7 +14,6 @@ function legacyConfig(pathname: string) {
     UNIFIED_TRANSACTION_MODULES,
     true,
     true,
-    true,
     false
   );
 }
@@ -37,7 +36,6 @@ describe("dashboard headers with NEW DESIGN off", () => {
       false,
       false,
       ["payments", "earn"],
-      true,
       true,
       true,
       false
@@ -69,8 +67,17 @@ describe("dashboard headers with NEW DESIGN off", () => {
   });
 
   it("leaves other routes as they are", () => {
-    expect(legacyConfig("/dashboard/policies")).toEqual(
-      getDashboardPageConfig("/dashboard/policies", t, false, false, [], true, true, true, true)
+    expect(legacyConfig("/dashboard/api-keys")).toEqual(
+      getDashboardPageConfig(
+        "/dashboard/api-keys",
+        t,
+        false,
+        false,
+        UNIFIED_TRANSACTION_MODULES,
+        true,
+        true,
+        true
+      )
     );
   });
 });

@@ -11,9 +11,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/wallets", "wallets-overview"],
     ["/dashboard/wallets/setup", "wallet-setup"],
     ["/dashboard/wallets/wallet-1", "wallet-detail"],
-    ["/dashboard/wallets/wallet-1/policy", "wallet-policy"],
-    ["/dashboard/wallets/wallet-1/policy/audit", "wallet-policy-audit-list"],
-    ["/dashboard/wallets/wallet-1/policy/audit/evaluation-1", "wallet-policy-audit-detail"],
     ["/dashboard/custody", "wallets-overview"],
     ["/dashboard/custody/wallet-1", "wallet-detail"],
     ["/dashboard/issuance", "issuance-overview"],
@@ -40,9 +37,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
-    ["/dashboard/policies", "policies"],
-    ["/dashboard/approvals", "approvals-list"],
-    ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/members", "settings"],
     ["/dashboard/helius-rings", "helius-rings"],
@@ -55,7 +49,9 @@ describe("dashboard loading route", () => {
   });
 
   it.each([
-    "/dashboard/wallets/wallet-1/policy/unknown",
+    "/dashboard/policies",
+    "/dashboard/approvals",
+    "/dashboard/approvals/request-1",
     "/dashboard/api-keys/key-1",
     "/dashboard/unknown",
     "/dashboard/walletsmith",

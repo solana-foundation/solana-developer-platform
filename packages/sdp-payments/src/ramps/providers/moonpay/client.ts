@@ -4,14 +4,12 @@ import type {
   PaymentRampQuote,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
-  type RampCurrencyLimit,
-} from "@sdp/types/payment-rails";
+import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId, RampCurrencyLimit } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
-import { sumDecimalAmounts } from "../../../decimal";
+import { compareDecimalAmounts, sumDecimalAmounts } from "../../../decimal";
 import { providerNotConfigured, SdpPaymentsError } from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
@@ -40,7 +38,6 @@ const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
 const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
-const MOONPAY_ONRAMP_MIN_USD = 20;
 
 export const MOONPAY_DECLARED_RAIL_SUPPORT = {
   onramp: { entityTypes: ["individual"] },
@@ -105,22 +102,6 @@ function readMoonpayConfig(
   return { apiKey, secretKey, onrampUrl, offrampUrl };
 }
 
-function normalizeMoonpayCurrencyCode(value: string): string {
-  const normalized = value.trim().toUpperCase();
-  if (!/^[A-Z0-9_]+$/.test(normalized)) {
-    throw new SdpPaymentsError(
-      "BAD_REQUEST",
-      "cryptoToken must be a valid token symbol or MoonPay currency code"
-    );
-  }
-  if (normalized === "USDC") return "usdc_sol";
-  if (normalized === "USDT") return "usdt_sol";
-  if (normalized.endsWith("_SOLANA")) {
-    return `${normalized.slice(0, -"_SOLANA".length)}_SOL`.toLowerCase();
-  }
-  return normalized.toLowerCase();
-}
-
 function requireMoonpayTransferId(paymentTransferId: string | undefined): string {
   if (!paymentTransferId) {
     throw new SdpPaymentsError(
@@ -173,6 +154,55 @@ const MOONPAY_CRYPTO_CODE_TO_RAIL = {
 
 function isMoonpayCryptoCode(value: string): value is MoonpayCryptoCode {
   return (MOONPAY_CRYPTO_CODES as readonly string[]).includes(value);
+}
+
+const MOONPAY_RAIL_TO_CODE: ReadonlyMap<CryptoRailId, MoonpayCryptoCode> = new Map(
+  MOONPAY_CRYPTO_CODES.map((code): [CryptoRailId, MoonpayCryptoCode] => [
+    MOONPAY_CRYPTO_CODE_TO_RAIL[code],
+    code,
+  ])
+);
+
+function moonpayCryptoCode(assetRail: CryptoRailId): MoonpayCryptoCode {
+  const code = MOONPAY_RAIL_TO_CODE.get(assetRail);
+  if (code === undefined) {
+    throw new SdpPaymentsError("BAD_REQUEST", `MoonPay does not support ${assetRail}`);
+  }
+  return code;
+}
+
+const MOONPAY_ONRAMP_LIMITS: ReadonlyMap<string, RampCurrencyLimit> = new Map(
+  Object.entries(RAMP_PROVIDER_SUPPORT_DETAILS.moonpay.onramp.currencies)
+);
+
+function compareMoonpayFiatAmount(fiatAmount: string, bound: string): number {
+  try {
+    return compareDecimalAmounts(fiatAmount, bound);
+  } catch (error) {
+    if (isSolanaError(error, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE)) {
+      throw new SdpPaymentsError("BAD_REQUEST", "fiatAmount is out of range");
+    }
+    throw error;
+  }
+}
+
+function assertMoonpayOnrampAmount(fiatCurrency: RampFiatCurrency, fiatAmount: string): void {
+  const limit = MOONPAY_ONRAMP_LIMITS.get(fiatCurrency);
+  if (limit === undefined) {
+    throw new SdpPaymentsError("BAD_REQUEST", `MoonPay on-ramp does not support ${fiatCurrency}`);
+  }
+  if (limit.min !== null && compareMoonpayFiatAmount(fiatAmount, limit.min) < 0) {
+    throw new SdpPaymentsError(
+      "BAD_REQUEST",
+      `MoonPay on-ramp requires fiatAmount to be at least ${limit.min} ${fiatCurrency}`
+    );
+  }
+  if (limit.max !== null && compareMoonpayFiatAmount(fiatAmount, limit.max) > 0) {
+    throw new SdpPaymentsError(
+      "BAD_REQUEST",
+      `MoonPay on-ramp requires fiatAmount to be at most ${limit.max} ${fiatCurrency}`
+    );
+  }
 }
 
 const moonpayCurrencyEntrySchema = z.object({
@@ -369,7 +399,7 @@ export class MoonpayRampClient implements RampProvider {
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
     const config = readMoonpayConfig(env, mode);
-    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const currencyCode = moonpayCryptoCode(input.assetRail);
     const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/buy_quote`);
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("baseCurrencyCode", input.fiatCurrency.toLowerCase());
@@ -403,7 +433,7 @@ export class MoonpayRampClient implements RampProvider {
     input: RampEstimateOfframpInput
   ): Promise<PaymentRampEstimate> {
     const config = readMoonpayConfig(env, mode);
-    const currencyCode = normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail));
+    const currencyCode = moonpayCryptoCode(input.assetRail);
     const url = new URL(`${MOONPAY_API_BASE_URL}/v3/currencies/${currencyCode}/sell_quote`);
     url.searchParams.set("apiKey", config.apiKey);
     url.searchParams.set("quoteCurrencyCode", input.fiatCurrency.toLowerCase());
@@ -431,21 +461,16 @@ export class MoonpayRampClient implements RampProvider {
     { env, mode }: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    const amount = Number.parseFloat(input.fiatAmount);
-    if (!Number.isFinite(amount) || amount < MOONPAY_ONRAMP_MIN_USD) {
-      throw new SdpPaymentsError(
-        "BAD_REQUEST",
-        `MoonPay on-ramp requires fiatAmount to be at least ${MOONPAY_ONRAMP_MIN_USD} USD`
-      );
-    }
+    const fiatCurrency = input.fiatCurrency ?? "USD";
+    assertMoonpayOnrampAmount(fiatCurrency, input.fiatAmount);
 
     const config = readMoonpayConfig(env, mode);
     const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.onrampUrl, config.secretKey, {
       apiKey: config.apiKey,
-      baseCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
+      baseCurrencyCode: fiatCurrency.toLowerCase(),
       baseCurrencyAmount: input.fiatAmount,
-      currencyCode: normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail)),
+      currencyCode: moonpayCryptoCode(input.assetRail),
       walletAddress: input.destinationWalletAddress,
       lockAmount: "true",
       externalCustomerId: input.externalCustomerId,
@@ -469,7 +494,7 @@ export class MoonpayRampClient implements RampProvider {
     const quoteId = requireMoonpayTransferId(input.paymentTransferId);
     const hostedUrl = await buildSignedMoonpayWidgetUrl(config.offrampUrl, config.secretKey, {
       apiKey: config.apiKey,
-      baseCurrencyCode: normalizeMoonpayCurrencyCode(getCryptoRailAssetLabel(input.assetRail)),
+      baseCurrencyCode: moonpayCryptoCode(input.assetRail),
       baseCurrencyAmount: input.cryptoAmount,
       quoteCurrencyCode: (input.fiatCurrency ?? "USD").toLowerCase(),
       refundWalletAddress: input.sourceWalletAddress,

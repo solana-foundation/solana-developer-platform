@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
@@ -10,6 +10,7 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
+import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
@@ -33,14 +34,21 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgRole, orgId, userId }, flags, initialQuickStartStep] =
-    await Promise.all([
-      params,
-      listSdpProjects(),
-      getSdpAuth(),
-      getDashboardFlags(),
-      loadQuickStartStep(),
-    ]);
+  const [
+    { projectId },
+    projects,
+    { orgRole, orgId, userId },
+    flags,
+    initialQuickStartStep,
+    cookieStore,
+  ] = await Promise.all([
+    params,
+    listSdpProjects(),
+    getSdpAuth(),
+    getDashboardFlags(),
+    loadQuickStartStep(),
+    cookies(),
+  ]);
   if (projects.some((project) => project.id === projectId)) {
     if (!orgId || !userId) {
       throw new Error("The dashboard layout admits only signed-in members of an organization");
@@ -57,7 +65,14 @@ export default async function ProjectLayout({
         projects={projects}
       >
         <NetworkDebugProvider>
-          <DashboardShell flags={flags}>{children}</DashboardShell>
+          <DashboardShell
+            flags={flags}
+            paymentsDemo={{
+              demoProjectId: cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value ?? null,
+            }}
+          >
+            {children}
+          </DashboardShell>
         </NetworkDebugProvider>
       </DashboardWorkspaceProvider>
     );

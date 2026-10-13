@@ -784,24 +784,6 @@ function getWalletRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  const walletPolicyRouteMatch = pathname.match(
-    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
-  );
-  if (walletPolicyRouteMatch) {
-    const [, section, walletId] = walletPolicyRouteMatch;
-    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.walletControls"),
-      backHref: isPolicyEvaluationDetail
-        ? `/dashboard/${section}/${walletId}/policy/audit`
-        : `/dashboard/${section}/${walletId}`,
-      backLabel: isPolicyEvaluationDetail
-        ? t("Shared.dashboardShell.backToPolicyHistory")
-        : t("Shared.dashboardShell.backToWallet"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-
   const isWalletDetail =
     (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
     (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
@@ -843,30 +825,6 @@ function getAccessControlPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/approvals") {
-    return {
-      title: t("Shared.dashboardShell.approvals"),
-      headerTabs: {
-        tabs: [
-          { id: "pending", label: t("DashboardApprovals.pendingTab") },
-          { id: "history", label: t("DashboardApprovals.historyTab") },
-        ],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname.startsWith("/dashboard/approvals")) {
-    return {
-      title: t("Shared.dashboardShell.approvals"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/approvals",
-        label: t("Shared.dashboardShell.backToApprovals"),
-      },
-    };
-  }
-
   return null;
 }
 
@@ -1260,9 +1218,8 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   // Transactions tabs, from `enabledTransactionModules`.
   transactionModules: readonly UnifiedTransactionModule[],
-  custodyEnabled = true,
+  _custodyEnabled = true,
   _paymentsEnabled = true,
-  _policiesEnabled = true,
   newDesign = true,
   newDesignModules?: DesignModuleFlags
 ): DashboardPageConfig {
@@ -1296,22 +1253,6 @@ export function getDashboardPageConfig(
   if (walletSectionPageConfig) return walletSectionPageConfig;
   const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
-  if (pathname === "/dashboard/policies") {
-    return {
-      title: t("Shared.dashboardShell.policies"),
-      headerTabs: {
-        tabs: custodyEnabled
-          ? [
-              { id: "all", label: t("DashboardPolicies.all") },
-              { id: "wallets", label: t("DashboardPolicies.wallets") },
-              { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
-            ]
-          : [{ id: "api_keys", label: t("DashboardPolicies.apiKeys") }],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under

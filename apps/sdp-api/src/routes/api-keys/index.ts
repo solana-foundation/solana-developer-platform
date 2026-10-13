@@ -3,41 +3,26 @@
  */
 
 import { Hono } from "hono";
-import {
-  requireAdminApiKeyRole,
-  requirePermissions,
-  unifiedAuthMiddleware,
-} from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
-import { requireModule } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  activateApiKeyControlProfileRevision,
   createApiKey,
-  createApiKeyControlProfile,
-  createApiKeyControlProfileRevision,
   getApiKey,
   listApiKeys,
   revokeApiKey,
   rotateApiKey,
   updateApiKey,
-  writeApiKeyPolicyBindings,
 } from "./handlers";
 import {
-  apiKeyControlProfileCreateSchema,
-  apiKeyControlProfileRevisionCreateSchema,
   apiKeyCreateSchema,
-  apiKeyPolicyBindingsWriteSchema,
   apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
 } from "./schemas";
 
 const apiKeys = new Hono<{ Bindings: Env }>();
-
-apiKeys.use("/:keyId/policy-profiles/*", requireModule("policies"));
-apiKeys.use("/:keyId/policy-bindings", requireModule("policies"));
 
 // All routes require authentication
 apiKeys.use("*", unifiedAuthMiddleware());
@@ -56,33 +41,6 @@ apiKeys.patch(
   requirePermissions("api-keys:write"),
   validateBody(apiKeyUpdateSchema),
   updateApiKey
-);
-apiKeys.post(
-  "/:keyId/policy-profiles",
-  requirePermissions("api-keys:write"),
-  requireAdminApiKeyRole(),
-  validateBody(apiKeyControlProfileCreateSchema),
-  createApiKeyControlProfile
-);
-apiKeys.post(
-  "/:keyId/policy-profiles/:profileId/revisions",
-  requirePermissions("api-keys:write"),
-  requireAdminApiKeyRole(),
-  validateBody(apiKeyControlProfileRevisionCreateSchema),
-  createApiKeyControlProfileRevision
-);
-apiKeys.post(
-  "/:keyId/policy-profiles/:profileId/revisions/:revisionId/activate",
-  requirePermissions("api-keys:write"),
-  requireAdminApiKeyRole(),
-  activateApiKeyControlProfileRevision
-);
-apiKeys.put(
-  "/:keyId/policy-bindings",
-  requirePermissions("api-keys:write"),
-  requireAdminApiKeyRole(),
-  validateBody(apiKeyPolicyBindingsWriteSchema),
-  writeApiKeyPolicyBindings
 );
 apiKeys.post(
   "/:keyId/rotate",

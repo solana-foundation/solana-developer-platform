@@ -30,13 +30,14 @@ import {
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  holdTransferBatchIdempotencyKey,
   isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   transferBatchRequestFingerprint,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { BulkImportRow } from "../bulk-import.redesign";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
@@ -150,6 +151,8 @@ function useBatchRecipientPage() {
  */
 function useBatchRecipientEntries() {
   const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
+  // A recipient ticked in demo mode starts with an amount, so the batch can be sent at once.
+  const startingAmount = usePaymentsDemo() ? DEMO_PREFILL_AMOUNTS.batchRecipient : "";
 
   // Typing an amount also adds the row to the batch, so the input can show on every row.
   const setRecipientAmount = (recipient: BatchEligibleRecipient, amount: string) => {
@@ -165,7 +168,7 @@ function useBatchRecipientEntries() {
       if (next[recipient.counterpartyAccountId]) {
         delete next[recipient.counterpartyAccountId];
       } else {
-        next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+        next[recipient.counterpartyAccountId] = { recipient, amount: startingAmount };
       }
       return next;
     });
@@ -177,7 +180,7 @@ function useBatchRecipientEntries() {
       for (const recipient of recipientsToSet) {
         if (value) {
           if (!next[recipient.counterpartyAccountId]) {
-            next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+            next[recipient.counterpartyAccountId] = { recipient, amount: startingAmount };
           }
         } else {
           delete next[recipient.counterpartyAccountId];
@@ -451,23 +454,10 @@ export function useBatchSendWizard({
     const fingerprint = transferBatchRequestFingerprint(request);
     const idempotencyKey = claimTransferBatchIdempotencyKey(fingerprint);
     try {
-      const outcome = await createTransferBatch(request, t, idempotencyKey);
-      if (outcome.kind === "approval_pending") {
-        // The approval executor replays this request under the same key, so
-        // the key must outlive the human deciding: pin it for the tab's life.
-        // A resubmit after the approval executes replays the recorded batch.
-        holdTransferBatchIdempotencyKey(fingerprint);
-        toast.info(t("DashboardPayments.batchSend.resultApprovalPending"), {
-          id: toastId,
-          description: t("DashboardPayments.batchSend.approvalPendingDescription"),
-          position: "bottom-right",
-        });
-        return;
-      }
+      const result = await createTransferBatch(request, t, idempotencyKey);
       // The batch row exists — the key is spent, and the next identical batch
       // is a new intent rather than a retry of this one.
       releaseTransferBatchIdempotencyKey(fingerprint);
-      const result = outcome.result;
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {

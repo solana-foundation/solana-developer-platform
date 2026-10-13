@@ -151,11 +151,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   const simulateCurrentQuote = async () => {
     const quote = wizard.quote;
-    if (
-      quote?.provider !== "lightspark" &&
-      quote?.provider !== "bvnk" &&
-      quote?.provider !== "mural"
-    ) {
+    if (quote?.provider !== "lightspark" && quote?.provider !== "bvnk") {
       return;
     }
     if (!wizard.selectedWallet || wizard.quoteTransferId === null) {

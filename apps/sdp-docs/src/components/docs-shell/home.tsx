@@ -104,7 +104,6 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
       { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
       { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
       { name: "MoneyGram", h: 24, src: "/docs/images/partners/moneygram.svg" },
-      { name: "Mural Pay", h: 20, src: "/docs/images/partners/muralpay.svg" },
     ],
   },
   {
@@ -150,8 +149,8 @@ const modelSteps: HomeCard[] = [
     graphic: <ArchitectureSketch />,
   },
   {
-    name: "Wallets & Policies",
-    desc: "Provision custody wallets and control signing with policies.",
+    name: "Wallets",
+    desc: "Provision custody wallets and limit what each API key may do with them.",
     href: "/docs/guides/setup-wallets",
     graphic: <WalletsSketch />,
   },

@@ -73,11 +73,18 @@ fail with `config_error`.
 ## State machine
 
 ```
-draft → preparing → approval_required → proving → ready_to_sign
+draft → preparing → proving → ready_to_sign
       → submitted → indexing → completed
 ```
 
 Terminal: `completed`, `failed`, `voided`.
+
+`approval_required` is retired (ADR 0006). Nothing enters it any more. It stays
+in `HELIUS_RINGS_OPERATION_STATUSES` only because the DB CHECK constraints still
+allow it, so an old row may carry it. Use `isLiveHeliusRingsOperationStatus` or
+`HELIUS_RINGS_LIVE_OPERATION_STATUSES` from `@sdp/types` for states an operation
+can still reach. The table-drop change (part 4) must drop it from the CHECK
+constraints and from `HELIUS_RINGS_RETIRED_OPERATION_STATUSES`.
 
 `failed` rows carry `failure_code`, `failure_message`, `retryable` (DB CHECK).
 Transitions are CAS under `SELECT … FOR UPDATE`.
@@ -86,8 +93,8 @@ Transitions are CAS under `SELECT … FOR UPDATE`.
 
 | Code | Retryable | Meaning |
 | --- | --- | --- |
-| `policy_denied` | no | Policy denied the operation. |
-| `approval_rejected` | no | Approval rejected, canceled, or expired. |
+| `policy_denied` | no | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it. |
+| `approval_rejected` | no | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it. |
 | `proof_failed` | yes | Prover error. |
 | `signer_failed` | varies | Custody signing failed; also used when `ready_to_sign` ages out (10 min) before a signature was recorded. |
 | `submit_failed` | yes | RPC submit error (provisioning only in practice). |
@@ -97,6 +104,17 @@ Transitions are CAS under `SELECT … FOR UPDATE`.
 | `gateway_unavailable` | yes | Port unreachable or transient upstream failure. |
 | `invalid_input` | varies | Bad input or inconsistent row. |
 | `insufficient_balance` | no | Not enough shielded balance. |
+
+## Who started an operation
+
+`helius_rings_operations.initiated_by_key_id` (migration 0127) holds the API key
+id that started the operation. It is set once, when the intent is first
+reserved. A replay keeps the original value. It is NULL for dashboard-session
+operations and for rows that predate the column. It is bare text with no
+foreign key, like `payment_transfers.initiated_by_key_id` and
+`issuance_transactions.initiated_by_key_id`. No API response exposes it. The
+removed `wallet_operations` ledger row was the only other place this was
+recorded for Rings.
 
 ## Withdraw (SOL)
 
@@ -200,7 +218,7 @@ outbox first so the same bytes can be resubmitted after a lost RPC response.
 
 - `intent_key = sha256(walletId, opType, canonical(input), clientNonce)` — replay
   returns the existing operation.
-- Retry files a **new** operation (`retry_of_operation_id`), re-runs policy, cap 5
+- Retry files a **new** operation (`retry_of_operation_id`), cap 5
   deep. Never retry a signed failure — void or reconcile instead.
 - The link is returned on both the summary and the detail, so Activity names each
   end ("Retry of …", "Retried as …") and stops offering Retry on a failure that
@@ -250,10 +268,10 @@ three passes per tick:
    (retryable); signed → `manual_reconciliation_required` (non-retryable), and
    only once the same chain check has spared whatever the chain vouches for.
 
-   Reads `proving` onward only. `preparing` and `approval_required` hold no
-   spend slot and block nothing, and an approval waits on a person, so including
-   them would let rows the sweep cannot advance fill its 100-row budget
-   oldest-first and starve the ones it exists to settle.
+   Reads `proving` onward only. `preparing` holds no spend slot and blocks
+   nothing, so including them would let rows the sweep cannot advance
+   fill its 100-row budget oldest-first and starve the ones it exists to settle.
+   (`approval_required` is retired and no longer reached.)
 
    A row with no signed bytes is skipped until it is older than
    `RINGS_UNSIGNED_GRACE_MS` (2 min). The pipeline builds, proves and signs
@@ -349,10 +367,10 @@ failure recorded on the row.
   ring's own transact instruction. Default-ring operations and sync are never
   blocked by any ring's state. An unknown name is a `400` and a recorded but
   not-yet-active ring a `503` (`config_error`); the resolved program id is
-  pinned on the operation row at prepare time and never re-resolved, so an
-  approval granted days later — and any retry — runs against the ring the
-  reviewer saw. The pinned ring also joins the intent key: the same operation
-  aimed at a different ring is a second operation, not a replay.
+  pinned on the operation row at prepare time and never re-resolved, so a
+  retry runs against the ring the original operation used. The pinned ring also joins the intent key:
+  the same operation aimed at a different ring is a second operation, not a
+  replay.
 - **Ring moves (`ring_exit` / `ring_entry`).** The wallet's own shielded SOL
   crosses between a named custom ring and the default ring in one transact:
   `ring_exit` spends ring-bound notes into the wallet's own default-ring note,
