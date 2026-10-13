@@ -26,6 +26,10 @@ import {
   restorePreCustodyDefaultsDropSchema,
 } from "./custody-defaults-schema";
 import {
+  DVP_TRADES_ENVIRONMENT_MIGRATION,
+  restorePreDvpTradesEnvironmentSchema,
+} from "./dvp-trades-environment-schema";
+import {
   PROJECT_ID_NOT_NULL_MIGRATION,
   restorePreProjectIdNotNullSchema,
 } from "./project-id-not-null-schema";
@@ -75,6 +79,7 @@ interface StoredConfigRow {
 }
 
 async function restorePreDefaultsDropSchema(): Promise<void> {
+  await restorePreDvpTradesEnvironmentSchema(client);
   await restorePreProjectIdNotNullSchema(client);
   await restorePreCustodyDefaultsDropSchema(client);
   await client.query("DELETE FROM schema_migrations WHERE version = $1", [
@@ -234,8 +239,8 @@ describe("0126 drop custody defaults migration", () => {
 
   afterEach(async () => {
     await seedTestDatabase(env);
-    await client.query("DELETE FROM schema_migrations WHERE version = $1", [
-      PROJECT_ID_NOT_NULL_MIGRATION,
+    await client.query("DELETE FROM schema_migrations WHERE version = ANY($1)", [
+      [PROJECT_ID_NOT_NULL_MIGRATION, DVP_TRADES_ENVIRONMENT_MIGRATION],
     ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });
