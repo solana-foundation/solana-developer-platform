@@ -1,4 +1,10 @@
-import { withHeliusApiKey } from "@sdp/rpc/relay";
+import {
+  createClusterDasRpc,
+  type DasAsset,
+  type DasRpc,
+  type DasTokenInfo,
+} from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import {
   type CustodyWalletTokenBalance,
@@ -6,7 +12,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
-import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import { withVendorCall } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
@@ -25,10 +31,6 @@ export function clearHeliusDasCachesForTests(): void {
   usdPriceCache.clearForTests();
 }
 
-function clusterOf(env: Env): NonNullable<Env["SOLANA_NETWORK"]> {
-  return env.SOLANA_NETWORK ?? "devnet";
-}
-
 interface TrackedAssetDefinition {
   decimals: number;
   isUsdStable?: boolean;
@@ -36,61 +38,8 @@ interface TrackedAssetDefinition {
   token: string;
 }
 
-interface HeliusRpcError {
-  code?: number;
-  message?: string;
-}
-
-interface HeliusTokenInfo {
-  amount?: number | string | null;
-  balance?: number | string | null;
-  decimals?: number | null;
-  mint?: string | null;
-  symbol?: string | null;
-  uiAmount?: number | string | null;
-  ui_amount?: number | string | null;
-  uiAmountString?: string | null;
-  ui_amount_string?: string | null;
-  price_info?: {
-    price_per_token?: number | null;
-    currency?: string | null;
-  } | null;
-}
-
-interface HeliusSearchAssetItem {
-  id?: string;
-  content?: {
-    metadata?: {
-      symbol?: string | null;
-    };
-  };
-  token_info?: HeliusTokenInfo | null;
-}
-
-interface HeliusSearchAssetsResponse {
-  error?: HeliusRpcError;
-  result?: {
-    items?: HeliusSearchAssetItem[];
-  };
-}
-
-interface HeliusGetAssetBatchItem {
-  id?: string;
-  content?: {
-    metadata?: {
-      symbol?: string | null;
-    };
-  };
-  token_info?: HeliusTokenInfo | null;
-}
-
-interface HeliusGetAssetBatchResponse {
-  error?: HeliusRpcError;
-  result?: HeliusGetAssetBatchItem[];
-}
-
 async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
-  const network = clusterOf(env);
+  const network = currentClusterScope().cluster;
   const usdc = WELL_KNOWN_TOKENS.USDC;
   const usdcMint = usdc.mints[network];
   const trackedAssets: TrackedAssetDefinition[] = [
@@ -140,14 +89,6 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
   }
 
   return trackedAssetsByMint;
-}
-
-function resolveHeliusDasUrl(env: Env): string | null {
-  if (!env.SOLANA_RPC_HELIUS_URL) {
-    return null;
-  }
-
-  return withHeliusApiKey(env.SOLANA_RPC_HELIUS_URL, env.SOLANA_RPC_HELIUS_API_KEY);
 }
 
 function resolveKnownUsdPrice(
@@ -210,7 +151,7 @@ function decimalToRawAmount(value: string, decimals: number): string {
   return combined || "0";
 }
 
-function resolveUiAmount(tokenInfo: HeliusTokenInfo, rawAmount: string, decimals: number): string {
+function resolveUiAmount(tokenInfo: DasTokenInfo, rawAmount: string, decimals: number): string {
   const directUiAmount =
     parseDecimalString(tokenInfo.uiAmountString) ??
     parseDecimalString(tokenInfo.ui_amount_string) ??
@@ -225,7 +166,7 @@ function resolveUiAmount(tokenInfo: HeliusTokenInfo, rawAmount: string, decimals
 }
 
 function toTrackedTokenBalance(
-  item: HeliusSearchAssetItem,
+  item: DasAsset,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): CustodyWalletTokenBalance | null {
   const tokenInfo = item.token_info;
@@ -267,49 +208,14 @@ function toTrackedTokenBalance(
   };
 }
 
-async function dasRequest(url: string, init: RequestInit): Promise<unknown> {
-  const startedAt = Date.now();
-  const fail = (error: unknown) => {
-    logVendorCallFailure("helius-das", "rpc", error, startedAt);
-    throw error;
-  };
-  let response: Response;
-  try {
-    response = await fetch(url, init);
-  } catch (error) {
-    return fail(error);
-  }
-  if (!response.ok) {
-    return fail(new Error(`Helius DAS request failed (${response.status})`));
-  }
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch (error) {
-    return fail(error);
-  }
-  const rpcError = (payload as { error?: { message?: string } } | null)?.error?.message;
-  if (rpcError) {
-    return fail(new Error(rpcError));
-  }
-  return payload;
-}
-
 async function fetchTrackedBalancesForOwner(
-  heliusDasUrl: string,
+  dasRpc: DasRpc,
   ownerAddress: string,
   trackedAssets: Map<string, TrackedAssetDefinition>
 ): Promise<CustodyWalletTokenBalance[]> {
-  const payload = (await dasRequest(heliusDasUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: `wallet-balances-${ownerAddress.slice(-8)}`,
-      method: "searchAssets",
-      params: {
+  const result = await withVendorCall("helius-das", "rpc", () =>
+    dasRpc
+      .searchAssets({
         ownerAddress,
         tokenType: "fungible",
         page: 1,
@@ -317,54 +223,37 @@ async function fetchTrackedBalancesForOwner(
         displayOptions: {
           showFungible: true,
         },
-      },
-    }),
-  })) as HeliusSearchAssetsResponse;
+      })
+      .send()
+  );
 
-  return (payload.result?.items ?? [])
+  return (result.items ?? [])
     .map((item) => toTrackedTokenBalance(item, trackedAssets))
     .filter((balance): balance is CustodyWalletTokenBalance => Boolean(balance));
 }
 
 async function fetchFungibleAssetsByMint(
-  heliusDasUrl: string,
-  mints: string[],
-  requestId: string
-): Promise<HeliusGetAssetBatchItem[]> {
+  dasRpc: DasRpc,
+  mints: string[]
+): Promise<readonly DasAsset[]> {
   if (mints.length === 0) {
     return [];
   }
 
-  const payload = (await dasRequest(heliusDasUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: requestId,
-      method: "getAssetBatch",
-      params: {
+  return await withVendorCall("helius-das", "rpc", () =>
+    dasRpc
+      .getAssetBatch({
         ids: mints,
         displayOptions: {
           showFungible: true,
         },
-      },
-    }),
-  })) as HeliusGetAssetBatchResponse;
-
-  return payload.result ?? [];
+      })
+      .send()
+  );
 }
 
-async function fetchUsdPricesByMint(
-  heliusDasUrl: string,
-  mints: string[]
-): Promise<Map<string, number>> {
-  const assets = await fetchFungibleAssetsByMint(
-    heliusDasUrl,
-    mints,
-    `wallet-prices-${mints.length}`
-  );
+async function fetchUsdPricesByMint(dasRpc: DasRpc, mints: string[]): Promise<Map<string, number>> {
+  const assets = await fetchFungibleAssetsByMint(dasRpc, mints);
   const pricesByMint = new Map<string, number>();
 
   for (const asset of assets) {
@@ -386,20 +275,16 @@ async function fetchUsdPricesByMint(
   return pricesByMint;
 }
 
-function resolveAssetSymbol(asset: HeliusGetAssetBatchItem): string | null {
+function resolveAssetSymbol(asset: DasAsset): string | null {
   const symbol = asset.token_info?.symbol?.trim() || asset.content?.metadata?.symbol?.trim() || "";
   return symbol.length > 0 ? symbol : null;
 }
 
 async function fetchTokenSymbolsByMint(
-  heliusDasUrl: string,
+  dasRpc: DasRpc,
   mints: string[]
 ): Promise<Map<string, string>> {
-  const assets = await fetchFungibleAssetsByMint(
-    heliusDasUrl,
-    mints,
-    `wallet-symbols-${mints.length}`
-  );
+  const assets = await fetchFungibleAssetsByMint(dasRpc, mints);
   const symbolsByMint = new Map<string, string>();
 
   for (const asset of assets) {
@@ -434,33 +319,33 @@ function enrichBalancesWithTokenSymbols(
 }
 
 export async function attachTokenSymbolsToBalances(
-  env: Env,
   balances: CustodyWalletTokenBalance[]
 ): Promise<CustodyWalletTokenBalance[]> {
-  const heliusDasUrl = resolveHeliusDasUrl(env);
+  const dasRpc = createClusterDasRpc();
   const unresolvedMints = [
     ...new Set(
       balances.filter((balance) => needsTokenSymbol(balance)).map((balance) => balance.mint)
     ),
   ];
 
-  if (!heliusDasUrl || unresolvedMints.length === 0) {
+  if (!dasRpc || unresolvedMints.length === 0) {
     return balances;
   }
 
   // A failed lookup answers no mints, so those balances keep their mint as the label.
-  const symbolsByMint = await tokenSymbolCache.lookup(clusterOf(env), unresolvedMints, (mints) =>
-    fetchTokenSymbolsByMint(heliusDasUrl, mints)
+  const symbolsByMint = await tokenSymbolCache.lookup(
+    currentClusterScope().cluster,
+    unresolvedMints,
+    (mints) => fetchTokenSymbolsByMint(dasRpc, mints)
   );
   return enrichBalancesWithTokenSymbols(balances, symbolsByMint);
 }
 
 export async function attachTokenSymbolsToBalanceMap(
-  env: Env,
   balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
 ): Promise<Map<string, CustodyWalletTokenBalance[]>> {
   const allBalances = [...balancesByWalletId.values()].flat();
-  const enrichedBalances = await attachTokenSymbolsToBalances(env, allBalances);
+  const enrichedBalances = await attachTokenSymbolsToBalances(allBalances);
   let cursor = 0;
 
   return new Map(
@@ -510,14 +395,16 @@ async function resolveUsdPricesForBalances(
   // cannot price reliably, including anything untraded recently, and Helius still
   // answers for some of those. Narrowing coverage is not the point of the change.
   const stillUnresolved = unresolvedMints.filter((mint) => !pricesByMint.has(mint));
-  const heliusDasUrl = resolveHeliusDasUrl(env);
-  if (!heliusDasUrl || stillUnresolved.length === 0) {
+  const dasRpc = createClusterDasRpc();
+  if (!dasRpc || stillUnresolved.length === 0) {
     return { pricesByMint, trackedAssets };
   }
 
   // A failed lookup answers no mints; those balances stay unpriced.
-  const fetchedPrices = await usdPriceCache.lookup(clusterOf(env), stillUnresolved, (mints) =>
-    fetchUsdPricesByMint(heliusDasUrl, mints)
+  const fetchedPrices = await usdPriceCache.lookup(
+    currentClusterScope().cluster,
+    stillUnresolved,
+    (mints) => fetchUsdPricesByMint(dasRpc, mints)
   );
   for (const [mint, price] of fetchedPrices) {
     pricesByMint.set(mint, price);
@@ -574,14 +461,14 @@ export async function getTrackedWalletBalancesByOwner(
   env: Env,
   ownerAddresses: string[]
 ): Promise<Map<string, CustodyWalletTokenBalance[]>> {
-  const heliusDasUrl = resolveHeliusDasUrl(env);
+  const dasRpc = createClusterDasRpc();
   const balancesByOwner = new Map<string, CustodyWalletTokenBalance[]>();
 
   for (const ownerAddress of ownerAddresses) {
     balancesByOwner.set(ownerAddress, []);
   }
 
-  if (!heliusDasUrl || ownerAddresses.length === 0) {
+  if (!dasRpc || ownerAddresses.length === 0) {
     return balancesByOwner;
   }
 
@@ -590,7 +477,7 @@ export async function getTrackedWalletBalancesByOwner(
   const results = await Promise.allSettled(
     uniqueOwners.map(async (ownerAddress) => ({
       ownerAddress,
-      balances: await fetchTrackedBalancesForOwner(heliusDasUrl, ownerAddress, trackedAssets),
+      balances: await fetchTrackedBalancesForOwner(dasRpc, ownerAddress, trackedAssets),
     }))
   );
 

@@ -2,11 +2,12 @@
 import { isJsonRpcPayload, type RpcTransport } from "@solana/kit";
 
 /**
- * Solana JSON-RPC methods that only read, so sending one twice is harmless.
+ * JSON-RPC methods that only read, so sending one twice is harmless: Solana's,
+ * plus the Helius DAS reads `createClusterDasRpc` sends.
  * Absent on purpose: `sendTransaction`, `requestAirdrop` and
  * `simulateTransaction`, the blockhash and fee reads a transaction is built on
  * (`getLatestBlockhash`, `isBlockhashValid`, `getRecentBlockhash`,
- * `getFeeForMessage`, `getRecentPrioritizationFees`), and every method a
+ * `getFeeForMessage`, `getRecentPrioritizationFees`), and every other method a
  * provider adds on top.
  */
 const READ_METHODS: ReadonlySet<string> = new Set([
@@ -55,6 +56,8 @@ const READ_METHODS: ReadonlySet<string> = new Set([
   "getVersion",
   "getVoteAccounts",
   "minimumLedgerSlot",
+  "searchAssets",
+  "getAssetBatch",
 ]);
 
 /** One JSON-RPC request (never a batch) whose method only reads. */
