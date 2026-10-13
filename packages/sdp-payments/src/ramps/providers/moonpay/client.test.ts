@@ -214,13 +214,14 @@ describe("MoonpayRampClient on-ramp limits", () => {
 
   it("refuses a fiat currency with no MoonPay on-ramp row", async () => {
     refuseProviderCalls();
-    // Every ramp fiat has a MoonPay row today, so the guard gets a code from outside the table.
     const unlisted: string = "XAF";
     assert.equal(Object.hasOwn(MOONPAY_ONRAMP_CURRENCIES, unlisted), false);
 
     await assert.rejects(
       new MoonpayRampClient().createOnrampQuote(runtimeContext, {
         ...onrampInput,
+        // SAFETY: every RampFiatCurrency has a MoonPay row today, so the guard
+        // under test is fed a code from outside the type on purpose.
         fiatCurrency: unlisted as RampFiatCurrency,
       }),
       isBadRequest(new RegExp(`^MoonPay on-ramp does not support ${unlisted}$`))

@@ -135,6 +135,24 @@ describe.each(RETIRED_RAMP_PROVIDERS)("retired ramp provider %s", (provider) => 
     });
   });
 
+  it("reads its transfer without a settlement its code no longer describes", async () => {
+    const id = `xfr_retired_settlement_${provider}`;
+    await seedRampTransfer({
+      id,
+      provider,
+      type: "onramp",
+      status: "completed",
+      providerData: { settlement: { provider, receivedAmount: "10" } },
+    });
+
+    const read = await app.request(`/v1/payments/transfers/${id}`, { headers: authorization }, env);
+
+    expect(read.status).toBe(200);
+    const body: unknown = await read.json();
+    expect(body).toMatchObject({ data: { transfer: { id, provider, status: "completed" } } });
+    expect(body).not.toHaveProperty("data.transfer.settlement");
+  });
+
   it("answers 503 to a cancel instead of acting on its transfer", async () => {
     const id = `xfr_retired_cancel_${provider}`;
     await seedRampTransfer({ id, provider, type: "offramp", status: "awaiting_payment" });

@@ -156,7 +156,6 @@
     "@solana/fixed-points": "7.1.1",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3",
-    "yaml": "2.9.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
