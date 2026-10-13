@@ -387,19 +387,12 @@ describe("Earn routes — environment scoping", () => {
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
 
-  it("lets an anonymous caller pick the shelf, production unless it asks for sandbox", async () => {
+  it("lets an anonymous caller read the shelf it names", async () => {
     const sandbox = await seedStrategy({});
     const production = await seedStrategy({
       environment: "production",
       hostCluster: "mainnet-beta",
     });
-
-    const defaulted = await getEarnAnonymously("/v1/earn/strategies", {});
-    expect(defaulted.status).toBe(200);
-    const defaultedBody = (await defaulted.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(defaultedBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
 
     const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
     expect(sandboxShelf.status).toBe(200);
@@ -408,8 +401,39 @@ describe("Earn routes — environment scoping", () => {
     };
     expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
 
+    const productionShelf = await getEarnAnonymously(
+      "/v1/earn/strategies?environment=production",
+      {}
+    );
+    expect(productionShelf.status).toBe(200);
+    const productionBody = (await productionShelf.json()) as {
+      data: { strategies: Array<{ id: string }> };
+    };
+    expect(productionBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
+
     expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`, {})).status).toBe(200);
     expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`, {})).status).toBe(200);
+  });
+
+  it("refuses an anonymous list that names no shelf", async () => {
+    await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    const res = await getEarnAnonymously("/v1/earn/strategies", {});
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.message).toBe("Invalid query parameters");
+  });
+
+  it("404s an anonymous detail read of an unknown strategy", async () => {
+    await seedStrategy({});
+
+    const res = await getEarnAnonymously("/v1/earn/strategies/strat_missing", {});
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
   });
 
   it("refuses a key that names a shelf other than its project's", async () => {
@@ -417,9 +441,9 @@ describe("Earn routes — environment scoping", () => {
     await seedStrategy({});
 
     const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
-    expect(mismatch.status).toBe(400);
+    expect(mismatch.status).toBe(409);
     const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
-    expect(mismatchBody.error.code).toBe("BAD_REQUEST");
+    expect(mismatchBody.error.code).toBe("CONFLICT");
     expect(mismatchBody.error.message).toContain("follows the project");
 
     const same = await getEarn("/v1/earn/strategies?environment=sandbox", {});

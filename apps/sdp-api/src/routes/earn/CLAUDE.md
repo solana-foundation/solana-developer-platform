@@ -1162,11 +1162,15 @@ fork a keyed and anonymous route with duplicate behavior.
 - **Keyed control plane:** submits, queued request/cancellation builds,
   movements, positions, earnings, custody vault routes, programs, and the
   aggregate feed. These retain the existing permission and project boundaries.
-- **Environment:** an authenticated project is authoritative. A keyless call
-  has no project, so the caller picks the shelf: `?environment=` on the list
-  (production when omitted) and the named strategy's own `environment` on
-  quotes and builds (`requireEarnStrategyForCaller`, context.ts). The
-  deployment's `ENVIRONMENT` never selects a cluster (PRO-1998).
+- **Environment:** an authenticated project is authoritative; naming another
+  `?environment=` on the list is a 409. A keyless call has no project, so the
+  caller picks the shelf: a required `?environment=` on the list (400 when
+  omitted) and the named strategy's own `environment` on quotes and builds.
+  The keyless router middleware in index.ts opens the cluster scope from that
+  choice before the handler runs; keyed calls keep the project middleware's
+  scope. `resolveEarnCatalogueEnvironment` and `requireEarnStrategyForCaller`
+  (context.ts) read the open scope for both tiers. The deployment's
+  `ENVIRONMENT` never selects a cluster (PRO-1998).
 - **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.

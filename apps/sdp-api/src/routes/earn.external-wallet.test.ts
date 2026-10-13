@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -11,6 +12,7 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import app from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
+import { anonymousExitNeedsStrategy } from "@/routes/earn/handlers/external-wallet";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -442,6 +444,67 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(input).not.toHaveProperty("organizationId");
   });
 
+  it("builds anonymously in the cluster scope of the strategy it names", async () => {
+    const strategy = await seedStrategy();
+    const observedScopes: ClusterScope[] = [];
+    buildExternalWalletDepositTransaction.mockImplementation(async () => {
+      observedScopes.push(currentClusterScope());
+      return { kind: "built", built: builtRow() };
+    });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    expect(observedScopes).toEqual([
+      { projectId: null, environment: "sandbox", cluster: "devnet" },
+    ]);
+  });
+
+  it("builds anonymously in the mainnet scope of a production strategy", async () => {
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const observedScopes: ClusterScope[] = [];
+    buildExternalWalletDepositTransaction.mockImplementation(async () => {
+      observedScopes.push(currentClusterScope());
+      return { kind: "built", built: builtRow() };
+    });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    expect(observedScopes).toEqual([
+      { projectId: null, environment: "production", cluster: "mainnet-beta" },
+    ]);
+  });
+
+  it("builds a keyed deposit in its project's cluster scope", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const observedScopes: ClusterScope[] = [];
+    buildExternalWalletDepositTransaction.mockImplementation(async () => {
+      observedScopes.push(currentClusterScope());
+      return { kind: "built", built: builtRow() };
+    });
+
+    const res = await post("deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: OWNER,
+      amount: "25",
+    });
+
+    expect(res.status).toBe(200);
+    expect(observedScopes).toEqual([
+      { projectId: TEST_PROJECT.id, environment: "sandbox", cluster: "devnet" },
+    ]);
+  });
+
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
@@ -482,6 +545,19 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       amount: "25",
     });
     expect(res.status).toBe(404);
+  });
+
+  it("404s an unknown strategy named by an anonymous caller", async () => {
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: "strat_missing", ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   describe("partner fee payer", () => {
@@ -1128,6 +1204,21 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
 
     expect(res.status).toBe(400);
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous position-only preview before quoting", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+
+    const res = await post("withdrawal-previews", { positionId, shares: "10" }, { apiKey: null });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: anonymousExitNeedsStrategy().message,
+    });
+    expect(quoteVaultWithdrawal).not.toHaveBeenCalled();
   });
 
   it("keeps the authenticated exit body position-based", async () => {
