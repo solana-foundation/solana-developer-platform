@@ -71,6 +71,9 @@ describe("payments exact wallet contract", () => {
 });
 
 describe("payments schema inferred types", () => {
+  // Type-only assertion: vitest strips types at runtime, so this test body
+  // never fails under `vitest run`. It is enforced by `pnpm typecheck`
+  // (tsc --noEmit includes test files).
   it("destination infers as string", () => {
     type CreateTransfer = z.infer<typeof createTransferSchema>;
 

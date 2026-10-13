@@ -10,10 +10,10 @@ import { createApiKeyMaterial, randomBase64Url } from "@/services/api-key.utils"
 
 describe("randomBase64Url", () => {
   it("generates string of correct length", () => {
-    // 24 bytes -> 32 base64 characters (minus padding)
+    // 24 bytes -> exactly 32 base64url characters (24 is divisible by 3, so
+    // the encoding emits no padding to strip).
     const result = randomBase64Url(24);
-    expect(result.length).toBeGreaterThanOrEqual(30);
-    expect(result.length).toBeLessThanOrEqual(32);
+    expect(result.length).toBe(32);
   });
 
   it("uses base64url characters only", () => {

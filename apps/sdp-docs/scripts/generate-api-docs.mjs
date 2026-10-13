@@ -154,9 +154,12 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
     );
   }
 
-  for (const tagPage of tagPages) {
-    const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
-    const actualRows = extractRenderedRows(source);
+  const sources = await Promise.all(
+    tagPages.map((tagPage) => fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"))
+  );
+
+  for (const [tagPageIndex, tagPage] of tagPages.entries()) {
+    const actualRows = extractRenderedRows(sources[tagPageIndex]);
     const expectedRows = (groupedOperations.get(tagPage.title) || [])
       .slice()
       .sort((left, right) => {
@@ -173,9 +176,14 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
       );
     }
 
-    for (const row of expectedRows) {
-      if (!actualRows.includes(row)) {
-        throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
+    // Order-sensitive, element-wise comparison: a membership check would let
+    // the same rows pass in a different order, and points at no location.
+    for (let index = 0; index < expectedRows.length; index += 1) {
+      const expectedRow = expectedRows[index];
+      if (actualRows[index] !== expectedRow) {
+        throw new Error(
+          `Generated API docs for ${tagPage.title} row ${index + 1} is "${actualRows[index]}", expected "${expectedRow}"`
+        );
       }
     }
   }
