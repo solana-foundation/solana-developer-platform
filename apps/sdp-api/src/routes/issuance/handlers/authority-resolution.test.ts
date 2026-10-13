@@ -449,6 +449,15 @@ describe("authority-resolution", () => {
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
+  it("keeps the pool's RPC_NOT_CONFIGURED when the scope cluster has no endpoint", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
+
+    await expect(
+      inSandboxScope(() => resolveCurrentAuthorityForRole(createToken(), "mint"))
+    ).rejects.toMatchObject({ code: "RPC_NOT_CONFIGURED", statusCode: 503 });
+    expect(fetchMaybeMintMock).not.toHaveBeenCalled();
+  });
+
   it("resolves a unique authority to its exact custody wallet row", async () => {
     await resetScope();
     await seedConfigWallet({ id: "cwlt_authority", walletId: "wal_authority" });
