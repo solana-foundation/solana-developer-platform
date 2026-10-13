@@ -87,6 +87,16 @@ import {
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
 
+/** Leaves a subscription's collection attempts unkeyed, as the cron's claim is (HOO-1918). */
+async function clearCollectionAttemptKeys(subscriptionId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      "UPDATE payment_subscription_collection_attempts SET idempotency_key = NULL WHERE subscription_id = ?"
+    )
+    .bind(subscriptionId)
+    .run();
+}
+
 const recurringPaymentLogEventSchema = z.object({ event: z.string() });
 
 function mockDistinctRecentBlockhashes(): void {
@@ -2341,6 +2351,9 @@ describe("Payments routes — recurring", () => {
       "sdp_api_payment_submission_unresolved"
     );
 
+    // Another key never recovers this request's attempt (it would leave that key
+    // free to pull the next period); the cron's unkeyed claim can be adopted.
+    await clearCollectionAttemptKeys(activated.subscriptionId);
     const recoveredRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
       { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -2508,6 +2521,8 @@ describe("Payments routes — recurring", () => {
           ...createSubscriptionsRepository(db),
           updateCollectionAttempt,
         }));
+      // Recovered as the cron's unkeyed claim: another key never adopts it.
+      await clearCollectionAttemptKeys(activated.subscriptionId);
       let recoveryRes: Response;
       try {
         recoveryRes = await app.request(
@@ -2788,6 +2803,9 @@ describe("Payments routes — recurring", () => {
         new Date(staleAt).getTime()
       );
 
+      // The first request adopted the journal's attempt; another key never
+      // recovers it, so the attempt goes back to the cron's unkeyed claim.
+      await clearCollectionAttemptKeys(activated.subscriptionId);
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/collect`,
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -4906,6 +4924,48 @@ describe("Payments routes — recurring", () => {
       );
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);
       expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(1);
+    });
+
+    it("refuses a keyed collect that would recover another key's collection, unstored", async () => {
+      recurringExecution.signAndSendMock();
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      });
+      sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+      const firstKey = crypto.randomUUID();
+      const ambiguous = await app.request(
+        actionPath(activated.id, "collect"),
+        { method: "POST", headers: keyed(firstKey), body: "{}" },
+        env
+      );
+      expect(ambiguous.status).toBe(200);
+
+      const otherKey = crypto.randomUUID();
+      const other = await app.request(
+        actionPath(activated.id, "collect"),
+        { method: "POST", headers: keyed(otherKey), body: "{}" },
+        env
+      );
+
+      expect(other.status).toBe(409);
+      const stored = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
+        )
+        .bind(otherKey)
+        .first<{ count: number }>();
+      expect(stored).toEqual({ count: 0 });
+      const attempts = await getDb(env)
+        .prepare(
+          "SELECT idempotency_key FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+        )
+        .bind(activated.subscriptionId)
+        .all<{ idempotency_key: string | null }>();
+      expect(attempts.results).toEqual([{ idempotency_key: recordKey(firstKey) }]);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     });
 
     it("journals a pending schedule's PATCH as a keyed attempt and answers its retry from it", async () => {
