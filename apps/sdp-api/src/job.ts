@@ -267,7 +267,9 @@ export async function runCronJob(): Promise<void> {
           )
         );
         await collect(
-          monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))
+          monitored(EARN_VAULT_MOVEMENTS_MONITOR, () =>
+            runPerCluster("reconcile-earn-vault-movements", () => reconcileEarnVaultMovements(env))
+          )
         );
         // Preserve DvP's non-fatal sweep and its position before secret retirement.
         await monitored(DVP_TRADES_MONITOR, () =>

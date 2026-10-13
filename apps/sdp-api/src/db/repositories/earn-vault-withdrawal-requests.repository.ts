@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
 import {
@@ -353,13 +354,43 @@ export interface EarnVaultWithdrawalRequestsRepository {
     /** Earliest time this failed request may be claimed again. */
     retryAt: string;
   }): Promise<void>;
+  /**
+   * Claim request/cancel actions whose transaction is not yet final, on open
+   * requests in the open cluster scope's environment, least recently checked first.
+   *
+   * @param limit - Most actions to claim, 1 to 256.
+   * @returns The claimed actions, stamped `last_checked_at`.
+   * @throws Error when `limit` is out of range.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
+  /**
+   * Claim due open requests in the open cluster scope's environment whose
+   * request transaction was sent, leasing each for two minutes.
+   *
+   * @param limit - Most requests to claim, 1 to 256.
+   * @returns The claimed requests.
+   * @throws Error when `limit` is out of range.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
+  /**
+   * Delete the open cluster scope's expired, unanchored reservations and PDA leases.
+   *
+   * @returns How many reservations were deleted.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   cleanupExpiredReservations(): Promise<number>;
-  cleanupExpiredExternalBuilds(params: {
-    environment: SdpEnvironment;
-    currentBlockHeight: string;
-  }): Promise<number>;
+  /**
+   * Delete the open cluster scope's unconsumed external-wallet builds whose
+   * blockhash expired, with their reservations and unoccupied PDA leases.
+   *
+   * @param params - The expiry bound.
+   * @param params.currentBlockHeight - The cluster's confirmed block height.
+   * @returns How many builds were deleted.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
+  cleanupExpiredExternalBuilds(params: { currentBlockHeight: string }): Promise<number>;
   createExternalWalletTransaction(
     input: CreateExternalWalletQueuedTransactionInput
   ): Promise<EarnExternalWalletWithdrawalRequestTransactionRow>;
@@ -1509,7 +1540,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                FROM earn_vault_withdrawal_request_actions action
               INNER JOIN earn_vault_withdrawal_requests request
                  ON request.id = action.withdrawal_request_id
-              WHERE action.status IN ('requested', 'submitted', 'confirmed')
+              WHERE action.environment = ?
+                AND action.status IN ('requested', 'submitted', 'confirmed')
                 AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
               ORDER BY COALESCE(action.last_checked_at, action.updated_at), action.id
               LIMIT ?
@@ -1521,7 +1553,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              WHERE action.id = candidates.id
              RETURNING action.*`
         )
-        .bind(limit)
+        .bind(currentClusterScope().environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapAction);
     },
@@ -1535,7 +1567,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           `WITH candidates AS MATERIALIZED (
              SELECT request.id
                FROM earn_vault_withdrawal_requests request
-              WHERE request.status IN (
+              WHERE request.environment = ?
+                AND request.status IN (
                 'creating', 'pending', 'fulfillable', 'expired_cancelable',
                 'cancelling', 'closed_or_unknown'
               )
@@ -1557,33 +1590,43 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             WHERE request.id = candidates.id
             RETURNING request.*`
         )
-        .bind(limit, new Date(Date.now() + 2 * 60_000).toISOString())
+        .bind(
+          currentClusterScope().environment,
+          limit,
+          new Date(Date.now() + 2 * 60_000).toISOString()
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRequest);
     },
 
     async cleanupExpiredReservations() {
+      const scopeEnvironment = currentClusterScope().environment;
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const result = await tx
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_reservations
-              WHERE last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
+              WHERE environment = ?
+                AND last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
           )
+          .bind(scopeEnvironment)
           .run();
         await tx
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_pda_leases
-              WHERE NOT occupied
+              WHERE environment = ?
+                AND NOT occupied
                 AND reuse_not_before <= sdp_iso_now()
                 AND last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
           )
+          .bind(scopeEnvironment)
           .run();
         return result;
       });
     },
 
     async cleanupExpiredExternalBuilds(params) {
+      const scopeEnvironment = currentClusterScope().environment;
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const expired = await tx
@@ -1593,7 +1636,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                 AND last_valid_block_height < ?
               RETURNING id`
           )
-          .bind(params.environment, params.currentBlockHeight)
+          .bind(scopeEnvironment, params.currentBlockHeight)
           .all<{ id: string }>();
         const ids = expired.results.map((row) => row.id);
         if (ids.length > 0) {

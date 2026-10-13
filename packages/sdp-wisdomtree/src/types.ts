@@ -1,3 +1,4 @@
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 import type { Address, Instruction } from "@solana/kit";
 
@@ -7,11 +8,11 @@ import type { Address, Instruction } from "@solana/kit";
  * type outside `@solana/kit` (the repo's pinned version) and `@sdp/types`.
  */
 
-/** Which cluster a call runs against, and how to reach it. Caller-supplied —
- * never read from process env — for the same reason as `KaminoRuntime`. */
+/** Which cluster a call runs against, and the door client that reaches it. */
 export interface WisdomTreeRuntime {
   cluster: SolanaCluster;
-  rpcUrl: string;
+  /** Every read bounded at the transport, honouring the caller's minimum-slot read scope. */
+  rpc: SolanaRpc;
 }
 
 /** A built, unsigned unit of work: one complete transaction's instructions. */

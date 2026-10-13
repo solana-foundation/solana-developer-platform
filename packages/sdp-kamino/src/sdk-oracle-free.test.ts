@@ -1,6 +1,6 @@
-import { type Address, address, type TransactionSigner } from "@solana/kit";
+import { type Address, address, createSolanaRpc, type TransactionSigner } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
 import { isShareAtaCloseInstruction } from "./withdraw-instructions";
 
@@ -17,13 +17,12 @@ type DecimalLike = {
 };
 
 const mocks = vi.hoisted(() => ({
-  createKaminoRpc: vi.fn(),
+  fetch: vi.fn(),
   fetchGlobalConfig: vi.fn(),
   fetchReserveStates: vi.fn(),
   getState: vi.fn(),
   getUserShares: vi.fn(),
   getUserSharesState: vi.fn(),
-  rpc: {} as Record<string, unknown>,
   sendTokenAccounts: vi.fn(),
   stateOnlyOracles: [] as Array<{
     decimals: DecimalLike;
@@ -113,10 +112,6 @@ vi.mock("./lookup-table", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lookup-table")>()),
   loadVaultLookupTableAddresses: vi.fn(async () => ({})),
 }));
-vi.mock("./rpc", () => ({
-  createKaminoReadRpc: mocks.createKaminoRpc,
-  createKaminoRpc: mocks.createKaminoRpc,
-}));
 
 function integer(value: number) {
   return {
@@ -167,18 +162,43 @@ const tokenAccounts = {
   ],
 };
 const owner = { address: OWNER } as TransactionSigner;
-const runtime = { cluster: "devnet" as const, rpcUrl: "https://devnet.example.invalid" };
+const DEVNET_RPC_URL = "https://devnet.kamino-oracle-free.test";
+const runtime = {
+  cluster: "devnet" as const,
+  rpc: createSolanaRpc(DEVNET_RPC_URL),
+  readRpc: createSolanaRpc(DEVNET_RPC_URL),
+};
+
+async function answerChainRead(method: string, params: unknown): Promise<unknown> {
+  if (method === "getMultipleAccounts" && Array.isArray(params) && Array.isArray(params[0])) {
+    return { context: { slot: 1 }, value: params[0].map(() => null) };
+  }
+  if (method === "getTokenAccountsByOwner") {
+    const { value } = await mocks.sendTokenAccounts();
+    return { context: { slot: 1 }, value };
+  }
+  throw new Error(`Unexpected ${method}`);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.stateOnlyOracles.length = 0;
-  mocks.rpc = {
-    getMultipleAccounts: vi.fn((keys: unknown[]) => ({
-      send: async () => ({ context: { slot: 1n }, value: keys.map(() => null) }),
-    })),
-    getTokenAccountsByOwner: vi.fn(() => ({ send: mocks.sendTokenAccounts })),
-  };
-  mocks.createKaminoRpc.mockReturnValue(mocks.rpc);
+  mocks.fetch.mockImplementation(async (_input: string, init: { body: string }) => {
+    const request: unknown = JSON.parse(init.body);
+    if (
+      typeof request !== "object" ||
+      request === null ||
+      !("id" in request) ||
+      !("method" in request) ||
+      typeof request.method !== "string" ||
+      !("params" in request)
+    ) {
+      throw new Error("Expected a JSON-RPC request");
+    }
+    const result = await answerChainRead(request.method, request.params);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+  });
+  vi.stubGlobal("fetch", mocks.fetch);
   mocks.fetchGlobalConfig.mockResolvedValue({
     withdrawalPenaltyBps: "0",
     withdrawalPenaltyLamports: "0",
@@ -197,6 +217,10 @@ beforeEach(() => {
     };
   });
   mocks.sendTokenAccounts.mockResolvedValue(tokenAccounts);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("oracle-free Kamino SDK execution", () => {
@@ -223,7 +247,7 @@ describe("oracle-free Kamino SDK execution", () => {
       code: "DEPOSIT_REFUSED",
       message: expect.stringContaining("devnet vault program cannot enforce a share floor"),
     });
-    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.getState).not.toHaveBeenCalled();
   });
 
