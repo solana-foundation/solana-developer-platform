@@ -294,6 +294,8 @@
         "**/apps/sdp-api/src/routes/pay.ts",
         "**/apps/sdp-api/src/routes/earn/index.ts",
         "**/apps/sdp-api/src/cron/cluster-runs.ts",
+        "**/apps/sdp-api/src/cron/earn-catalogue-sync.ts",
+        "**/apps/sdp-api/src/cron/earn-metrics-refresh.ts",
         "**/apps/sdp-api/src/routes/webhooks/handlers.ts",
         "**/apps/sdp-api/src/services/jobs/replay-ramp-webhook-events.ts"
       ],
@@ -345,11 +347,7 @@
     {
       "includes": [
         "**/packages/sdp-rpc/src/**/*.ts",
-        "**/apps/sdp-api/src/services/earn/deposit-mint-guard.ts",
-        "**/apps/sdp-api/src/services/earn/execution-registry.ts",
-        "**/apps/sdp-api/src/services/earn/owner-token-balance.ts",
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
-        "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
         "**/packages/sdp-api-integration/src/helpers/integration.ts",
         "**/packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts",
         "**/packages/sdp-private-channels/src/gateway.ts"

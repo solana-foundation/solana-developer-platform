@@ -92,6 +92,7 @@
   },
   "dependencies": {
     "@sdp/redaction": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*"
   },
   "devDependencies": {

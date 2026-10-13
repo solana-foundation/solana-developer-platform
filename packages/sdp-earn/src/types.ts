@@ -37,14 +37,6 @@ export interface EarnRuntimeEnvironment {
    */
   WISDOMTREE_API_KEY?: string;
   WISDOMTREE_SANDBOX_API_KEY?: string;
-  SOLANA_RPC_URL?: string;
-  /**
-   * Per-cluster overrides for on-chain catalogue reads, same keys the API's
-   * execution path reads (`resolveClusterRpcUrl`). See `resolveCatalogueRpcUrl`
-   * in ./solana-rpc for why a single process endpoint is not enough.
-   */
-  SOLANA_DEVNET_RPC_URL?: string;
-  SOLANA_MAINNET_RPC_URL?: string;
 }
 
 export interface EarnRuntimeContext {

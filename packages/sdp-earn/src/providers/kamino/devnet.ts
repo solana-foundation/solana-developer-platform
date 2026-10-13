@@ -140,28 +140,23 @@ export function decodeVaultState(address: string, data: Uint8Array): KaminoDevne
  * so a partial read would not degrade gracefully — it would delist the vaults
  * whose page went unread. An RPC failure throws and the sync skips its pass.
  *
- * The genesis proof, the JSON-RPC transport and the base58/base64 helpers are
+ * The cluster check, the door-backed JSON-RPC transport and the base58/base64 helpers are
  * shared with every other on-chain catalogue read (../../solana-rpc.ts); only
  * the layout knowledge below is Kamino's.
  */
-export async function listKaminoDevnetVaults(rpcUrl: string): Promise<KaminoDevnetVault[]> {
-  await assertRpcServesCluster("kamino", rpcUrl, "devnet");
+export async function listKaminoDevnetVaults(): Promise<KaminoDevnetVault[]> {
+  assertRpcServesCluster("kamino", "devnet");
 
-  const accounts = await solanaRpcCall<RpcProgramAccount[]>(
-    "kamino",
-    rpcUrl,
-    "getProgramAccounts",
-    [
-      KAMINO_DEVNET_KVAULT_PROGRAM_ID,
-      {
-        encoding: "base64",
-        // Server-side size filter: the program also owns smaller bookkeeping
-        // accounts, and shipping only vault states keeps this read at a few
-        // hundred KB instead of the whole program's account set.
-        filters: [{ dataSize: VAULT_STATE_SIZE }],
-      },
-    ]
-  );
+  const accounts = await solanaRpcCall<RpcProgramAccount[]>("kamino", "getProgramAccounts", [
+    KAMINO_DEVNET_KVAULT_PROGRAM_ID,
+    {
+      encoding: "base64",
+      // Server-side size filter: the program also owns smaller bookkeeping
+      // accounts, and shipping only vault states keeps this read at a few
+      // hundred KB instead of the whole program's account set.
+      filters: [{ dataSize: VAULT_STATE_SIZE }],
+    },
+  ]);
 
   if (!Array.isArray(accounts)) {
     throw internalError("Kamino devnet vault read returned no result array");

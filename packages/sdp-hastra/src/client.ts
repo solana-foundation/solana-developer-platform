@@ -30,7 +30,9 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
-import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import type { Signature } from "@sdp/rpc/solana";
+import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
@@ -63,7 +65,8 @@ const U64_MAX = (1n << 64n) - 1n;
 const I128_SIGN = 1n << 127n;
 const I128_MODULUS = 1n << 128n;
 const MAX_ADMINISTRATORS = 5;
-const RPC_READ_TIMEOUT_MS = 30_000;
+/** Maximum time a single Hastra RPC request may hold a worker open, failover hops included. */
+const RPC_REQUEST_TIMEOUT_MS = 30_000;
 const CLASSIC_TOKEN_ACCOUNT_BYTES = 165;
 /** Anchor `RedemptionRequest`: discriminator + owner + amount + mint + bump. */
 const REDEMPTION_REQUEST_ACCOUNT_BYTES = 81;
@@ -307,45 +310,37 @@ interface RpcAccount {
 }
 
 interface RpcAccountWire {
-  data?: [string, string] | string;
+  data?: readonly [string, string] | string;
   executable?: boolean;
   owner?: string;
 }
 
-async function rpcRequest<T>(
-  runtime: HastraRuntime,
-  method: string,
-  params: unknown[],
+/**
+ * Send one chain read through the runtime's door client, mapping every failure to a typed Hastra
+ * error. The request is built inside the guard, so an invalid address is the same refusal as a
+ * failed read.
+ *
+ * @param send - Builds and sends the request.
+ * @param code - The Hastra error code a failure maps to.
+ * @param description - What the read was doing, for the error.
+ * @returns The RPC's typed result.
+ * @throws SdpHastraError `code` when the request cannot be built or the read fails.
+ */
+async function readChain<T>(
+  send: () => Promise<T>,
   code: SdpHastraErrorCode,
   description: string
 ): Promise<T> {
-  let response: Response;
   try {
-    response = await contextAwareRpcFetch(runtime.rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal: AbortSignal.timeout(RPC_READ_TIMEOUT_MS),
-    });
+    return await send();
   } catch (cause) {
     throw new SdpHastraError(code, `The Solana RPC failed while ${description}.`, { cause });
   }
-  if (!response.ok) {
-    throw new SdpHastraError(
-      code,
-      `The Solana RPC answered HTTP ${response.status} while ${description}.`
-    );
-  }
-  const body = (await response.json()) as { result?: T; error?: unknown };
-  if (body.error !== undefined || body.result === undefined) {
-    throw new SdpHastraError(code, `The Solana RPC returned an error while ${description}.`);
-  }
-  return body.result;
 }
 
 function decodeRpcAccount(value: RpcAccountWire | null, address: string): RpcAccount | null {
   if (value === null) return null;
-  const encoded = Array.isArray(value.data) ? value.data[0] : value.data;
+  const encoded = typeof value.data === "string" ? value.data : value.data?.[0];
   if (
     typeof encoded !== "string" ||
     typeof value.owner !== "string" ||
@@ -371,11 +366,15 @@ async function getMultipleAccountWires(
   runtime: HastraRuntime,
   addresses: readonly string[],
   code: SdpHastraErrorCode
-): Promise<(RpcAccountWire | null)[]> {
-  const result = await rpcRequest<{ value?: (RpcAccountWire | null)[] }>(
-    runtime,
-    "getMultipleAccounts",
-    [addresses, { encoding: "base64", commitment: "confirmed" }],
+): Promise<readonly (RpcAccountWire | null)[]> {
+  const result = await readChain(
+    () =>
+      runtime.rpc
+        .getMultipleAccounts(
+          addresses.map((address) => assertValidAddress(address)),
+          { encoding: "base64", commitment: "confirmed" }
+        )
+        .send(),
     code,
     "reading Hastra accounts"
   );
@@ -399,35 +398,29 @@ async function getAccount(
   code: SdpHastraErrorCode = "PROGRAM_MISMATCH",
   commitment: "confirmed" | "finalized" = "confirmed"
 ): Promise<RpcAccount | null> {
-  const result = await rpcRequest<{ value?: RpcAccountWire | null }>(
-    runtime,
-    "getAccountInfo",
-    [address, { encoding: "base64", commitment }],
+  const result = await readChain(
+    () =>
+      runtime.rpc
+        .getAccountInfo(assertValidAddress(address), { encoding: "base64", commitment })
+        .send(),
     code,
     `reading account ${address}`
   );
   if (!("value" in result)) {
     throw new SdpHastraError(code, `The Solana RPC omitted account ${address}.`);
   }
-  return decodeRpcAccount(result.value ?? null, address);
+  return decodeRpcAccount(result.value, address);
 }
 
-interface RpcSignatureHistoryEntry {
-  signature?: string;
-  slot?: number;
-  err?: unknown;
-}
-
-interface RpcBlockIdentity {
-  blockHeight?: number | null;
-}
-
-interface RpcTransactionLifecycle {
-  meta?: { err?: unknown; logMessages?: string[] | null } | null;
-}
-
-function nonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+/**
+ * A chain integer the package handles as a JavaScript number, or null when it is negative or
+ * beyond `Number.MAX_SAFE_INTEGER`.
+ *
+ * @param value - The integer as kit decoded it.
+ * @returns The same integer as a number, or null when it cannot be one exactly.
+ */
+function safeIntegerFromChain(value: bigint): number | null {
+  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null;
 }
 
 /**
@@ -438,7 +431,7 @@ function nonNegativeSafeInteger(value: unknown): value is number {
  */
 const namedVaults = new Map<SolanaCluster, readonly string[]>();
 
-/** Rent-exempt minimums are static per (cluster, endpoint, size). */
+/** Rent-exempt minimums are static per (cluster, size). */
 const RENT_MINIMUM_TTL_MS = 600_000;
 const rentMinimums = new Map<string, { lamports: Promise<number>; expiresAt: number | null }>();
 
@@ -454,9 +447,7 @@ async function rentExemptMinimum(
   bytes: number,
   label: string
 ): Promise<number> {
-  // A digest, so no key holds the RPC URL or its API key.
-  const endpoint = createHash("sha256").update(runtime.rpcUrl).digest("hex").slice(0, 16);
-  const key = `${runtime.cluster}\n${endpoint}\n${bytes}`;
+  const key = `${runtime.cluster}\n${bytes}`;
   let entry = rentMinimums.get(key);
   if (entry && entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
     rentMinimums.delete(key);
@@ -484,15 +475,16 @@ async function readRentExemptMinimum(
   bytes: number,
   label: string
 ): Promise<number> {
-  const lamports = await rpcRequest<number>(
-    runtime,
-    // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
-    "getMinimumBalanceForRentExemption",
-    [bytes, { commitment: "confirmed" }],
+  const rentLamports = await readChain(
+    () =>
+      runtime.rpc
+        .getMinimumBalanceForRentExemption(BigInt(bytes), { commitment: "confirmed" })
+        .send(),
     "PROGRAM_MISMATCH",
     `reading ${label} rent`
   );
-  if (!nonNegativeSafeInteger(lamports)) {
+  const lamports = safeIntegerFromChain(rentLamports);
+  if (lamports === null) {
     throw new SdpHastraError(
       "PROGRAM_MISMATCH",
       `The Solana RPC returned an invalid ${label} rent.`
@@ -524,19 +516,20 @@ async function assertRedemptionRequestReuseSafe(
     );
   }
 
-  let before: string | undefined;
-  let closingSlot: number | null = null;
+  let before: Signature | undefined;
+  let closingSlot: bigint | null = null;
   let exhausted = false;
   for (let page = 0; page < MAX_SIGNATURE_HISTORY_PAGES; page += 1) {
-    const options: { commitment: "finalized"; limit: number; before?: string } = {
-      commitment: "finalized",
-      limit: SIGNATURE_HISTORY_PAGE_SIZE,
-    };
-    if (before) options.before = before;
-    const history = await rpcRequest<RpcSignatureHistoryEntry[]>(
-      runtime,
-      "getSignaturesForAddress",
-      [requestAddress, options],
+    const pageBefore = before;
+    const history = await readChain(
+      () =>
+        runtime.rpc
+          .getSignaturesForAddress(assertValidAddress(requestAddress), {
+            commitment: "finalized",
+            limit: SIGNATURE_HISTORY_PAGE_SIZE,
+            ...(pageBefore === undefined ? {} : { before: pageBefore }),
+          })
+          .send(),
       "REQUEST_UNREADABLE",
       "checking Hastra request-address history"
     );
@@ -564,20 +557,24 @@ async function assertRedemptionRequestReuseSafe(
       if (
         typeof entry.signature !== "string" ||
         entry.signature.length === 0 ||
-        !nonNegativeSafeInteger(entry.slot)
+        typeof entry.slot !== "bigint" ||
+        entry.slot < 0n
       ) {
         throw new SdpHastraError(
           "REQUEST_UNREADABLE",
           "The Solana RPC returned malformed successful Hastra request history."
         );
       }
-      const transaction = await rpcRequest<RpcTransactionLifecycle | null>(
-        runtime,
-        "getTransaction",
-        [
-          entry.signature,
-          { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 },
-        ],
+      const entrySignature = entry.signature;
+      const transaction = await readChain(
+        () =>
+          runtime.rpc
+            .getTransaction(entrySignature, {
+              commitment: "finalized",
+              encoding: "json",
+              maxSupportedTransactionVersion: 0,
+            })
+            .send(),
         "REQUEST_UNREADABLE",
         "authenticating prior Hastra request history"
       );
@@ -648,30 +645,39 @@ async function assertRedemptionRequestReuseSafe(
     // unrelated or failed mentions do not turn a first request into a reuse.
     return;
   }
+  const closedAtSlot = closingSlot;
   const [closingBlock, currentBlockHeight] = await Promise.all([
-    rpcRequest<RpcBlockIdentity | null>(
-      runtime,
-      "getBlock",
-      [closingSlot, { commitment: "finalized", transactionDetails: "none", rewards: false }],
+    readChain(
+      () =>
+        runtime.rpc
+          .getBlock(closedAtSlot, {
+            commitment: "finalized",
+            transactionDetails: "none",
+            rewards: false,
+          })
+          .send(),
       "REQUEST_UNREADABLE",
       "reading the last Hastra request block"
     ),
-    rpcRequest<number>(
-      runtime,
-      "getBlockHeight",
-      [{ commitment: "finalized" }],
+    readChain(
+      () => runtime.rpc.getBlockHeight({ commitment: "finalized" }).send(),
       "REQUEST_UNREADABLE",
       "reading finalized Solana block height"
     ),
   ]);
   const closingBlockHeight = closingBlock?.blockHeight;
-  if (!nonNegativeSafeInteger(closingBlockHeight) || !nonNegativeSafeInteger(currentBlockHeight)) {
+  if (
+    typeof closingBlockHeight !== "bigint" ||
+    closingBlockHeight < 0n ||
+    typeof currentBlockHeight !== "bigint" ||
+    currentBlockHeight < 0n
+  ) {
     throw new SdpHastraError(
       "REQUEST_UNREADABLE",
       "The Solana RPC could not prove that Hastra's prior request transactions expired."
     );
   }
-  if (currentBlockHeight <= closingBlockHeight + HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS) {
+  if (currentBlockHeight <= closingBlockHeight + BigInt(HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS)) {
     throw new SdpHastraError(
       "REDEMPTION_REFUSED",
       "This wallet's prior Hastra request closed too recently. Wait for its signed transactions " +
@@ -1797,31 +1803,38 @@ export class HastraVaultDirectClient
     EarnVaultWithdrawQuoteProvider,
     EarnVaultParRedemptionProvider
 {
+  /**
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
+   * @param resolveSwapPort - The API's admitted swap builder for the request.
+   */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
     private readonly runOperation: HastraVaultOperationRunner,
     private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => HastraSwapPort
   ) {
     super();
   }
 
-  private async runtime(ctx: EarnRuntimeContext): Promise<{
+  /**
+   * The operation's runtime: the request's cluster, its Hastra deployment, and the door client for
+   * the open cluster scope, built here inside the scope so nothing below reads it. The door proves
+   * each endpoint's genesis before its first request.
+   *
+   * @param ctx - The request's runtime context.
+   * @returns The runtime and the cluster's Hastra configuration.
+   * @throws SdpHastraError when Hastra has no deployment on the cluster.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+   */
+  private runtime(ctx: EarnRuntimeContext): {
     runtime: HastraRuntime;
     config: HastraClusterConfig;
-  }> {
+  } {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const config = hastraClusterConfig(cluster);
-    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-    if (!rpcUrl.trim()) {
-      throw new SdpHastraError(
-        "POSITION_UNREADABLE",
-        `No Solana RPC endpoint is configured for ${cluster}; Hastra cannot build or read.`
-      );
-    }
-    return { runtime: { cluster, rpcUrl }, config };
+    return {
+      runtime: { cluster, rpc: createClusterBoundedRpc({ timeoutMs: RPC_REQUEST_TIMEOUT_MS }) },
+      config,
+    };
   }
 
   private async withRuntime<T>(
@@ -1834,7 +1847,7 @@ export class HastraVaultDirectClient
     ) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
-      const { runtime, config } = await this.runtime(ctx);
+      const { runtime, config } = this.runtime(ctx);
       assertActive();
       return operation(runtime, config, assertActive);
     });

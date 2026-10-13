@@ -1,10 +1,12 @@
 import type { EarnVaultInstruction } from "@sdp/earn/types";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 
-/** Chain runtime for one operation: a genesis-proven endpoint and its cluster. */
+/** Chain runtime for one operation: its cluster and the door client that reaches it. */
 export interface HastraRuntime {
   cluster: SolanaCluster;
-  rpcUrl: string;
+  /** Every request bounded at the transport. */
+  rpc: SolanaRpc;
 }
 
 /**

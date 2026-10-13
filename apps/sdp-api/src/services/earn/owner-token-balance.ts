@@ -1,32 +1,25 @@
-import { createRpc } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { address } from "@solana/kit";
 import { z } from "zod";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
-import type { Env } from "@/types/env";
 
 /**
- * One owner's balance of ONE mint, in base units, on the environment's own
+ * One owner's balance of ONE mint, in base units, on the open cluster scope's
  * cluster (PRO-1864).
  *
  * Written for the orphaned split-swap detector and its build-time baseline,
  * which must be the SAME measurement or the difference between them means
- * nothing: same cluster resolution, same genesis check, same filtered RPC call,
- * same summing rule. `getSplTokenBalances` (routes/payments/token-accounts.ts)
- * is the wrong tool here: it walks every token account of both token programs
+ * nothing: same door client, same filtered RPC call, same summing rule.
+ * `getSplTokenBalances` (routes/payments/token-accounts.ts) is the wrong tool
+ * here: it walks every token account of both token programs
  * to answer a question about one mint, and it returns decimal strings where the
  * comparison needs atoms.
  *
  * Filtering by `mint` rather than `programId` is one call, not two: a mint
  * belongs to exactly one token program, and the RPC resolves it.
  *
- * The genesis assertion is not optional. `createRpc` with an empty URL falls
- * back to the process-default cluster, so without it a mis-pointed sandbox
- * would judge devnet advisories against mainnet balances and never notice.
+ * The door proves each endpoint's genesis before it serves a read, so a
+ * mis-pointed endpoint can never judge devnet advisories against mainnet
+ * balances.
  */
 export interface OwnerMintBalance {
   /** Sum across the owner's token accounts for the mint, base units. */
@@ -57,16 +50,20 @@ const mintFilteredTokenAccountsResponseSchema = z.object({
   ),
 });
 
+/**
+ * Read one owner's balance of one mint on the open cluster scope's cluster.
+ *
+ * @param ownerAddress - The wallet whose token accounts to sum.
+ * @param mint - The mint to sum.
+ * @returns The summed atoms and the mint's decimals, null decimals when no account exists.
+ * @throws Error when the RPC response is malformed, out of scope, or mixes decimals.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export async function readOwnerMintBalance(
-  env: Env,
-  environment: SdpEnvironment,
   ownerAddress: string,
   mint: string
 ): Promise<OwnerMintBalance> {
-  const cluster = earnClusterFor(environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
-  const response = await createRpc(env, { rpcUrl })
+  const response = await createClusterRpc()
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },

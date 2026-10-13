@@ -27,7 +27,9 @@
  * shipping unmonitored.
  */
 
-import { createRpc } from "@sdp/rpc/solana";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   EARN_DEPOSIT_TOKEN_SYMBOLS,
   type EarnDepositTokenSymbol,
@@ -39,8 +41,6 @@ import { address } from "@solana/kit";
 import { z } from "zod";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { assertClusterEndpoint, resolveClusterRpcUrl } from "@/services/earn/execution-registry";
-import type { Env } from "@/types/env";
 
 export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";
 
@@ -212,31 +212,31 @@ export function detectMintDrift(
 }
 
 /**
- * Read every Token-2022 deposit mint on `cluster` and report drift from its pin.
+ * Read every Token-2022 deposit mint on the open cluster scope's cluster and report drift from
+ * its pin, through the door, which proves each endpoint's genesis before serving it.
  *
- * Never throws and never blocks the pass that called it. A cluster this
- * deployment has no proven RPC for is a quiet skip (a devnet-only deployment
- * has nothing to say about mainnet PYUSD); a read that fails is a warning, not
- * an alert, because an RPC outage is already covered elsewhere and paging on
- * it here would teach people to ignore the event that matters.
+ * Never blocks the pass that called it. A cluster this deployment has no endpoint for is a
+ * quiet skip (a devnet-only deployment has nothing to say about mainnet PYUSD); a read that
+ * fails, a wrong-cluster endpoint's included, is a warning, not an alert, because an RPC outage
+ * is already covered elsewhere and paging on it here would teach people to ignore the event
+ * that matters.
  *
- * Returns the number of drift events emitted, for the caller's summary log.
+ * @returns The number of drift events emitted, for the caller's summary log.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export async function guardDepositMints(env: Env, cluster: SolanaCluster): Promise<number> {
+export async function guardDepositMints(): Promise<number> {
+  const { cluster } = currentClusterScope();
   const mints = token2022DepositMints(cluster);
   if (mints.length === 0) return 0;
 
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  let rpc: ReturnType<typeof createClusterBoundedRpc>;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
-  } catch (err) {
-    getLogger().info(
-      { cluster, error: err instanceof Error ? err.message : String(err) },
-      "guardDepositMints: skipped, no proven RPC for this cluster"
-    );
+    rpc = createClusterBoundedRpc({ timeoutMs: DEPOSIT_MINT_READ_TIMEOUT_MS });
+  } catch (error) {
+    if (!(error instanceof SdpRpcError && error.code === "RPC_NOT_CONFIGURED")) throw error;
+    getLogger().info({ cluster }, "guardDepositMints: skipped, no RPC configured for this cluster");
     return 0;
   }
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: DEPOSIT_MINT_READ_TIMEOUT_MS });
 
   let emitted = 0;
   for (const { symbol, mint } of mints) {
