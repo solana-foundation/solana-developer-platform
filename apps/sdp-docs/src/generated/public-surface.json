@@ -1,0 +1,40 @@
+{
+  "releaseChannel": "experimental",
+  "modules": [
+    "custody",
+    "payments",
+    "recurring_payments",
+    "ramps",
+    "compliance",
+    "issuance",
+    "markets",
+    "dvp",
+    "private_channels",
+    "helius_rings"
+  ],
+  "rampProviders": [
+    "moonpay",
+    "bvnk",
+    "coinbase",
+    "stripe"
+  ],
+  "allModules": [
+    "custody",
+    "payments",
+    "recurring_payments",
+    "ramps",
+    "compliance",
+    "issuance",
+    "markets",
+    "earn",
+    "dvp",
+    "private_channels",
+    "helius_rings"
+  ],
+  "allRampProviders": [
+    "moonpay",
+    "bvnk",
+    "coinbase",
+    "stripe"
+  ]
+}

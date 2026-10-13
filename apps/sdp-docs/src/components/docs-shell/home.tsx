@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { docsReleaseChannel, isDocsModuleInChannel } from "@/lib/release-channel";
+import { isGatePublished, isModulePublished } from "@/lib/release-channel";
 import { HomePageClass } from "./home-page-class";
 import { HOME_SECTIONS } from "./home-sections";
 import {
@@ -78,7 +78,13 @@ function HomeCardLink({ card }: { card: HomeCard }) {
   );
 }
 
-type Partner = { name: string; src: string; h: number };
+type Partner = {
+  name: string;
+  src: string;
+  h: number;
+  /** A ramp partner shows only when the build publishes that ramp provider. */
+  rampProvider?: string;
+};
 
 const PARTNER_ROWS: {
   category: string;
@@ -107,10 +113,15 @@ const PARTNER_ROWS: {
     Icon: ArrowLeftRightIcon,
     module: "ramps",
     partners: [
-      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg" },
-      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg" },
-      { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
-      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
+      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg", rampProvider: "moonpay" },
+      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg", rampProvider: "bvnk" },
+      {
+        name: "Coinbase",
+        h: 22,
+        src: "/docs/images/partners/coinbase.svg",
+        rampProvider: "coinbase",
+      },
+      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg", rampProvider: "stripe" },
     ],
   },
   {
@@ -256,8 +267,7 @@ const aiResources: HomeCard[] = [
 ];
 
 function inChannel<T extends { module?: SdpModule }>(items: T[]): T[] {
-  const releaseChannel = docsReleaseChannel();
-  return items.filter((item) => isDocsModuleInChannel(item.module, releaseChannel));
+  return items.filter((item) => isModulePublished(item.module));
 }
 
 export function DocsHome() {
@@ -317,16 +327,22 @@ export function DocsHome() {
                 {row.category}
               </div>
               <div className="launch-home-partners-logos">
-                {row.partners.map((p) => (
-                  <img
-                    key={p.name}
-                    src={p.src}
-                    alt={p.name}
-                    style={{ height: p.h }}
-                    loading="lazy"
-                    className="launch-home-partners-wordmark"
-                  />
-                ))}
+                {row.partners
+                  .filter(
+                    (p) =>
+                      p.rampProvider === undefined ||
+                      isGatePublished({ rampProvider: p.rampProvider })
+                  )
+                  .map((p) => (
+                    <img
+                      key={p.name}
+                      src={p.src}
+                      alt={p.name}
+                      style={{ height: p.h }}
+                      loading="lazy"
+                      className="launch-home-partners-wordmark"
+                    />
+                  ))}
               </div>
             </div>
           ))}

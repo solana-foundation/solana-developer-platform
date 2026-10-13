@@ -18,7 +18,6 @@ import {
   MDXUnorderedList,
 } from "@/components/docs-shell/mdx-elements";
 import { EnvConfigurator } from "@/components/EnvConfigurator";
-import { InChannel } from "@/components/in-channel";
 
 type MDXComponents = Record<string, unknown>;
 
@@ -45,7 +44,6 @@ function createMDXComponents(components?: MDXComponents): MDXComponents {
     Step,
     StepPanel,
     EnvConfigurator,
-    InChannel,
     ...components,
   };
 }

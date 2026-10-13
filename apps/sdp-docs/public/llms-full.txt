@@ -14,7 +14,7 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One API for tokenization, custody, payments, and compliance on Solana.
+> One API in front of interchangeable providers for building on Solana.
 
 SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
 
@@ -99,7 +99,6 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 ```
 </Tab>
 </Tabs>
-
 </Step>
 <Step>
 ### Wallet Custody
@@ -118,7 +117,6 @@ Provision signing wallets through integrated custody providers, so your team nev
 
    Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
 </Step>
-
 <Step>
 ### Issuance and Compliance with Token-2022
 
@@ -164,7 +162,6 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 </Tab>
 </Tabs>
 </Step>
-
 <Step>
 ### Onchain Transfers
 
@@ -223,7 +220,6 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tabs>
 
 The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
-
 </Step>
 <Step>
 ### Audit Trails
@@ -238,7 +234,7 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
 | Organization & access   | Members, invitations, projects, and project membership             |
-| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
+| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes |
 </Step>
 </Steps>
 
@@ -525,7 +521,7 @@ A key can carry a list of the operation families and types it may perform on the
 | `payment` | Transfers, transfer batches, and recurring payment creation, updates and collections |
 | `ramp` | On-ramp and off-ramp quotes |
 | `issuance` | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions |
-| `program` | Earn vault deposits and withdrawals, Earn program withdrawals, DvP fund and settle |
+| `program` | DvP fund and settle. |
 | `privacy` | Private operations through Helius Rings |
 
 Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
@@ -2301,7 +2297,7 @@ Reasons to skip SDP and go to RPC directly:
 ### Overview
 Source: https://platform.solana.com/docs/payments
 
-> Build payments on Solana with SDP — concepts, send, accept, and ramps.
+> Build payments on Solana with SDP — concepts, sending, and accepting payments.
 
 SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
@@ -3337,7 +3333,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `bvnk`, `coinbase`, `stripe`. |
+| `provider` | yes | A provider from the [capability matrix](/docs/payments/ramps-providers#capability-matrix). |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
 | `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), resolved against your API key's wallet scope. Same shape for every provider. |
 | `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
@@ -5011,7 +5007,7 @@ and pass the resulting service URL and token into a custom SDP Utila integration
 ### Overview
 Source: https://platform.solana.com/docs/reference
 
-> API reference, token types, provider onboarding, and integration resources.
+> API reference, provider onboarding, AI resources, and integration guides.
 
 Resources for integrating with SDP: API endpoints, tokenization templates, provider onboarding, AI consumption, and the Postman collection.
 

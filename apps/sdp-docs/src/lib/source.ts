@@ -3,7 +3,7 @@ import { loader, type VirtualFile } from "fumadocs-core/source";
 import { icons } from "lucide-react";
 import { createElement } from "react";
 import { docs } from "../../.source/server";
-import { docsReleaseChannel, isDocsModuleInChannel, parseDocsModule } from "./release-channel";
+import { isModulePublished, pageModuleOf } from "./release-channel";
 
 type FumadocsSource = {
   files: VirtualFile[] | (() => VirtualFile[]);
@@ -14,18 +14,15 @@ const mdxSource = (
 ).toFumadocsSource();
 const normalizedFiles = typeof mdxSource.files === "function" ? mdxSource.files() : mdxSource.files;
 
-const releaseChannel = docsReleaseChannel();
-
 /**
  * A page tagged `module: <module>` in its frontmatter is published only when the
- * deployment's release channel runs that module. Dropping it here removes it
+ * build's release channel publishes that module (src/generated/public-surface.json). Dropping it here removes it
  * from every consumer of `source`: static params (so its URL 404s), the page
  * tree, search, the sitemap and the Markdown route.
  */
 function isFileInChannel(file: VirtualFile): boolean {
   if (file.type !== "page") return true;
-  const data = file.data as { module?: unknown } | undefined;
-  return isDocsModuleInChannel(parseDocsModule(data?.module, file.path), releaseChannel);
+  return isModulePublished(pageModuleOf((file.data ?? {}) as { module?: unknown }, file.path));
 }
 
 /**

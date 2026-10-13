@@ -40,7 +40,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | Field | Meaning |
 | --- | --- |
 | `id` | SDP-internal transfer identifier (use this in API URLs). |
-| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
+| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`.<InChannel module="ramps"> Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`.</InChannel> See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |

@@ -6,8 +6,8 @@ export type RouteOwner = SdpModule | "core";
  * Which module owns each API route, first match wins. `core` routes run in every
  * release channel. A new route must land here before CI passes, and once it is filed
  * under a module, every release channel that leaves that module out must refuse it
- * (route-modules.test.ts). The public OpenAPI document publishes only routes whose
- * owner is in the `stable` release channel (openapi/spec.ts).
+ * (route-modules.test.ts). Each deployment's public OpenAPI document publishes only
+ * routes whose owner is in its release channel (openapi/spec.ts).
  */
 export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
   [/^\/v1\/payments\/ramps(\/|$)/, "ramps"],

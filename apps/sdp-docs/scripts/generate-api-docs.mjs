@@ -14,6 +14,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
+// What the build's release channel publishes, written by openapi:generate beside
+// the spec. Committed at experimental like the other generated docs files.
+const generatedSurfacePath = path.resolve(__dirname, "../../sdp-api/generated/public-surface.json");
+const surfacePath = path.resolve(__dirname, "../src/generated/public-surface.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
@@ -204,6 +208,9 @@ const validateGeneratedTagPages = async ({
 
 const run = async () => {
   const { tagDescriptions, operations } = await loadSpecData();
+
+  await fs.mkdir(path.dirname(surfacePath), { recursive: true });
+  await fs.copyFile(generatedSurfacePath, surfacePath);
 
   const groupedOperations = new Map();
   for (const operation of operations) {

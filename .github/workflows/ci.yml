@@ -703,10 +703,8 @@ jobs:
       - name: Configurator unit tests
         run: pnpm --filter @sdp/env-config test
 
-      - name: Build docs (stable, as production)
+      - name: Build docs
         run: pnpm --filter sdp-docs build
-        env:
-          SDP_RELEASE_CHANNEL: stable
 
   docs_integrity:
     name: Docs Integrity
@@ -737,7 +735,7 @@ jobs:
           pnpm --filter sdp-docs generate:ai
 
       - name: Committed docs artifacts match generated output
-        run: git diff --exit-code apps/sdp-docs/public
+        run: git diff --exit-code apps/sdp-docs/public apps/sdp-docs/src/generated
 
       - name: Docs release-channel tests
         run: pnpm --filter sdp-docs test

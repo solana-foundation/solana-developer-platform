@@ -121,10 +121,10 @@ A key can carry a list of the operation families and types it may perform on the
 | Family | Covers |
 | --- | --- |
 | `payment` | Transfers, transfer batches, and recurring payment creation, updates and collections |
-| `ramp` | On-ramp and off-ramp quotes |
-| `issuance` | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions |
-| `program` | Earn vault deposits and withdrawals, Earn program withdrawals, DvP fund and settle |
-| `privacy` | Private operations through Helius Rings |
+| `ramp` <ChannelRow module="ramps" /> | On-ramp and off-ramp quotes |
+| `issuance` <ChannelRow module="issuance" /> | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions |
+| `program` <ChannelRow module="markets" /> | <InChannel module="earn">Earn vault deposits and withdrawals, Earn program withdrawals. </InChannel><InChannel module="dvp">DvP fund and settle.</InChannel> |
+| `privacy` <ChannelRow module="helius_rings" /> | Private operations through Helius Rings |
 
 Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
 
@@ -140,7 +140,7 @@ curl -X POST https://api.solana.com/v1/api-keys \
   }'
 ```
 
-Use `null` or an empty list on update to remove the restriction. Actions that get funds back out, such as a DvP cancel or reclaim, are never restricted by this list.
+Use `null` or an empty list on update to remove the restriction. Actions that get funds back out<InChannel module="dvp">, such as a DvP cancel or reclaim,</InChannel> are never restricted by this list.
 
 ## Rotate a key
 

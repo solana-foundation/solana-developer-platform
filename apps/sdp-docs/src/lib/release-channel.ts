@@ -1,97 +1,82 @@
-import {
-  isModuleInReleaseChannel,
-  resolveSdpReleaseChannel,
-  SDP_MODULES,
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpModule,
-  type SdpReleaseChannel,
-} from "@sdp/types";
+import { parse as parseYaml } from "yaml";
+import generatedSurface from "../generated/public-surface.json";
 
 /**
- * The docs deployment's release channel. Each deployment documents only the
- * modules its API runs, so production (`stable`) never documents a route it
- * refuses with 403.
+ * What this docs build may publish: the modules and ramp providers of the
+ * deployment's release channel, Earn's publication hold included. The API
+ * decides it (`createPublicSurfaceManifest` in apps/sdp-api/src/openapi/spec.ts,
+ * written by `openapi:generate` from `SDP_RELEASE_CHANNEL`) and `generate:api`
+ * copies it to src/generated/public-surface.json, committed at `experimental`.
  *
- * A Vercel build must set `SDP_RELEASE_CHANNEL` (a missing value fails the
- * build, like sdp-web). Elsewhere (local runs, CI drift checks, the Dockerfile's
- * default) an unset value means `experimental`, which documents every module
- * and is what the committed generated artifacts hold.
- *
- * @param env - The process environment.
- * @returns The release channel to build the docs for.
+ * Deliberately free of workspace imports: the MDX pipeline (source.config.ts)
+ * loads this file in a plain Node context.
  */
-export function docsReleaseChannel(
-  env: Record<string, string | undefined> = process.env
-): SdpReleaseChannel {
-  if (env.VERCEL) {
-    return resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL);
+export type PublicSurface = {
+  releaseChannel: string;
+  modules: readonly string[];
+  rampProviders: readonly string[];
+  allModules: readonly string[];
+  allRampProviders: readonly string[];
+};
+
+export const publicSurface: PublicSurface = generatedSurface;
+
+/** What a page, passage or row is about: one module, or one ramp provider. */
+export type ChannelGate = { module: string } | { rampProvider: string };
+
+/**
+ * Validates a gate, so a typo fails the build instead of publishing (or hiding)
+ * content.
+ *
+ * @throws When the module or ramp provider is unknown.
+ */
+export function checkGate(gate: ChannelGate, where: string, surface = publicSurface): ChannelGate {
+  if ("module" in gate && !surface.allModules.includes(gate.module)) {
+    throw new Error(
+      `${where}: module must be one of ${surface.allModules.join(", ")}; got "${gate.module}"`
+    );
   }
-  return resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL || "experimental");
-}
-
-/**
- * Parses a docs `module` tag (page frontmatter or `<InChannel module>`).
- *
- * @param value - The tag's value; undefined means the content belongs to no module.
- * @param where - Where the tag sits, for the error message.
- * @throws When the value is not an SDP module, so a typo cannot publish a page.
- */
-export function parseDocsModule(value: unknown, where: string): SdpModule | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "string" && (SDP_MODULES as readonly string[]).includes(value)) {
-    return value as SdpModule;
+  if ("rampProvider" in gate && !surface.allRampProviders.includes(gate.rampProvider)) {
+    throw new Error(
+      `${where}: rampProvider must be one of ${surface.allRampProviders.join(", ")}; got "${gate.rampProvider}"`
+    );
   }
-  throw new Error(
-    `${where}: module must be one of ${SDP_MODULES.join(", ")}; got ${JSON.stringify(value)}`
-  );
+  return gate;
 }
 
-/** Whether content tagged with `module` (or untagged) is published on `releaseChannel`. */
-export function isDocsModuleInChannel(
-  module: SdpModule | undefined,
-  releaseChannel: SdpReleaseChannel
-): boolean {
-  return (
-    module === undefined ||
-    isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES)
-  );
+/** Whether the build publishes content behind `gate`. */
+export function isGatePublished(gate: ChannelGate, surface = publicSurface): boolean {
+  return "module" in gate
+    ? surface.modules.includes(gate.module)
+    : surface.rampProviders.includes(gate.rampProvider);
 }
 
-const FRONTMATTER = /^---\n([\s\S]*?)\n---/;
-
-/** The `module` frontmatter tag of a raw MDX page. */
-export function pageModuleOf(source: string, where: string): SdpModule | undefined {
-  const frontmatter = source.match(FRONTMATTER)?.[1] ?? "";
-  const value = frontmatter.match(/^module:\s*["']?([^"'\s]+)["']?\s*$/m)?.[1];
-  return parseDocsModule(value, where);
+/** Whether the build publishes content about `module` (undefined: no module). */
+export function isModulePublished(module: string | undefined, surface = publicSurface): boolean {
+  return module === undefined || isGatePublished({ module }, surface);
 }
 
-/** Whether a raw MDX page is published on `releaseChannel`. */
-export function isPageSourceInChannel(
-  source: string,
-  releaseChannel: SdpReleaseChannel,
-  where: string
-): boolean {
-  return isDocsModuleInChannel(pageModuleOf(source, where), releaseChannel);
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+
+/** A raw MDX page's frontmatter block, or undefined. */
+export function frontmatterOf(source: string): { raw: string; data: Record<string, unknown> } {
+  const raw = source.match(FRONTMATTER)?.[0] ?? "";
+  const body = source.match(FRONTMATTER)?.[1];
+  const data = body === undefined ? {} : ((parseYaml(body) as Record<string, unknown>) ?? {});
+  return { raw, data };
 }
 
-const IN_CHANNEL_BLOCK = /<InChannel\s+module="([^"]*)"\s*>([\s\S]*?)<\/InChannel>/g;
+/** The `module:` frontmatter tag of a page, validated. */
+export function pageModuleOf(data: { module?: unknown }, where: string): string | undefined {
+  if (data.module === undefined || data.module === null) return undefined;
+  if (typeof data.module !== "string") {
+    throw new Error(`${where}: module must be a string`);
+  }
+  checkGate({ module: data.module }, where);
+  return data.module;
+}
 
-/**
- * Resolves `<InChannel module="…">` blocks in raw MDX the way the rendered page
- * does: a block whose module is outside the release channel is removed, any
- * other is unwrapped. For the text consumers of raw MDX (llms files, the
- * Markdown route, the link checker). Blocks do not nest. A removed block keeps
- * its line breaks, so line numbers after it still match the source file.
- */
-export function resolveInChannelBlocks(
-  source: string,
-  releaseChannel: SdpReleaseChannel,
-  where: string
-): string {
-  return source.replace(IN_CHANNEL_BLOCK, (block: string, module: string, body: string) =>
-    isDocsModuleInChannel(parseDocsModule(module, where), releaseChannel)
-      ? body
-      : "\n".repeat(block.split("\n").length - 1)
-  );
+/** Whether a raw MDX page is published by this build. */
+export function isPageSourcePublished(source: string, where: string): boolean {
+  return isModulePublished(pageModuleOf(frontmatterOf(source).data, where));
 }

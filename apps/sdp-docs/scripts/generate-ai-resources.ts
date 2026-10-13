@@ -3,12 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SdpModule } from "@sdp/types";
-import {
-  docsReleaseChannel,
-  isDocsModuleInChannel,
-  isPageSourceInChannel,
-  resolveInChannelBlocks,
-} from "../src/lib/release-channel";
+import { resolveChannelGates } from "../src/lib/channel-gates";
+import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";
 import { canonicalSite } from "../src/lib/site";
 
 const {
@@ -49,8 +45,7 @@ type Section = {
   pages: DocsPage[];
 };
 
-// The llms files describe only the modules this deployment's release channel runs.
-const releaseChannel = docsReleaseChannel();
+// The llms files describe only what this build's release channel publishes.
 
 type Feature = { summary: string; module?: SdpModule };
 
@@ -65,9 +60,9 @@ const FEATURES: Feature[] = [
   { summary: "Asset profiles and public token metadata", module: "issuance" },
 ];
 
-const FEATURE_SUMMARY = FEATURES.filter((feature) =>
-  isDocsModuleInChannel(feature.module, releaseChannel)
-).map((feature) => feature.summary);
+const FEATURE_SUMMARY = FEATURES.filter((feature) => isModulePublished(feature.module)).map(
+  (feature) => feature.summary
+);
 
 /**
  * Generated API reference pages carry no frontmatter; their family exists only
@@ -164,11 +159,11 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
   for (const [index, filePath] of mdxFiles.entries()) {
     const slug = toPageSlug(filePath);
     const raw = sources[index] ?? "";
-    if (!isPageSourceInChannel(raw, releaseChannel, filePath)) {
+    if (!isPageSourcePublished(raw, filePath)) {
       excludedSlugs.add(slug);
       continue;
     }
-    const source = resolveInChannelBlocks(raw, releaseChannel, filePath);
+    const source = resolveChannelGates(raw, filePath);
     const { title, description } = parseFrontmatter(source);
 
     pages.set(slug, {
@@ -287,8 +282,7 @@ function buildSections(
 
 function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
   const inChannel = KEY_PAGE_SLUGS.filter(
-    (slug) =>
-      !excludedSlugs.has(slug) && isDocsModuleInChannel(KEY_PAGE_MODULES[slug], releaseChannel)
+    (slug) => !excludedSlugs.has(slug) && isModulePublished(KEY_PAGE_MODULES[slug])
   );
   return inChannel.map((slug) => {
     const page = pages.get(slug);

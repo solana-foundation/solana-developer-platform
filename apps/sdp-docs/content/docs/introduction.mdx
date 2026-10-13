@@ -1,19 +1,19 @@
 ---
 title: What is SDP?
 icon: BookOpen
-description: One API for tokenization, custody, payments, and compliance on Solana.
+description: One API in front of interchangeable providers for building on Solana.
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
 import "../../src/styles/ramp-rotator.css";
 
-SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
+SDP provides <InChannel module="issuance">tokenization, </InChannel>custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
 
 | Module | What it does |
 | --- | --- |
-| **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
+| **Issuance** <ChannelRow module="issuance" /> | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
-| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests<InChannel module="ramps">, and ramps</InChannel> |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -232,11 +232,11 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | Area                    | Recorded events                                                                    |
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
-| Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
-| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
+| Token issuance          <ChannelRow module="issuance" /> | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
+| Compliance actions      <ChannelRow module="issuance" /> | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
 | Organization & access   | Members, invitations, projects, and project membership             |
-| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
+| Counterparties<InChannel module="issuance"> & assets</InChannel> | Counterparty and Counterparty Account changes<InChannel module="issuance">, asset profile changes</InChannel> |
 </Step>
 </Steps>

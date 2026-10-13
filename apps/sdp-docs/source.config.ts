@@ -1,6 +1,8 @@
 import type { RampProviderId } from "@sdp/types";
 import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins";
 import { defineConfig, defineDocs, frontmatterSchema } from "fumadocs-mdx/config";
+import { remarkChannelGates } from "./src/lib/channel-gates";
+import { publicSurface } from "./src/lib/release-channel";
 
 type ShikiTransformer = NonNullable<typeof rehypeCodeDefaultOptions.transformers>[number];
 type Element = Parameters<NonNullable<ShikiTransformer["span"]>>[0];
@@ -31,14 +33,18 @@ type Rotation = { flag: string; token: string; prefix: string; values: readonly 
  * Each rotation swaps `token` in fences tagged with `flag` for a carousel of
  * `values`, with `prefix` re-emitted as plain text before the carousel (so a
  * leading `/` can sit outside the chip). A list of n values animates with the
- * `rpr-track-<n>` keyframes in ramp-rotator.css, so a new length needs its own.
+ * `rpr-track-<n>` keyframes in ramp-rotator.css, so a new length needs its own;
+ * a single value replaces the token without a carousel.
  */
 const ROTATIONS = [
   {
     flag: "rotate-providers",
     token: '"moonpay"',
     prefix: "",
-    values: ROTATOR_PROVIDERS.map((provider) => `"${provider}"`),
+    // Only the ramp providers this build's release channel publishes rotate.
+    values: ROTATOR_PROVIDERS.filter((provider) =>
+      publicSurface.rampProviders.includes(provider)
+    ).map((provider) => `"${provider}"`),
   },
   {
     flag: "rotate-token-ops",
@@ -93,6 +99,11 @@ const rampProviderRotator: ShikiTransformer = {
 
     const [before, after] = child.value.split(rotation.token);
     const [leadValue, ...restValues] = rotation.values;
+    if (leadValue === undefined) return;
+    if (restValues.length === 0) {
+      child.value = before + rotation.prefix + leadValue + after;
+      return;
+    }
     const items: ElementContent[] = [
       rotatorItem(leadValue, true),
       ...restValues.map((value) => rotatorItem(value, false)),
@@ -126,6 +137,9 @@ if (!defaultTransformers) {
 
 export default defineConfig({
   mdxOptions: {
+    // Release-channel gates first, so hidden content never reaches the table of
+    // contents or the search index (src/lib/channel-gates.ts).
+    remarkPlugins: (defaults) => [remarkChannelGates, ...defaults],
     rehypeCodeOptions: {
       ...rehypeCodeDefaultOptions,
       transformers: [...defaultTransformers, rampProviderRotator],

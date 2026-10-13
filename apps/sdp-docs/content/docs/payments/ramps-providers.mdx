@@ -19,10 +19,12 @@ Configure both credential pairs for any provider you want to expose to test and 
 
 | Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
 | --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
-| Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
-| Stripe | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
+| MoonPay <ChannelRow rampProvider="moonpay" /> | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
+| BVNK <ChannelRow rampProvider="bvnk" /> | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
+| Coinbase <ChannelRow rampProvider="coinbase" /> | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
+| Stripe <ChannelRow rampProvider="stripe" /> | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
+
+<InChannel rampProvider="moonpay">
 
 ## MoonPay
 
@@ -36,6 +38,10 @@ Configure both credential pairs for any provider you want to expose to test and 
 | `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
 
 MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.
+
+</InChannel>
+
+<InChannel rampProvider="bvnk">
 
 ## BVNK
 
@@ -54,6 +60,10 @@ BVNK is a travel-rule / compliance-sharing provider and requires party details s
 
 BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
+</InChannel>
+
+<InChannel rampProvider="coinbase">
+
 ## Coinbase
 
 | Variable | Required | Notes |
@@ -65,6 +75,10 @@ Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reje
 
 Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Coinbase also requires email and phone values; quote creation currently fails at the pending just-in-time collection seam.
 
+</InChannel>
+
+<InChannel rampProvider="stripe">
+
 ## Stripe
 
 | Variable | Required | Notes |
@@ -74,6 +88,8 @@ Order creation (the quote step) is sandbox-only today — it requires buyer agre
 
 Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
 
+</InChannel>
+
 ## Provider gating
 
 Even when all four providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call: if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
@@ -82,11 +98,11 @@ Even when all four providers' env vars are populated, an org can be restricted t
 
 | Need | Lean towards |
 | --- | --- |
-| Fastest sandbox iteration | MoonPay or BVNK. |
-| Travel-rule / compliance party metadata | BVNK. |
-| Broadest payment-method coverage | MoonPay (corridor-dependent). |
-| Widget/session-embedded onramp UI | Stripe. |
-| Onramp only, no off-ramp needed | Coinbase or Stripe. |
+| Fastest sandbox iteration <ChannelRow rampProvider="moonpay" /> <ChannelRow rampProvider="bvnk" /> | MoonPay or BVNK. |
+| Travel-rule / compliance party metadata <ChannelRow rampProvider="bvnk" /> | BVNK. |
+| Broadest payment-method coverage <ChannelRow rampProvider="moonpay" /> | MoonPay (corridor-dependent). |
+| Widget/session-embedded onramp UI <ChannelRow rampProvider="stripe" /> | Stripe. |
+| Onramp only, no off-ramp needed <ChannelRow rampProvider="coinbase" /> <ChannelRow rampProvider="stripe" /> | Coinbase or Stripe. |
 
 For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
 

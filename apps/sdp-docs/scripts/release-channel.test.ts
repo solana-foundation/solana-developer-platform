@@ -1,52 +1,112 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  docsReleaseChannel,
-  isPageSourceInChannel,
-  resolveInChannelBlocks,
-} from "../src/lib/release-channel";
+import type { Root } from "mdast";
+import remarkGfm from "remark-gfm";
+import remarkMdx from "remark-mdx";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+import { remarkChannelGates, resolveChannelGates } from "../src/lib/channel-gates";
+import type { PublicSurface } from "../src/lib/release-channel";
 
-const ISSUANCE_PAGE = "---\nmodule: issuance\ntitle: Mint and Burn\n---\n\nBody\n";
-const SHARED_PAGE = [
+const ALL_MODULES = ["custody", "payments", "ramps", "issuance", "earn", "dvp", "markets"];
+const ALL_PROVIDERS = ["moonpay", "stripe"];
+
+const STABLE: PublicSurface = {
+  releaseChannel: "stable",
+  modules: ["custody", "payments"],
+  rampProviders: [],
+  allModules: ALL_MODULES,
+  allRampProviders: ALL_PROVIDERS,
+};
+
+const EXPERIMENTAL: PublicSurface = {
+  releaseChannel: "experimental",
+  modules: ["custody", "payments", "ramps", "issuance", "dvp", "markets"],
+  rampProviders: ["stripe"],
+  allModules: ALL_MODULES,
+  allRampProviders: ALL_PROVIDERS,
+};
+
+const PAGE = [
+  "---\r",
+  "title: Shared\r",
+  "---\r",
+  "",
   'Transfers<InChannel module="ramps"> and ramps</InChannel>.',
   "",
   '<InChannel module="issuance">',
   "",
+  "### Issuance heading",
+  "",
   "- [Mint and Burn](/docs/tokens/mint-and-burn)",
   "",
   "</InChannel>",
+  "",
+  "| Module | What |",
+  "| --- | --- |",
+  '| **Issuance** <ChannelRow module="issuance" /> | Mint tokens |',
+  "| **Payments** | Move funds |",
+  "",
+  '<InChannel rampProvider="moonpay">MoonPay only.</InChannel>',
+  '<InChannel rampProvider="stripe">Stripe only.</InChannel>',
   "After",
 ].join("\n");
 
-describe("docs release channel", () => {
-  it("documents every module when unset outside Vercel, and requires it on Vercel", () => {
-    assert.equal(docsReleaseChannel({}), "experimental");
-    assert.equal(docsReleaseChannel({ SDP_RELEASE_CHANNEL: "stable" }), "stable");
-    assert.throws(() => docsReleaseChannel({ VERCEL: "1" }), /SDP_RELEASE_CHANNEL is required/);
+const headingsAfterPlugin = (source: string, surface: PublicSurface): string[] => {
+  const processor = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
+  const tree = processor.parse(source.replace(/^---[\s\S]*?---\r?\n/, "")) as Root;
+  remarkChannelGates({ surface })(tree, { path: "page.mdx" });
+  const texts: string[] = [];
+  const visit = (node: { type: string; value?: string; children?: unknown[] }) => {
+    if (node.type === "text" && node.value) texts.push(node.value);
+    for (const child of (node.children ?? []) as (typeof node)[]) visit(child);
+  };
+  visit(tree);
+  return texts;
+};
+
+describe("release-channel gates", () => {
+  it("drops out-of-channel passages, rows and providers from raw MDX", () => {
+    const stable = resolveChannelGates(PAGE, "page.mdx", { surface: STABLE });
+    assert.doesNotMatch(stable, /ramps|Issuance|mint-and-burn|MoonPay|Stripe|InChannel|ChannelRow/);
+    assert.match(stable, /Transfers\./);
+    assert.match(stable, /\| \*\*Payments\*\* \| Move funds \|/);
+    assert.match(stable, /After$/);
   });
 
-  it("publishes a module page only on a channel that runs the module", () => {
-    assert.equal(isPageSourceInChannel(ISSUANCE_PAGE, "experimental", "page"), true);
-    assert.equal(isPageSourceInChannel(ISSUANCE_PAGE, "stable", "page"), false);
-    assert.equal(isPageSourceInChannel("---\ntitle: Shared\n---\n", "stable", "page"), true);
+  it("unwraps in-channel gates without leaving their tags", () => {
+    const experimental = resolveChannelGates(PAGE, "page.mdx", { surface: EXPERIMENTAL });
+    assert.match(experimental, /Transfers and ramps\./);
+    assert.match(experimental, /### Issuance heading/);
+    assert.match(experimental, /\| \*\*Issuance\*\* \| Mint tokens \|/);
+    assert.match(experimental, /Stripe only\./);
+    assert.doesNotMatch(experimental, /MoonPay|InChannel|ChannelRow/);
   });
 
-  it("rejects an unknown module tag", () => {
+  it("keeps line numbers when asked, for the link checker", () => {
+    const stable = resolveChannelGates(PAGE, "page.mdx", { surface: STABLE, preserveLines: true });
+    assert.equal(stable.split("\n").length, PAGE.split("\n").length);
+  });
+
+  it("removes hidden headings from the compiled tree, so the TOC never lists them", () => {
+    assert.ok(!headingsAfterPlugin(PAGE, STABLE).includes("Issuance heading"));
+    assert.ok(headingsAfterPlugin(PAGE, EXPERIMENTAL).includes("Issuance heading"));
+  });
+
+  it("rejects unknown modules, expression attributes and stray row markers", () => {
     assert.throws(
-      () => isPageSourceInChannel("---\nmodule: issuence\n---\n", "stable", "page"),
+      () =>
+        resolveChannelGates('<InChannel module="issuence">x</InChannel>', "p", { surface: STABLE }),
       /module must be one of/
     );
-  });
-
-  it("removes out-of-channel blocks, keeping line numbers, and unwraps the rest", () => {
-    const stable = resolveInChannelBlocks(SHARED_PAGE, "stable", "page");
-    assert.doesNotMatch(stable, /ramps|mint-and-burn|InChannel/);
-    assert.equal(stable.split("\n").length, SHARED_PAGE.split("\n").length);
-    assert.equal(stable.split("\n").at(-1), "After");
-
-    const experimental = resolveInChannelBlocks(SHARED_PAGE, "experimental", "page");
-    assert.match(experimental, /Transfers and ramps\./);
-    assert.match(experimental, /mint-and-burn/);
-    assert.doesNotMatch(experimental, /InChannel/);
+    assert.throws(
+      () =>
+        resolveChannelGates('<InChannel module={"ramps"}>x</InChannel>', "p", { surface: STABLE }),
+      /one literal module or rampProvider/
+    );
+    assert.throws(
+      () => resolveChannelGates('Text <ChannelRow module="ramps" />', "p", { surface: STABLE }),
+      /belongs in a table row/
+    );
   });
 });

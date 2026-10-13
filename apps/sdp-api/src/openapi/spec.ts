@@ -1,9 +1,14 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
-import { DEFAULT_SDP_API_URL, SDP_RELEASE_CHANNELS, type SdpReleaseChannel } from "@sdp/types";
+import {
+  DEFAULT_SDP_API_URL,
+  RAMP_PROVIDERS,
+  SDP_MODULES,
+  SDP_RELEASE_CHANNELS,
+  type SdpReleaseChannel,
+} from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { routeOwnerOf } from "@/routes/route-modules";
-
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
@@ -22,6 +27,11 @@ import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 import { registerTransactionsPaths } from "./paths/transactions";
+import {
+  isValuePublished,
+  pruneUnpublishedValues,
+  publishedModules,
+} from "./release-channel-values";
 
 const EARN_TAG_DESCRIPTION =
   "Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.";
@@ -282,10 +292,12 @@ function createDocument({
       },
     ],
   });
-  if (publicOnly) {
-    document.tags = usedTags(document, document.tags ?? []);
+  if (!publicOnly || releaseChannel === undefined) {
+    return document;
   }
-  return document;
+  const published = pruneUnpublishedValues(document, releaseChannel, publishEarn);
+  published.tags = usedTags(published, published.tags ?? []);
+  return published;
 }
 
 export function createOpenApiDocument(): OpenAPIObject {
@@ -301,4 +313,33 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
       SDP_RELEASE_CHANNELS[releaseChannel].includes("earn"),
     releaseChannel,
   });
+}
+
+/**
+ * What a release channel's public surfaces may name, for consumers that cannot
+ * load this package (the docs site's MDX pipeline): the modules and ramp
+ * providers the public document publishes, Earn's hold included, and the full
+ * vocabularies to validate tags against.
+ */
+export type PublicSurfaceManifest = {
+  releaseChannel: SdpReleaseChannel;
+  modules: string[];
+  rampProviders: string[];
+  allModules: string[];
+  allRampProviders: string[];
+};
+
+export function createPublicSurfaceManifest(
+  releaseChannel: SdpReleaseChannel
+): PublicSurfaceManifest {
+  const modules = publishedModules(releaseChannel, EARN_PUBLIC_SURFACE_PUBLISHED);
+  return {
+    releaseChannel,
+    modules: SDP_MODULES.filter((module) => modules.has(module)),
+    rampProviders: RAMP_PROVIDERS.filter((provider) =>
+      isValuePublished(provider, modules, releaseChannel)
+    ),
+    allModules: [...SDP_MODULES],
+    allRampProviders: [...RAMP_PROVIDERS],
+  };
 }

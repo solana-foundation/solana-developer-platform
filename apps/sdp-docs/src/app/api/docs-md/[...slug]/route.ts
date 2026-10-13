@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { docsReleaseChannel, resolveInChannelBlocks } from "@/lib/release-channel";
+import { resolveChannelGates } from "@/lib/channel-gates";
 import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
@@ -42,7 +42,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     if (!filePath.startsWith(contentDirPrefix)) continue;
     try {
       const raw = await readFile(filePath, "utf8");
-      const body = stripMdxShell(resolveInChannelBlocks(raw, docsReleaseChannel(), filePath));
+      const body = stripMdxShell(resolveChannelGates(raw, filePath));
       const pageUrl = `/docs/${slug.join("/")}`;
       const mdUrl = `${pageUrl}.md`;
 

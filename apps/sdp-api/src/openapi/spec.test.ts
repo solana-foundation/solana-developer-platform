@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { routeOwnerOf } from "@/routes/route-modules";
+import { classifiedValues, isValuePublished, publishedModules } from "./release-channel-values";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 /** The widest public document: every module's routes, as dev serves it. */
@@ -772,6 +773,54 @@ describe("OpenAPI spec", () => {
       expect(outside).toEqual([]);
     });
   }
+
+  // Shared schemas name module values too (an API key's `earn:write` scope, a
+  // `moonpay` transfer provider). No document may name a value its channel leaves out.
+  for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+    it(`${releaseChannel}: names no enum value, example or default its release channel leaves out`, () => {
+      const modules = publishedModules(releaseChannel, false);
+      const leaked = new Set<string>();
+      const visit = (node: unknown, inValues: boolean): void => {
+        if (typeof node === "string") {
+          if (inValues && !isValuePublished(node, modules, releaseChannel)) leaked.add(node);
+          return;
+        }
+        if (Array.isArray(node)) {
+          for (const entry of node) visit(entry, inValues);
+          return;
+        }
+        if (node && typeof node === "object") {
+          for (const [key, value] of Object.entries(node)) {
+            visit(value, inValues || ["enum", "example", "examples", "default"].includes(key));
+          }
+        }
+      };
+      visit(createPublicOpenApiDocument({ releaseChannel }), false);
+      expect([...leaked]).toEqual([]);
+    });
+  }
+
+  it("names Earn nowhere in any channel's document while the hold is on", () => {
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(JSON.stringify(createPublicOpenApiDocument({ releaseChannel }))).not.toMatch(/earn/i);
+    }
+  });
+
+  it("keeps the values of modules a channel runs", () => {
+    const stable = JSON.stringify(createPublicOpenApiDocument({ releaseChannel: "stable" }));
+    for (const value of [
+      "payments:write",
+      "payment_transfer_execute",
+      "recurring_payment_create",
+    ]) {
+      expect(stable).toContain(`"${value}"`);
+    }
+    const experimental = JSON.stringify(createPublicOpenApiDocument(EXPERIMENTAL));
+    for (const value of ["tokens:write", "issuance_mint_execute", "mint_authority"]) {
+      expect(experimental).toContain(`"${value}"`);
+    }
+    expect(classifiedValues()).toContain("earn:write");
+  });
 
   it("documents only the stable modules for production", () => {
     const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });

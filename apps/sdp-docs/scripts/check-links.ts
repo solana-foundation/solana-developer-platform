@@ -2,11 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  docsReleaseChannel,
-  isPageSourceInChannel,
-  resolveInChannelBlocks,
-} from "../src/lib/release-channel";
+import { resolveChannelGates } from "../src/lib/channel-gates";
+import { isPageSourcePublished, publicSurface } from "../src/lib/release-channel";
 import { getDocsPagePath } from "../src/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,10 +15,10 @@ const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
 const EXTERNAL_URL_TIMEOUT_MS = 10_000;
 
-// Links are checked as the build for SDP_RELEASE_CHANNEL renders them: pages a
-// `module:` tag leaves out do not exist, and neither do links inside an
-// `<InChannel>` block for a module outside the channel. CI runs this per channel.
-const releaseChannel = docsReleaseChannel();
+// Links are checked as the build for src/generated/public-surface.json renders
+// them: pages a `module:` tag leaves out do not exist, and neither do links in a
+// gate the build drops (src/lib/channel-gates.ts). CI runs this per channel.
+const releaseChannel = publicSurface.releaseChannel;
 const excludedSlugs = new Set<string>();
 
 type DocsMeta = {
@@ -120,7 +117,7 @@ async function loadDocPages(): Promise<Map<string, string>> {
 
   for (const [index, filePath] of mdxFiles.entries()) {
     const raw = sources[index] ?? "";
-    if (isPageSourceInChannel(raw, releaseChannel, filePath)) {
+    if (isPageSourcePublished(raw, filePath)) {
       pages.set(toPageSlug(filePath), filePath);
     } else {
       excludedSlugs.add(toPageSlug(filePath));
@@ -252,7 +249,9 @@ async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]
   const perPage = await Promise.all(
     [...pages].map(async ([slug, filePath]) => {
       const raw = await fs.readFile(filePath, "utf8");
-      const source = stripMarkdownSource(resolveInChannelBlocks(raw, releaseChannel, filePath));
+      const source = stripMarkdownSource(
+        resolveChannelGates(raw, filePath, { preserveLines: true })
+      );
       return extractMarkdownLinks(source).map((link) => ({
         sourcePath: filePath,
         sourceSlug: slug,

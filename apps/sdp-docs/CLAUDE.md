@@ -191,12 +191,13 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 
 ## Release Channels
 
-Each docs deployment documents only the modules its release channel runs (`SDP_RELEASE_CHANNEL`, read by `src/lib/release-channel.ts`; required on Vercel, `experimental` when unset elsewhere). Never move or delete content to hide a module:
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`, Earn's hold included); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds). Never move or delete content to hide a module:
 
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter. Outside the channel it leaves `source` (so it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- A module-specific passage in a shared page goes in `<InChannel module="ramps">…</InChannel>`. Blocks do not nest; put block content on its own lines with blank lines inside the tags.
-- `check:links` checks the channel in `SDP_RELEASE_CHANNEL`; CI runs it on `experimental` and `stable`, so a stable page linking to an issuance page fails.
-- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`) are built at `experimental`; the deployment's build regenerates them for its channel.
+- A passage in a shared page goes in `<InChannel module="ramps">…</InChannel>` (block or inline, including inside a table cell); `rampProvider="moonpay"` gates on one ramp provider. A table row takes a `<ChannelRow module="issuance" />` marker in any cell; several markers mean all must be published.
+- `remarkChannelGates` (`src/lib/channel-gates.ts`) resolves the gates before Fumadocs extracts headings and search text, so hidden content never reaches the table of contents or the search index; `resolveChannelGates` applies the same decisions to raw MDX for the llms files, the Markdown route and the link checker. Attributes must be literal; an unknown module or provider fails the build. Frontmatter (titles, descriptions) cannot be gated, so keep it channel-neutral.
+- `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`, so a stable page linking to an issuance page fails.
+- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
 
 API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
 
