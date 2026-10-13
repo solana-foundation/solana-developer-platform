@@ -59,14 +59,17 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
 const EGRESS_PROBE_TIMEOUT_MS = 5_000;
 
 /**
- * Wait until the open cluster scope's managed pool answers one probe, or the warmup deadline
- * passes, logging which happened; either way the reconciliation ticks run afterwards. A cluster
- * with no pool configured has nothing to probe and returns at once.
+ * Wait until the open cluster scope's managed pool answers one probe, another cluster proves
+ * egress first (`egressProven` aborts), or the warmup deadline passes, logging which happened;
+ * either way the reconciliation ticks run afterwards. Egress is process-wide, so the first cluster
+ * to answer ends every cluster's wait. A cluster with no pool configured has nothing to probe.
  *
- * @returns Resolves once the probe succeeded, the deadline passed, or the cluster has no pool.
+ * @param egressProven - Aborted by the first cluster whose probe succeeds.
+ * @returns Resolves once the probe succeeded, egress was proven elsewhere, the deadline passed,
+ *   or the cluster has no pool.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-async function warmEgressOnScopeCluster(): Promise<void> {
+async function warmEgressOnScopeCluster(egressProven: AbortController): Promise<void> {
   const { environment, cluster } = currentClusterScope();
   let probeRpc: SolanaRpc;
   try {
@@ -82,11 +85,17 @@ async function warmEgressOnScopeCluster(): Promise<void> {
         .send({ abortSignal: AbortSignal.timeout(EGRESS_PROBE_TIMEOUT_MS) }),
     deadlineMs: 120_000,
     intervalMs: 5_000,
+    stopSignal: egressProven.signal,
   });
-  if (egress.ready) {
+  if (egress.outcome === "ready") {
+    egressProven.abort();
+  }
+  if (egress.outcome !== "deadline") {
     getLogger().info(
       { environment, cluster, elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
-      "reconciliation job: egress ready"
+      egress.outcome === "ready"
+        ? "reconciliation job: egress ready"
+        : "reconciliation job: egress proven by another cluster"
     );
   } else {
     getLogger().error(
@@ -180,7 +189,8 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
 
-  await runPerCluster("egress-warmup", warmEgressOnScopeCluster);
+  const egressProven = new AbortController();
+  await runPerCluster("egress-warmup", () => warmEgressOnScopeCluster(egressProven));
 
   const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const earnEnabled = isEarnEnabled(env);
