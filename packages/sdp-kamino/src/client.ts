@@ -1,4 +1,5 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
+import { internalError } from "@sdp/earn/errors";
 import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
 import type {
   EarnRuntimeContext,
@@ -16,6 +17,7 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
@@ -37,6 +39,24 @@ export { KAMINO_POSITION_READ_CONCURRENCY } from "./concurrency";
  * klend-sdk's own vault, reserve, farm and exchange-rate reads are bounded too.
  */
 export const KAMINO_RPC_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Refuse a runtime whose environment differs from the open cluster scope's: program ids come from
+ * `ctx.environment` and clients from the scope, so a mismatch would read one cluster with the
+ * other cluster's programs.
+ *
+ * @param ctx - The request's runtime context.
+ * @throws SdpEarnError `INTERNAL_ERROR` when the two environments differ.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+function assertContextMatchesScope(ctx: EarnRuntimeContext): void {
+  const scopeEnvironment = currentClusterScope().environment;
+  if (scopeEnvironment !== ctx.environment) {
+    throw internalError(
+      `Kamino was asked to run on ${ctx.environment} inside a ${scopeEnvironment} cluster scope`
+    );
+  }
+}
 
 /**
  * API-owned execution guard for one provider operation. The API injects its
@@ -113,10 +133,12 @@ export class KaminoVaultDirectClient
    *
    * @param ctx - The request's runtime context.
    * @returns The runtime every chain capability receives.
+   * @throws SdpEarnError `INTERNAL_ERROR` when `ctx.environment` differs from the scope's.
    * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
    */
   private runtime(ctx: EarnRuntimeContext): KaminoRuntime {
+    assertContextMatchesScope(ctx);
     return {
       cluster: CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment],
       rpc: createClusterBoundedRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
