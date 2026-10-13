@@ -1,9 +1,11 @@
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
   WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS,
 } from "@sdp/types/wisdomtree-programs";
-import { address, createNoopSigner, createSolanaRpc } from "@solana/kit";
+import { address, createNoopSigner } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import { SdpWisdomTreeError } from "./errors";
@@ -23,7 +25,7 @@ const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 
 const runtime: WisdomTreeRuntime = {
   cluster: "mainnet-beta",
-  rpc: createSolanaRpc("http://offline.invalid"),
+  rpc: createEndpointRpc("http://offline.invalid", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
 };
 
 async function ata(owner: string, mint: string, tokenProgram: string): Promise<string> {

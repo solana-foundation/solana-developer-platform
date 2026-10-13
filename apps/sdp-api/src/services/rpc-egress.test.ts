@@ -1,5 +1,6 @@
 import { isTransientRpcError } from "@sdp/rpc";
-import { confirmTransaction, createRpcFromTransport } from "@sdp/rpc/solana";
+import { createEndpointRpcFromTransport } from "@sdp/rpc/factory";
+import { confirmTransaction, DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as guardedEgress from "@/services/guarded-egress";
@@ -153,7 +154,10 @@ describe("createCustomerRpcTransport", () => {
           },
         })
       );
-    const rpc = createRpcFromTransport(createCustomerRpcTransport("https://rpc.example.com/"));
+    const rpc = createEndpointRpcFromTransport(
+      createCustomerRpcTransport("https://rpc.example.com/"),
+      { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }
+    );
 
     const confirmation = await confirmTransaction(
       rpc,

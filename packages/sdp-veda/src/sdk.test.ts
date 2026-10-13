@@ -1,7 +1,9 @@
+import { createEndpointRpc } from "@sdp/rpc/factory";
 import { prepareRpcRead, withMinimumRpcSlot } from "@sdp/rpc/read-context";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { wellKnownMint } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
-import { type Address, address, createSolanaRpc } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   VEDA_DEPOSIT_ALLOWED_USER_ACCOUNT_INDEX,
@@ -114,8 +116,12 @@ const DEPLOYMENT: VedaDeployment = {
 const config = toClusterConfig("devnet", DEPLOYMENT);
 const runtime: VedaRuntime = {
   cluster: "devnet",
-  rpc: createSolanaRpc("https://devnet.veda-sdk.test"),
-  readRpc: createSolanaRpc("https://devnet.veda-sdk-reads.test"),
+  rpc: createEndpointRpc("https://devnet.veda-sdk.test", {
+    timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+  }),
+  readRpc: createEndpointRpc("https://devnet.veda-sdk-reads.test", {
+    timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+  }),
 };
 const OTHER_SHARE_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 

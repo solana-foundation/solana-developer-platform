@@ -26,6 +26,7 @@ import {
   TEST_PROJECT,
   TEST_PROJECT_CACHED_KEY,
 } from "../helpers/integration";
+import { sendIntegrationLaneJsonRpc } from "../helpers/kora-lane";
 
 const {
   createKVStoreSet,
@@ -112,30 +113,19 @@ async function expectSlippageRefusal(path: string, body: Record<string, unknown>
   expect(payload.error?.details?.reason).toBe("slippage_exceeded");
 }
 
-async function cheat(method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(env.SOLANA_RPC_URL ?? "", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await response.json()) as { result?: unknown; error?: { message?: string } };
-  if (body.error) throw new Error(`${method} failed: ${body.error.message}`);
-  return body.result;
-}
-
 async function putForkClockAheadOfLazyClones(): Promise<void> {
-  const slot = await cheat("getSlot", [{ commitment: "confirmed" }]);
+  const slot = await sendIntegrationLaneJsonRpc("getSlot", [{ commitment: "confirmed" }]);
   if (!Number.isSafeInteger(slot)) throw new Error("Surfnet returned an invalid slot");
   // Remote-mode Surfnet seeds its clock from one upstream RPC request, then
   // clones each protocol account lazily. A load-balanced public endpoint can
   // serve a clone from a node a few slots ahead of that seed; Jupiter Liquidity
   // correctly refuses the resulting future-dated reserve state. Move the fresh
   // fork forward before its first clone so every account is safely in the past.
-  await cheat("surfnet_timeTravel", [{ absoluteSlot: Number(slot) + 10_000 }]);
+  await sendIntegrationLaneJsonRpc("surfnet_timeTravel", [{ absoluteSlot: Number(slot) + 10_000 }]);
 }
 
 async function fundUsdt(owner: string): Promise<void> {
-  await cheat("surfnet_setTokenAccount", [
+  await sendIntegrationLaneJsonRpc("surfnet_setTokenAccount", [
     owner,
     JUPITER_LEND_USDT.assetMint,
     { amount: 100_000_000 },
@@ -143,7 +133,7 @@ async function fundUsdt(owner: string): Promise<void> {
 }
 
 async function fundSol(owner: string): Promise<void> {
-  await cheat("surfnet_setAccount", [
+  await sendIntegrationLaneJsonRpc("surfnet_setAccount", [
     owner,
     {
       lamports: 100_000_000,

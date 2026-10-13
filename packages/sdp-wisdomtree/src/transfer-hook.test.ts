@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
@@ -7,7 +9,6 @@ import {
 import {
   address,
   createNoopSigner,
-  createSolanaRpc,
   getAddressEncoder,
   getProgramDerivedAddress,
 } from "@solana/kit";
@@ -39,7 +40,7 @@ const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 
 const runtime: WisdomTreeRuntime = {
   cluster: "mainnet-beta",
-  rpc: createSolanaRpc("http://offline.invalid"),
+  rpc: createEndpointRpc("http://offline.invalid", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
 };
 const encoder = getAddressEncoder();
 

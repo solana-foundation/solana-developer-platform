@@ -82,8 +82,6 @@ const providedEnv: Env = {
   SPC_CREDENTIAL_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
   SOLANA_MOCK: "true",
   RUN_INTEGRATION_TESTS: "false",
-  SOLANA_NETWORK: "devnet",
-  SOLANA_RPC_URL: "https://solana-rpc.mock.invalid",
   FEE_PAYMENT_PROVIDER: "kora",
   KORA_RPC_URL_DEVNET: "https://kora-rpc.mock.invalid",
   // The minted metadata origin comes only from this trusted config value —

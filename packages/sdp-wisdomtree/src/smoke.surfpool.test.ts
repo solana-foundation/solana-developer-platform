@@ -1,5 +1,7 @@
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
@@ -10,7 +12,6 @@ import {
   address,
   appendTransactionMessageInstructions,
   createKeyPairSignerFromBytes,
-  createSolanaRpc,
   createTransactionMessage,
   generateKeyPairSigner,
   getAddressDecoder,
@@ -251,7 +252,7 @@ async function simulateSigned(
   instructions: readonly Instruction[],
   returnedAccounts: readonly Address[]
 ): Promise<SimulationValue> {
-  const rpc = createSolanaRpc(SURFPOOL_RPC_URL);
+  const rpc = createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
   const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -322,10 +323,15 @@ async function buildComplianceProbe(
   signerAssets: SignerAssets,
   destinationOwner: Address
 ): Promise<ComplianceProbe> {
-  const reader = createWisdomTreeChainReader(createSolanaRpc(SURFPOOL_RPC_URL));
+  const reader = createWisdomTreeChainReader(
+    createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+  );
   const plan = await buildWisdomTreeRedemptionPlan(
     reader,
-    { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
+    {
+      cluster: "mainnet-beta",
+      rpc: createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+    },
     {
       fund: WTGXX,
       owner: signer,
@@ -515,7 +521,9 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
         throw new Error("WisdomTree Connect returned the signer itself as an on-receipt wallet");
       }
 
-      const reader = createWisdomTreeChainReader(createSolanaRpc(SURFPOOL_RPC_URL));
+      const reader = createWisdomTreeChainReader(
+        createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+      );
       const freshRecipient = await generateKeyPairSigner();
       const complianceProbe = await buildComplianceProbe(
         signer,
@@ -538,7 +546,10 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
       const [deposit, redemption] = await Promise.all([
         buildWisdomTreeDepositPlan(
           reader,
-          { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
+          {
+            cluster: "mainnet-beta",
+            rpc: createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+          },
           {
             fund: WTGXX,
             owner: signer,
@@ -550,7 +561,10 @@ describe.skipIf(!RUN_SURFPOOL_E2E)(
         ),
         buildWisdomTreeRedemptionPlan(
           reader,
-          { cluster: "mainnet-beta", rpc: createSolanaRpc(SURFPOOL_RPC_URL) },
+          {
+            cluster: "mainnet-beta",
+            rpc: createEndpointRpc(SURFPOOL_RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+          },
           {
             fund: WTGXX,
             owner: signer,

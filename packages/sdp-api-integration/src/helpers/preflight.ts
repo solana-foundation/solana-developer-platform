@@ -6,9 +6,9 @@ import { address as toAddress } from "@solana/kit";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
 import {
-  getIntegrationLaneCluster,
   getIntegrationLaneKora,
   getIntegrationLaneRpc,
+  laneRpcPoolEnvKeyPattern,
 } from "./kora-lane";
 import { privateChannelProbeTransport } from "./private-channels";
 
@@ -263,16 +263,6 @@ function getKoraMinBalanceLamports(): number {
 
   // Default to 0.001 SOL which is enough for many transactions while avoiding false failures.
   return 1_000_000;
-}
-
-/**
- * The env key pattern of the lane cluster's managed pool, for a missing-config message.
- *
- * @returns E.g. `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL`.
- */
-function laneRpcPoolEnvKeyPattern(): string {
-  const clusterSuffix = getIntegrationLaneCluster() === "devnet" ? "DEVNET" : "MAINNET";
-  return `SOLANA_RPC_<PROVIDER>_${clusterSuffix}_API_KEY_URL`;
 }
 
 async function assertSolanaRpcHealthy(rpc: SolanaRpc): Promise<void> {

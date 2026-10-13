@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { describe, it, type TestContext } from "node:test";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
   address,
   type Base64EncodedWireTransaction,
@@ -9,9 +10,11 @@ import {
   createSolanaRpcFromTransport,
   type RpcTransport,
 } from "@solana/kit";
-import { contextAwareRpcFetch, withMinimumRpcSlot, withRpcReadContext } from "./read-context";
+import { assertEndpointServesCluster, createClusterBoundedRpc, createEndpointRpc } from "./factory";
+import { contextAwareRpcFetch, withMinimumRpcSlot } from "./read-context";
+import { runInClusterScope } from "./scope";
 import { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
-import { createRpc } from "./solana";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 
 const socketDeath = (code: string | undefined, message: string) =>
   new TypeError("fetch failed", { cause: Object.assign(new Error(message), { code }) });
@@ -42,6 +45,22 @@ const NEVER_RESENT = [
 /** Lets undici return a finished request's socket to the pool before the next send. */
 const pooled = () => new Promise((resolve) => setTimeout(resolve, 10));
 const ANSWER = { jsonrpc: "2.0", id: 1, result: 7 };
+const ENDPOINT_OPTIONS = { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS };
+const MANAGED_POOL_ENV_KEY = /^SOLANA_RPC_[A-Z]+_(?:DEVNET|MAINNET)_API_KEY_URL$/;
+
+async function withDevnetPoolEndpoint<T>(endpointUrl: string, work: () => Promise<T>): Promise<T> {
+  const ambientPool = Object.fromEntries(
+    Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
+  );
+  for (const envKey of Object.keys(ambientPool)) delete process.env[envKey];
+  process.env.SOLANA_RPC_TRITON_DEVNET_API_KEY_URL = endpointUrl;
+  try {
+    return await work();
+  } finally {
+    delete process.env.SOLANA_RPC_TRITON_DEVNET_API_KEY_URL;
+    Object.assign(process.env, ambientPool);
+  }
+}
 
 describe("withReadSocketRetry", () => {
   for (const [label, error] of [
@@ -176,7 +195,12 @@ async function startDroppingServer(drop: "before-response" | "mid-body") {
         request.socket.destroy();
         return;
       }
-      const result = method.includes("Account") ? { context: { slot: 150 }, value: null } : 42;
+      const result =
+        method === "getGenesisHash"
+          ? GENESIS_HASH_BY_CLUSTER.devnet
+          : method.includes("Account")
+            ? { context: { slot: 150 }, value: null }
+            : 42;
       const text = JSON.stringify({ jsonrpc: "2.0", id, result });
       response.writeHead(200, {
         "content-type": "application/json",
@@ -202,7 +226,7 @@ async function startDroppingServer(drop: "before-response" | "mid-body") {
 }
 
 describe("a reused socket that dies before the response (loopback)", () => {
-  it("fails a plain kit read; the createRpc read answers the same value", async () => {
+  it("fails a plain kit read; the createEndpointRpc read answers the same value", async () => {
     const plainServer = await startDroppingServer("before-response");
     const sharedServer = await startDroppingServer("before-response");
     try {
@@ -214,7 +238,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
       await assert.rejects(plain.getSlot().send(), /fetch failed/);
       assert.deepEqual(plainServer.methods, ["getSlot", "getSlot"]);
 
-      const rpc = createRpc({}, { rpcUrl: sharedServer.url });
+      const rpc = createEndpointRpc(sharedServer.url, ENDPOINT_OPTIONS);
       assert.equal(await rpc.getSlot().send(), 42n);
       await pooled();
       assert.equal(await rpc.getSlot().send(), 42n);
@@ -227,7 +251,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends a transaction on a dead socket", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createEndpointRpc(server.url, ENDPOINT_OPTIONS);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(
@@ -243,7 +267,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends a blockhash read on a dead socket, through either seam", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createEndpointRpc(server.url, ENDPOINT_OPTIONS);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(rpc.getLatestBlockhash().send(), /fetch failed/);
@@ -267,7 +291,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends once a response has started", async () => {
     const server = await startDroppingServer("mid-body");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createEndpointRpc(server.url, ENDPOINT_OPTIONS);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(rpc.getSlot().send(), /terminated/);
@@ -277,17 +301,22 @@ describe("a reused socket that dies before the response (loopback)", () => {
     }
   });
 
-  it("keeps a minimum-slot scope valid when the answer came from the retry", async () => {
+  it("keeps a minimum-slot scope valid when the door's answer came from the retry", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url, wrapTransport: withRpcReadContext });
-      await rpc.getSlot().send();
-      await pooled();
-      const account = await withMinimumRpcSlot(100, () =>
-        rpc.getAccountInfo(address("11111111111111111111111111111111")).send()
-      );
+      const account = await withDevnetPoolEndpoint(server.url, async () => {
+        const rpc = runInClusterScope(
+          { projectId: "proj_socket_retry", environment: "sandbox" },
+          () => createClusterBoundedRpc(ENDPOINT_OPTIONS)
+        );
+        await assertEndpointServesCluster("devnet", server.url);
+        await pooled();
+        return await withMinimumRpcSlot(100, () =>
+          rpc.getAccountInfo(address("11111111111111111111111111111111")).send()
+        );
+      });
       assert.equal(account.context.slot, 150n);
-      assert.deepEqual(server.methods, ["getSlot", "getAccountInfo", "getAccountInfo"]);
+      assert.deepEqual(server.methods, ["getGenesisHash", "getAccountInfo", "getAccountInfo"]);
     } finally {
       await server.close();
     }
