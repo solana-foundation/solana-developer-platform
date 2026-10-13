@@ -56,6 +56,7 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { assertWalletProjectInClusterScope } from "@/services/domain/signing/wallet-scope-guard";
 import {
   assertCustodyProviderAvailable,
   assertCustodyProviderEnabled,
@@ -1250,11 +1251,25 @@ export class SigningService {
     });
   }
 
+  /**
+   * The signer for one already-authorized custody-wallet row, refused before any provider call
+   * when the wallet's project is outside the open cluster scope: under a request scope the
+   * wallet's project must be the request's; under a job or webhook scope (no project) its
+   * environment must be the scope's.
+   *
+   * @param orgId - The organization that owns the wallet's project.
+   * @param projectId - The project the wallet belongs to.
+   * @param custodyWalletId - The custody-wallet database row ID.
+   * @returns The wallet's transaction signer, on the scope's cluster.
+   * @throws SigningError `WALLET_NOT_FOUND` when the wallet's project is outside the open scope.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+   */
   async getTransactionSignerForWalletRecord(
     orgId: string,
     projectId: string,
     custodyWalletId: string
   ): Promise<TransactionSigner> {
+    await assertWalletProjectInClusterScope(this.env, { orgId, projectId, custodyWalletId });
     return this.runtimeTargets.getTransactionSignerForWalletRecord(
       orgId,
       projectId,
