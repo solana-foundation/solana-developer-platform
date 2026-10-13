@@ -31,7 +31,7 @@ describe("createTransfer", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const transfer = await createTransfer(SUBMISSION, t, "key_1");
+    const transfer = await createTransfer(SUBMISSION, t, { value: "key_1", persisted: true });
 
     expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
     const init = fetchMock.mock.calls[0][1];
@@ -62,9 +62,9 @@ describe("createTransfer", () => {
       vi.fn(async () => Response.json({ data: {} }))
     );
 
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toThrow(
-      "DashboardPayments.workspace.transferMissing"
-    );
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
   });
 
   // The status decides the key's fate, so the error has to carry it.
@@ -74,13 +74,15 @@ describe("createTransfer", () => {
       vi.fn(async () => Response.json({ error: { message: "over the limit" } }, { status: 422 }))
     );
 
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toMatchObject({
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toMatchObject({
       name: "TransferRequestError",
       message: "over the limit",
       status: 422,
     });
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toBeInstanceOf(
-      TransferRequestError
-    );
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toBeInstanceOf(TransferRequestError);
   });
 });

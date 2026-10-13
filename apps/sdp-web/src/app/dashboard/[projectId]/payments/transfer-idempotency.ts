@@ -2,9 +2,11 @@
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+  beginKeyedSend,
+  createIdempotencyKeyStore,
+  refusalRetiresKey,
+  resetIdempotencyKeyStoresForTests,
+} from "@/lib/idempotency-key-store";
 import {
   type CreateTransferInput,
   createTransfer,
@@ -17,17 +19,18 @@ import {
  *
  * Without a key, pressing Send again after a timeout is a new payment to the
  * API, and both can send the money. With the same key the API's replay finds
- * the first transfer and sends nothing more. Storage, expiry and holds are the
- * shared store's; this module owns what makes two sends the same payment.
+ * the first transfer and sends nothing more. Storage, expiry, holds and the
+ * retire rule are the shared store's; this module owns what makes two sends
+ * the same payment.
  */
 
-const store = createPaymentIdempotencyStore("sdp:payments:transfer:idempotency:v1");
+const store = createIdempotencyKeyStore("sdp:payments:transfer:idempotency:v1");
 type TransferSendResult = { transfer: TransferRecord; fingerprint: string };
 const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferIdempotencyStateForTests(): void {
-  store.resetForTests();
+  resetIdempotencyKeyStoresForTests();
   pendingSends.clear();
 }
 
@@ -51,14 +54,9 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
   return store.claim(fingerprint);
 }
 
-/** Retire the key once the API recorded the transfer or refused it with a 4xx. */
+/** Retire the key once the API recorded the transfer or definitively refused it. */
 export function releaseTransferIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
-}
-
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
 }
 
 /**
@@ -78,26 +76,22 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
+  const { key, earlierAttemptUnanswered } = beginKeyedSend(store, fingerprint);
   // A provider may repeat its signature callback after a lost event response.
   // Its session still names the same payment, even after the transfer lands.
   if (providerSession) store.hold(fingerprint);
   let transfer: TransferRecord;
   try {
-    transfer = await createTransfer(submission, t, idempotencyKey);
+    transfer = await createTransfer(submission, t, key);
   } catch (error) {
     // A provider session always names the same payment, including after an
     // expired login rejects a callback retry. Never release its recorded key.
-    // A 4xx for a new manual send frees the key. A 5xx or a network
-    // failure keeps it: the API may have recorded the transfer before the
-    // answer was lost. A 409 under our own key keeps it too.
-    if (
-      !providerSession &&
-      error instanceof TransferRequestError &&
-      error.status >= 400 &&
-      error.status < 500 &&
-      !isTransferKeyConflict(error.status)
-    ) {
+    // Otherwise the dashboard-wide rule decides: a network failure, a 5xx, a
+    // 409 or a 429 keeps the key, and so does any refusal once an earlier
+    // attempt went unanswered, since that attempt may have recorded the
+    // transfer.
+    const refusal = error instanceof TransferRequestError ? error : null;
+    if (!providerSession && refusalRetiresKey(refusal, earlierAttemptUnanswered)) {
       releaseTransferIdempotencyKey(fingerprint);
     }
     throw error;

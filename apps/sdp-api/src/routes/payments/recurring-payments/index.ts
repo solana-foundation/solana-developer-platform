@@ -62,9 +62,11 @@ recurringPayments.patch(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(updateRecurringPaymentSchema),
   authorize(authorizeRecurringPaymentUpdate),
+  // Editing an active schedule signs and broadcasts a replacement subscription,
+  // so a retry without the key could broadcast twice: the key is required.
   // Each lifecycle attempt carries its key (0130), so a takeover or a 5xx re-run
   // is answered from the attempt instead of a 409 for the schedule mid-change.
-  idempotent({ key: "accepted", serverErrors: "rerun", canonicalize: canonicalAmount }),
+  idempotent({ key: "required", serverErrors: "rerun", canonicalize: canonicalAmount }),
   replayFromRecord(findRecurringPaymentUpdateReplay),
   updateRecurringPayment
 );

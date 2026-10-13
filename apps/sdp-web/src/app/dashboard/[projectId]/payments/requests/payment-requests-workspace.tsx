@@ -74,6 +74,7 @@ import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
+import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
@@ -258,7 +259,13 @@ function CreateRequestModal({
     }
     const counterpartyId =
       result.data.counterparty === ANYONE_OPTION ? null : result.data.counterparty;
-    const expiresAt = resolveExpiryDate(result.data.expiry);
+    const input = JSON.stringify([
+      result.data.wallet,
+      result.data.token,
+      result.data.amount,
+      counterpartyId,
+      result.data.expiry,
+    ]);
 
     setSubmitting(true);
     const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
@@ -268,9 +275,12 @@ function CreateRequestModal({
         token: result.data.token,
         amount: result.data.amount,
         counterpartyId,
-        expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        // Read from the clock once per action, so a retry resends the same
+        // body under the first attempt's key.
+        expiresAt: expiresAtForAction(input, () => resolveExpiryDate(result.data.expiry)),
       },
     });
+    settleExpiresAt(input, res);
     setSubmitting(false);
     if (!res.ok) {
       toast.error(res.error);

@@ -66,6 +66,58 @@ describe("sendTransferUnderKey", () => {
 
     expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
   });
+
+  // Browser test (HOO-1918): the API recorded the transfer but the answer was
+  // lost; a refusal after that settles nothing about the recorded transfer, so
+  // the third press must replay it under the first key, not send a second one.
+  it.each([
+    ["a rate limit", 429],
+    ["an expired session", 401],
+  ])("keeps a lost attempt's key through %s", async (_label, status) => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => Response.json({ error: { message: "refused" } }, { status }))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow("Failed to fetch");
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({ status });
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  // A key held in memory only is lost on reload, and a retry after the reload
+  // would send the payment again under a fresh key.
+  it("refuses to send when storage refuses the key, keeping an earlier attempt's key", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ error: { message: "unavailable" } }, { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    const unanswered = sentKey(fetchMock);
+
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({
+        name: "TransferRequestError",
+        status: 428,
+      });
+    } finally {
+      setItem.mockRestore();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Idempotency-Key")).toBe(
+      unanswered
+    );
+  });
 });
 
 describe("concurrent transfer submissions", () => {

@@ -157,7 +157,7 @@ export interface AuthorizedBatchRequest {
  * project and under the counterparty the recipient names. Status is state and
  * is checked later, so a request that already ran is still answered.
  *
- * @param retainedCustodyWalletId - Resolve this wallet even when inactive (a keyed request).
+ * @param retainedCustodyWalletId - Resolve this wallet even when inactive, so a replay of a request that ran is answered.
  */
 export async function authorizeBatchRequest(
   c: AppContext,

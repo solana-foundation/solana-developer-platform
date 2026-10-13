@@ -28,13 +28,8 @@ const PINNED_READS: Record<string, number> = {
   "routes/issuance/handlers/mint.ts": 2,
   "routes/issuance/handlers/pause.ts": 4,
   "routes/issuance/handlers/seize.ts": 2,
-  // The row backstops for transfers and batches: the retained-wallet lookup and the row's key.
-  "routes/payments/transfer-batches/create.ts": 2,
-  "routes/payments/transfers/handlers.ts": 2,
-  // Recurring: the retained-wallet lookup, and one read for the key every action writes on
-  // its row (the schedule, 0129; the activation, lifecycle, update or collection attempt, 0130).
-  "routes/payments/recurring-payments/access.ts": 1,
-  "routes/payments/recurring-payments/handlers.ts": 1,
+  // Payments (transfers, batches, recurring) reads none: its rows take the key from
+  // getIdempotencyClaim, and its access checks never depend on whether one was sent.
   "routes/private-channels/helpers.ts": 1,
 };
 

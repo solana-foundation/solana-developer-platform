@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
+  sendTransferBatchUnderKey,
   transferBatchRequestFingerprint,
 } from "./transfer-batch-idempotency";
+
+const t: Translate = (key) => key;
 
 function batchRequest(
   overrides: Partial<PaymentTransferBatchRequest> = {}
@@ -53,16 +56,6 @@ describe("canonicalTransferBatchRequest", () => {
     expect(canonical.token).toBe(request.token);
     expect(canonical.externalId).toBe("ext_1");
     expect(canonical.recipients).toHaveLength(request.recipients.length);
-  });
-});
-
-describe("isTransferBatchKeyConflict", () => {
-  it("singles out the 409 that must keep the key", () => {
-    expect(isTransferBatchKeyConflict(409)).toBe(true);
-    expect(isTransferBatchKeyConflict(400)).toBe(false);
-    expect(isTransferBatchKeyConflict(403)).toBe(false);
-    expect(isTransferBatchKeyConflict(422)).toBe(false);
-    expect(isTransferBatchKeyConflict(500)).toBe(false);
   });
 });
 
@@ -130,7 +123,91 @@ describe("claim / release", () => {
   });
 });
 
+describe("sendTransferBatchUnderKey", () => {
+  const recorded = () =>
+    Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
+
+  function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
+    return fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retires the key once the API records the batch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => recorded());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [first, second] = sentKeys(fetchMock);
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it("retires a fresh key on a first-attempt refusal", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(Response.json({ error: { message: "bad" } }, { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
+      status: 422,
+    });
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [refused, next] = sentKeys(fetchMock);
+    expect(next).not.toBe(refused);
+  });
+
+  // Browser test (HOO-1918): the API recorded the batch but the answer was lost;
+  // a refusal after that settles nothing about the recorded batch, so the third
+  // press must replay it under the first key, not pay every recipient again.
+  it.each([
+    ["a rate limit", 429],
+    ["an expired session", 401],
+  ])("keeps a lost attempt's key through %s", async (_label, status) => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(Response.json({ error: { message: "refused" } }, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({ status });
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+  });
+});
+
 describe("degraded storage", () => {
+  // A batch whose key lives in memory only could be sent twice by a reload and
+  // retry, so it is refused like every other money movement.
+  it("refuses to send a batch whose key storage refused", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
+        name: "TransferBatchRequestError",
+        status: 428,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the key stable in memory when sessionStorage refuses writes", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("QuotaExceededError");

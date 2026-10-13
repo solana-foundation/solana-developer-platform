@@ -16,13 +16,17 @@ function sentHeaders(fetchMock: ReturnType<typeof noContentFetchMock>): Headers 
   return new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
 }
 
-/** Gives the window a `sessionStorage`: an in-memory one, or one that refuses every write. */
-function installSessionStorage(refuseWrites = false): void {
+/**
+ * Gives the window a `sessionStorage`: an in-memory one, or one that refuses
+ * every write. Returns a switch to start or stop refusing later.
+ */
+function installSessionStorage(refuseWrites = false): { refuseWrites: boolean } {
+  const control = { refuseWrites };
   const entries = new Map<string, string>();
   const storage = {
     getItem: (name: string) => entries.get(name) ?? null,
     setItem: (name: string, value: string) => {
-      if (refuseWrites) throw new DOMException("quota exceeded", "QuotaExceededError");
+      if (control.refuseWrites) throw new DOMException("quota exceeded", "QuotaExceededError");
       entries.set(name, value);
     },
     removeItem: (name: string) => {
@@ -30,6 +34,7 @@ function installSessionStorage(refuseWrites = false): void {
     },
   };
   Object.defineProperty(window, "sessionStorage", { value: storage, configurable: true });
+  return control;
 }
 
 /** Puts the tab on `pathname` with working storage, as a browser has. */
@@ -128,7 +133,6 @@ function jsonResponse(status: number, headers: Record<string, string> = {}): Res
 
 describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
   const PATH = "/api/dashboard/payments/recurring-payments";
-
 
   function statusFetchMock(...statuses: number[]) {
     return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -298,6 +302,48 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Editing an active schedule signs and broadcasts a replacement subscription.
+  it("keys a recurring edit, and refuses it when storage refuses its key", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const storage = installSessionStorage();
+    const fetchMock = statusFetchMock(200);
+    vi.stubGlobal("fetch", fetchMock);
+    const edit = () =>
+      dashboardRequest(`${PATH}/rp_1`, { method: "PATCH", body: '{"amount":"2"}' });
+
+    await edit();
+    expect(keyOfCall(fetchMock, 0)).toMatch(/^[0-9a-f-]{36}$/);
+
+    storage.refuseWrites = true;
+    const refused = await edit();
+
+    expect(refused.status).toBe(428);
+    expect(await refused.json()).toMatchObject({
+      error: { code: "IDEMPOTENCY_KEY_NOT_PERSISTED" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // The refusal only drops a key it minted: a reused key belongs to an
+  // unanswered attempt that may have written, and its retry still needs it.
+  it("keeps an unanswered attempt's key through a storage refusal", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const storage = installSessionStorage();
+    const fetchMock = vi
+      .fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(201))
+      .mockRejectedValueOnce(new TypeError("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow("network down");
+    storage.refuseWrites = true;
+    expect((await submit()).status).toBe(428);
+    storage.refuseWrites = false;
+    await submit();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+  });
+
   it("still sends any other mutation, reusing the key in this page, when storage refuses it", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/counterparties`);
     installSessionStorage(true);
@@ -398,10 +444,34 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
       body: "{}",
     });
     await dashboardRequest(PATH, { method: "GET" });
-    await dashboardRequest("/api/dashboard/payments/ramps/quote", { method: "POST", body: "{}" });
+    await dashboardRequest("/api/dashboard/counterparty", { method: "POST", body: "{}" });
 
     expect(keyOfCall(fetchMock, 0)).toBe("own-key");
     expect(keyOfCall(fetchMock, 1)).toBeNull();
     expect(keyOfCall(fetchMock, 2)).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  // They fire as the user types; keyed, each would leave an unanswered key
+  // behind that never expires.
+  it("leaves read-like POSTs (estimates, quotes, simulations) unkeyed", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments`);
+    const fetchMock = statusFetchMock(200, 200, 200, 200);
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const path of [
+      "/api/dashboard/payments/transfers/batch/estimate",
+      "/api/dashboard/payments/ramps/onramp/quote",
+      "/api/dashboard/payments/ramps/offramp/estimate?draft=1",
+      "/api/dashboard/payments/ramps/sandbox/simulate",
+    ]) {
+      await dashboardRequest(path, { method: "POST", body: "{}" });
+    }
+
+    expect([0, 1, 2, 3].map((index) => keyOfCall(fetchMock, index))).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
   });
 });

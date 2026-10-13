@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";
 import {
+  createActionMemo,
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -173,5 +175,73 @@ describe("FloorMemo partial-write divergence", () => {
     floorMemo.remember("fp", "0.999");
     expect(floorMemo.recall("fp")).toBe("0.999");
     expect(JSON.parse(sessionStorage.getItem(FLOOR_KEY) ?? "{}")).toEqual({ fp: "0.999" });
+  });
+});
+
+describe("createActionMemo", () => {
+  const memo = createActionMemo("test:action-memo:v1", z.string().nullable());
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("freezes each input's first value, including null, across a reload", () => {
+    const build = vi.fn(() => new Date().toISOString());
+    const first = memo.valueFor("expiry=1h", build);
+    memo.valueFor("expiry=never", () => null);
+
+    resetIdempotencyKeyStoresForTests();
+
+    expect(memo.valueFor("expiry=1h", () => "later")).toBe(first);
+    expect(memo.valueFor("expiry=never", () => "later")).toBeNull();
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores a digest of the input, never the input itself", () => {
+    memo.valueFor("counterparty=Alice Example", () => "value");
+
+    expect(sessionStorage.getItem("test:action-memo:v1")).not.toContain("Alice");
+  });
+
+  it("never evicts an unanswered value, however many inputs follow", () => {
+    const first = memo.valueFor("input=0", () => "first");
+    memo.settle("input=0", "open");
+    for (let index = 1; index <= 40; index++) memo.valueFor(`input=${index}`, () => `v${index}`);
+
+    expect(memo.valueFor("input=0", () => "fresh")).toBe(first);
+  });
+
+  it("forgets a value on a definitive answer, and on a first attempt's refusal", () => {
+    memo.valueFor("a", () => "a1");
+    memo.settle("a", "definitive");
+    memo.valueFor("b", () => "b1");
+    memo.settle("b", "refused");
+
+    expect(memo.valueFor("a", () => "a2")).toBe("a2");
+    expect(memo.valueFor("b", () => "b2")).toBe("b2");
+  });
+
+  it("keeps the value in memory when storage refuses reads", () => {
+    const first = memo.valueFor("a", () => "a1");
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+
+    expect(memo.valueFor("a", () => "a2")).toBe(first);
+  });
+
+  it("rebuilds a stored value its schema rejects", () => {
+    const strict = createActionMemo("test:action-memo-strict:v1", z.string().min(1));
+    strict.valueFor("a", () => "kept");
+    const raw = sessionStorage.getItem("test:action-memo-strict:v1") ?? "";
+    sessionStorage.setItem("test:action-memo-strict:v1", raw.replace('"\\"kept\\""', '"42"'));
+    resetIdempotencyKeyStoresForTests();
+
+    expect(strict.valueFor("a", () => "rebuilt")).toBe("rebuilt");
   });
 });

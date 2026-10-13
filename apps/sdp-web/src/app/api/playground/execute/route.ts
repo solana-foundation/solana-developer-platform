@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
@@ -39,6 +40,8 @@ const FORWARDED_RESPONSE_HEADERS = new Set([
   "content-type",
   "date",
   "etag",
+  "idempotency-key",
+  "idempotent-replayed",
   "location",
   "retry-after",
   "x-ratelimit-limit",
@@ -76,7 +79,9 @@ function normalizePublicApiPath(path: string, requestUrl: string): string | null
  * as a URL before the mount check so fetch cannot reinterpret traversal
  * segments after validation. apiKey must be non-empty — an absent key
  * previously fell back to the caller's dashboard session, escalating scope
- * past the selected key.
+ * past the selected key. idempotencyKey is the one client header the proxy
+ * forwards (as Idempotency-Key, non-GET only): the shell mints one per Send,
+ * so the money routes that require it can be called from the playground.
  */
 const playgroundExecuteSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"], { error: "Invalid method" }),
@@ -86,6 +91,13 @@ const playgroundExecuteSchema = z.object({
     .string({ error: "API key is required" })
     .trim()
     .min(1, { error: "API key is required" }),
+  idempotencyKey: z
+    .string({ error: "Invalid idempotency key" })
+    .trim()
+    .regex(IDEMPOTENCY_KEY_PATTERN, {
+      error: "Idempotency key must be 1-255 printable ASCII characters",
+    })
+    .optional(),
 });
 
 /**
@@ -141,7 +153,7 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return failureResponse(trace, 400, parsed.error.issues[0].message);
     }
-    const { method, path: requestedPath, body: requestBody, apiKey } = parsed.data;
+    const { method, path: requestedPath, body: requestBody, apiKey, idempotencyKey } = parsed.data;
     const path = normalizePublicApiPath(requestedPath, request.url);
     if (!path) {
       return failureResponse(trace, 400, INVALID_PATH_MESSAGE);
@@ -158,7 +170,10 @@ export async function POST(request: Request) {
 
     const response = await client.request(path, {
       method,
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(method !== "GET" && idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : {}),
+      },
       body:
         method !== "GET" && requestBody !== null && requestBody !== undefined
           ? JSON.stringify(requestBody)

@@ -4,7 +4,6 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
-import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import {
   assertApiKeyCustodyWalletAccess,
   getAllowedApiKeyWalletAuthorizationForPermissions,
@@ -100,10 +99,7 @@ export async function authorizeRecurringPaymentCreate(
   assertApiKeyCustodyWalletAccess(await freshWalletScope(c), body.sourceCustodyWalletId, [
     ...PERMISSIONS,
   ]);
-  const scope = await resolveScope(
-    c,
-    parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
-  );
+  const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
   // Every id the caller names is checked before the key is claimed: a
   // counterparty account from another tenant never reaches the service.

@@ -11,12 +11,13 @@ import {
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { actionIdempotencyHeaders } from "@/lib/idempotency";
+import { type ActionKeyAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
 import {
   createSdpApiClient,
   extractSdpApiError,
   requestProjectHref,
   type SdpApiClient,
+  sdpApiKeyAnswer,
 } from "@/lib/sdp-api";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
 
@@ -163,12 +164,15 @@ export type WalletSetupActionResult =
   | {
       status: "error";
       message: string;
+      /** What the failure settles about the browser's key (`useActionIdempotencyKey`). */
+      keyAnswer: ActionKeyAnswer;
     };
 
 export type InitializeCustodySetupActionResult =
   | WalletSetupActionResult
   | {
       status: "provider_already_set_up";
+      keyAnswer: ActionKeyAnswer;
     };
 
 /**
@@ -189,11 +193,12 @@ export async function initializeCustodySetupAction(
     return { status: "success" };
   } catch (error) {
     if (extractSdpApiError(error).status === 409) {
-      return { status: "provider_already_set_up" };
+      return { status: "provider_already_set_up", keyAnswer: sdpApiKeyAnswer(error) };
     }
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
+      keyAnswer: sdpApiKeyAnswer(error),
     };
   }
 }
@@ -210,6 +215,7 @@ export async function createCustodySetupWalletAction(
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
+      keyAnswer: sdpApiKeyAnswer(error),
     };
   }
 }
@@ -222,6 +228,7 @@ export type UpdateWalletLabelActionResult =
   | {
       status: "error";
       message: string;
+      keyAnswer: ActionKeyAnswer;
     };
 
 export async function updateWalletLabelAction(
@@ -232,7 +239,12 @@ export async function updateWalletLabelAction(
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
   if (!resolvedWalletId) {
-    return { status: "error", message: t("DashboardCustody.walletIdRequired") };
+    // Refused before anything was sent.
+    return {
+      status: "error",
+      message: t("DashboardCustody.walletIdRequired"),
+      keyAnswer: "refused",
+    };
   }
 
   const nextLabel = label.trim();
@@ -261,6 +273,7 @@ export async function updateWalletLabelAction(
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
+      keyAnswer: sdpApiKeyAnswer(error),
     };
   }
 }
@@ -377,9 +390,14 @@ export type WalletFaucetActionResult =
       message: string;
     };
 
+/**
+ * Proves the wallet's signer can sign, in simulation. Nothing is broadcast, so
+ * the check carries no Idempotency-Key: every press is a fresh probe of the
+ * signer as it is now, where a key would replay an earlier failure after the
+ * user fixed the signer.
+ */
 export async function checkWalletSignerMemoAction(
-  walletId: string,
-  idempotencyKey?: string
+  walletId: string
 ): Promise<WalletSignerCheckActionResult> {
   const t = await getTranslations();
   const resolvedWalletId = walletId.trim();
@@ -392,7 +410,6 @@ export async function checkWalletSignerMemoAction(
     const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
       body: JSON.stringify({ walletId: resolvedWalletId }),
-      headers: actionIdempotencyHeaders(idempotencyKey),
     });
 
     return {

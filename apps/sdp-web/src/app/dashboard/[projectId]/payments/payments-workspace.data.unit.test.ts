@@ -36,7 +36,10 @@ describe("Payments write requests", () => {
       );
     vi.stubGlobal("fetch", fetch);
 
-    await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, "idem_transfer_1");
+    await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, {
+      value: "idem_transfer_1",
+      persisted: true,
+    });
     await createTransfer(transferInput, t, null);
 
     const init = fetch.mock.calls[0]?.[1] as RequestInit;
@@ -73,9 +76,9 @@ describe("Payments write requests", () => {
       )
     );
 
-    await expect(createTransfer(transferInput, t, "idem_transfer_1")).rejects.toThrow(
-      "DashboardPayments.workspace.transferMissing"
-    );
+    await expect(
+      createTransfer(transferInput, t, { value: "idem_transfer_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
   });
 
   it("carries the status of a refusal so the caller can decide the key's fate", async () => {
@@ -84,9 +87,10 @@ describe("Payments write requests", () => {
       vi.fn().mockResolvedValue(jsonResponse({ error: { message: "Insufficient balance" } }, 422))
     );
 
-    const refusal = await createTransfer(transferInput, t, "idem_transfer_1").catch(
-      (error: unknown) => error
-    );
+    const refusal = await createTransfer(transferInput, t, {
+      value: "idem_transfer_1",
+      persisted: true,
+    }).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(TransferRequestError);
     expect(refusal).toMatchObject({ status: 422, message: "Insufficient balance" });
   });
@@ -108,7 +112,7 @@ describe("Payments write requests", () => {
     };
 
     await estimateTransferBatch(request, t);
-    await createTransferBatch(request, t, "idem_batch_1");
+    await createTransferBatch(request, t, { value: "idem_batch_1", persisted: true });
 
     for (const [, init] of fetch.mock.calls) {
       expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({

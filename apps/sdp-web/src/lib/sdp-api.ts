@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
-import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { type ActionKeyAnswer, IDEMPOTENCY_KEY_HEADER, keyAnswerFor } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
@@ -144,7 +144,9 @@ function createSdpApiRequest(
 export class SdpApiResponseError extends Error {
   constructor(
     readonly status: number,
-    readonly responseBody: string
+    readonly responseBody: string,
+    /** Whether sdp-api answered from a stored result (`Idempotent-Replayed`). */
+    readonly replayed = false
   ) {
     super(`SDP API request failed (${status}): ${responseBody}`);
     this.name = "SdpApiResponseError";
@@ -154,7 +156,11 @@ export class SdpApiResponseError extends Error {
 async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new SdpApiResponseError(res.status, body);
+    throw new SdpApiResponseError(
+      res.status,
+      body,
+      res.headers.get("Idempotent-Replayed") === "true"
+    );
   }
 
   if (res.status === 204) {
@@ -213,6 +219,21 @@ export function extractSdpApiError(error: unknown): { status: number | null; mes
     status: match ? Number.parseInt(match[1] ?? "", 10) : null,
     message: extractSdpApiErrorMessage(error),
   };
+}
+
+/**
+ * What a failed sdp-api call settles about the Idempotency-Key it carried, for
+ * a server action to hand back to the browser that owns the key: the browser
+ * never sees `Idempotent-Replayed` through a server action, so it cannot tell a
+ * stored failure replayed (definitive) from one that may still have written.
+ *
+ * @param error - What the sdp-api call threw.
+ */
+export function sdpApiKeyAnswer(error: unknown): ActionKeyAnswer {
+  if (error instanceof SdpApiResponseError) {
+    return keyAnswerFor(error.status, error.replayed);
+  }
+  return keyAnswerFor(extractSdpApiError(error).status, false);
 }
 
 export interface SdpApiClient {
