@@ -1,4 +1,4 @@
-import { OPERATION_TYPES, operationTypesInFamily } from "@sdp/types";
+import { type AllowedOperation, OPERATION_TYPES, operationTypesInFamily } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   type ApiKeyAuthoringDraft,
@@ -76,18 +76,23 @@ describe("API-key authoring: allowed operations", () => {
     expect(toggleFamily(ticked, "payment")).toEqual([]);
   });
 
-  it("clears every type under a family when the family is unticked", () => {
+  it("ticks the whole family when it is partly ticked", () => {
     const partial = toggleOperationType([], "payment_transfer_execute");
 
     expect(familyState(partial, "payment")).toBe("some");
-    expect(toggleFamily(partial, "payment")).toEqual([]);
+    expect(toggleFamily(partial, "payment")).toEqual(["payment"]);
   });
 
-  it("completes a partly ticked family when it is ticked", () => {
-    // Anything but "none" means the box is ticked, so clicking it clears.
-    // Ticking is only offered from "none".
-    expect(familyState([], "ramp")).toBe("none");
-    expect(toggleFamily([], "ramp")).toEqual(["ramp"]);
+  it("clears every type under a fully ticked family", () => {
+    const types = operationTypesInFamily("ramp");
+    expect(familyState(types, "ramp")).toBe("all");
+    expect(toggleFamily(types, "ramp")).toEqual([]);
+  });
+
+  it("keeps an unknown stored value when a family is toggled", () => {
+    const stored = ["gone_op"] as unknown as AllowedOperation[];
+
+    expect(toggleFamily(stored, "ramp")).toEqual(["gone_op", "ramp"]);
   });
 
   it("turns a ticked family into its remaining types when one type is unticked", () => {

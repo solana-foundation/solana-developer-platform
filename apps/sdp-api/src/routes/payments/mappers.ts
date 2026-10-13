@@ -1,7 +1,8 @@
-import type {
-  PaymentSubscriptionCollectionAttempt,
-  RampCryptoDeposit,
-  RampTransferSettlement,
+import {
+  isRetiredRampProviderId,
+  type PaymentSubscriptionCollectionAttempt,
+  type RampCryptoDeposit,
+  type RampTransferSettlement,
 } from "@sdp/types";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories";
 import {
@@ -15,9 +16,9 @@ import { bvnkProviderReference } from "./ramps/providers/bvnk";
 /**
  * The provider-side payout reference mapped for a ramp transfer row. BVNK
  * routes through {@link bvnkProviderReference} (the payout uuid once the
- * on-ramp settlement exists, omitted before); every other provider keeps the
- * stored `provider_reference` as-is. The switch is exhaustive over the ramp
- * provider union.
+ * on-ramp settlement exists, omitted before); every other provider, retired
+ * ones included, keeps the stored `provider_reference` as-is. The switch is
+ * exhaustive over the live ramp provider union.
  *
  * @param row - The payment transfer row being mapped.
  * @returns The provider reference to present, or undefined when omitted.
@@ -30,12 +31,14 @@ function rampProviderReference(row: TransferRow): string | undefined {
     case "lightspark":
     case "moneygram":
     case "coinbase":
-    case "mural":
     case "stripe":
       return row.provider_reference === null ? undefined : row.provider_reference;
     default: {
       if (row.provider === null) {
         throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
+      }
+      if (isRetiredRampProviderId(row.provider)) {
+        return row.provider_reference === null ? undefined : row.provider_reference;
       }
       const exhaustive: never = row.provider;
       return exhaustive;

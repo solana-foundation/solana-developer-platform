@@ -168,9 +168,6 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties/cpty_real")).status).toBe(404);
     expect((await call("GET", "/v1/payments/transfers/xfr_real")).status).toBe(404);
     expect((await call("GET", "/v1/projects")).status).toBeNull();
-    expect((await call("GET", "/v1/wallets/approval-requests?status=pending")).body).toEqual({
-      data: { approvalRequests: [] },
-    });
   });
 
   it("offers Lightspark as the only ramp, on the organization's real provider answer", async () => {
@@ -648,7 +645,7 @@ describe("every ramp provider", () => {
     });
     expect(await status()).toBe("customer_verification_required");
 
-    expect((await simulateVerification("demo_cpty_jane", "mural")).status).toBe(400);
+    expect((await simulateVerification("demo_cpty_jane", "lightspark")).status).toBe(400);
     expect((await simulateVerification()).status).toBe(200);
     expect(await status()).toBe("customer_verifying");
     expect((await simulateVerification()).status).toBe(409);
@@ -668,22 +665,6 @@ describe("every ramp provider", () => {
     });
     await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
     expect((await statusAfterSettling(transferId)).status).toBe("completed");
-  });
-
-  it("runs a Mural deposit for a business contact", async () => {
-    const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "mural",
-      counterpartyId: "demo_cpty_acme",
-      destinationCustodyWalletId: "demo_cwlt_treasury",
-      assetRail: "usdc.solana",
-      fiatCurrency: "USD",
-      fiatAmount: "250",
-    });
-    expect(quoted.body.data.quote.paymentInstructions[0].bankDetails.bankName).toBeTruthy();
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      transferId: quoted.body.data.transferId,
-    });
-    expect((await statusAfterSettling(quoted.body.data.transferId)).status).toBe("completed");
   });
 
   it("refuses a provider on a pair it doesn't run", async () => {

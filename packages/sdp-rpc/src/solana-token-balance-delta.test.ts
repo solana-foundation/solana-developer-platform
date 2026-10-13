@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Signature } from "@solana/kit";
+import { address, type Signature, stringifiedBigInt, stringifiedNumber } from "@solana/kit";
 import { getTransaction, type SolanaRpc, tokenBalanceDelta } from "./solana";
+import { jsonParsedTransactionMeta, jsonParsedTransactionResponse } from "./test-fixtures";
 
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const SHARE = "DvMCm7Xjirn7xmf3j4kWV49NGJUQqh7jVTAEvNNPAYiw";
 const OWNER = "3HArNo1CCY8AekuckdiZW3SBw2zZxKX3sdqYksgD9eVm";
 const VAULT = "CApPBBp8Fgb8zvRzDojfSe9bqzq6LejvDxFtucHoQaUk";
+const TOKEN_PROGRAM = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 const balance = (accountIndex: number, mint: string, owner: string, amount: string) => ({
   accountIndex,
@@ -72,27 +74,40 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
     getTransaction: (_signature: unknown, config: unknown) => {
       request = config;
       return {
-        send: async () => ({
-          slot: 42n,
-          meta: {
-            err: null,
-            fee: 5000n,
-            preBalances: [],
-            postBalances: [],
-            preTokenBalances: [
-              {
-                accountIndex: 1,
-                mint: USDC,
-                owner: OWNER,
-                uiTokenAmount: { amount: "1", decimals: 6 },
-              },
-            ],
-            postTokenBalances: [
-              { accountIndex: 1, mint: USDC, uiTokenAmount: { amount: "3", decimals: 6 } },
-            ],
-          },
-          transaction: { message: { instructions: [] } },
-        }),
+        send: async () =>
+          jsonParsedTransactionResponse({
+            meta: jsonParsedTransactionMeta({
+              err: null,
+              preTokenBalances: [
+                {
+                  accountIndex: 1,
+                  mint: address(USDC),
+                  owner: address(OWNER),
+                  programId: TOKEN_PROGRAM,
+                  uiTokenAmount: {
+                    amount: stringifiedBigInt("1"),
+                    decimals: 6,
+                    uiAmount: 0.000001,
+                    uiAmountString: stringifiedNumber("0.000001"),
+                  },
+                },
+              ],
+              postTokenBalances: [
+                {
+                  accountIndex: 1,
+                  mint: address(USDC),
+                  programId: TOKEN_PROGRAM,
+                  uiTokenAmount: {
+                    amount: stringifiedBigInt("3"),
+                    decimals: 6,
+                    uiAmount: 0.000003,
+                    uiAmountString: stringifiedNumber("0.000003"),
+                  },
+                },
+              ],
+            }),
+            instructions: [],
+          }),
       };
     },
   } as unknown as SolanaRpc;
@@ -114,19 +129,25 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
 
 for (const { name, meta, known } of [
   { name: "null metadata", meta: null, known: false },
-  { name: "missing metadata", meta: undefined, known: false },
-  { name: "missing execution result", meta: {}, known: false },
-  { name: "successful execution", meta: { err: null }, known: true },
-  { name: "failed execution", meta: { err: "InsufficientFundsForFee" }, known: true },
+  {
+    name: "successful execution",
+    meta: jsonParsedTransactionMeta({ err: null, preTokenBalances: [], postTokenBalances: [] }),
+    known: true,
+  },
+  {
+    name: "failed execution",
+    meta: jsonParsedTransactionMeta({
+      err: "InsufficientFundsForFee",
+      preTokenBalances: [],
+      postTokenBalances: [],
+    }),
+    known: true,
+  },
 ]) {
   test(`getTransaction identifies ${name}`, async () => {
     const rpc = {
       getTransaction: () => ({
-        send: async () => ({
-          slot: 42n,
-          meta,
-          transaction: { message: { instructions: [] } },
-        }),
+        send: async () => jsonParsedTransactionResponse({ meta, instructions: [] }),
       }),
     } as unknown as SolanaRpc;
 

@@ -15,15 +15,11 @@ function applyApiKeyTemplate(url: string, apiKey: string): string {
 }
 
 function appendQueryParam(url: string, key: string, value: string): string {
-  try {
-    const parsed = new URL(url);
-    if (!parsed.searchParams.has(key)) {
-      parsed.searchParams.set(key, value);
-    }
-    return parsed.toString();
-  } catch {
-    return url;
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has(key)) {
+    parsed.searchParams.set(key, value);
   }
+  return parsed.toString();
 }
 
 export function withHeliusApiKey(url: string, apiKey?: string): string {
@@ -79,7 +75,7 @@ function buildManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
   if (env.SOLANA_RPC_TRITON_URL) {
     providers.push({
       id: "triton",
-      url: applyApiKeyTemplate(env.SOLANA_RPC_TRITON_URL, env.SOLANA_RPC_TRITON_API_KEY ?? ""),
+      url: withOptionalApiKeyTemplate(env.SOLANA_RPC_TRITON_URL, env.SOLANA_RPC_TRITON_API_KEY),
     });
   }
 
@@ -110,9 +106,9 @@ function buildManagedRpcProviders(env: RpcEnv): ManagedRpcProvider[] {
   if (env.SOLANA_RPC_VALIDATIONCLOUD_URL) {
     providers.push({
       id: "validationcloud",
-      url: applyApiKeyTemplate(
+      url: withOptionalApiKeyTemplate(
         env.SOLANA_RPC_VALIDATIONCLOUD_URL,
-        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
+        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY
       ),
     });
   }

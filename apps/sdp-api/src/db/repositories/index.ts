@@ -126,6 +126,7 @@ export {
   DEFAULT_RINGS_OPERATION_LIST_LIMIT,
   generateHeliusRingsOperationId,
   mapHeliusRingsOperationSummaryRow,
+  RETIRED_APPROVAL_FAILURE,
 } from "./helius-rings-operation.repository";
 export { createPostgresHeliusRingsOperationRepository } from "./helius-rings-operation.repository.postgres";
 export type {

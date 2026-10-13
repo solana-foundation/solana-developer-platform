@@ -41,7 +41,6 @@ const FLAG_CAPS = {
   rampProviderBvnk: { rampProvider: "bvnk" },
   rampProviderMoneygram: { rampProvider: "moneygram" },
   rampProviderCoinbase: { rampProvider: "coinbase" },
-  rampProviderMural: { rampProvider: "mural" },
   rampProviderStripe: { rampProvider: "stripe" },
 } as const satisfies Record<keyof DashboardFlags, FlagCap>;
 
@@ -93,7 +92,6 @@ const RAMP_PROVIDER_FLAG_NAMES = {
   bvnk: "rampProviderBvnk",
   moneygram: "rampProviderMoneygram",
   coinbase: "rampProviderCoinbase",
-  mural: "rampProviderMural",
   stripe: "rampProviderStripe",
 } as const satisfies Record<RampProviderId, keyof DashboardFlags>;
 

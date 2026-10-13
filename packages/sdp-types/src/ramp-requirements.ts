@@ -183,21 +183,13 @@ export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: "bvnk"; status: "customer_verification_failed" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
   | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
-  | { provider: "mural"; status: "onboarding_not_started" }
-  | { provider: "mural"; status: "terms_of_service_required"; termsOfServiceUrl: string }
-  | { provider: "mural"; status: "customer_verification_required"; verificationUrl: string }
-  | { provider: "mural"; status: "customer_verifying" }
-  | { provider: "mural"; status: "customer_verification_failed" }
-  | { provider: "mural"; status: "funding_account_provisioning" }
 );
 
 export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
-  "terms_of_service_required",
   "customer_verification_required",
   "customer_verifying",
   "counterparty_agreement_signing",
   "customer_funding_account_provisioning",
-  "funding_account_provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type CounterpartyRequirementsPollStatus =
@@ -219,7 +211,6 @@ export const RAMP_ONBOARDING_PENDING_STATUSES = [
   "customer_verifying",
   "counterparty_agreement_signing",
   "customer_funding_account_provisioning",
-  "funding_account_provisioning",
 ] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type RampOnboardingPendingStatus = (typeof RAMP_ONBOARDING_PENDING_STATUSES)[number];

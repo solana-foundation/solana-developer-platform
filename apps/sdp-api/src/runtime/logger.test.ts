@@ -115,10 +115,10 @@ describe("logger PII scrubbing", () => {
   it("redacts an address that only appears inside the message", () => {
     const { logger, records } = captureLogger();
 
-    logger.warn({ provider: "mural" }, "rejected quote for jane.doe@example.com");
+    logger.warn({ provider: "stripe" }, "rejected quote for jane.doe@example.com");
 
     expect(records[0].message).toBe("rejected quote for [REDACTED_EMAIL]");
-    expect(records[0].provider).toBe("mural");
+    expect(records[0].provider).toBe("stripe");
   });
 
   it("redacts credentials that leaked into a provider error message", () => {

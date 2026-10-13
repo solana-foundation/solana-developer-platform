@@ -73,7 +73,7 @@ function toLocalDateTime(value: string | null): string {
 function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAuthoringDraft {
   const empty = createApiKeyAuthoringDraft();
   if (!initialKey) return empty;
-  const allowedOperations = initialKey.allowedOperations ?? [];
+  const { allowedOperations } = initialKey;
   return {
     ...empty,
     name: initialKey.name,
@@ -455,7 +455,6 @@ function OperationsPicker({
                     type="checkbox"
                     checked={state === "all"}
                     ref={(element) => {
-                      // Only part of the family is ticked: show a dash instead of a tick.
                       if (element) element.indeterminate = state === "some";
                     }}
                     onChange={() =>
@@ -852,7 +851,12 @@ export function ApiKeyAuthoringWorkspace({
 
   const submit = () => {
     startTransition(async () => {
-      const result = await saveApiKeyAuthoringAction({ mode, keyId: initialKey?.id, draft });
+      const result = await saveApiKeyAuthoringAction({
+        mode,
+        keyId: initialKey?.id,
+        draft,
+        operationsTouched,
+      });
       if (!result.ok) {
         toast.error(result.message, { position: "bottom-right" });
         return;

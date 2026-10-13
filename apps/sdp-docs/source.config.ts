@@ -24,7 +24,6 @@ const ROTATOR_PROVIDERS = [
   "bvnk",
   "moneygram",
   "coinbase",
-  "mural",
   "stripe",
 ] as const satisfies readonly RampProviderId[];
 
@@ -33,8 +32,8 @@ type Rotation = { flag: string; token: string; prefix: string; values: readonly 
 /**
  * Each rotation swaps `token` in fences tagged with `flag` for a carousel of
  * `values`, with `prefix` re-emitted as plain text before the carousel (so a
- * leading `/` can sit outside the chip). Every values list must have exactly
- * 7 entries — the CSS keyframes in ramp-rotator.css step through 7 rows.
+ * leading `/` can sit outside the chip). A list of n values animates with the
+ * `rpr-track-<n>` keyframes in ramp-rotator.css, so a new length needs its own.
  */
 const ROTATIONS = [
   {
@@ -112,7 +111,7 @@ const rampProviderRotator: ShikiTransformer = {
           {
             type: "element",
             tagName: "span",
-            properties: { className: ["rpr-track"] },
+            properties: { className: ["rpr-track", `rpr-track-${rotation.values.length}`] },
             children: items,
           },
         ],
