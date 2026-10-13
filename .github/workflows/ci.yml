@@ -734,8 +734,15 @@ jobs:
           pnpm --filter sdp-docs generate:api
           pnpm --filter sdp-docs generate:ai
 
-      # The generator also rewrites the tracked reference/api index and meta,
-      # which public/ only reflects indirectly through llms-full.txt.
+      # Fail when a committed file written by the two generate commands above is
+      # out of date, so an OpenAPI or docs change can't merge without its
+      # regenerated output. To fix a failure, run those commands and commit the
+      # result. The checked paths:
+      #   - public/: llms.txt, llms-full.txt and the Postman collection.
+      #   - content/docs/reference/api/: index.mdx and meta.json, which list the
+      #     API families. The per-family pages are gitignored and built at deploy.
+      #   - content/docs/meta.json: the root sidebar; regenerating must leave it
+      #     unchanged.
       - name: Committed docs artifacts match generated output
         run: >-
           git diff --exit-code
@@ -743,6 +750,9 @@ jobs:
           apps/sdp-docs/content/docs/meta.json
           apps/sdp-docs/content/docs/reference/api
 
+      # The dashboard's API playground lists operations from a catalog generated
+      # from the public OpenAPI spec. To fix a failure, run
+      # `pnpm generate:api-playground` and commit the catalog.
       - name: API playground catalog matches the public spec
         run: pnpm check:api-playground
 
