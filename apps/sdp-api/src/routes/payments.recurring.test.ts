@@ -30,6 +30,7 @@ import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as organizationAccess from "@/lib/organization-access";
+import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { rootLogger } from "@/runtime/logger";
@@ -4362,6 +4363,12 @@ describe("Payments routes — recurring", () => {
 
   describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
     const keyed = (key: string) => ({ ...RECURRING_HEADERS, "Idempotency-Key": key });
+    /** What the domain rows store for a key: bound to the test API key (ADR 0008). */
+    const recordKey = (key: string) =>
+      deriveIdempotencyRecordKey(
+        { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, principal: TEST_API_KEY.id },
+        key
+      );
     const errorCode = async (response: Response) =>
       z.object({ error: z.object({ code: z.string() }) }).parse(await response.json()).error.code;
     const actionPath = (id: string, action?: string) =>
@@ -4410,7 +4417,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           `UPDATE ${input.attemptTable} SET status = 'processing', updated_at = ? WHERE idempotency_key = ?`
         )
-        .bind(now, input.key)
+        .bind(now, recordKey(input.key))
         .run();
       expect(updated).toBe(1);
     }
@@ -4486,7 +4493,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           "SELECT operation, status, stage FROM payment_recurring_payment_lifecycle_attempts WHERE idempotency_key = ?"
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ operation: string; status: string; stage: string }>();
       expect(attempt).toEqual({ operation: "cancel", status: "confirmed", stage: "finalize" });
       await forgetIdempotencyKey(key);
@@ -4623,7 +4630,7 @@ describe("Payments routes — recurring", () => {
           `SELECT status FROM payment_recurring_payment_activation_attempts
             WHERE idempotency_key = ? ORDER BY created_at`
         )
-        .bind(key)
+        .bind(recordKey(key))
         .all<{ status: string }>();
       expect(attempts.results).toEqual([{ status: "failed" }, { status: "confirmed" }]);
     });
@@ -4717,7 +4724,7 @@ describe("Payments routes — recurring", () => {
             TEST_PROJECT.id,
             created.id,
             status,
-            key
+            recordKey(key)
           )
           .run();
 
@@ -4917,7 +4924,7 @@ describe("Payments routes — recurring", () => {
              FROM payment_recurring_payment_update_attempts
             WHERE idempotency_key = ?`
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ status: string; stage: string; fingerprinted: boolean }>();
       expect(attempt).toEqual({ status: "confirmed", stage: "finalize", fingerprinted: true });
       await forgetIdempotencyKey(key);
@@ -4960,7 +4967,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           "SELECT COUNT(*)::integer AS count FROM payment_recurring_payments WHERE idempotency_key = ?"
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ count: number }>();
       expect(schedules).toEqual({ count: 1 });
     });

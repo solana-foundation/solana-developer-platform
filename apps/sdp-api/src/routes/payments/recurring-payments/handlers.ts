@@ -18,7 +18,7 @@ import {
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyClaim } from "@/middleware/idempotency";
+import { getIdempotencyClaim, getIdempotencyRecordKey } from "@/middleware/idempotency";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -98,10 +98,12 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
  */
 function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
   const claim = getIdempotencyClaim(c);
-  if (claim === undefined) {
+  const recordKey = getIdempotencyRecordKey(c);
+  if (claim === undefined || recordKey === undefined) {
     throw internalError("Recurring payment request reached the handler without an Idempotency-Key");
   }
-  return claim;
+  // The credential-bound record key (ADR 0008), never the raw client key.
+  return { key: recordKey, fingerprint: claim.fingerprint };
 }
 
 /**

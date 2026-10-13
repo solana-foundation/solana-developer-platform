@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
 import type { Env } from "@/types/env";
 import { type AuthorizeInput, getAuthorized, validatedInput } from "./authorize";
-import { parseIdempotencyKey } from "./idempotency-key";
+import { getIdempotencyRecordKey } from "./idempotency";
 
 /**
  * The steps between `idempotent()` and a money-moving handler (HOO-1918, ADR
@@ -39,13 +39,14 @@ export function replayFromRecord<TAuthorized>(
   find: (
     c: StepContext,
     input: MovementStepInput<TAuthorized>,
-    idempotencyKey: string
+    recordKey: string
   ) => Promise<Response | null>
 ): MiddlewareHandler<{ Bindings: Env }> {
   return async (c, next: Next) => {
-    const idempotencyKey = parseIdempotencyKey(c);
-    if (idempotencyKey !== undefined) {
-      const answered = await find(c, stepInput<TAuthorized>(c), idempotencyKey);
+    // The credential-bound record key (`getIdempotencyRecordKey`), never the raw header.
+    const recordKey = getIdempotencyRecordKey(c);
+    if (recordKey !== undefined) {
+      const answered = await find(c, stepInput<TAuthorized>(c), recordKey);
       if (answered !== null) {
         return answered;
       }

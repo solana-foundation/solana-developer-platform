@@ -4,6 +4,7 @@ import { AppError, forbidden } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { authorize } from "./authorize";
+import { deriveIdempotencyRecordKey } from "./idempotency";
 import { admit, replayFromRecord } from "./movement-steps";
 
 function testApp(): Hono<{ Bindings: Env }> {
@@ -18,20 +19,50 @@ function testApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
+const KEY_ID = "key_movement_steps";
+const ORG_ID = "org_movement_steps";
+
+/** Stands in for auth and idempotent(): the credential, and the key it claimed from the header. */
+function claimFromHeader(app: Hono<{ Bindings: Env }>): void {
+  app.use(async (c, next) => {
+    c.set("apiKey", {
+      id: KEY_ID,
+      organizationId: ORG_ID,
+      projectId: "prj_movement_steps",
+      role: "api_admin",
+      permissions: [],
+      environment: "sandbox",
+      signingWalletId: null,
+    });
+    const key = c.req.header("Idempotency-Key");
+    if (key !== undefined) {
+      c.set("idempotencyClaimedKey", key);
+      c.set("idempotencyFingerprint", "fp");
+    }
+    await next();
+  });
+}
+
 function post(app: Hono<{ Bindings: Env }>, headers: Record<string, string> = {}) {
   return app.request("/v1/move", { method: "POST", headers }, env);
 }
 
 describe("movement steps", () => {
   it("answers from the domain row before admission, so admission never refuses a request that ran", async () => {
+    // The finder is handed the credential-bound record key, never the raw header.
+    const ran = deriveIdempotencyRecordKey(
+      { organizationId: ORG_ID, projectId: null, principal: KEY_ID },
+      "ran"
+    );
     const find = vi.fn(async (_c, input: { authorized: { walletId: string } }, key: string) =>
-      key === "ran" ? new Response(`row for ${input.authorized.walletId}`) : null
+      key === ran ? new Response(`row for ${input.authorized.walletId}`) : null
     );
     const refuse = vi.fn(async () => {
       throw forbidden("organization may not start movements");
     });
     const handler = vi.fn(() => new Response("moved"));
     const app = testApp();
+    claimFromHeader(app);
     app.post(
       "/v1/move",
       authorize(() => ({ walletId: "w1" })),

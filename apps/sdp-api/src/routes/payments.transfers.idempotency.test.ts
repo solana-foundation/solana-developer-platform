@@ -4,6 +4,7 @@ import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
@@ -12,7 +13,10 @@ import {
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
+  TEST_ORG,
+  TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  TEST_USER,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
@@ -74,6 +78,69 @@ describe("Payments routes — transfer idempotency", () => {
     );
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
+  it("binds the domain row to its credential: past the key record, the same credential replays and another runs as new", async () => {
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+        signerAddress: TEST_MOCK_FEE_PAYER,
+      }),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi.fn(),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const otherKey = {
+      id: "key_payments_other",
+      raw: "sk_test_payments_other",
+      prefix: "sk_test_oth",
+    };
+    await seedProjectApiKey(getDb(env), env, {
+      key: otherKey,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
+    });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+    };
+    const expireKeyRecords = () =>
+      getDb(env).execute(
+        "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = ?",
+        ["xfer-shared-key"]
+      );
+
+    const first = await postTransfer(body, { idempotencyKey: "xfer-shared-key" });
+    expect(first.status).toBe(200);
+    const firstId = (await readTransferResponse(first)).data.transfer.id;
+    await expireKeyRecords();
+
+    const sameCredential = await postTransfer(body, { idempotencyKey: "xfer-shared-key" });
+    expect(sameCredential.status).toBe(200);
+    expect((await readTransferResponse(sameCredential)).data.transfer.id).toBe(firstId);
+    expect(await countTransferRows()).toBe(1);
+    await expireKeyRecords();
+
+    // A new transfer signs new bytes: a fresh blockhash keeps its signature distinct.
+    getRecentBlockhashMock.mockResolvedValue({
+      blockhash: TEST_SOLANA_ADDRESSES.wallet3 as Awaited<
+        ReturnType<typeof solanaRpc.getRecentBlockhash>
+      >["blockhash"],
+      lastValidBlockHeight: 1000n,
+    });
+    const otherCredential = await postTransfer(body, {
+      idempotencyKey: "xfer-shared-key",
+      auth: { kind: "api_key", raw: otherKey.raw },
+    });
+    expect(otherCredential.status).toBe(200);
+    expect((await readTransferResponse(otherCredential)).data.transfer.id).not.toBe(firstId);
+    expect(await countTransferRows()).toBe(2);
   });
 
   it("replays a failed transfer on retry without submitting again", async () => {
