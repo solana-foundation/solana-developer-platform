@@ -541,18 +541,30 @@ export function createClusterReadRpc(options: ClusterRpcOptions): SolanaRpc {
   return rpc;
 }
 
+declare global {
+  interface JSON {
+    /**
+     * Node 21+ (V8 11.4+), not yet in TypeScript's lib: a value `JSON.stringify` writes as `text`
+     * verbatim.
+     *
+     * @param text - JSON text for a primitive.
+     * @returns The raw JSON value.
+     */
+    rawJSON(text: string): unknown;
+  }
+}
+
 /**
  * JSON text for a response the door's transport decoded: kit's Solana HTTP transport parses every
- * integer as a bigint, so each one is written back as the bare integer it was on the wire. Same
- * value-object round trip as kit's own (unexported) `stringifyJsonWithBigInts`.
+ * integer as a bigint, so each one is written back as the bare integer it was on the wire.
  *
  * @param value - The decoded JSON-RPC response.
  * @returns The response as JSON text, integers at full precision.
  */
 function jsonTextWithBigInts(value: unknown): string {
   return JSON.stringify(value, (_key, member: unknown) =>
-    typeof member === "bigint" ? { $n: member.toString() } : member
-  ).replace(/\{\s*"\$n"\s*:\s*"(-?\d+)"\s*\}/g, "$1");
+    typeof member === "bigint" ? JSON.rawJSON(member.toString()) : member
+  );
 }
 
 /**
@@ -600,6 +612,9 @@ export function createClusterJsonRpcFetch(options: ClusterRpcOptions): typeof fe
       throw new TypeError("The cluster JSON-RPC fetch sends only a JSON string body");
     }
     const payload = parseJsonWithLargeIntegers(init.body);
+    if (Array.isArray(payload)) {
+      throw new TypeError("The cluster JSON-RPC fetch sends one JSON-RPC request at a time");
+    }
     const response = await boundedTransport<unknown>({
       payload,
       ...(init.signal ? { signal: init.signal } : {}),

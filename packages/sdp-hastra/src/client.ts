@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { HastraEarnClient } from "@sdp/earn/providers/hastra/client";
+import { assertRuntimeMatchesScope } from "@sdp/earn/runtime-scope";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -1829,6 +1830,7 @@ export class HastraVaultDirectClient
     runtime: HastraRuntime;
     config: HastraClusterConfig;
   } {
+    assertRuntimeMatchesScope(ctx, "Hastra");
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const config = hastraClusterConfig(cluster);
     return {

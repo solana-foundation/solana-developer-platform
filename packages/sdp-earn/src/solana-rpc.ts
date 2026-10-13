@@ -146,7 +146,8 @@ export type RpcAccount = { data?: [string, string] } | null;
  * @returns The response's `result`.
  * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the cluster has no endpoint configured;
  *   `PROVIDER_UNAVAILABLE` when the read fails; `INTERNAL_ERROR` on a JSON-RPC error or no result.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope; `RPC_CLUSTER_MISMATCH` when
+ *   the pool serves another cluster.
  */
 export async function solanaRpcCall<T>(
   provider: EarnProviderId,

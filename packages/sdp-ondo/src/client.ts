@@ -1,5 +1,6 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { OndoEarnClient } from "@sdp/earn/providers/ondo/client";
+import { assertRuntimeMatchesScope } from "@sdp/earn/runtime-scope";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -205,6 +206,7 @@ export class OndoVaultDirectClient
     runtime: OndoRuntime;
     config: OndoClusterConfig;
   } {
+    assertRuntimeMatchesScope(ctx, "Ondo");
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const config = ondoClusterConfig(cluster);
     return {
