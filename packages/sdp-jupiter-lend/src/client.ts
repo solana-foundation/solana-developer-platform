@@ -29,10 +29,11 @@ import type {
 import { readStamp } from "@sdp/rpc/read-context";
 import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
+// biome-ignore lint/style/noRestrictedImports: type-only: the client takes the door-built Connection from ./rpc
+import type { Connection } from "@solana/web3.js";
 import {
   type AccountInfo,
   type Commitment,
-  type Connection,
   type GetAccountInfoConfig,
   PublicKey,
   TransactionInstruction,

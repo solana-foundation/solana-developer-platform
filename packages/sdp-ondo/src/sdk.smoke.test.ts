@@ -1,4 +1,5 @@
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { wellKnownMint } from "@sdp/types";
@@ -8,7 +9,6 @@ import {
   appendTransactionMessageInstructions,
   compressTransactionMessageUsingAddressLookupTables,
   createKeyPairSignerFromPrivateKeyBytes,
-  createSolanaRpc,
   createTransactionMessage,
   fetchAddressesForLookupTables,
   getBase64EncodedWireTransaction,
@@ -167,7 +167,7 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Ondo plans against a surfpool mainnet 
   }
 
   async function signAndLand(plan: EarnVaultTransactionPlan) {
-    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const rpc = runInClusterScope(SMOKE_SCOPE, createClusterRpc);
     const owner = await signer();
     const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
 

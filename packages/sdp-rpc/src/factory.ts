@@ -690,3 +690,60 @@ export function createClusterDasRpc(): DasRpc | null {
   clusterDasRpcs.set(dasRpcKey, dasRpc);
   return dasRpc;
 }
+
+/** Request headers kit's HTTP transport accepts; it rejects forbidden ones at runtime too. */
+export type RpcRequestHeaders = NonNullable<
+  Parameters<typeof createDefaultRpcTransport>[0]["headers"]
+>;
+
+/** Behaviour options for a client of one endpoint outside the managed pool. */
+export type EndpointRpcOptions = Readonly<{
+  /** Deadline for each request, combined with the caller's own signal when it passes one. */
+  timeoutMs: number;
+  /** Sent with every request, e.g. a channel gateway's `Authorization` bearer token. */
+  headers?: RpcRequestHeaders;
+}>;
+
+/**
+ * A Solana JSON-RPC client for one endpoint that is NOT part of the managed pool: a Private
+ * Channels gateway (a different chain, so no cluster genesis guard can apply) or a URL a tenant
+ * supplied. Each request gets the per-attempt deadline and the read socket retry; there is no
+ * genesis guard, no failover and no memoization, so each call builds a fresh client. Never give
+ * it a managed pool URL: managed reads go through `createClusterRpc()` and its siblings, which
+ * read the cluster from the open scope and prove every endpoint's genesis.
+ *
+ * @param endpointUrl - The non-managed endpoint's URL; never logged or put in an error.
+ * @param options - The client's behaviour.
+ * @param options.timeoutMs - The deadline for each request.
+ * @param options.headers - Headers sent with every request.
+ * @returns The RPC client for the endpoint.
+ */
+export function createEndpointRpc(endpointUrl: string, options: EndpointRpcOptions): SolanaRpc {
+  return createEndpointRpcFromTransport(
+    createDefaultRpcTransport({
+      url: endpointUrl,
+      headers: options.headers,
+    }),
+    { timeoutMs: options.timeoutMs }
+  );
+}
+
+/**
+ * `createEndpointRpc` over a caller-owned transport, for a non-managed endpoint that must be
+ * dialed through a specific egress path (a tenant URL through the DNS-guarded customer
+ * transport). Same per-attempt deadline and read socket retry, no genesis guard, no pool, no
+ * memoization. Never give it a transport to a managed pool endpoint.
+ *
+ * @param endpointTransport - The transport to the non-managed endpoint.
+ * @param options - The client's behaviour.
+ * @param options.timeoutMs - The deadline for each request.
+ * @returns The RPC client over `endpointTransport`.
+ */
+export function createEndpointRpcFromTransport(
+  endpointTransport: RpcTransport,
+  options: Pick<EndpointRpcOptions, "timeoutMs">
+): SolanaRpc {
+  return createSolanaRpcFromTransport(
+    withAttemptDeadline(withReadSocketRetry(endpointTransport), options.timeoutMs)
+  );
+}

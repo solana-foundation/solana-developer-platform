@@ -35,12 +35,6 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
-
-vi.spyOn(solanaRpc, "createClusterRpc").mockImplementation((rpcEnv, _cluster, options) =>
-  solanaRpc.createRpc(rpcEnv, options)
-);
-
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
 export const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
@@ -397,60 +391,6 @@ export const USDC_TOKEN_SUPPLY_RESULT = {
   value: { amount: "1000000000000", decimals: 6, uiAmount: 1000000, uiAmountString: "1000000" },
 } as const satisfies JsonRpcResult;
 
-export function mockRecurringActivationRpc(options: {
-  tokenAccounts?: Array<{
-    pubkey: string;
-    mint: string;
-    amount: string;
-    decimals: number;
-    uiAmountString: string;
-  }>;
-}) {
-  const tokenAccounts = options.tokenAccounts ?? [
-    {
-      pubkey: TEST_SOLANA_ADDRESSES.wallet3,
-      mint: DEVNET_USDC_MINT,
-      amount: "1000000000",
-      decimals: 6,
-      uiAmountString: "1000",
-    },
-  ];
-
-  createRpcMock.mockReturnValue({
-    getTokenAccountsByOwner: () => ({
-      send: async () => ({
-        value: tokenAccounts.map((account) => ({
-          pubkey: account.pubkey,
-          account: {
-            data: {
-              parsed: {
-                info: {
-                  mint: account.mint,
-                  tokenAmount: {
-                    amount: account.amount,
-                    decimals: account.decimals,
-                    uiAmountString: account.uiAmountString,
-                  },
-                },
-              },
-            },
-          },
-        })),
-      }),
-    }),
-    getTokenSupply: () => ({
-      send: async () => ({
-        value: {
-          decimals: 6,
-        },
-      }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-}
-
 export async function recurringCollectionTransactionForSignature(options: {
   signature: Signature;
   decimals: number;
@@ -552,14 +492,6 @@ export function installPaymentsRouteTestHooks(): void {
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    createRpcMock.mockReturnValue({
-      getTokenSupply: () => ({
-        send: async () => ({ value: { decimals: 6 } }),
-      }),
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

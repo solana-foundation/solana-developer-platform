@@ -152,28 +152,25 @@ export async function buildTokenTransferInstructions(input: {
   };
 }
 
-async function broadcastTransfer(
-  env: Env,
-  input: {
-    instance: TransferInstance;
-    signer: TransactionSigner;
-    mint: Address;
-    /** Program owning the mint; seeds both ATA derivations. */
-    tokenProgram: Address;
-    decimals: number;
-    recipient: Address;
-    amountBaseUnits: bigint;
-    gatewayAuth: SpcAuthContext;
-    /**
-     * Called with the transaction's signature after signing and before the
-     * send, so the outcome of a request that dies mid-send stays resolvable:
-     * a persisted signature is what lets abandoned-reservation recovery ask
-     * SPC what happened instead of guessing. A 401 retry re-signs and reports
-     * its new signature the same way before its own send.
-     */
-    onSigned: (signature: Signature) => Promise<void>;
-  }
-): Promise<Signature> {
+async function broadcastTransfer(input: {
+  instance: TransferInstance;
+  signer: TransactionSigner;
+  mint: Address;
+  /** Program owning the mint; seeds both ATA derivations. */
+  tokenProgram: Address;
+  decimals: number;
+  recipient: Address;
+  amountBaseUnits: bigint;
+  gatewayAuth: SpcAuthContext;
+  /**
+   * Called with the transaction's signature after signing and before the
+   * send, so the outcome of a request that dies mid-send stays resolvable:
+   * a persisted signature is what lets abandoned-reservation recovery ask
+   * SPC what happened instead of guessing. A 401 retry re-signs and reports
+   * its new signature the same way before its own send.
+   */
+  onSigned: (signature: Signature) => Promise<void>;
+}): Promise<Signature> {
   const signer = input.signer;
   // The (blockhash-independent) instructions are built ONCE, outside the retried
   // gateway unit — a 401 retry re-signs against a fresh blockhash but must not
@@ -193,7 +190,7 @@ async function broadcastTransfer(
   // allowed to age across a separate round trip. Signing inside the unit also
   // means a 401 retry re-signs against a fresh blockhash and therefore carries a
   // NEW signature — resending identical bytes would be discarded as a duplicate.
-  return withGatewayRpc(env, input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
+  return withGatewayRpc(input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
     // SPC accepts and then discards `commitment` (one sequencer, no fork choice),
     // so the level here is inert; it is passed only to match the other SPC paths.
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(gatewayRpc, "confirmed");
@@ -342,7 +339,7 @@ export async function resolveAbandonedTransferReservation(
 
   const signature = parseSignature(row.signature);
   let latest = await settleTransfer(repo, row, { status: "submitted", signature });
-  const settled = await confirmAndPersistTransfer(env, repo, {
+  const settled = await confirmAndPersistTransfer(repo, {
     transferId: row.id,
     gatewayUrl: input.gatewayUrl,
     signature,
@@ -423,7 +420,7 @@ export async function createChannelTransfer(
     return input.onReplay(replay);
   }
 
-  const balance = await getChannelBalance(env, {
+  const balance = await getChannelBalance({
     instance: input.instance,
     owner: sender,
     mint,
@@ -473,7 +470,7 @@ export async function createChannelTransfer(
   let signature: Signature;
   let recordedSignature: Signature | null = null;
   try {
-    signature = await broadcastTransfer(env, {
+    signature = await broadcastTransfer({
       instance: input.instance,
       signer: input.signer,
       mint,
@@ -527,7 +524,7 @@ export async function createChannelTransfer(
     input.sdpUserId
   );
 
-  const settled = await confirmAndPersistTransfer(env, repo, {
+  const settled = await confirmAndPersistTransfer(repo, {
     transferId: pending.id,
     gatewayUrl: input.instance.gatewayUrl,
     signature,

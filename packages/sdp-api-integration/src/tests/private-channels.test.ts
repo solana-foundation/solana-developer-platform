@@ -15,7 +15,6 @@ import {
 } from "@sdp/private-channels";
 import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
-import { env } from "#env-impl";
 import {
   getGatewayUrl,
   PRIVATE_CHANNEL_CONFIGURED,
@@ -37,7 +36,7 @@ describe.skipIf(!PRIVATE_CHANNEL_CONFIGURED || !RUN_INTEGRATION_TESTS)(
     });
 
     it("gateway RPC: getLatestBlockhash succeeds against the gateway", async () => {
-      const rpc = createChannelGatewayRpc(env, getGatewayUrl());
+      const rpc = createChannelGatewayRpc(getGatewayUrl());
 
       const { value } = await rpc.getLatestBlockhash().send();
 
@@ -52,7 +51,7 @@ describe.skipIf(!PRIVATE_CHANNEL_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       // that it returns a balance. A positive path needs a member JWT (getSpcSession
       // + withGatewayRpc), and a member bearer is answered 403 on this method even
       // for its own verified wallet.
-      const rpc = createChannelGatewayRpc(env, getGatewayUrl());
+      const rpc = createChannelGatewayRpc(getGatewayUrl());
 
       await expect(getChannelTokenBalance(rpc, SAMPLE_OWNER, DEVNET_USDC)).rejects.toThrow(
         /401|[Uu]nauthorized/

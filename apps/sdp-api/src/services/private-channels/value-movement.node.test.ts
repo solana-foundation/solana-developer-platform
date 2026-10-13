@@ -1,4 +1,5 @@
 import * as spc from "@sdp/private-channels";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import {
@@ -15,6 +16,7 @@ import {
   mapPrivateChannelTransferRow,
   mapPrivateChannelWithdrawalRow,
 } from "@/db/repositories";
+import { installClusterRpcStub, runInJobClusterScope } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -35,6 +37,8 @@ let projectRpc: PrivateChannelProjectRpcClient;
 let failSend: Error | undefined;
 let signedBeforeSend: string[];
 
+const clusterRpc = installClusterRpcStub();
+
 beforeEach(async () => {
   await seedTestDatabase(env);
   const generated = await generateKeyPairSigner();
@@ -43,26 +47,21 @@ beforeEach(async () => {
   refresh = vi.fn(async () => "fresh-jwt");
   failSend = undefined;
   signedBeforeSend = [];
+  clusterRpc.answer("getAccountInfo", {
+    context: { slot: 0 },
+    value: {
+      owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+      data: ["", "base64"],
+      executable: false,
+      lamports: 0,
+      rentEpoch: 0,
+      space: 0,
+    },
+  });
   projectRpc = {
     cluster: "devnet",
     probe: async () => ({ ok: true, latencyMs: 0, version: "test" }),
-    rpc: solanaRpc.createRpcFromTransport(
-      vi.fn().mockResolvedValue({
-        jsonrpc: "2.0",
-        id: "pc-execution",
-        result: {
-          context: { slot: 0 },
-          value: {
-            owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
-            data: ["", "base64"],
-            executable: false,
-            lamports: 0,
-            rentEpoch: 0,
-            space: 0,
-          },
-        },
-      })
-    ),
+    rpc: runInJobClusterScope("sandbox", createClusterRpc),
   };
   const db = getDb(env);
   await db.batch([

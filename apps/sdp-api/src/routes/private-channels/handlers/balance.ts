@@ -61,7 +61,7 @@ export async function getPrivateChannelBalance(c: AppContext) {
     });
     const projectRpc = loadProjectRpcClient();
 
-    const balance = await getChannelBalance(c.env, {
+    const balance = await getChannelBalance({
       instance,
       owner,
       mint: parsed.data.mint,

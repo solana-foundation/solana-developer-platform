@@ -1,6 +1,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -39,7 +45,70 @@
       },
       "style": {
         "noNonNullAssertion": "warn",
-        "useConst": "error"
+        "useConst": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@solana/kit": {
+                "importNames": [
+                  "createSolanaRpc",
+                  "createSolanaRpcFromTransport",
+                  "createDefaultRpcTransport",
+                  "createRpc",
+                  "createJsonRpcApi",
+                  "createSolanaRpcSubscriptions",
+                  "createSolanaRpcSubscriptions_UNSTABLE",
+                  "createSolanaRpcSubscriptionsFromTransport",
+                  "*"
+                ],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@solana/rpc": {
+                "importNames": [
+                  "createSolanaRpc",
+                  "createSolanaRpcFromTransport",
+                  "createDefaultRpcTransport",
+                  "createRpc",
+                  "createJsonRpcApi",
+                  "*"
+                ],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@solana/web3.js": {
+                "importNames": ["Connection", "*"],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@solana/rpc-spec": {
+                "importNames": ["createRpc", "createJsonRpcApi", "*"],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@solana/rpc-subscriptions": {
+                "importNames": [
+                  "createSolanaRpcSubscriptions",
+                  "createSolanaRpcSubscriptions_UNSTABLE",
+                  "createSolanaRpcSubscriptionsFromTransport",
+                  "*"
+                ],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@sdp/rpc/solana": {
+                "importNames": [
+                  "createRpc",
+                  "createClusterRpc",
+                  "createRpcFromTransport",
+                  "createRpcForSdk",
+                  "createFailoverTransport"
+                ],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+              },
+              "@sdp/rpc/scope": {
+                "allowImportNames": ["currentClusterScope", "ClusterScope"],
+                "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+              }
+            }
+          }
+        }
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": {
@@ -193,6 +262,62 @@
                   "@sdp/types/provider-access": {
                     "importNames": ["RAMP_PROVIDERS"],
                     "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  },
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-spec": {
+                    "importNames": ["createRpc", "createJsonRpcApi", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-subscriptions": {
+                    "importNames": [
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/solana": {
+                    "importNames": [
+                      "createRpc",
+                      "createClusterRpc",
+                      "createRpcFromTransport",
+                      "createRpcForSdk",
+                      "createFailoverTransport"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   }
                 }
               }
@@ -210,42 +335,61 @@
       "linter": {
         "rules": {
           "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["**/apps/sdp-api/**/*.ts", "**/packages/**/*.ts"],
-      "linter": {
-        "rules": {
-          "style": {
             "noRestrictedImports": {
               "level": "error",
               "options": {
                 "paths": {
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-spec": {
+                    "importNames": ["createRpc", "createJsonRpcApi", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-subscriptions": {
+                    "importNames": [
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@sdp/rpc/solana": {
                     "importNames": [
                       "createRpc",
                       "createClusterRpc",
                       "createRpcFromTransport",
                       "createRpcForSdk",
-                      "createFailoverTransport",
-                      "*"
+                      "createFailoverTransport"
                     ],
-                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
-                  },
-                  "@solana/kit": {
-                    "importNames": [
-                      "createSolanaRpc",
-                      "createSolanaRpcFromTransport",
-                      "createDefaultRpcTransport",
-                      "createSolanaRpcSubscriptions",
-                      "createRpc",
-                      "createJsonRpcApi",
-                      "*"
-                    ],
-                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/scope": {
                     "allowImportNames": ["currentClusterScope", "ClusterScope"],
@@ -264,7 +408,8 @@
         "**/apps/sdp-api/**/test/**/*.ts",
         "**/packages/**/*.test.ts",
         "**/packages/**/*.spec.ts",
-        "**/packages/**/test/**/*.ts"
+        "**/packages/**/test/**/*.ts",
+        "**/packages/sdp-api-integration/src/**/*.ts"
       ],
       "linter": {
         "rules": {
@@ -273,6 +418,58 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-spec": {
+                    "importNames": ["createRpc", "createJsonRpcApi", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-subscriptions": {
+                    "importNames": [
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@sdp/rpc/solana": {
+                    "importNames": [
+                      "createRpc",
+                      "createClusterRpc",
+                      "createRpcFromTransport",
+                      "createRpcForSdk",
+                      "createFailoverTransport"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@sdp/rpc/scope": {
                     "allowImportNames": [
                       "currentClusterScope",
@@ -307,28 +504,57 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@solana/kit": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc": {
+                    "importNames": [
+                      "createSolanaRpc",
+                      "createSolanaRpcFromTransport",
+                      "createDefaultRpcTransport",
+                      "createRpc",
+                      "createJsonRpcApi",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-spec": {
+                    "importNames": ["createRpc", "createJsonRpcApi", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/rpc-subscriptions": {
+                    "importNames": [
+                      "createSolanaRpcSubscriptions",
+                      "createSolanaRpcSubscriptions_UNSTABLE",
+                      "createSolanaRpcSubscriptionsFromTransport",
+                      "*"
+                    ],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@sdp/rpc/solana": {
                     "importNames": [
                       "createRpc",
                       "createClusterRpc",
                       "createRpcFromTransport",
                       "createRpcForSdk",
-                      "createFailoverTransport",
-                      "*"
+                      "createFailoverTransport"
                     ],
-                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
-                  },
-                  "@solana/kit": {
-                    "importNames": [
-                      "createSolanaRpc",
-                      "createSolanaRpcFromTransport",
-                      "createDefaultRpcTransport",
-                      "createSolanaRpcSubscriptions",
-                      "createRpc",
-                      "createJsonRpcApi",
-                      "*"
-                    ],
-                    "message": "Build Solana RPC clients only through createClusterRpc() from @sdp/rpc/factory, which reads the open cluster scope. Files still on the legacy constructors are listed in the last biome.json override; remove a file from that list when it moves onto the door. See docs/decisions/0007-cluster-scope-ambient.md."
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/scope": {
                     "allowImportNames": [
@@ -346,27 +572,11 @@
       }
     },
     {
-      "includes": [
-        "**/packages/sdp-rpc/src/**/*.ts",
-        "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
-        "**/packages/sdp-api-integration/src/helpers/integration.ts",
-        "**/packages/sdp-helius-rings-sdk/scripts/verify-usdc-pdas.ts",
-        "**/packages/sdp-private-channels/src/gateway.ts"
-      ],
+      "includes": ["**/packages/sdp-rpc/**"],
       "linter": {
         "rules": {
           "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "paths": {
-                  "@sdp/rpc/scope": {
-                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
-                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
-                  }
-                }
-              }
-            }
+            "noRestrictedImports": "off"
           }
         }
       }

@@ -9,6 +9,7 @@ import {
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type Commitment,
+  // biome-ignore lint/style/noRestrictedImports: the door's one web3.js Connection, sending only through createClusterJsonRpcFetch
   Connection,
   type GetProgramAccountsConfig,
   type GetProgramAccountsResponse,

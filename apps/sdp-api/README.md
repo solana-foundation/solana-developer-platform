@@ -118,7 +118,7 @@ Create `apps/sdp-api/.env.local` with at least:
 SDP_DEPLOYMENT_MODE=self_hosted
 
 # Use an RPC endpoint that supports the methods exercised by the API
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 
 # Wallet signer (generate both values with `pnpm --filter @sdp/api keygen:local`)
 SIGNING_PROVIDER=local
@@ -208,12 +208,12 @@ CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>  # required by EncryptionSer
 FEE_PAYMENT_PROVIDER=native
 FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 
-# RPC — any single endpoint. The public devnet endpoint
+# RPC — any single endpoint per cluster. The public devnet endpoint
 # (https://api.devnet.solana.com) returns 403 for getTokenAccountsByOwner,
 # so wallet-balance queries will log "failed to fetch SPL balances" on every
 # refresh. Use a free Helius / Triton / QuickNode / Validation Cloud key or a
 # local solana-test-validator instead.
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 ```
 
 Generate `CUSTODY_PRIVATE_KEY` and `FEE_PAYER_PRIVATE_KEY` values:

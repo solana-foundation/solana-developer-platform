@@ -56,8 +56,8 @@ depend on finding this file.
   deposits) in the deployment, and a mainnet RPC the catalogue can reach.
   Ondo's availability gates on the Jupiter key, so without it the provider
   reports `configured: false` and no deposit action is offered. A devnet
-  deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`
-  (`resolveCatalogueRpcUrl` in `@sdp/earn`); without it the production pass
+  deployment reaches mainnet through the mainnet managed pool
+  (`SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL`); without it the production pass
   skips and the sandbox mirror stays empty. The rate and TVL need nothing
   extra: Ondo's assets API is public.
 - **Per-org**: `providerOverrides.earn.ondo` in the organization's Clerk

@@ -5,7 +5,6 @@ import type {
   AllowedOperation,
   ApiKeyEnvironment,
   OrganizationEntitlements,
-  OrganizationRpcProvider,
   Permission,
   SdpRampProviderStages,
 } from "@sdp/types";
@@ -98,18 +97,6 @@ export interface Env extends ManagedRpcEnv {
   ALLOWLIST_ADMIN_ORG_ID?: string;
 
   // Solana configuration
-  SOLANA_RPC_URL?: string;
-  /**
-   * Legacy per-cluster overrides read only by `@sdp/rpc`'s `resolveClusterRpcUrl`. Earn reads
-   * the chain through the door's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`).
-   */
-  SOLANA_DEVNET_RPC_URL?: string;
-  SOLANA_MAINNET_RPC_URL?: string;
-  SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
-  SOLANA_RPC_TRITON_URL?: string;
-  SOLANA_RPC_TRITON_API_KEY?: string;
-  SOLANA_RPC_HELIUS_URL?: string;
-  SOLANA_RPC_HELIUS_API_KEY?: string;
   /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
@@ -122,15 +109,6 @@ export interface Env extends ManagedRpcEnv {
    */
   JUPITER_SWAP_API_URL?: string;
   JUPITER_SWAP_API_KEY?: string;
-  SOLANA_RPC_ALCHEMY_URL?: string;
-  SOLANA_RPC_ALCHEMY_API_KEY?: string;
-  SOLANA_RPC_QUICKNODE_URL?: string;
-  SOLANA_RPC_QUICKNODE_API_KEY?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
-  SOLANA_RPC_NODIT_URL?: string;
-  SOLANA_RPC_NODIT_API_KEY?: string;
-  SOLANA_NETWORK?: "devnet" | "mainnet-beta";
   CUSTODY_PRIVATE_KEY?: string;
   SOLANA_MOCK?: string;
   RUN_INTEGRATION_TESTS?: string;

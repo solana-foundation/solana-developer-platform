@@ -1,8 +1,6 @@
 /**
- * Solana RPC Service
- *
- * Provides RPC client creation and transaction submission utilities
- * using the modern @solana/kit.
+ * Solana RPC helpers over a client the door (`@sdp/rpc/factory`) built: blockhash, submission,
+ * confirmation, simulation, account, signature and transaction reads.
  */
 
 import {
@@ -11,28 +9,18 @@ import {
   type Blockhash,
   type Commitment,
   commitmentComparator,
-  createDefaultRpcTransport,
   type createSolanaRpc,
-  createSolanaRpcFromTransport,
   fetchEncodedAccount,
   getBase64Decoder,
   getTransactionDecoder,
-  type RpcTransport,
   type Signature,
   type Slot,
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import {
-  explicitClusterRpcUrl,
-  getSolanaConfig,
-  resolveDefaultCluster,
-  resolveSolanaRpcProviderUrls,
-} from "./config";
 import { solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
-import type { RpcEnv } from "./types";
 
 export { fetchWithReadSocketRetry } from "./socket-retry";
 export { withReadSocketRetry };
@@ -60,197 +48,10 @@ export interface SimulationResult {
   error: string | null;
 }
 
-/** Request headers kit's HTTP transport accepts; it rejects forbidden ones at runtime too. */
-export type RpcRequestHeaders = NonNullable<
-  Parameters<typeof createDefaultRpcTransport>[0]["headers"]
->;
-
-export interface RpcClientOptions {
-  rpcUrl?: string;
-  headers?: RpcRequestHeaders;
-  /**
-   * Per-request transport deadline. A stalled HTTP request (socket open, no
-   * response) rejects after this long instead of hanging the caller forever.
-   * Callers that pass their own `abortSignal` to `.send()` keep full control.
-   */
-  requestTimeoutMs?: number;
-  /** Optional caller-owned transport middleware, applied to every provider. */
-  wrapTransport?: (transport: RpcTransport) => RpcTransport;
-}
-
 export const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 // Type for RPC client
 export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// RPC Client Factory
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Wrap a transport so every request carries a deadline. Without one, a stalled
- * HTTP request (socket open, server never responds) hangs the awaiting caller
- * indefinitely — deadlines like `confirmTransaction`'s `timeoutMs` are only
- * checked between polls, so a single hung fetch defeats them.
- */
-export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
-  return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
-    if (config.signal) {
-      // The caller manages cancellation; don't override it.
-      return await transport<TResponse>(config);
-    }
-    // AbortController + setTimeout (not AbortSignal.timeout) so the timer is
-    // cleared on settle and behaves consistently in Node and test environments.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await transport<TResponse>({ ...config, signal: controller.signal });
-    } catch (error) {
-      if (controller.signal.aborted) {
-        // Deterministic, transient-classified message (see transient.ts).
-        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-}
-
-const lastGoodTransportIndex = new Map<string, number>();
-
-/**
- * Wrap an ordered set of provider transports in per-request failover: a
- * transient failure (429/5xx/transport error) advances to the next provider,
- * and the last index that answered is remembered per `stickyKey` so later
- * requests start on the healthy provider instead of rediscovering the outage.
- *
- * `sendTransaction` never fails over: a transient-looking failure can arrive
- * after the transaction reached the leader, and resubmitting through another
- * provider risks a double-send. It runs once, against the sticky provider.
- */
-export function createFailoverTransport(
-  transports: readonly RpcTransport[],
-  options: { stickyKey?: string } = {}
-): RpcTransport {
-  if (transports.length === 1) {
-    return transports[0];
-  }
-  const key = options.stickyKey;
-  return async <TResponse>(request: Parameters<RpcTransport>[0]): Promise<TResponse> => {
-    const payload = request.payload as { method?: unknown } | null | undefined;
-    const method = payload && typeof payload.method === "string" ? payload.method : undefined;
-    const start = (key ? lastGoodTransportIndex.get(key) : undefined) ?? 0;
-    const attempts = method === "sendTransaction" ? 1 : transports.length;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const index = (start + attempt) % transports.length;
-      try {
-        const result = await transports[index]<TResponse>(request);
-        if (key !== undefined && index !== start) {
-          lastGoodTransportIndex.set(key, index);
-        }
-        return result;
-      } catch (error) {
-        lastError = error;
-        if (attempt === attempts - 1 || !isTransientRpcError(error)) {
-          throw error;
-        }
-      }
-    }
-    throw lastError;
-  };
-}
-
-/**
- * Create a configured Solana RPC client from environment
- */
-export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
-  const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
-
-  // The socket retry sits below caller middleware, so a read-context scope
-  // only ever observes the attempt that answered.
-  const buildTransport = (url: string): RpcTransport => {
-    if (options?.headers && Object.keys(options.headers).length > 0) {
-      const transport = withReadSocketRetry(
-        createDefaultRpcTransport({ headers: options.headers, url })
-      );
-      return options.wrapTransport?.(transport) ?? transport;
-    }
-    const transport = withReadSocketRetry(createDefaultRpcTransport({ url }));
-    return options?.wrapTransport?.(transport) ?? transport;
-  };
-
-  // An explicit URL is already the complete endpoint selection. Do not force
-  // callers with a per-request/per-cluster URL to also configure the legacy
-  // process default merely to construct a client for that explicit endpoint.
-  if (options?.rpcUrl) {
-    return createRpcFromTransport(buildTransport(options.rpcUrl), {
-      requestTimeoutMs: timeoutMs,
-    });
-  }
-
-  const urls = resolveSolanaRpcProviderUrls(env);
-  if (urls.length === 0) {
-    // Preserves the single-URL error message callers have always seen.
-    getSolanaConfig(env);
-  }
-  // The deadline sits on each provider attempt, not around the whole failover:
-  // an outer deadline lets one stalled provider consume the entire budget and
-  // hands every later attempt an already-aborted signal. A stall costs at most
-  // timeoutMs per provider before the hop.
-  const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
-  return createSolanaRpcFromTransport(
-    createFailoverTransport(transports, { stickyKey: urls.join("|") })
-  );
-}
-
-/**
- * An RPC client for `cluster` on a process that may serve both clusters. An
- * explicit `SOLANA_<CLUSTER>_RPC_URL` wins for any cluster, the default
- * cluster included, so a pinned private endpoint is used for every read of
- * that cluster (Earn execution and sponsorship reconciliation must observe the
- * same chain). Without one, the process default cluster keeps the full
- * failover client `createRpc` builds, and the other cluster throws, so a
- * caller never silently reads or prices against the wrong chain.
- *
- * @deprecated Use `createClusterRpc()` from `@sdp/rpc/factory`, which reads the cluster from the
- * open cluster scope; this one is deleted once its callers move (HOO-1879).
- */
-export function createClusterRpc(
-  env: RpcEnv,
-  cluster: "devnet" | "mainnet-beta",
-  options?: Omit<RpcClientOptions, "rpcUrl">
-): SolanaRpc {
-  const rpcUrl = explicitClusterRpcUrl(env, cluster);
-  if (rpcUrl) return createRpc(env, { ...options, rpcUrl });
-  if (cluster === resolveDefaultCluster(env)) return createRpc(env, options);
-  throw new Error(
-    `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
-  );
-}
-
-/** Build the standard SDP Solana client around a caller-owned egress transport. */
-export function createRpcFromTransport(
-  transport: RpcTransport,
-  options: Pick<RpcClientOptions, "requestTimeoutMs" | "wrapTransport"> = {}
-): SolanaRpc {
-  const timeoutMs = options.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
-  return createSolanaRpcFromTransport(
-    withRequestTimeout(options.wrapTransport?.(transport) ?? transport, timeoutMs)
-  );
-}
-
-export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;
-
-export function createRpcForSdk<TSdkRpc>(
-  env: RpcEnv,
-  options?: RpcClientOptions
-): SolanaRpcSdkBridge<TSdkRpc> {
-  // Mosaic SDK still publishes Solana Kit v5 RPC types. The runtime client shape is
-  // compatible, so keep the cross-version cast at the boundary where SDK code is called.
-  return createRpc(env, options) as unknown as SolanaRpcSdkBridge<TSdkRpc>;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Blockhash Operations
