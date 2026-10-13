@@ -4,7 +4,6 @@ import {
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
-import { resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -77,10 +76,10 @@ export async function createRecurringPayment(input: {
     // A concurrent request with the same key won the insert: answer with its row.
     const raced =
       input.idempotency && isPostgresUniqueViolation(error)
-        ? await findKeyedRecurringPayment(input.env, input, input.idempotency)
+        ? await findKeyedRecurringPayment(input.env, input, input.idempotency.key)
         : null;
     if (!raced) throw error;
-    return raced;
+    return raced.recurringPayment;
   }
 
   if (!recurringPayment) {
@@ -91,34 +90,28 @@ export async function createRecurringPayment(input: {
 }
 
 /**
- * The schedule a create request's Idempotency-Key already made, or null for
- * none. The same key with a different request is refused (422).
+ * The schedule a create request's record key already made, with the key
+ * layer's fingerprint it recorded, or null for none. `replayFromRecord`
+ * compares the fingerprint.
  */
 export async function findKeyedRecurringPayment(
   env: Env,
   tenant: { organizationId: string; projectId: string },
-  idempotency: RecurringPaymentIdempotency
-): Promise<PaymentRecurringPaymentRow | null> {
+  idempotencyKey: string
+): Promise<{ recurringPayment: PaymentRecurringPaymentRow; fingerprint: string } | null> {
   const repository = createPaymentRecurringPaymentsRepository(env, createTenantScope(tenant));
-  const keyed = await resolveIdentityBoundIdempotencyReplay(
-    async () => {
-      const row = await repository.findRecurringPaymentByIdempotencyKey({
-        organizationId: tenant.organizationId,
-        projectId: tenant.projectId,
-        idempotencyKey: idempotency.key,
-      });
-      return row && { id: row.id, idempotency_fingerprint: row.idempotencyFingerprint };
-    },
-    idempotency.fingerprint,
-    // The key is scoped to the project; the fingerprint is the request identity.
-    () => true
-  );
-  if (!keyed) return null;
+  const keyed = await repository.findRecurringPaymentByIdempotencyKey({
+    organizationId: tenant.organizationId,
+    projectId: tenant.projectId,
+    idempotencyKey,
+  });
+  if (!keyed || keyed.idempotencyFingerprint === null) return null;
   // The route's authorize step already checked the caller's wallet access.
-  return repository.getRecurringPaymentById({
+  const recurringPayment = await repository.getRecurringPaymentById({
     recurringPaymentId: keyed.id,
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     walletAuthorization: null,
   });
+  return recurringPayment && { recurringPayment, fingerprint: keyed.idempotencyFingerprint };
 }

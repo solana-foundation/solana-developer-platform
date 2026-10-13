@@ -21,7 +21,6 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   generatePaymentTransferId,
-  type PaymentsRepository,
   RAMP_TRANSFER_TYPES,
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
@@ -46,16 +45,16 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import {
-  buildPaymentTransferFingerprint,
-  resolveIdentityBoundIdempotencyReplay,
-} from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyRecordKey, markIdempotencyCommitted } from "@/middleware/idempotency";
+import {
+  getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
+  markIdempotencyCommitted,
+} from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
-import type { MovementStepInput } from "@/middleware/movement-steps";
+import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
@@ -99,21 +98,6 @@ import {
 } from "./observed-transfers";
 import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
 
-async function resolveTransferIdempotencyReplay(
-  repository: PaymentsRepository,
-  organizationId: string,
-  projectId: string | null,
-  idempotencyKey: string,
-  fingerprint: string,
-  custodyWalletId: string
-): Promise<TransferRow | null> {
-  return resolveIdentityBoundIdempotencyReplay(
-    () => repository.findTransferByIdempotency({ organizationId, projectId, idempotencyKey }),
-    fingerprint,
-    (row) => row.custody_wallet_id === custodyWalletId
-  );
-}
-
 async function createTransferRecord(
   c: AppContext,
   input: {
@@ -131,41 +115,19 @@ async function createTransferRecord(
     status?: TransferStatus;
     serializedTx?: string;
     initiatedByKeyId?: string;
-    idempotencyKey?: string | null;
+    /**
+     * The request's credential-bound record key and the key layer's
+     * fingerprint, recorded on the row; `replayFromRecord` answers a retry
+     * from them before this runs.
+     */
+    idempotency: { key: string; fingerprint: string } | null;
     providerData?: Record<string, unknown>;
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
-  const idempotencyKey = input.idempotencyKey ?? null;
-  const fingerprintInput = {
-    custodyWalletId: input.custodyWalletId,
-    sourceAddress: input.sourceAddress,
-    destinationAddress: input.destinationAddress,
-    token: input.token,
-    amount: input.amount,
-    memo: input.memo,
-    type: input.type ?? "transfer",
-  };
-  const idempotencyFingerprint = idempotencyKey
-    ? buildPaymentTransferFingerprint(fingerprintInput)
-    : null;
-
+  const idempotencyKey = input.idempotency?.key ?? null;
   try {
     const db = getDb(c.env);
     const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
-
-    if (idempotencyKey && idempotencyFingerprint) {
-      const existing = await resolveTransferIdempotencyReplay(
-        repository,
-        input.organizationId,
-        input.projectId,
-        idempotencyKey,
-        idempotencyFingerprint,
-        input.custodyWalletId
-      );
-      if (existing) {
-        return { row: existing, replayed: true };
-      }
-    }
 
     const createdRow = await repository.createTransfer({
       id: generatePaymentTransferId(),
@@ -193,7 +155,7 @@ async function createTransferRecord(
       slot: null,
       initiatedByKeyId: input.initiatedByKeyId ?? null,
       idempotencyKey,
-      idempotencyFingerprint,
+      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
     });
 
     if (!createdRow) {
@@ -202,15 +164,14 @@ async function createTransferRecord(
 
     return { row: createdRow, replayed: false };
   } catch (error) {
-    if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
-      const existing = await resolveTransferIdempotencyReplay(
-        getPaymentsRepository(c),
-        input.organizationId,
-        input.projectId,
+    if (idempotencyKey && isPostgresUniqueViolation(error)) {
+      // A concurrent attempt under this key (a takeover) wrote the row first.
+      // The key layer holds one fingerprint per key, so it is this request's.
+      const existing = await getPaymentsRepository(c).findTransferByIdempotency({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
         idempotencyKey,
-        idempotencyFingerprint,
-        input.custodyWalletId
-      );
+      });
       if (existing) {
         return { row: existing, replayed: true };
       }
@@ -389,8 +350,8 @@ export async function admitTransferExecution(
 export async function findTransferRecordReplay(
   c: AppContext,
   input: MovementStepInput<TransferResolved>,
-  idempotencyKey: string
-): Promise<Response | null> {
+  recordKey: string
+): Promise<RecordAnswer | null> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
   const { scope, operation, rampTransfer: existing } = input.authorized;
@@ -404,29 +365,19 @@ export async function findTransferRecordReplay(
       existing.amount !== null &&
       compareDecimalAmounts(existing.amount, operation.amount) === 0
     ) {
-      return replayTransferRow(c, existing);
+      // The deposit row names its own request: checked here, not by fingerprint.
+      return { fingerprint: null, respond: () => replayTransferRow(c, existing) };
     }
     return null;
   }
 
-  const fingerprintInput = {
-    custodyWalletId: operation.sourceWallet.id,
-    sourceAddress: operation.sourceWallet.publicKey,
-    destinationAddress: body.destination,
-    token: operation.token,
-    amount: operation.amount,
-    memo: body.memo,
-    type: "transfer",
-  };
-  const replay = await resolveTransferIdempotencyReplay(
-    getPaymentsRepository(c),
-    scope.auth.organizationId,
-    scope.auth.projectId,
-    idempotencyKey,
-    buildPaymentTransferFingerprint(fingerprintInput),
-    operation.sourceWallet.id
-  );
-  return replay ? replayTransferRow(c, replay) : null;
+  const row = await getPaymentsRepository(c).findTransferByIdempotency({
+    organizationId: scope.auth.organizationId,
+    projectId: scope.auth.projectId,
+    idempotencyKey: recordKey,
+  });
+  if (row === null || row.idempotency_fingerprint === null) return null;
+  return { fingerprint: row.idempotency_fingerprint, respond: () => replayTransferRow(c, row) };
 }
 
 async function updateTransferRecord(
@@ -769,7 +720,10 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
   // The credential-bound record key (ADR 0008), never the raw client key.
-  const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
+  const recordKey = getIdempotencyRecordKey(c);
+  const fingerprint = getIdempotencyFingerprint(c);
+  const idempotency =
+    recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
 
   const reusedRampTransfer = rampTransfer !== null;
   const { row: transfer, replayed } = rampTransfer
@@ -794,7 +748,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         memo: body.memo,
         status: "processing",
         initiatedByKeyId: scope.auth.id,
-        idempotencyKey,
+        idempotency,
       });
 
   if (replayed) {

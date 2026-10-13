@@ -71,11 +71,12 @@ describe("Payments routes — transfer idempotency", () => {
     expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
     const stored = await readTransferRow(firstJson.data.transfer.id);
     expect(stored.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    if (!stored.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
-    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
-      "custodyWalletId",
-      TEST_CUSTODY_WALLET_ID
-    );
+    // The row records the key layer's fingerprint, which replayFromRecord compares.
+    const keyRecord = await getDb(env)
+      .prepare("SELECT fingerprint FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("xfer-key-1")
+      .first<{ fingerprint: string }>();
+    expect(stored.idempotency_fingerprint).toBe(keyRecord?.fingerprint);
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });

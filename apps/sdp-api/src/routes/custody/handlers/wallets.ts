@@ -15,10 +15,11 @@ import {
   providerUnavailable,
   serviceUnavailable,
 } from "@/lib/errors";
-import { deriveProviderRequestId, resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getIdempotencyClaim } from "@/middleware/idempotency";
+import type { RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
@@ -278,32 +279,28 @@ interface KeyedCustodyWalletRow {
  * lease takeover, or past the key's 24 hours. The provider is not called. The
  * same key with a different request is refused (422). Reads one row only.
  */
-export async function findCustodyWalletCreateReplay(c: AppContext): Promise<Response | null> {
+export async function findCustodyWalletCreateReplay(c: AppContext): Promise<RecordAnswer | null> {
   const idempotency = custodyWalletIdempotency(c);
   if (idempotency === null) return null;
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const row = await resolveIdentityBoundIdempotencyReplay(
-    () =>
-      getDb(c.env)
-        .prepare(
-          `SELECT w.id, w.custody_config_id, w.custody_connection_id, w.wallet_id, w.public_key,
-                  w.label, w.purpose, w.status, w.created_at, w.idempotency_fingerprint
-           FROM custody_wallets w
-           LEFT JOIN custody_configs cc ON cc.id = w.custody_config_id
-           LEFT JOIN custody_connections cn ON cn.id = w.custody_connection_id
-           WHERE w.idempotency_request_id = ?
-             AND COALESCE(cc.organization_id, cn.organization_id) = ?
-             AND COALESCE(cc.project_id, cn.project_id) = ?
-           LIMIT 1`
-        )
-        .bind(idempotency.requestId, auth.organizationId, projectId)
-        .first<KeyedCustodyWalletRow>(),
-    idempotency.fingerprint,
-    // The request id already binds the tenant and credential; the fingerprint is the request.
-    () => true
-  );
-  if (row === null) return null;
+  // The request id already binds the tenant and credential; `replayFromRecord`
+  // compares the fingerprint, which is the request.
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT w.id, w.custody_config_id, w.custody_connection_id, w.wallet_id, w.public_key,
+              w.label, w.purpose, w.status, w.created_at, w.idempotency_fingerprint
+       FROM custody_wallets w
+       LEFT JOIN custody_configs cc ON cc.id = w.custody_config_id
+       LEFT JOIN custody_connections cn ON cn.id = w.custody_connection_id
+       WHERE w.idempotency_request_id = ?
+         AND COALESCE(cc.organization_id, cn.organization_id) = ?
+         AND COALESCE(cc.project_id, cn.project_id) = ?
+       LIMIT 1`
+    )
+    .bind(idempotency.requestId, auth.organizationId, projectId)
+    .first<KeyedCustodyWalletRow>();
+  if (row === null || row.idempotency_fingerprint === null) return null;
   // custody_wallets_exactly_one_owner (0046): a row has a config or a connection.
   let owner: { custodyConfigId: string } | { custodyConnectionId: string };
   if (row.custody_config_id !== null) {
@@ -326,7 +323,7 @@ export async function findCustodyWalletCreateReplay(c: AppContext): Promise<Resp
       createdAt: row.created_at,
     },
   };
-  return created(c, response);
+  return { fingerprint: row.idempotency_fingerprint, respond: () => created(c, response) };
 }
 
 export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSchema>) => {
@@ -388,8 +385,9 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   } catch (error) {
     if (idempotency !== null && isCustodyWalletIdempotencyViolation(error)) {
       // A concurrent attempt under this key recorded the wallet first: answer from its row.
+      // The key layer holds one fingerprint per key, so the row is this request's.
       const replay = await findCustodyWalletCreateReplay(c);
-      if (replay !== null) return replay;
+      if (replay !== null) return replay.respond();
     }
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {

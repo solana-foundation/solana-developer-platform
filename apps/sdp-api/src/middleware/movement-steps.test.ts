@@ -55,7 +55,9 @@ describe("movement steps", () => {
       "ran"
     );
     const find = vi.fn(async (_c, input: { authorized: { walletId: string } }, key: string) =>
-      key === ran ? new Response(`row for ${input.authorized.walletId}`) : null
+      key === ran
+        ? { fingerprint: "fp", respond: () => new Response(`row for ${input.authorized.walletId}`) }
+        : null
     );
     const refuse = vi.fn(async () => {
       throw forbidden("organization may not start movements");
@@ -79,6 +81,24 @@ describe("movement steps", () => {
     expect((await post(app)).status).toBe(403);
     expect(find).toHaveBeenCalledTimes(2);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses another request under a key whose row recorded a different fingerprint", async () => {
+    const respond = vi.fn(() => new Response("row"));
+    const app = testApp();
+    claimFromHeader(app);
+    app.post(
+      "/v1/move",
+      authorize(() => ({ walletId: "w1" })),
+      replayFromRecord(async () => ({ fingerprint: "another-request", respond })),
+      () => new Response("moved")
+    );
+
+    const response = await post(app, { "Idempotency-Key": "ran" });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED" } });
+    expect(respond).not.toHaveBeenCalled();
   });
 
   it("passes admitted work to the handler with what authorize loaded", async () => {
