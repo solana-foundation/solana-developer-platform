@@ -11,13 +11,13 @@ import {
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { type ActionKeyAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
+import { type ApiAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
 import {
   createSdpApiClient,
   extractSdpApiError,
   requestProjectHref,
   type SdpApiClient,
-  sdpApiKeyAnswer,
+  sdpApiAnswer,
 } from "@/lib/sdp-api";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
 
@@ -180,14 +180,14 @@ export type WalletSetupActionResult =
       status: "error";
       message: string;
       /** What the failure settles about the browser's key (`useActionIdempotencyKey`). */
-      keyAnswer: ActionKeyAnswer;
+      answer: ApiAnswer;
     };
 
 export type InitializeCustodySetupActionResult =
   | WalletSetupActionResult
   | {
       status: "provider_already_set_up";
-      keyAnswer: ActionKeyAnswer;
+      answer: ApiAnswer;
     };
 
 /**
@@ -208,12 +208,12 @@ export async function initializeCustodySetupAction(
     return { status: "success" };
   } catch (error) {
     if (extractSdpApiError(error).status === 409) {
-      return { status: "provider_already_set_up", keyAnswer: sdpApiKeyAnswer(error) };
+      return { status: "provider_already_set_up", answer: sdpApiAnswer(error) };
     }
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
-      keyAnswer: sdpApiKeyAnswer(error),
+      answer: sdpApiAnswer(error),
     };
   }
 }
@@ -230,7 +230,7 @@ export async function createCustodySetupWalletAction(
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
-      keyAnswer: sdpApiKeyAnswer(error),
+      answer: sdpApiAnswer(error),
     };
   }
 }
@@ -243,7 +243,7 @@ export type UpdateWalletLabelActionResult =
   | {
       status: "error";
       message: string;
-      keyAnswer: ActionKeyAnswer;
+      answer: ApiAnswer;
     };
 
 export async function updateWalletLabelAction(
@@ -258,7 +258,7 @@ export async function updateWalletLabelAction(
     return {
       status: "error",
       message: t("DashboardCustody.walletIdRequired"),
-      keyAnswer: "refused",
+      answer: { status: null, replayed: false },
     };
   }
 
@@ -288,7 +288,7 @@ export async function updateWalletLabelAction(
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),
-      keyAnswer: sdpApiKeyAnswer(error),
+      answer: sdpApiAnswer(error),
     };
   }
 }

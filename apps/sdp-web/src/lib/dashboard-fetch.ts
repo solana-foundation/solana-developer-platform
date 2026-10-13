@@ -1,12 +1,7 @@
 import type { IdempotencyRequiredRoute } from "@sdp/types";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
-import {
-  answerRetiresKey,
-  IDEMPOTENCY_KEY_HEADER,
-  keyAnswerFor,
-  storageFingerprint,
-} from "./idempotency";
+import { answerRetiresKey, IDEMPOTENCY_KEY_HEADER, storageFingerprint } from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
@@ -110,26 +105,18 @@ function isApiAnswer(response: Response): boolean {
 }
 
 /**
- * Whether an answer retires the key, so the next submit is a new action. Only
- * a backend answer can ({@link isApiAnswer}), on the vault flows' rule
- * (`applyIdempotencyKeyOutcome`):
- *
- * - A success, or a replay, is definitive: sdp-api ran or stored the request.
- * - A refusal (4xx other than a conflict or a rate limit) retires a fresh key.
- *   Once an earlier attempt went unanswered it does not: a refusal sdp-api
- *   never stores, or a local 401 from an expired session, settles nothing about
- *   that attempt, which may have written. Only a success or a replay does.
- * - A 5xx is not definitive: on a route that re-runs after a 5xx the same key
- *   is what makes the retry safe, and on one that stores it the retry comes
- *   back as a replay, which then retires the key.
+ * Whether an answer retires the key, so the next submit is a new action: only
+ * a backend answer can ({@link isApiAnswer}), on the dashboard-wide rule
+ * (`answerRetiresKey`).
  */
-function retiresKey(response: Response, earlierAttemptUnanswered: boolean): boolean {
-  if (!isApiAnswer(response)) return false;
-  const answer = keyAnswerFor(
-    response.status,
-    response.headers.get("Idempotent-Replayed") === "true"
+function retiresKey(response: Response): boolean {
+  return (
+    isApiAnswer(response) &&
+    answerRetiresKey({
+      status: response.status,
+      replayed: response.headers.get("Idempotent-Replayed") === "true",
+    })
   );
-  return answerRetiresKey(answer, earlierAttemptUnanswered);
 }
 
 function sendWithProject(
@@ -172,9 +159,9 @@ function abortable(response: Promise<Response>, signal: AbortSignal | null | und
  * Sends a `stable` mutation under one Idempotency-Key per user action: the
  * key is minted for the (Project, method, path, body) the user submitted and
  * reused by every retry and double-click of that same action until the answer
- * (headers and body) is definitive ({@link retiresKey}). The key is pinned
- * before the request goes out, so an unanswered write (a reload, a network
- * failure, a first 5xx) keeps it past its normal expiry. A second
+ * (headers and body) retires it ({@link retiresKey}). The key is kept before
+ * the request goes out, so an unanswered write (a reload, a network failure,
+ * a 5xx) keeps it for the retry. A second
  * identical submit while the first is in flight joins it, and one caller
  * aborting never cancels the shared request.
  */
@@ -197,22 +184,19 @@ async function sendUnderActionKey(
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
     const keys = mutationKeys();
-    // Read before this attempt pins the key: an earlier attempt that never got
-    // a definitive answer leaves it uncertain.
-    const earlierAttemptUnanswered = keys.isUncertain(fingerprint) || keys.isHeld(fingerprint);
-    const { key, wasReused } = keys.claimReportingReuse(fingerprint);
+    const kept = keys.has(fingerprint);
+    // Kept before the request goes out, so a reload mid-flight finds it. When
+    // browser storage refuses the write (private mode, quota), the key lives in
+    // memory only: retries in this page still reuse it, but a reload cannot. A
+    // money movement refuses to send then, since a reload and retry could move
+    // it twice; any other mutation sends, as a duplicate costs at most a replay.
+    const { key, persisted } = keys.claim(fingerprint);
     headers.set(IDEMPOTENCY_KEY_HEADER, key);
-    // Pinned before the request goes out: a reload mid-flight must not let
-    // an unanswered write's key expire or be evicted. When browser storage
-    // refuses the write (private mode, quota), the key lives in memory only:
-    // retries in this page still reuse it, but a reload cannot. A money
-    // movement refuses to send then, since a reload and retry could move it
-    // twice; any other mutation sends, as a duplicate costs at most a replay.
-    if (!keys.markUncertain(fingerprint)) {
+    if (!persisted) {
       if (requiresPersistedKey(init.method ?? "GET", path)) {
-        // Only a key this call minted is dropped: a reused one belongs to an
+        // Only a key this call minted is dropped: a kept one belongs to an
         // earlier attempt that may have written, and its retry still needs it.
-        if (!wasReused) keys.release(fingerprint);
+        if (!kept) keys.release(fingerprint);
         return keyNotPersistedResponse();
       }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
@@ -221,7 +205,7 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response, earlierAttemptUnanswered)) {
+      if (retiresKey(response)) {
         keys.release(fingerprint);
       }
       return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {

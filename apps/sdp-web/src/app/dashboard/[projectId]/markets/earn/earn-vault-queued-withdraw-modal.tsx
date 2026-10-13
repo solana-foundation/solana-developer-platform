@@ -18,7 +18,8 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
@@ -239,18 +240,16 @@ function useQueuedWithdrawalSubmission(options: {
           deadlineSeconds: previewInput.deadlineSeconds,
         },
       });
-      const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-      if (!submission) {
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (!persisted) {
         options.setError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
       const result = await createEarnVaultWithdrawalRequest(previewInput, key);
-      applyIdempotencyKeyOutcome(
+      settleIdempotencyKey(
         vaultAsyncWithdrawalIdempotencyKeyStore,
         fingerprint,
-        result,
-        submission.wasUncertain
+        fetchResultAnswer(result)
       );
       if (result.ok) {
         setOutcome(result.data);
@@ -295,10 +294,9 @@ function useQueuedWithdrawalRequestView(
     setCancelling(true);
     setCancelError(null);
     const fingerprint = `cancel:${request.withdrawalRequestId}`;
-    const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
     try {
-      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-      if (!submission) {
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (!persisted) {
         setCancelError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
@@ -307,11 +305,10 @@ function useQueuedWithdrawalRequestView(
         vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint);
         setCancelResult(result.data);
       } else {
-        applyIdempotencyKeyOutcome(
+        settleIdempotencyKey(
           vaultAsyncWithdrawalIdempotencyKeyStore,
           fingerprint,
-          result,
-          submission.wasUncertain
+          fetchResultAnswer(result)
         );
         setCancelError(result.error);
       }

@@ -2,9 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  applyIdempotencyKeyOutcome,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
+  settleIdempotencyKey,
 } from "./idempotency-key-store";
 
 describe("unresolved Treasury intent identity", () => {
@@ -16,51 +16,52 @@ describe("unresolved Treasury intent identity", () => {
 
   it.each([401, 403, 429])("preserves an ambiguous submit key after a later %s", (status) => {
     const store = createIdempotencyKeyStore("test:treasury-recovery");
-    const original = store.claim("same-intent");
-    applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status: null });
-    applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status });
-    expect(store.claim("same-intent")).toBe(original);
+    const original = store.claim("same-intent").key;
+    settleIdempotencyKey(store, "same-intent", { status: null, replayed: false });
+    settleIdempotencyKey(store, "same-intent", { status, replayed: false });
+    expect(store.claim("same-intent").key).toBe(original);
   });
 
   it("does not replace an unresolved intent just because fifteen minutes elapsed", () => {
     vi.useFakeTimers();
     const store = createIdempotencyKeyStore("test:treasury-recovery");
-    const original = store.claim("same-intent");
-    applyIdempotencyKeyOutcome(store, "same-intent", { ok: false, status: 504 });
+    const original = store.claim("same-intent").key;
+    settleIdempotencyKey(store, "same-intent", { status: 504, replayed: false });
     vi.setSystemTime(Date.now() + 16 * 60_000);
-    expect(store.claim("same-intent")).toBe(original);
+    expect(store.claim("same-intent").key).toBe(original);
   });
-  it("pins before transport and restores the identity on reload after the draft TTL", () => {
+
+  it("keeps the key before transport and restores it on reload, however much later", () => {
     vi.useFakeTimers();
     const store = createIdempotencyKeyStore("test:reload");
-    const key = store.claim("intent");
-    expect(store.beginSubmission("intent")).toEqual({ wasUncertain: false });
+    const { key, persisted } = store.claim("intent");
+    expect(persisted).toBe(true);
     resetIdempotencyKeyStoresForTests();
     vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
     const reloaded = createIdempotencyKeyStore("test:reload");
-    expect(reloaded.claim("intent")).toBe(key);
-    expect(reloaded.beginSubmission("intent")).toEqual({ wasUncertain: true });
+    expect(reloaded.has("intent")).toBe(true);
+    expect(reloaded.claim("intent").key).toBe(key);
   });
 
-  it("refuses submission when its pending marker cannot persist", () => {
+  it("reports a key whose write cannot persist, so a money flow refuses to submit", () => {
     const store = createIdempotencyKeyStore("test:quota");
     store.claim("intent");
     const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
     try {
-      expect(store.beginSubmission("intent")).toBeNull();
+      expect(store.claim("intent").persisted).toBe(false);
     } finally {
       write.mockRestore();
     }
   });
 
-  it("keeps legacy expired entries because the old writer did not distinguish drafts", () => {
+  it("keeps entries an earlier build wrote, whatever extra fields they carry", () => {
     sessionStorage.setItem(
       "test:legacy",
-      JSON.stringify([{ id: "intent", value: "old-key", createdAt: 0 }])
+      JSON.stringify([{ id: "intent", value: "old-key", createdAt: 0, expiresAt: 1 }])
     );
-    expect(createIdempotencyKeyStore("test:legacy").claim("intent")).toBe("old-key");
+    expect(createIdempotencyKeyStore("test:legacy").claim("intent").key).toBe("old-key");
   });
 
   it.each(["deposit", "withdrawal"])(
@@ -69,15 +70,8 @@ describe("unresolved Treasury intent identity", () => {
       const store = createIdempotencyKeyStore(`test:back-to-back:${direction}`);
       const keys: string[] = [];
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        keys.push(store.claim("same-wallet-vault-amount"));
-        const submission = store.beginSubmission("same-wallet-vault-amount");
-        expect(submission).toEqual({ wasUncertain: false });
-        applyIdempotencyKeyOutcome(
-          store,
-          "same-wallet-vault-amount",
-          { ok: true, status: 200, data: { kind: "submitted" } },
-          submission?.wasUncertain
-        );
+        keys.push(store.claim("same-wallet-vault-amount").key);
+        settleIdempotencyKey(store, "same-wallet-vault-amount", { status: 200, replayed: false });
       }
       expect(new Set(keys).size).toBe(3);
     }

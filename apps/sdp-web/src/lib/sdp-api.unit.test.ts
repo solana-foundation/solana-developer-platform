@@ -14,7 +14,7 @@ import {
   requestProjectHref,
   requestProjectId,
   SdpApiResponseError,
-  sdpApiKeyAnswer,
+  sdpApiAnswer,
 } from "./sdp-api";
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -232,8 +232,11 @@ describe("server-side Idempotency-Key (HOO-1918)", () => {
       .catch((error: unknown) => error);
 
     expect(failure).toMatchObject({ status: 422, replayed: true });
-    expect(sdpApiKeyAnswer(failure)).toBe("definitive");
-    expect(sdpApiKeyAnswer(new SdpApiResponseError(422, "{}"))).toBe("refused");
+    expect(sdpApiAnswer(failure)).toEqual({ status: 422, replayed: true });
+    expect(sdpApiAnswer(new SdpApiResponseError(400, "{}"))).toEqual({
+      status: 400,
+      replayed: false,
+    });
   });
 });
 

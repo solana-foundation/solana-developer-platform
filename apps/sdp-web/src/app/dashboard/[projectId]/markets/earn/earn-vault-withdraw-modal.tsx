@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
@@ -858,7 +859,7 @@ export function EarnVaultWithdrawModal({
       shares,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
     });
-    const resolvedKey = vaultWithdrawalIdempotencyKeyStore.claimReportingReuse(fingerprint);
+    const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
     // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
     // live — must replay the floor it was MINTED with, verbatim — the deposit
@@ -870,7 +871,7 @@ export function EarnVaultWithdrawModal({
     // stops here, submitting nothing, rather than pair the live key with a
     // changed request.
     const replay = floorToReplay(
-      resolvedKey,
+      { reused },
       recallVaultWithdrawalFloor,
       fingerprint,
       minAmountOut ?? null
@@ -883,8 +884,8 @@ export function EarnVaultWithdrawModal({
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
-    const submission = vaultWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-    if (!submission) {
+    const { key, persisted } = vaultWithdrawalIdempotencyKeyStore.claim(fingerprint);
+    if (!persisted) {
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
     }
@@ -894,19 +895,18 @@ export function EarnVaultWithdrawModal({
         shares,
         ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
-      resolvedKey.key
+      key
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording the answer.
-    const disposition = applyIdempotencyKeyOutcome(
+    const retired = settleIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
-      result,
-      submission.wasUncertain
+      fetchResultAnswer(result)
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
-    if (disposition === "retired") forgetVaultWithdrawalFloor(fingerprint);
+    if (retired) forgetVaultWithdrawalFloor(fingerprint);
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
       result,

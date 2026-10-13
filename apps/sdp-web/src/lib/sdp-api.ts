@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
-import { type ActionKeyAnswer, IDEMPOTENCY_KEY_HEADER, keyAnswerFor } from "./idempotency";
+import { type ApiAnswer, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
@@ -222,18 +222,18 @@ export function extractSdpApiError(error: unknown): { status: number | null; mes
 }
 
 /**
- * What a failed sdp-api call settles about the Idempotency-Key it carried, for
- * a server action to hand back to the browser that owns the key: the browser
- * never sees `Idempotent-Replayed` through a server action, so it cannot tell a
- * stored failure replayed (definitive) from one that may still have written.
+ * What sdp-api answered a failed call, for a server action to hand back to the
+ * browser that owns the Idempotency-Key: the browser never sees the status or
+ * `Idempotent-Replayed` through a server action, and needs both to apply
+ * `answerRetiresKey`.
  *
  * @param error - What the sdp-api call threw.
  */
-export function sdpApiKeyAnswer(error: unknown): ActionKeyAnswer {
+export function sdpApiAnswer(error: unknown): ApiAnswer {
   if (error instanceof SdpApiResponseError) {
-    return keyAnswerFor(error.status, error.replayed);
+    return { status: error.status, replayed: error.replayed };
   }
-  return keyAnswerFor(extractSdpApiError(error).status, false);
+  return { status: extractSdpApiError(error).status, replayed: false };
 }
 
 export interface SdpApiClient {

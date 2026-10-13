@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
@@ -173,16 +173,18 @@ export function WithdrawForm({
       destination: destination.trim() || undefined,
     };
     const fingerprint = privateChannelWithdrawalRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelWithdrawalIdempotencyKeyStore.claim(fingerprint);
+    const idempotencyKey = privateChannelWithdrawalIdempotencyKeyStore.claim(fingerprint).key;
 
     startTransition(async () => {
       const result = await createWithdrawalAction({ ...requestPayload, idempotencyKey });
-      applyIdempotencyKeyOutcome(
+      settleIdempotencyKey(
         privateChannelWithdrawalIdempotencyKeyStore,
         fingerprint,
         result.ok
-          ? { ok: true, status: 200, data: { kind: "withdrawal" } }
-          : { ok: false, status: result.kind === "server" ? result.status : 400 }
+          ? { status: 200, replayed: false }
+          : result.kind === "server"
+            ? result.answer
+            : { status: null, replayed: false }
       );
       if (result.ok) {
         updateState({ withdrawal: result.withdrawal });
