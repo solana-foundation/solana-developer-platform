@@ -18,6 +18,10 @@ import {
   restorePreCustodyDefaultsDropSchema,
 } from "./custody-defaults-schema";
 import {
+  DVP_TRADES_ENVIRONMENT_MIGRATION,
+  restorePreDvpTradesEnvironmentSchema,
+} from "./dvp-trades-environment-schema";
+import {
   PROJECT_ID_NOT_NULL_MIGRATION,
   restorePreProjectIdNotNullSchema,
 } from "./project-id-not-null-schema";
@@ -251,6 +255,7 @@ afterAll(async () => {
 describe("0125 custody project-only migration", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await restorePreDvpTradesEnvironmentSchema(client);
     await restorePreProjectIdNotNullSchema(client);
     await restorePreCustodyDefaultsDropSchema(client);
     await restorePreProjectOnlySchema();
@@ -259,7 +264,11 @@ describe("0125 custody project-only migration", () => {
   afterEach(async () => {
     await seedTestDatabase(env);
     await client.query("DELETE FROM schema_migrations WHERE version = ANY($1)", [
-      [CUSTODY_DEFAULTS_DROP_MIGRATION, PROJECT_ID_NOT_NULL_MIGRATION],
+      [
+        CUSTODY_DEFAULTS_DROP_MIGRATION,
+        PROJECT_ID_NOT_NULL_MIGRATION,
+        DVP_TRADES_ENVIRONMENT_MIGRATION,
+      ],
     ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });
