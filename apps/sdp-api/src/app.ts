@@ -63,7 +63,7 @@ import rpc from "@/routes/rpc";
 import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -478,6 +478,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     ) {
       if (err instanceof SdpRpcError) {
         logVendorError("rpc", err.code, err.statusCode);
+      }
+      // The provider's own wording never reaches the body below; operators read
+      // it here. Its own event, so it stays out of the vendor-error alert, which
+      // leaves ramps to sdp_api_ramp_provider_error.
+      if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
+        logEvent(err.statusCode >= 500 ? "error" : "warn", {
+          event: "sdp_api_payments_provider_error",
+          code: err.code,
+          status: err.statusCode,
+          method: c.req.method,
+          path: c.req.path,
+          request_id: requestId,
+          ...describeError(err),
+          error_diagnostics: paymentsErrorDiagnostics(err),
+        });
       }
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);

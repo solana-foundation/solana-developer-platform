@@ -27,40 +27,44 @@ function isEdgeBlockBody(parsed: unknown, raw: string): boolean {
  */
 function mapBvnkErrorStatus(
   status: number,
-  message: string,
-  options?: { edgeBlocked?: boolean; details?: Record<string, unknown> }
+  options: { edgeBlocked: boolean; diagnostics: Record<string, unknown> | undefined }
 ): SdpPaymentsError {
-  const details = { provider: "bvnk", providerStatus: status, ...options?.details };
-  if (options?.edgeBlocked) {
+  const details = { provider: "bvnk", providerStatus: status };
+  const { diagnostics } = options;
+  if (options.edgeBlocked) {
     return providerUnavailable(
       `BVNK request was blocked at the edge (CloudFront/WAF, status ${status}) before reaching the API. This is typically IP rate-limiting, not a credential issue; retry shortly or from a different egress.`,
-      details
+      details,
+      diagnostics
     );
   }
   if (status === 401) {
     return providerNotConfigured(
       "BVNK rejected the request credentials (status 401). Check the BVNK Hawk auth configuration.",
-      details
+      details,
+      diagnostics
     );
   }
   if (status === 403) {
     return providerNotConfigured(
       "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account.",
-      details
+      details,
+      diagnostics
     );
   }
   if (status === 429) {
-    return rateLimited(message, details);
+    return rateLimited(`BVNK rate-limited the request (status ${status}).`, details, diagnostics);
   }
   if (status >= 500) {
-    return internalError(`BVNK request failed with status ${status}.`, details);
+    return internalError(`BVNK request failed with status ${status}.`, details, diagnostics);
   }
-  return badRequest(message, details);
+  return badRequest(`BVNK request failed with status ${status}.`, details, diagnostics);
 }
 
 /**
  * Maps a non-2xx BVNK HTTP response into an SdpPaymentsError, distinguishing edge
  * blocks, auth failures, rate limits, validation errors, and provider-side 5xx failures.
+ * BVNK's own code, message and field errors ride in diagnostics, never the public message.
  *
  * @param status - HTTP status BVNK returned.
  * @param raw - Raw response body text, used to detect CloudFront/WAF edge blocks.
@@ -69,21 +73,15 @@ function mapBvnkErrorStatus(
  */
 export function bvnkRequestFailure(status: number, raw: string, parsed: unknown): SdpPaymentsError {
   const envelope = bvnkErrorEnvelopeSchema.safeParse(parsed);
-  const parts = envelope.success
-    ? [envelope.data.code, envelope.data.message].filter(
-        (part): part is string => part !== undefined
-      )
-    : [];
-  const message =
-    parts.length === 0
-      ? `BVNK request failed with status ${status}`
-      : `BVNK request failed with status ${status}: ${parts.join(" ")}`;
-  return mapBvnkErrorStatus(status, message, {
+  return mapBvnkErrorStatus(status, {
     edgeBlocked: isEdgeBlockBody(parsed, raw),
-    details:
-      status === 400 && envelope.success && envelope.data.details !== undefined
-        ? { errors: envelope.data.details.errors }
-        : undefined,
+    diagnostics: envelope.success
+      ? {
+          providerCode: envelope.data.code,
+          providerMessage: envelope.data.message,
+          providerErrors: envelope.data.details?.errors,
+        }
+      : undefined,
   });
 }
 
@@ -98,10 +96,11 @@ export function bvnkRequestFailure(status: number, raw: string, parsed: unknown)
 export function parseBvnkResponse<T extends z.ZodType>(schema: T, response: unknown): z.infer<T> {
   const parsed = schema.safeParse(response);
   if (!parsed.success) {
-    throw providerUnavailable("BVNK response is malformed.", {
-      provider: "bvnk",
-      issues: z.flattenError(parsed.error).fieldErrors,
-    });
+    throw providerUnavailable(
+      "BVNK response is malformed.",
+      { provider: "bvnk" },
+      { issues: z.flattenError(parsed.error).fieldErrors }
+    );
   }
   return parsed.data;
 }

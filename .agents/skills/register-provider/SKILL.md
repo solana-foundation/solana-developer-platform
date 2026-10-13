@@ -40,7 +40,7 @@ export class <Id>RampClient implements RampProvider {
 
 `RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional.
 
-Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`.
+Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns.
 
 If API-side handlers import provider-specific public helpers or types through package subpaths, add explicit exports in `packages/sdp-payments/package.json`.
 

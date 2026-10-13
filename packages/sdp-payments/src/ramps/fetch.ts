@@ -59,14 +59,17 @@ export function isDefinitiveProviderRejection(error: unknown): boolean {
 }
 
 /**
- * Ramp providers validate the counterparty fields we submit and echo them back
- * in the failure ("email jane@doe.test is already registered", "phone must be
- * E.164"). That message becomes an `SdpPaymentsError` that is both logged and
- * returned, so it is scrubbed at the one place every provider's error passes
- * through — the wording stays actionable, the identifier does not survive.
+ * Reads the message a provider put in its error body, scrubbed. Ramp providers
+ * validate the counterparty fields we submit and echo them back in the
+ * failure ("email jane@doe.test is already registered", "phone must be
+ * E.164"), so the identifier never survives, only the wording.
+ *
+ * @param payload - Parsed provider error body.
+ * @returns The scrubbed message, or undefined when the body carries none.
  */
-export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== "object") return fallback;
+function readProviderErrorMessage(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  // SAFETY: every field is declared unknown and type-checked before use.
   const record = payload as {
     error?: { message?: unknown };
     message?: unknown;
@@ -75,7 +78,19 @@ export function extractProviderErrorMessage(payload: unknown, fallback: string):
     errorMessage?: unknown;
   };
   const message = record.error?.message ?? record.message ?? record.reason ?? record.errorMessage;
-  return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : fallback;
+  return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : undefined;
+}
+
+/**
+ * The scrubbed message a provider put in its error body, or `fallback`.
+ *
+ * @param payload - Parsed provider error body.
+ * @param fallback - Returned when the body carries no message.
+ * @returns The scrubbed provider message or the fallback.
+ */
+export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
+  const message = readProviderErrorMessage(payload);
+  return message === undefined ? fallback : message;
 }
 
 /**
@@ -139,13 +154,14 @@ export async function providerFetchJson<TResponse, TBody = never>(
   const { response, parsed } = await providerFetch(provider, url, init);
 
   if (!response.ok) {
+    // The provider's own wording is for operators, never for the caller: it
+    // rides in diagnostics, which are logged and not serialized.
+    const providerMessage = readProviderErrorMessage(parsed);
     throw new SdpPaymentsError(
       classifyProviderStatus(response.status),
-      extractProviderErrorMessage(
-        parsed,
-        `${provider} request failed with status ${response.status}`
-      ),
-      { provider, providerStatus: response.status }
+      `${provider} request failed with status ${response.status}`,
+      { provider, providerStatus: response.status },
+      providerMessage === undefined ? undefined : { providerMessage }
     );
   }
 

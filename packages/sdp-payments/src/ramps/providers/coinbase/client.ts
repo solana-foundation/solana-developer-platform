@@ -237,11 +237,14 @@ export class CoinbaseRampClient implements RampProvider {
     const crypto = Number(quote.purchase_amount.value);
     const subtotal = Number(quote.payment_subtotal.value);
     if (!Number.isFinite(crypto) || crypto === 0 || !Number.isFinite(subtotal)) {
-      throw providerUnavailable("Coinbase returned an unusable buy quote.", {
-        provider: this.id,
-        purchaseAmount: quote.purchase_amount.value,
-        paymentSubtotal: quote.payment_subtotal.value,
-      });
+      throw providerUnavailable(
+        "Coinbase returned an unusable buy quote.",
+        { provider: this.id },
+        {
+          purchaseAmount: quote.purchase_amount.value,
+          paymentSubtotal: quote.payment_subtotal.value,
+        }
+      );
     }
     return {
       provider: this.id,
