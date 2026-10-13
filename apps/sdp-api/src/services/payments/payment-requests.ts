@@ -1,5 +1,6 @@
+import { isTransientRpcError } from "@sdp/rpc";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import type { Signature } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
@@ -36,14 +37,15 @@ export function isPaymentRequestExpired(expiresAt: string | null): boolean {
  *
  * @param env - API environment for RPC and database access.
  * @param row - The stored payment request row to reconcile.
- * @param options.bestEffort - When true, unexpected infra failures (e.g. an
- *   RPC outage) degrade to the stored row with a log so one bad row cannot
+ * @param options.bestEffort - When true, a transient RPC failure (an outage,
+ *   a rate limit) degrades to the stored row with a log so one bad row cannot
  *   take down a whole list read or the public pay page; the next read
  *   retries. An unresolved legacy wallet also returns the stored row because
  *   the exact-identity backfill intentionally leaves ambiguous rows unpinned.
- *   Other invariant violations (AppError) always rethrow — they do
- *   not self-heal and must not hide behind a stale row. When false, every
- *   failure rethrows, for paths that must not act on stale state.
+ *   Everything else rethrows (invariant violations, a missing cluster scope,
+ *   an unconfigured or misrouted cluster): those do not self-heal and must
+ *   not hide behind a stale row. When false, every failure rethrows, for
+ *   paths that must not act on stale state.
  * @returns The settled row when a valid payment was found, otherwise the
  *   stored row.
  */
@@ -68,7 +70,7 @@ export async function reconcilePaymentRequest(
   try {
     return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
-    if (!options.bestEffort || err instanceof AppError) {
+    if (!options.bestEffort || !isTransientRpcError(err)) {
       throw err;
     }
     getLogger().error(
@@ -100,7 +102,7 @@ async function settlePaymentRequestIfPaid(
     throw internalError("payment_requests row is missing project_id");
   }
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
