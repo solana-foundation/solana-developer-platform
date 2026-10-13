@@ -156,7 +156,7 @@ const coinbaseCreateOrderSchema = z.object({
     exchangeRate: z.string(),
     fees: z.array(z.object({ amount: z.string(), currency: z.string(), type: z.string() })),
   }),
-  paymentLink: z.object({ url: z.string(), paymentLinkType: z.string() }),
+  paymentLink: z.object({ url: z.string(), paymentLinkType: z.string().optional() }),
 });
 
 export class CoinbaseRampClient implements RampProvider {

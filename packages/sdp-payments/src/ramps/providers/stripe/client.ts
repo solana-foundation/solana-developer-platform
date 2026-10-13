@@ -85,6 +85,10 @@ const stripeOnrampSessionSchema = z.object({
 });
 
 /** The fields `estimateOnramp` reads from Stripe's onramp quotes. */
+/**
+ * The fields `estimateOnramp` reads from Stripe's quotes. The request names one
+ * network and one currency, so every entry is one the adapter can pick.
+ */
 const stripeOnrampQuotesSchema = z.object({
   destination_network_quotes: z.record(
     z.string(),
