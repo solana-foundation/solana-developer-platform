@@ -133,7 +133,7 @@ test.describe
           "DELETE FROM payment_transfer_batches WHERE source_custody_wallet_id LIKE 'cwlt_pr2_alias_%'"
         );
         await client.query(
-          "DELETE FROM payment_transfers WHERE custody_wallet_id LIKE 'cwlt_pr2_alias_%' OR id LIKE 'xfr_pr2_wrong_%'"
+          "DELETE FROM payment_transfers WHERE custody_wallet_id LIKE 'cwlt_pr2_alias_%' OR id LIKE 'xfr_pr2_wrong_%' OR id LIKE 'xfr_pr2_legacy_%'"
         );
         await client.query(
           `DELETE FROM counterparty_provider_accounts AS account
@@ -166,6 +166,125 @@ test.describe
       await page.getByRole("button", { name: alias.label ?? "Exact Payments B" }).click();
     }
 
+    test("uses internal-only balances and refuses legacy and mixed payment selectors", async ({
+      page,
+    }) => {
+      await getClerkBearerToken(page);
+      await gotoProjectPage(page, projectId, "/dashboard/payments");
+      await expect(
+        page.getByRole("heading", { name: "Available balance", exact: true })
+      ).toBeVisible({ timeout: TIMEOUT });
+      await expect(page).toHaveURL(projectHref(projectId, "/dashboard/payments"), {
+        timeout: TIMEOUT,
+      });
+      const balance = await page.evaluate(
+        async ({ projectId, walletId }) => {
+          const response = await fetch(`/api/dashboard/payments/wallets/${walletId}/balances`, {
+            headers: { "x-project-id": projectId },
+          });
+          return { status: response.status, body: await response.json() };
+        },
+        { projectId, walletId: alias.id }
+      );
+      expect(balance.status).toBe(200);
+      expect(balance.body.data.walletBalances).toMatchObject({
+        custodyWalletId: alias.id,
+        address: alias.publicKey,
+      });
+      expect(balance.body.data.walletBalances).not.toHaveProperty("walletId");
+      const legacyBalanceStatus = await page.evaluate(
+        async ({ projectId, walletId }) => {
+          const response = await fetch(`/api/dashboard/payments/wallets/${walletId}/balances`, {
+            headers: { "x-project-id": projectId },
+          });
+          return response.status;
+        },
+        { projectId, walletId: alias.walletId }
+      );
+      expect(legacyBalanceStatus).toBe(404);
+
+      const recipients = [
+        {
+          counterpartyId: contact.counterpartyId,
+          counterpartyAccountId: contact.accountId,
+          amount: "0.01",
+        },
+      ];
+      const writes = [
+        {
+          path: "/api/dashboard/payments/transfers",
+          selector: "sourceCustodyWalletId",
+          legacySelector: "sourceWalletId",
+          body: { destination: DEPOSIT_ADDRESS, token: "SOL", amount: "0.01" },
+        },
+        ...[
+          "/api/dashboard/payments/transfers/batch/estimate",
+          "/api/dashboard/payments/transfers/batch",
+        ].map((path) => ({
+          path,
+          selector: "sourceCustodyWalletId",
+          legacySelector: "sourceWalletId",
+          body: { token: "SOL", recipients },
+        })),
+        {
+          path: "/api/dashboard/payments/ramps/onramp/quote",
+          selector: "destinationCustodyWalletId",
+          legacySelector: "destinationWalletId",
+          body: {
+            provider: "moneygram",
+            counterpartyId: contact.counterpartyId,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "25",
+          },
+        },
+        {
+          path: "/api/dashboard/payments/ramps/offramp/quote",
+          selector: "sourceCustodyWalletId",
+          legacySelector: "sourceWalletId",
+          body: {
+            provider: "moneygram",
+            counterpartyId: contact.counterpartyId,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "25",
+          },
+        },
+      ];
+      for (const write of writes) {
+        const statuses = await page.evaluate(
+          async ({ projectId, write, custodyWalletId, providerWalletId }) => {
+            const bodies = [
+              { ...write.body, [write.legacySelector]: providerWalletId },
+              {
+                ...write.body,
+                [write.selector]: custodyWalletId,
+                [write.legacySelector]: providerWalletId,
+              },
+              {
+                ...write.body,
+                [write.selector]: custodyWalletId,
+                providerWalletId,
+              },
+              { ...write.body, [write.selector]: providerWalletId },
+            ];
+            const statuses = [];
+            for (const body of bodies) {
+              const response = await fetch(write.path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "x-project-id": projectId },
+                body: JSON.stringify(body),
+              });
+              statuses.push(response.status);
+            }
+            return statuses;
+          },
+          { projectId, write, custodyWalletId: alias.id, providerWalletId: alias.walletId }
+        );
+        expect(statuses, write.path).toEqual([400, 400, 400, 404]);
+      }
+    });
+
     test("submits the exact selected wallet and refuses fresh execution after its revocation", async ({
       page,
     }) => {
@@ -192,6 +311,7 @@ test.describe
       expect(response.status()).toBe(200);
       const submitted = (await response.json()).data;
       expect(submitted.transfer).toMatchObject({ custodyWalletId: alias.id, status: "confirmed" });
+      expect(submitted.transfer).not.toHaveProperty("providerWalletId");
       await expect(
         page.getByRole("heading", { name: "Transfer submitted", exact: true })
       ).toBeVisible();
@@ -199,6 +319,7 @@ test.describe
         `/v1/payments/transfers/${submitted.transfer.id}`
       );
       expect(detail.transfer.custodyWalletId).toBe(alias.id);
+      expect(detail.transfer).not.toHaveProperty("providerWalletId");
       const before = await api.get<Array<{ id: string }>>(
         `/v1/payments/transfers?custodyWalletId=${alias.id}`
       );
@@ -252,6 +373,10 @@ test.describe
       expect(created.request().postDataJSON()).toMatchObject({ sourceCustodyWalletId: alias.id });
       const result = (await created.json()).data;
       expect(result.batch).toMatchObject({ sourceCustodyWalletId: alias.id, status: "processing" });
+      expect(result.batch).not.toHaveProperty("sourceProviderWalletId");
+      for (const transfer of result.transfers) {
+        expect(transfer).not.toHaveProperty("providerWalletId");
+      }
       expect(result.recipients).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ destination: DEPOSIT_ADDRESS, amount: "0.01" }),
@@ -262,8 +387,12 @@ test.describe
         transfers: Array<{ custodyWalletId: string }>;
       }>(`/v1/payments/transfer-batches/${result.batch.id}`);
       expect(saved.batch.sourceCustodyWalletId).toBe(alias.id);
+      expect(saved.batch).not.toHaveProperty("sourceProviderWalletId");
       expect(saved.transfers.length).toBeGreaterThan(0);
-      for (const transfer of saved.transfers) expect(transfer.custodyWalletId).toBe(alias.id);
+      for (const transfer of saved.transfers) {
+        expect(transfer.custodyWalletId).toBe(alias.id);
+        expect(transfer).not.toHaveProperty("providerWalletId");
+      }
     });
 
     test("continues an exact MoneyGram quote and saved crypto leg through the browser BFF", async ({
@@ -351,6 +480,45 @@ test.describe
         `/v1/payments/transfers/${quote.transferId}`
       );
       expect(continued.transfer).toMatchObject({ custodyWalletId: alias.id, status: "settling" });
+      expect(continued.transfer).not.toHaveProperty("providerWalletId");
+      const legacyId = `xfr_pr2_legacy_${crypto.randomUUID()}`;
+      await db.query(
+        `INSERT INTO payment_transfers (id, organization_id, project_id, custody_wallet_id, wallet_id,
+           source_address, destination_address, token, amount, type, direction, status, signature,
+           created_at, updated_at)
+         SELECT $1, organization_id, project_id, NULL, wallet_id, source_address,
+                destination_address, token, amount, 'transfer', 'outbound', 'finalized',
+                'retained-e2e-legacy-signature', sdp_iso_now(), sdp_iso_now()
+         FROM payment_transfers WHERE id = $2`,
+        [legacyId, legId]
+      );
+      const legacy = await api.get<{ transfer: { id: string; custodyWalletId: string | null } }>(
+        `/v1/payments/transfers/${legacyId}`
+      );
+      expect(legacy.transfer).toMatchObject({ id: legacyId, custodyWalletId: null });
+      expect(legacy.transfer).not.toHaveProperty("providerWalletId");
+      const legacyBrowserDetail = await page.evaluate(
+        async ({ projectId, transferId }) => {
+          const response = await fetch(`/api/dashboard/payments/transfers/${transferId}`, {
+            headers: { "x-project-id": projectId },
+          });
+          return { status: response.status, body: await response.json() };
+        },
+        { projectId, transferId: legacyId }
+      );
+      expect(legacyBrowserDetail.status).toBe(200);
+      expect(legacyBrowserDetail.body.data.transfer).toMatchObject({
+        id: legacyId,
+        custodyWalletId: null,
+      });
+      expect(legacyBrowserDetail.body.data.transfer).not.toHaveProperty("providerWalletId");
+      const legacyHistory =
+        await api.get<Array<{ id: string; custodyWalletId: string | null }>>(
+          "/v1/payments/transfers"
+        );
+      expect(legacyHistory).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: legacyId, custodyWalletId: null })])
+      );
       const failedId = `xfr_${crypto.randomUUID()}`;
       await db.query(
         `INSERT INTO payment_transfers (id, organization_id, project_id, custody_wallet_id, wallet_id,

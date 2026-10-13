@@ -61,7 +61,6 @@ function transfer(status: PaymentTransferStatus): PaymentTransferSummary {
   return {
     id: "xfr_offramp",
     custodyWalletId: "cwlt_treasury",
-    providerWalletId: "wallet_treasury",
     status,
     signature: null,
     rampsMemo: {},

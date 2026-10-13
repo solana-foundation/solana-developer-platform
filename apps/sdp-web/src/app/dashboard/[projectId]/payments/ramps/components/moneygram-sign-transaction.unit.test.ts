@@ -30,7 +30,6 @@ const DEPOSIT = {
 const RAMP: PaymentTransferSummary = {
   id: "xfr_mg_test_1",
   custodyWalletId: "cwlt_mg_1",
-  providerWalletId: "wal_mg_1",
   status: "pending",
   signature: null,
   rampsMemo: {},
@@ -42,7 +41,6 @@ const RAMP: PaymentTransferSummary = {
 const CRYPTO_LEG: PaymentTransferSummary = {
   id: "xfr_mg_deposit_leg",
   custodyWalletId: "cwlt_mg_1",
-  providerWalletId: "wal_mg_1",
   status: "confirmed",
   signature: "sig_mg_deposit_1",
   rampsMemo: {},
@@ -82,7 +80,6 @@ describe("fundMoneygramDeposit", () => {
       vi.mocked(fetchTransferById).mockResolvedValue({
         ...RAMP,
         custodyWalletId,
-        providerWalletId: RAMP.providerWalletId,
       });
       const ctx = context({});
 

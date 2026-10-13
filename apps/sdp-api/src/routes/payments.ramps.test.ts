@@ -303,35 +303,69 @@ describe("Payments routes — ramps", () => {
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
-  it("rejects the retired destinationWallet key on the onramp quote endpoint", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "retired_destination_wallet_key",
-    });
+  it.each([false, true])(
+    "rejects the retired destinationWallet key on the onramp quote endpoint (exact supplied: %s)",
+    async (includeExact) => {
+      const counterpartyId = await seedCounterparty({
+        externalId: "retired_destination_wallet_key",
+      });
 
-    const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      const response = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            ...(includeExact ? { destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
+            destinationWallet: TEST_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "120.50",
+          }),
         },
-        body: JSON.stringify({
-          provider: "moonpay",
-          counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          assetRail: "sol.solana",
-          fiatCurrency: "USD",
-          fiatAmount: "120.50",
-        }),
-      },
-      env
-    );
+        env
+      );
 
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
-    expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
-  });
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
+    }
+  );
+
+  it.each([false, true])(
+    "rejects the retired sourceWallet key on the offramp quote endpoint (exact supplied: %s)",
+    async (includeExact) => {
+      const response = await app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId: "cpty_retired_source_wallet",
+            ...(includeExact ? { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
+            sourceWallet: TEST_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "10",
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: expect.stringContaining("sourceWallet") },
+      });
+    }
+  );
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "provider_walletid_as_custody_id",
@@ -410,7 +444,7 @@ describe("Payments routes — ramps", () => {
     });
 
     const res = await app.request(
-      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
+      `/v1/payments/wallets/${TEST_CONNECTION_CUSTODY_WALLET_ID}/balances`,
       {
         method: "GET",
         headers: {
@@ -424,7 +458,7 @@ describe("Payments routes — ramps", () => {
     expect(await res.json()).toMatchObject({
       data: {
         walletBalances: {
-          walletId: TEST_CONNECTION_WALLET_ID,
+          custodyWalletId: TEST_CONNECTION_CUSTODY_WALLET_ID,
           address: TEST_SOLANA_ADDRESSES.wallet2,
         },
       },
@@ -438,7 +472,7 @@ describe("Payments routes — ramps", () => {
       walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
     });
     const forbiddenRes = await app.request(
-      `/v1/payments/wallets/${TEST_CONNECTION_WALLET_ID}/balances`,
+      `/v1/payments/wallets/${TEST_CONNECTION_CUSTODY_WALLET_ID}/balances`,
       {
         method: "GET",
         headers: {
@@ -478,7 +512,7 @@ describe("Payments routes — ramps", () => {
         return [];
       });
       const res = await app.request(
-        `/v1/payments/wallets/${TEST_WALLET_ID}/balances?minimumSlot=101`,
+        `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/balances?minimumSlot=101`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -505,7 +539,7 @@ describe("Payments routes — ramps", () => {
       if (failure !== "SOL")
         getSplTokenBalancesMock.mockRejectedValueOnce(new Error("rpc unavailable"));
       const res = await app.request(
-        `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+        `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/balances`,
         {
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
         },
@@ -1429,7 +1463,6 @@ describe("Payments routes — ramps", () => {
         id: A3_TRANSFER_ID,
         organizationId: TEST_ORG.id,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        providerWalletId: "wallet_bvnk_onramp_seed",
         projectId: TEST_PROJECT.id,
         type: "onramp",
         kind: "onramp",
@@ -1571,7 +1604,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ transferId: "xfr_cancel_pending" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_pending", ignoredClientHint: true }),
       },
       env
     );
@@ -1579,6 +1612,7 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
     expect(body.data.transfer.status).toBe("canceled");
+    expect(body.data.transfer).not.toHaveProperty("providerWalletId");
 
     const row = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")

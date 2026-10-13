@@ -67,7 +67,6 @@ function transferFixture(
   return {
     id: "xfr_bvnk_screen",
     custodyWalletId: CUSTODY_WALLET_ID,
-    providerWalletId: "provider-bvnk",
     status,
     signature,
     rampsMemo: {},

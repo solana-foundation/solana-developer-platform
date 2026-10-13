@@ -182,7 +182,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         quote={quote}
         transferId={wizard.quoteTransferId}
         sourceWalletId={selectedWallet.id}
-        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+        sourceWalletName={selectedWallet.label ?? selectedWallet.id}
         sourceWalletAddress={selectedWallet.publicKey}
         sourceTokenMint={null}
         cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}

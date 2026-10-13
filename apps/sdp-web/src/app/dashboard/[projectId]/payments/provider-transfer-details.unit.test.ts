@@ -6,7 +6,6 @@ function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTra
   return {
     id: "xfr_test",
     custodyWalletId: "cwlt_test",
-    providerWalletId: "wallet_test",
     status: "completed",
     signature: null,
     rampsMemo: {},

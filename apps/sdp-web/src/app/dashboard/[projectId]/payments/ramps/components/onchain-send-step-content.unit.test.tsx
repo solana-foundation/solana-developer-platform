@@ -191,7 +191,7 @@ describe("OnchainSendStepContent", () => {
 
   it.each([
     { name: "label", wallet: labeledWallet, expected: "Treasury" },
-    { name: "provider wallet id", wallet: unlabeledWallet, expected: "provider_unlabeled" },
+    { name: "SDP wallet ID", wallet: unlabeledWallet, expected: "cwlt_unlabeled" },
   ])("shows the source wallet $name and a non-empty memo", ({ wallet, expected }) => {
     renderStep({
       ...baseWizard,
@@ -235,7 +235,6 @@ describe("OnchainSendStepContent", () => {
         transferResult: {
           id: "xfr_test",
           custodyWalletId: labeledWallet.id,
-          providerWalletId: labeledWallet.walletId,
           status: "processing",
           signature,
           rampsMemo: {},

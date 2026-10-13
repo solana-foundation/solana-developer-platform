@@ -702,7 +702,6 @@ describe("fetchPaymentTransfers", () => {
 
     expect(result.data?.[0]).toMatchObject({
       custodyWalletId: null,
-      providerWalletId: "wallet-1",
       provider: "mural",
       counterpartyId: "counterparty-1",
       counterpartyDisplayName: "Northstar Labs",
@@ -714,7 +713,7 @@ describe("fetchPaymentTransfers", () => {
   });
 
   it.each([undefined, "", "   ", " wallet-1 "])(
-    "fails closed when providerWalletId is %j",
+    "ignores obsolete provider wallet metadata in history: %j",
     async (providerWalletId) => {
       const request = vi.fn(
         async () =>
@@ -737,8 +736,16 @@ describe("fetchPaymentTransfers", () => {
       const result = await fetchPaymentTransfers(request, 5, { includeObserved: false });
 
       expect(result).toEqual({
-        ok: false,
-        error: "Malformed transfer response: required fields are missing or invalid",
+        ok: true,
+        data: [
+          {
+            id: "transfer-1",
+            custodyWalletId: null,
+            status: "confirmed",
+            signature: null,
+            rampsMemo: {},
+          },
+        ],
       });
     }
   );

@@ -36,6 +36,46 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
+  it.each(["source", "sourceWalletId", "providerWalletId"])(
+    "rejects retired %s selectors with or without an exact transfer source",
+    async (selector) => {
+      for (const includeExact of [false, true]) {
+        const response = await postRawTransfer(
+          {
+            ...(includeExact ? { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
+            [selector]: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          },
+          {}
+        );
+        expect(response.status).toBe(400);
+        expect(await readErrorResponse(response)).toMatchObject({
+          error: { code: "BAD_REQUEST" },
+        });
+      }
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countTransferRows()).toBe(0);
+    }
+  );
+
+  it("rejects a provider reference in the exact transfer selector without signing", async () => {
+    const response = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+    expect(response.status).toBe(404);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+  });
+
   it("rejects the retired privateTransfer field at the request boundary", async () => {
     const res = await postRawTransfer(
       {
@@ -88,6 +128,11 @@ describe("Payments routes — on-chain transfers", () => {
     );
 
     expect(res.status).toBe(200);
+    const response = await res.clone().json();
+    expect(response.data.transfer).toMatchObject({
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    });
+    expect(response.data.transfer).not.toHaveProperty("providerWalletId");
     const body = await readTransferResponse(res);
     expect(body.data.transfer.status).toBe("confirmed");
     expect(body.data.transfer.id).toMatch(/^xfr_/);

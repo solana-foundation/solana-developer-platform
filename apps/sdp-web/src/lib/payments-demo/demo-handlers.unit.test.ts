@@ -73,6 +73,121 @@ beforeEach(() => {
   now = NOW;
 });
 
+describe("exact wallet selectors", () => {
+  const sourceRequests = [
+    {
+      path: "/v1/payments/transfers",
+      body: { sourceCustodyWalletId: TREASURY, destination: ADDRESS, token: USDC, amount: "1" },
+    },
+    ...["estimate", ""].map((action) => ({
+      path: `/v1/payments/transfer-batches${action ? `/${action}` : ""}`,
+      body: {
+        sourceCustodyWalletId: TREASURY,
+        token: USDC,
+        recipients: [
+          { counterpartyId: "demo_cpty_jane", counterpartyAccountId: "demo_cpa_jane", amount: "1" },
+        ],
+      },
+    })),
+    {
+      path: "/v1/payments/ramps/offramp/quote",
+      body: {
+        provider: "lightspark",
+        counterpartyId: "demo_cpty_jane",
+        sourceCustodyWalletId: TREASURY,
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        cryptoAmount: "1",
+      },
+    },
+  ];
+  it.each(
+    sourceRequests.flatMap(({ path, body }) =>
+      [
+        "source",
+        "wallet",
+        "sourceWallet",
+        "sourceWalletId",
+        "sourceProviderWalletId",
+        "providerWalletId",
+        "walletId",
+        "destinationWallet",
+        "destinationWalletId",
+        "destinationProviderWalletId",
+      ].map((field) => ({ path, body, field }))
+    )
+  )("refuses $field alongside exact source at $path", ({ path, body, field }) => {
+    expect(refusal(write("POST", path, { ...body, [field]: "demo_privy_treasury" }))).toEqual([
+      400,
+      "invalid_request",
+    ]);
+    expect(ops).toEqual([]);
+  });
+  it.each([
+    "destination",
+    "destinationWallet",
+    "destinationWalletId",
+    "destinationProviderWalletId",
+    "providerWalletId",
+    "walletId",
+    "source",
+    "wallet",
+    "sourceWallet",
+    "sourceWalletId",
+    "sourceProviderWalletId",
+  ])("refuses %s alongside an exact on-ramp destination", (field) => {
+    expect(
+      refusal(
+        write("POST", "/v1/payments/ramps/onramp/quote", {
+          provider: "coinbase",
+          counterpartyId: "demo_cpty_jane",
+          destinationCustodyWalletId: TREASURY,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "10",
+          [field]: "demo_privy_treasury",
+        })
+      )
+    ).toEqual([400, "invalid_request"]);
+    expect(ops).toEqual([]);
+  });
+  it("refuses provider aliases when requirements name an exact destination", () => {
+    expect(
+      read(
+        "/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&destinationCustodyWalletId=demo_privy_treasury"
+      ).status
+    ).toBe(404);
+    expect(
+      refusal(
+        write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
+          provider: "coinbase",
+          direction: "onramp",
+          destinationCustodyWalletId: "demo_privy_treasury",
+        })
+      )
+    ).toEqual([404, "not_found"]);
+    expect(ops).toEqual([]);
+  });
+  it.each(["destination", "destinationWallet", "wallet", "sourceWallet"])(
+    "refuses %s on requirements reads and writes alongside an exact destination",
+    (field) => {
+      const readStatus = read(
+        `/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&destinationCustodyWalletId=${TREASURY}&${field}=demo_privy_treasury`
+      ).status;
+      const writeRefusal = refusal(
+        write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
+          provider: "coinbase",
+          direction: "onramp",
+          destinationCustodyWalletId: TREASURY,
+          [field]: "demo_privy_treasury",
+        })
+      );
+      expect([readStatus, ...writeRefusal]).toEqual([400, 400, "invalid_request"]);
+      expect(ops).toEqual([]);
+    }
+  );
+});
+
 describe("routing", () => {
   it("has no stand-in for a write it doesn't know", () => {
     expect(write("POST", "/v1/payments/unknown-thing")).toBeUndefined();
@@ -520,6 +635,37 @@ describe("ramp pay-ins and cancels", () => {
 });
 
 describe("transfers and batches", () => {
+  it("keeps custody identity in the created transfer while provider evidence stays internal", () => {
+    const result = write("POST", "/v1/payments/transfers", {
+      sourceCustodyWalletId: TREASURY,
+      destination: ADDRESS,
+      token: USDC,
+      amount: "1",
+    });
+    expect(result?.status).toBe(201);
+    expect(result?.body).toHaveProperty("data.transfer.custodyWalletId", TREASURY);
+    expect(result?.body).not.toHaveProperty("data.transfer.providerWalletId");
+  });
+
+  it("projects created batch and transfer DTOs while retaining provider evidence in the session world", () => {
+    const result = write("POST", "/v1/payments/transfer-batches", {
+      sourceCustodyWalletId: TREASURY,
+      token: USDC,
+      recipients: [
+        { counterpartyId: "demo_cpty_jane", counterpartyAccountId: "demo_cpa_jane", amount: "1" },
+      ],
+    });
+    expect(result?.status).toBe(201);
+    expect(result?.body).toHaveProperty("data.batch.sourceCustodyWalletId", TREASURY);
+    expect(result?.body).not.toHaveProperty("data.batch.sourceProviderWalletId");
+    expect(result?.body).toHaveProperty("data.transfers.0.custodyWalletId", TREASURY);
+    expect(result?.body).not.toHaveProperty("data.transfers.0.providerWalletId");
+    expect(
+      world().batches.find(({ batch }) => batch.id === result?.body.data.batch.id)?.batch
+        .sourceProviderWalletId
+    ).toBe("demo_privy_treasury");
+  });
+
   const exactWalletWrites = [
     {
       path: "payments/transfers",

@@ -17,7 +17,6 @@ export const walletBalanceResponseSchema = z.object({
   data: z.object({
     walletBalances: z.object({
       custodyWalletId: z.string().min(1),
-      walletId: z.string().optional(),
       address: z.string().min(1),
       balances: z.array(walletTokenBalanceSchema),
     }),

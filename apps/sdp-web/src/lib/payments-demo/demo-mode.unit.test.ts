@@ -690,6 +690,18 @@ describe("every ramp provider", () => {
   });
 });
 
+describe("exact Payments identity", () => {
+  it("refuses legacy transfer query selectors even alongside an exact wallet", async () => {
+    const response = await call(
+      "GET",
+      "/v1/payments/transfers?custodyWalletId=demo_cwlt_treasury&walletId=demo_privy_treasury"
+    );
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("invalid_request");
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
 describe("requests and schedules", () => {
   it("creates a payment request the list and its page can find", async () => {
     const created = await call("POST", "/v1/payments/requests", {

@@ -275,7 +275,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
           quote={quote}
           transferId={wizard.quoteTransferId}
           sourceWalletId={selectedWallet.id}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+          sourceWalletName={selectedWallet.label ?? selectedWallet.id}
           sourceWalletAddress={selectedWallet.publicKey}
           sourceTokenMint={sourceTokenMint}
           cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}

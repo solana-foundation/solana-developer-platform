@@ -209,7 +209,7 @@ function MoneygramStep({ wizard, quote }: { wizard: OnrampWizard; quote: Moneygr
       quote={quote}
       transferId={quoteTransferId}
       sourceWalletId={selectedWallet.id}
-      sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+      sourceWalletName={selectedWallet.label ?? selectedWallet.id}
       sourceWalletAddress={selectedWallet.publicKey}
       sourceTokenMint={null}
       cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}

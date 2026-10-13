@@ -1118,7 +1118,7 @@ describe("Custody wallet scope routes", () => {
     });
 
     const selectedBalances = await app.request(
-      `/v1/payments/wallets/${sharedWalletId}/balances`,
+      `/v1/payments/wallets/cwlt_scope_shared_a/balances`,
       { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
       env
     );

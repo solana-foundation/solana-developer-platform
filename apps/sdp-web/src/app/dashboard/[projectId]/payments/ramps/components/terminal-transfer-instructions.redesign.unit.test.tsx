@@ -72,7 +72,6 @@ function transferSummary(
   return {
     id: "xfr_manual",
     custodyWalletId: "cwlt_manual",
-    providerWalletId: "wallet_manual",
     status,
     signature: null,
     rampsMemo: {},

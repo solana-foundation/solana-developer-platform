@@ -83,7 +83,7 @@ export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
       description:
-        "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Legacy provider `walletId` remains supported during the compatible rollout; ambiguous selectors are rejected.",
+        "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
       example: "cwlt_example",
     }),
   })
@@ -138,7 +138,6 @@ export const tokenBalanceSchema = z
 export const walletBalancesSchema = z
   .object({
     custodyWalletId: custodyWalletIdParamSchema,
-    walletId: walletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })
@@ -476,9 +475,6 @@ export const transferSchema = z
         "Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.",
       example: "cwlt_example",
     }),
-    providerWalletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID retained as evidence; not an execution selector.",
-    }),
     projectId: projectIdParamSchema
       .optional()
       .openapi({ description: "Project identifier for the transfer." }),
@@ -731,9 +727,6 @@ export const transferBatchSchema = z
     sourceCustodyWalletId: z.string().nullable().openapi({
       description: "Exact source SDP Wallet ID, or null for unresolved legacy batches.",
       example: "cwlt_example",
-    }),
-    sourceProviderWalletId: walletIdParamSchema.openapi({
-      description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source custody wallet address.",

@@ -332,7 +332,6 @@ describe("counterparty provider accounts table", () => {
     return {
       id,
       custodyWalletId: null,
-      providerWalletId: "pw_1",
       status: "completed",
       signature: null,
       direction: "outbound",

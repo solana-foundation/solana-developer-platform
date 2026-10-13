@@ -491,7 +491,7 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Legacy provider `walletId` remains supported during the compatible rollout; ambiguous selectors are rejected.",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
             "defaultValue": "cwlt_example",
             "required": true
           },
@@ -506,7 +506,6 @@
           "data": {
             "walletBalances": {
               "custodyWalletId": "cwlt_example",
-              "walletId": "privy_wallet_123",
               "address": "So11111111111111111111111111111111111111112",
               "balances": [
                 {
@@ -555,7 +554,6 @@
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
-              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "kind": "pay",
@@ -855,7 +853,6 @@
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
-              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "kind": "pay",
@@ -950,7 +947,6 @@
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
-              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "kind": "pay",
@@ -1083,7 +1079,6 @@
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
               "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -1114,7 +1109,6 @@
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
-                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "kind": "pay",
@@ -1273,7 +1267,6 @@
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
               "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -1317,7 +1310,6 @@
               "projectId": "prj_example",
               "externalId": "payroll_2026_06_30",
               "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "token": "SOL",
               "status": "processing",
@@ -1348,7 +1340,6 @@
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
-                "providerWalletId": "privy_wallet_123",
                 "projectId": "prj_example",
                 "type": "transfer",
                 "kind": "pay",
@@ -1899,7 +1890,6 @@
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
-              "providerWalletId": "privy_wallet_123",
               "projectId": "prj_example",
               "type": "transfer",
               "kind": "pay",

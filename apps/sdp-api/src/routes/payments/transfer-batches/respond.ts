@@ -24,7 +24,6 @@ export function mapBatchRow(row: PaymentTransferBatchRow) {
     projectId: row.project_id,
     externalId: row.external_id,
     sourceCustodyWalletId: row.source_custody_wallet_id,
-    sourceProviderWalletId: row.source_wallet_id,
     sourceAddress: row.source_address,
     token: row.token,
     status: row.status,

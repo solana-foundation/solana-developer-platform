@@ -57,7 +57,6 @@ export interface PaymentWalletBalance {
 
 export interface PaymentWalletBalancesSnapshot {
   custodyWalletId: string;
-  walletId?: string;
   address: string;
   balances: PaymentWalletBalance[];
 }
@@ -251,7 +250,6 @@ interface WalletBalancesEnvelope {
         walletBalances?: PaymentWalletBalancesSnapshot;
       }
     | {
-        walletId?: string;
         address?: string;
         balances?: PaymentWalletBalance[];
       };
@@ -405,12 +403,12 @@ export async function fetchRampEstimates(
 }
 
 export async function fetchWalletBalances(
-  walletId: string,
+  custodyWalletId: string,
   t: Translate,
   signal?: AbortSignal
 ): Promise<PaymentWalletBalancesSnapshot> {
   const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    `/api/dashboard/payments/wallets/${encodeURIComponent(custodyWalletId)}/balances`,
     {
       method: "GET",
       cache: "no-store",
@@ -427,7 +425,7 @@ export async function fetchWalletBalances(
     );
   }
 
-  return parseWalletBalanceResponse(body, walletId);
+  return parseWalletBalanceResponse(body, custodyWalletId);
 }
 
 export interface CreateTransferInput {

@@ -693,6 +693,76 @@ describe("Counterparties Routes", () => {
       });
     });
 
+    it.each(["bvnk", "mural"])(
+      "rejects retired custody selectors alongside the exact %s onramp wallet",
+      async (provider) => {
+        const created = await createCounterparty({ externalId: `retired_selector_${provider}` });
+        expect(created.status).toBe(201);
+        const counterparty = (await created.json()).data.counterparty;
+        for (const selector of [
+          "wallet",
+          "walletId",
+          "providerWalletId",
+          "source",
+          "sourceWallet",
+          "sourceWalletId",
+          "sourceProviderWalletId",
+          "destination",
+          "destinationWallet",
+          "destinationWalletId",
+          "destinationProviderWalletId",
+        ]) {
+          const response = await app.request(
+            `/v1/counterparties/${counterparty.id}/requirements`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: authHeader },
+              body: JSON.stringify({
+                provider,
+                direction: "onramp",
+                assetRail: "usdc.solana",
+                fiatCurrency: "USD",
+                destinationCustodyWalletId: TEST_CP_CUSTODY_WALLET_ID,
+                [selector]: TEST_CP_CUSTODY_WALLET_ID,
+              }),
+            },
+            env
+          );
+
+          expect(response.status).toBe(400);
+          expect(await response.json()).toMatchObject({
+            error: { code: "BAD_REQUEST", message: expect.stringContaining(selector) },
+          });
+        }
+      }
+    );
+
+    it("keeps unrelated client hints optional on exact BVNK onramp requirements", async () => {
+      const created = await createCounterparty({ externalId: "requirements_client_hint" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const response = await app.request(
+        `/v1/counterparties/${counterparty.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({
+            provider: "bvnk",
+            direction: "onramp",
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            destinationCustodyWalletId: TEST_CP_CUSTODY_WALLET_ID,
+            ignoredClientHint: true,
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { provider: "bvnk", direction: "onramp", status: "collect_counterparty_residence" },
+      });
+    });
+
     it("returns ready with the resolved payout account id for an offramp advance", async () => {
       const created = await createCounterparty({ externalId: "requirements_offramp_ready" });
       expect(created.status).toBe(201);
