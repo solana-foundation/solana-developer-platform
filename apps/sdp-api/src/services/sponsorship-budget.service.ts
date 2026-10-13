@@ -177,6 +177,16 @@ export function sponsorshipProviderConfigFingerprint(
     .digest("hex");
 }
 
+/**
+ * Price a transaction's network fee on one RPC client, pinned when the fee payment is built.
+ *
+ * @param rpc - The cluster RPC the fee is priced on.
+ * @returns A function that prices a transaction's network fee in lamports on `rpc`.
+ */
+function networkFeeOn(rpc: ReturnType<typeof createClusterRpc>) {
+  return (transaction: Uint8Array) => getTransactionNetworkFee(rpc, transaction);
+}
+
 export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
   private readonly network: SponsorshipNetwork;
@@ -205,9 +215,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.network = sponsorshipNetworkForCluster(currentClusterScope().cluster);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-    this.getNetworkFee =
-      dependencies.getNetworkFee ??
-      ((transaction) => getTransactionNetworkFee(createClusterRpc(), transaction));
+    this.getNetworkFee = dependencies.getNetworkFee ?? networkFeeOn(createClusterRpc());
     this.now = dependencies.now ?? (() => new Date());
   }
 
