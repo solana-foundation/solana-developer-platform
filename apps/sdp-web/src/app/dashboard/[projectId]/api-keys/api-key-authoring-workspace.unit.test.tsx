@@ -199,6 +199,12 @@ describe("ApiKeyAuthoringWorkspace allowed operations", () => {
     // Only part of the family is ticked, so the family box shows a dash, not a tick.
     expect(familyBox("Ramps").checked).toBe(false);
     expect(familyBox("Ramps").indeterminate).toBe(true);
+
+    await user.click(familyBox("Ramps"));
+
+    expect(familyBox("Ramps").checked).toBe(true);
+    expect(onramp.checked).toBe(true);
+    expect(offramp.checked).toBe(true);
   });
 
   it("hides a family's types until the family is ticked", async () => {

@@ -12,17 +12,17 @@
  */
 
 import { isForbiddenRpcError, type RpcEnv } from "@sdp/rpc";
-import { createRpc, getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import { createRpc, getAccountInfo, type RpcRequestHeaders, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
 export interface GatewayClientOptions {
   /**
    * Extra request headers for the gateway. JWT-gated methods take
-   * `{ Authorization: \`Bearer \${token}\` }` here; `Authorization` is permitted by
-   * `@sdp/rpc`'s header policy.
+   * `{ Authorization: \`Bearer \${token}\` }` here; kit's HTTP transport rejects
+   * forbidden headers.
    */
-  headers?: Readonly<Record<string, string>>;
+  headers?: RpcRequestHeaders;
 }
 
 /**

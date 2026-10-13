@@ -42,7 +42,6 @@ import {
   prepareMint,
 } from "./handlers/mint";
 import { pauseToken, unpauseToken } from "./handlers/pause";
-import { extractIssuanceBody, extractIssuanceNoBody } from "./handlers/request-gate";
 import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
@@ -118,7 +117,6 @@ issuance.patch(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_metadata_update_execute"),
   validateBody(updateTokenSchema),
-  requestGate({ extract: extractIssuanceBody }),
   updateToken
 );
 
@@ -128,7 +126,6 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_deploy_execute"),
   validateBody(deployTokenSchema),
-  requestGate({ extract: extractIssuanceBody }),
   deployToken
 );
 issuance.post(
@@ -192,7 +189,6 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_burn_execute"),
   validateBody(burnSchema),
-  requestGate({ extract: extractIssuanceBody }),
   executeBurn
 );
 
@@ -209,7 +205,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_seize_execute"),
   validateBody(seizeSchema),
-  requestGate({ extract: extractIssuanceBody }),
   executeSeize
 );
 
@@ -226,7 +221,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_force_burn_execute"),
   validateBody(forceBurnSchema),
-  requestGate({ extract: extractIssuanceBody }),
   executeForceBurn
 );
 
@@ -257,7 +251,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_pause_execute"),
   validateBody(pauseTokenSchema),
-  requestGate({ extract: extractIssuanceBody }),
   pauseToken
 );
 issuance.post(
@@ -265,7 +258,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_unpause_execute"),
   validateBody(pauseTokenSchema),
-  requestGate({ extract: extractIssuanceBody }),
   unpauseToken
 );
 
@@ -275,7 +267,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_freeze_execute"),
   validateBody(freezeSchema),
-  requestGate({ extract: extractIssuanceBody }),
   freezeAccount
 );
 issuance.post(
@@ -283,7 +274,6 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_unfreeze_execute"),
   validateBody(unfreezeSchema),
-  requestGate({ extract: extractIssuanceBody }),
   unfreezeAccount
 );
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
@@ -302,14 +292,12 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_allowlist_add_execute"),
   validateBody(addAllowlistSchema),
-  requestGate({ extract: extractIssuanceBody }),
   addAllowlistEntry
 );
 issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_allowlist_remove_execute"),
-  requestGate({ extract: extractIssuanceNoBody }),
   removeAllowlistEntry
 );
 

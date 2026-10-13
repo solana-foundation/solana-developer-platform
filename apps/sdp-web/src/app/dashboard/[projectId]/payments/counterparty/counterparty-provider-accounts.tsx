@@ -6,7 +6,7 @@ import {
   type CounterpartyProviderAccount,
   type CounterpartyProviderCustomerLink,
   type CounterpartyProviderCustomerLinkAgreement,
-  type RampProviderId,
+  type PersistedRampProviderId,
 } from "@sdp/types";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import {
@@ -22,11 +22,7 @@ import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wa
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useTranslations } from "@/i18n/provider";
-import {
-  getRampProviderLabel,
-  RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
-  RAMP_PROVIDER_LOGOS,
-} from "@/lib/ramps";
+import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
@@ -75,27 +71,16 @@ function ProviderAccountStatusBadge({ status, label }: { status: string; label?:
 }
 
 /**
- * Picks the status to display for a provider account: enriched payout
- * accounts show SDP's status, everything else shows the provider's own status
- * when one exists.
+ * Picks the status to display for a provider account: the provider's own
+ * status when one exists, otherwise SDP's.
  *
  * @param account - The provider account or customer link.
  * @returns The status string to render.
  */
 function providerAccountStatus(
-  account: Pick<
-    CounterpartyProviderAccount,
-    "status" | "providerStatus" | "bankName" | "accountNumberLast4" | "paymentRails"
-  >
+  account: Pick<CounterpartyProviderAccount, "status" | "providerStatus">
 ): string {
-  const hasEnrichment =
-    account.bankName !== undefined ||
-    account.accountNumberLast4 !== undefined ||
-    account.paymentRails !== undefined;
-  if (hasEnrichment || account.providerStatus === null) {
-    return account.status;
-  }
-  return account.providerStatus;
+  return account.providerStatus === null ? account.status : account.providerStatus;
 }
 
 function CustomerLinkAgreements({
@@ -150,19 +135,16 @@ function ProviderCustomerHeader({
   provider,
   customerLink,
 }: {
-  provider: RampProviderId;
+  provider: PersistedRampProviderId;
   customerLink: CounterpartyProviderCustomerLink | undefined;
 }) {
   const t = useTranslations();
+  const logo = getRampProviderLogo(provider);
   return (
     <>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
+      {logo === undefined ? null : (
+        <Image src={logo} alt="" width={20} height={20} className="size-5 rounded" />
+      )}
       <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
       {customerLink !== undefined ? (
         <>
@@ -284,8 +266,6 @@ function PayoutAccountsTable({ accounts }: { accounts: CounterpartyProviderAccou
   const headers = [
     t("DashboardPayments.counterparty.providerAccountCorridor"),
     t("DashboardPayments.counterparty.providerAccountRail"),
-    t("DashboardPayments.counterparty.providerAccountBank"),
-    t("DashboardPayments.counterparty.providerAccountNumber"),
     t("DashboardPayments.counterparty.providerAccountStatus"),
   ];
   return (
@@ -322,14 +302,6 @@ function PayoutAccountsTable({ accounts }: { accounts: CounterpartyProviderAccou
                   <Badge variant="outline">{account.paymentRail}</Badge>
                 ) : null}
               </td>
-              <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                {account.bankName}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                {account.accountNumberLast4 !== undefined
-                  ? `•••• ${account.accountNumberLast4}`
-                  : null}
-              </td>
               <td className="whitespace-nowrap px-4 py-3">
                 <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
               </td>
@@ -342,14 +314,12 @@ function PayoutAccountsTable({ accounts }: { accounts: CounterpartyProviderAccou
 }
 
 function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
-  const t = useTranslations();
   const [open, setOpen] = useState(false);
   const { provider, customerLink, payoutAccounts, fundingWallets } = group;
   const expandable =
     payoutAccounts.length > 0 ||
     fundingWallets.length > 0 ||
-    (customerLink !== undefined && customerLink.provider === "bvnk") ||
-    RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+    (customerLink !== undefined && customerLink.provider === "bvnk");
 
   return (
     <div className="rounded-lg border border-border-default bg-surface-raised">
@@ -379,13 +349,7 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
       {expandable && open ? (
         <>
           {fundingWallets.length > 0 ? <FundingWalletsList accounts={fundingWallets} /> : null}
-          {payoutAccounts.length > 0 ? (
-            <PayoutAccountsTable accounts={payoutAccounts} />
-          ) : RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider] ? (
-            <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
-              {t("DashboardPayments.counterparty.noPayoutAccounts")}
-            </p>
-          ) : null}
+          {payoutAccounts.length > 0 ? <PayoutAccountsTable accounts={payoutAccounts} /> : null}
           {customerLink !== undefined && customerLink.provider === "bvnk" ? (
             <CustomerLinkAgreements agreements={customerLink.agreements} />
           ) : null}

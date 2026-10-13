@@ -200,8 +200,9 @@ is local test infrastructure. It signs with a test-only fee payer and submits to
 the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Embedded
 Surfnet uses the same managed Solana RPC selection as the integration test
 runner, including `SOLANA_RPC_CI_PREFERRED_PROVIDER`, as its
-`SURFPOOL_REMOTE_RPC_URL`; set `SURFPOOL_REMOTE_RPC_URL` directly to override it
-or omit managed RPC env vars to run Surfpool offline. When this command is run
+`SURFPOOL_REMOTE_RPC_URL`; set `SURFPOOL_REMOTE_RPC_URL` directly to override it.
+At least one `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` must be set, and the
+selected endpoint must serve devnet: Surfpool always forks devnet. When this command is run
 under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
 `http://127.0.0.1:18080` for the local Kora-compatible endpoint; set
 `KORA_SURFPOOL_KORA_RPC_URL` to change that local endpoint. Use
@@ -213,7 +214,7 @@ under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
 - Check `.secrets/kora-surfpool/kora-shim.log` for local Kora-compatible JSON-RPC failures.
 - Run `pnpm kora:surfpool:down` before retrying if a stale local process or port is suspected.
 - If the failure mentions the local fee payer, rerun `pnpm kora:surfpool:up`; it generates `SIGNER_PRIVATE_KEY` when needed and funds the local fee payer with `KORA_FEE_PAYER_LAMPORTS`.
-- If lazy account fetching is flaky, set `SOLANA_RPC_CI_PREFERRED_PROVIDER=default` to run Surfpool offline, or set `SURFPOOL_REMOTE_RPC_URL` to an explicit upstream RPC.
+- If lazy account fetching is flaky, set `SOLANA_RPC_CI_PREFERRED_PROVIDER` to another provider, or set `SURFPOOL_REMOTE_RPC_URL` to an explicit devnet upstream RPC. Surfpool always forks devnet; there is no offline mode.
 
 ### Live Kora smoke failed
 

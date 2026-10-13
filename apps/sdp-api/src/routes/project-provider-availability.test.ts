@@ -204,16 +204,8 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
     },
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    {
-      family: "ramps",
-      provider: "lightspark",
-      available: false,
-      reason: "provider_not_configured",
-    },
     { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
     ...EARN_AVAILABILITY,
   ],
@@ -284,16 +276,8 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     },
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    {
-      family: "ramps",
-      provider: "lightspark",
-      available: false,
-      reason: "provider_not_configured",
-    },
     { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_offered" },
     { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
     ...EARN_AVAILABILITY,
   ],
@@ -484,7 +468,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
 
     const availability = await readAvailability(
       "sandbox",
-      deploymentEnv({ SDP_RELEASE_CHANNEL: "beta" })
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
     );
 
     expect(availability.providers).toContainEqual({

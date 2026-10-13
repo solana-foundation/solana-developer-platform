@@ -26,6 +26,7 @@ import {
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
+import { HELIUS_RINGS_OPERATION_MOVEMENTS } from "@sdp/types";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -49,8 +50,10 @@ import {
   mapHeliusRingsHealthRows,
   mapHeliusRingsProjectRingRow,
   mapHeliusRingsWalletRow,
+  RETIRED_APPROVAL_FAILURE,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
@@ -1315,6 +1318,7 @@ export class HeliusRingsService {
         projectId: this.tenant.projectId,
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
+        movement: HELIUS_RINGS_OPERATION_MOVEMENTS[current.op_type],
       });
       const signature = await assertRingsSignedTransactionMatches({
         owner,
@@ -1403,6 +1407,17 @@ export class HeliusRingsService {
     operation: HeliusRingsOperationRow,
     error: unknown
   ): Promise<HeliusRingsOperationRow> {
+    if (error instanceof MoneyMovementRefusedError) {
+      // Money admission refused the signature (HOO-1955): a decision, not an
+      // outage. Record it as final and surface the 403 rather than a
+      // retryable gateway failure.
+      await this.fail(operation.id, operation.state, {
+        code: "signer_failed",
+        message: error.message,
+        retryable: false,
+      });
+      throw error;
+    }
     const failed = await this.fail(operation.id, operation.state, describeFailure(error));
     return failed ?? (await this.requireOperation(operation.id));
   }
@@ -1632,16 +1647,20 @@ export class HeliusRingsService {
     row: HeliusRingsOperationRow,
     events: OperationEvent[] = []
   ): PrivateOperation {
+    // A stored `approval_required` row waits on an approval that no longer
+    // exists. Report it as a failure that cannot be retried (ADR 0006).
+    const retired = row.state === "approval_required";
     return {
       id: row.id,
       walletId: row.wallet_id,
       opType: row.op_type,
-      state: row.state,
+      state: retired ? "failed" : row.state,
       proof: null,
       outerTxSignature: row.outer_tx_signature,
       photonIndexedAt: row.photon_indexed_at,
-      failure:
-        row.failure_code && row.failure_message !== null && row.retryable !== null
+      failure: retired
+        ? { ...RETIRED_APPROVAL_FAILURE }
+        : row.failure_code && row.failure_message !== null && row.retryable !== null
           ? { code: row.failure_code, message: row.failure_message, retryable: row.retryable }
           : null,
       ringProgramId: row.ring_program_id ?? null,

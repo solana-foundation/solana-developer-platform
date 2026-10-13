@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { usePlaygroundCreateKeyHref } from "@/components/use-playground-create-key-href";
 import { useTranslations } from "@/i18n/provider";
 import {
   buildIssuancePlaygroundEndpointConfigs,
@@ -28,6 +29,7 @@ export function IssuancePlayground({
   tokens,
 }: IssuancePlaygroundProps) {
   const t = useTranslations();
+  const createApiKeyHref = usePlaygroundCreateKeyHref();
   const endpoints = useMemo(
     () => buildIssuancePlaygroundEndpointConfigs({ templates, tokens, t }),
     [templates, tokens, t]
@@ -41,6 +43,7 @@ export function IssuancePlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      createApiKeyHref={createApiKeyHref}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={templatesError ? [{ text: templatesError, tone: "critical" }] : []}
     />

@@ -1,6 +1,6 @@
 "use client";
 
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
+import { FIAT_PEG_CURRENCIES } from "@sdp/types/payment-rails";
 import { type LucideIcon, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import type { CustomFieldRow, DraftState } from "./issuance-draft-wizard.types";
 
 type UpdateDraft = (patch: Partial<DraftState>) => void;
 
-const FIAT_CURRENCY_OPTIONS = fiatCurrencyOptions(RAMP_FIAT_CURRENCIES);
+const FIAT_CURRENCY_OPTIONS = fiatCurrencyOptions(FIAT_PEG_CURRENCIES);
 
 export function FormCard({
   title,

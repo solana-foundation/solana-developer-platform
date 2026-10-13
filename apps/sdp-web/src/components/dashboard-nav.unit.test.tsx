@@ -316,10 +316,11 @@ describe("Removed Policies and Approvals navigation", () => {
 });
 
 describe("subnav open state", () => {
-  const closed = { integrations: false, payments: false, markets: false } as const;
+  const closed = { wallets: false, integrations: false, payments: false, markets: false } as const;
 
   it("opens a section when its top-level item is followed", () => {
     expect(withSubnavOpen(closed, "payments")).toEqual({
+      wallets: false,
       integrations: false,
       payments: true,
       markets: false,
@@ -327,19 +328,27 @@ describe("subnav open state", () => {
   });
 
   it("never closes the section being navigated into", () => {
-    const open = { integrations: false, payments: true, markets: false };
+    // The whole reason this is not a toggle. A second click on the section you
+    // are already inside would otherwise hide the pages you are looking at.
+    const open = { wallets: false, integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments").payments).toBe(true);
   });
 
   it("returns the same object when the section is already open", () => {
-    const open = { integrations: false, payments: true, markets: false };
+    // Held in React state, so a click that decides nothing must not re-render
+    // the whole shell.
+    const open = { wallets: false, integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments")).toBe(open);
   });
 
   it("leaves other sections alone", () => {
     expect(
-      withSubnavOpen({ integrations: false, payments: false, markets: true }, "payments")
+      withSubnavOpen(
+        { wallets: false, integrations: false, payments: false, markets: true },
+        "payments"
+      )
     ).toEqual({
+      wallets: false,
       integrations: false,
       payments: true,
       markets: true,
@@ -349,7 +358,37 @@ describe("subnav open state", () => {
   it("still flips both ways for the chevron", () => {
     expect(withSubnavToggled(closed, "markets").markets).toBe(true);
     expect(
-      withSubnavToggled({ integrations: false, payments: false, markets: true }, "markets").markets
+      withSubnavToggled(
+        { wallets: false, integrations: false, payments: false, markets: true },
+        "markets"
+      ).markets
     ).toBe(false);
+  });
+});
+
+describe("pinned wallets", () => {
+  const pinned = [
+    { label: "Off ramp demo wallet", href: "/dashboard/wallets/wa-1", leading: <span /> },
+    { label: "KMS", href: "/dashboard/wallets/para-1", leading: <span /> },
+  ];
+  const walletsItem = (overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) =>
+    getNavSections(t, navOptions(overrides))[0]?.items.find(
+      (item) => item.href === "/dashboard/wallets"
+    );
+
+  it("lists pinned wallets under Wallets as a collapsible group, in pin order", () => {
+    const wallets = walletsItem({ walletFavorites: pinned });
+    expect(wallets?.subnavKey).toBe("wallets");
+    expect(wallets?.children?.map((child) => child.label)).toEqual(["Off ramp demo wallet", "KMS"]);
+  });
+
+  it("keeps Wallets a plain link until something is pinned", () => {
+    const wallets = walletsItem({ walletFavorites: [] });
+    expect(wallets?.children).toBeUndefined();
+    expect(wallets?.subnavKey).toBeUndefined();
+  });
+
+  it("drops the pins with the Wallets module", () => {
+    expect(walletsItem({ custodyEnabled: false, walletFavorites: pinned })).toBeUndefined();
   });
 });

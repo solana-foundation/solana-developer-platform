@@ -58,11 +58,14 @@ import PaymentRequestsLoading, {
 } from "@/app/dashboard/[projectId]/payments/requests/loading";
 import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
+  CurrentWalletDetailSkeleton,
+  CurrentWalletSetupSkeleton,
+  CurrentWalletsOverviewSkeleton,
+  WalletDetailSkeleton as LegacyWalletDetailSkeleton,
+  WalletSetupSkeleton as LegacyWalletSetupSkeleton,
+  WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
   WalletConnectionsListSkeleton,
-  WalletDetailSkeleton,
-  WalletSetupSkeleton,
-  WalletsOverviewSkeleton,
-} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
+} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
 interface PageLoadingProps {
@@ -89,6 +92,9 @@ const LEGACY_DESIGN_PAGE_LOADING: Partial<
   "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
   "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
   "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
+  "wallets-overview": LegacyWalletsOverviewSkeleton,
+  "wallet-setup": LegacyWalletSetupSkeleton,
+  "wallet-detail": LegacyWalletDetailSkeleton,
 };
 
 export function resolvePageLoadingComponent(
@@ -114,13 +120,13 @@ function resolveCurrentPageLoadingComponent(
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
-      return WalletsOverviewSkeleton;
+      return CurrentWalletsOverviewSkeleton;
     case "wallet-setup":
-      return WalletSetupSkeleton;
+      return CurrentWalletSetupSkeleton;
     case "wallet-connections":
       return WalletConnectionsListSkeleton;
     case "wallet-detail":
-      return WalletDetailSkeleton;
+      return CurrentWalletDetailSkeleton;
     case "issuance-overview":
       return IssuancePageSkeleton;
     case "issuance-create":

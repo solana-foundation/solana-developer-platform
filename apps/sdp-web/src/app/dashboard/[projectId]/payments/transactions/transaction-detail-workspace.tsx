@@ -1,6 +1,10 @@
 "use client";
 
-import type { PaymentTransferStatus, RampProviderId, UnifiedTransaction } from "@sdp/types";
+import type {
+  PaymentTransferStatus,
+  PersistedRampProviderId,
+  UnifiedTransaction,
+} from "@sdp/types";
 import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -315,7 +319,7 @@ function ProviderSection({
   provider,
   reference,
 }: {
-  provider: RampProviderId;
+  provider: PersistedRampProviderId;
   reference: string | undefined;
 }) {
   const t = useTranslations();

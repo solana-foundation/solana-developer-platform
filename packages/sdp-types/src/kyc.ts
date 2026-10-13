@@ -3,8 +3,8 @@
 //
 // Identity is verified ONCE per wallet (kyc_wallets) and reused across assets; a wallet
 // is "cleared" to hold an asset via an active enrollment (wallet_asset_enrollments).
-// KYC providers (Mural today, others later) are writers into kyc_status — SDP owns the
-// normalized status; kycProvider/providerRef only record who verified it.
+// KYC providers are writers into kyc_status. SDP owns the normalized status;
+// kycProvider/providerRef only record who verified it.
 
 export const KYC_STATUSES = ["unverified", "pending", "verified", "rejected"] as const;
 export type KycStatus = (typeof KYC_STATUSES)[number];

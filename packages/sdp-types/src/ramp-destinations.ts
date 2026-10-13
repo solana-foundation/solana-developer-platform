@@ -8,13 +8,6 @@
  * credentials.
  */
 
-/**
- * MoneyGram widget hosts the sessions API may hand back. The pilot is
- * sandbox-only (the client refuses to mint non-sandbox secrets), so only the
- * playground host is approved; extend this when a production pilot starts.
- */
-export const MONEYGRAM_WIDGET_APPROVED_HOSTS = ["playground.xramps.moneygram.com"] as const;
-
 /** MoonPay hosted-checkout hosts (production and sandbox, buy and sell). */
 export const MOONPAY_HOSTED_APPROVED_HOSTS = [
   "buy.moonpay.com",

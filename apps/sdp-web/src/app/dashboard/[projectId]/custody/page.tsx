@@ -11,6 +11,7 @@ import {
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/[projectId]/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -23,6 +24,7 @@ import {
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
+import RedesignCurrentCustodyPage from "./page.redesign";
 import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsWorkspace } from "./wallets-workspace";
 
@@ -66,7 +68,8 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-export default async function CustodyPage() {
+// react-doctor-disable-next-line no-high-complexity-react-function -- main's page, unchanged; this change only moves its default export to the design switch
+async function CustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -166,3 +169,5 @@ export default async function CustodyPage() {
     throw error;
   }
 }
+
+export default withLegacyDesign(RedesignCurrentCustodyPage, CustodyPage, "wallets");
