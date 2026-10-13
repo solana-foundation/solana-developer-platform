@@ -9,7 +9,7 @@ import {
 } from "@sdp/dvp";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
@@ -379,7 +379,7 @@ export async function executeDvpFunding(
     { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
     { programAddress: tokenProgram }
   );
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
