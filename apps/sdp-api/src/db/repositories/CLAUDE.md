@@ -142,6 +142,10 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   `ramp-support:generate` only** (not `currencies:discover`, which needs
   Doppler and re-pulls live provider snapshots). Fiat currencies only it
   offered leave `RAMP_FIAT_CURRENCIES`, so request validation narrows with it.
+- **Re-key tests that used it as the stand-in provider** (demo mode,
+  release-channel and integration gates) to a live provider that runs the same
+  pair in the regenerated support table. Tests that pick "a currency provider X
+  doesn't list" from `RAMP_FIAT_CURRENCIES` can run out of candidates.
 - **Merge only after an operator count shows no open transfers for it in stage
   and prod.** A merge to main deploys to prod in the same run, so the drain
   check gates the merge, not a later deploy.
