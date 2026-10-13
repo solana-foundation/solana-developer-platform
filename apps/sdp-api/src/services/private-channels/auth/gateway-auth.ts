@@ -141,13 +141,12 @@ function isUnauthorizedAuthError(error: unknown): boolean {
  * 401 / auth unavailable), that error surfaces — it is more actionable than the 401.
  */
 export async function withGatewayRpc<T>(
-  env: Env,
   gatewayUrl: string,
   context: SpcAuthContext,
   run: (rpc: SolanaRpc) => Promise<T>
 ): Promise<T> {
   const attempt = (token: string) =>
-    run(createChannelGatewayRpc(env, gatewayUrl, gatewayAuthOptions(token)));
+    run(createChannelGatewayRpc(gatewayUrl, gatewayAuthOptions(token)));
   const startedAt = Date.now();
   try {
     return await attempt(context.current);

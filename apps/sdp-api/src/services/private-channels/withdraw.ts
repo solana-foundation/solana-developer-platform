@@ -114,30 +114,27 @@ export interface CreateChannelWithdrawalInput {
  * Build, sign, and broadcast the burn to the gateway. Returns the channel-chain
  * signature. The custody wallet is the sole signer (owner + fee payer).
  */
-async function broadcastWithdrawal(
-  env: Env,
-  input: {
-    instance: WithdrawalInstance;
-    organizationId: string;
-    projectId: string;
-    wallet: CustodyWallet;
-    signer: TransactionSigner;
-    mint: Address;
-    /** Program owning the mint; seeds the burn's `tokenAccount` derivation. */
-    tokenProgram: Address;
-    destination: Address;
-    amountBaseUnits: bigint;
-    gatewayAuth: SpcAuthContext;
-    /**
-     * Called with the burn's signature after signing and before the send, so
-     * the outcome of a request that dies mid-send stays resolvable: a persisted
-     * signature is what lets abandoned-reservation recovery ask the gateway
-     * what happened instead of guessing. A 401 retry re-signs and reports its
-     * new signature the same way before its own send.
-     */
-    onSigned: (signature: Signature) => Promise<void>;
-  }
-): Promise<Signature> {
+async function broadcastWithdrawal(input: {
+  instance: WithdrawalInstance;
+  organizationId: string;
+  projectId: string;
+  wallet: CustodyWallet;
+  signer: TransactionSigner;
+  mint: Address;
+  /** Program owning the mint; seeds the burn's `tokenAccount` derivation. */
+  tokenProgram: Address;
+  destination: Address;
+  amountBaseUnits: bigint;
+  gatewayAuth: SpcAuthContext;
+  /**
+   * Called with the burn's signature after signing and before the send, so
+   * the outcome of a request that dies mid-send stays resolvable: a persisted
+   * signature is what lets abandoned-reservation recovery ask the gateway
+   * what happened instead of guessing. A 401 retry re-signs and reports its
+   * new signature the same way before its own send.
+   */
+  onSigned: (signature: Signature) => Promise<void>;
+}): Promise<Signature> {
   // Signer derivation + the (blockhash-independent) burn instruction are built ONCE,
   // outside the retried gateway unit — a 401 retry re-signs against a fresh blockhash
   // but must not re-derive the signer.
@@ -158,7 +155,7 @@ async function broadcastWithdrawal(
   });
 
   // Blockhash + broadcast on the gateway; whole sequence is the withGatewayRpc retry unit.
-  return withGatewayRpc(env, input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
+  return withGatewayRpc(input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(gatewayRpc, "confirmed");
 
     const message = pipe(
@@ -289,7 +286,7 @@ export async function resolveAbandonedWithdrawalReservation(
     );
   }
   let latest = promoted ?? row;
-  const settled = await confirmAndPersistWithdrawal(env, repo, {
+  const settled = await confirmAndPersistWithdrawal(repo, {
     withdrawalId: row.id,
     gatewayUrl: input.gatewayUrl,
     signature,
@@ -365,7 +362,7 @@ export async function createChannelWithdrawal(
   // refuse it anyway, but that answer arrives as an opaque channel-chain failure
   // on a row already marked `submitted`; this one is a clean 400 with nothing
   // persisted, and it mirrors the member-transfer path.
-  const balance = await getChannelBalance(env, {
+  const balance = await getChannelBalance({
     instance,
     owner,
     mint,
@@ -412,7 +409,7 @@ export async function createChannelWithdrawal(
   let signature: Signature;
   let recordedSignature: Signature | null = null;
   try {
-    signature = await broadcastWithdrawal(env, {
+    signature = await broadcastWithdrawal({
       instance,
       organizationId,
       projectId,
@@ -491,7 +488,7 @@ export async function createChannelWithdrawal(
   // Confirm the burn on the gateway. A transport/auth error here leaves the
   // withdrawal `submitted` (the reconciler finalizes it); only a real on-chain
   // burn error marks it `failed`. See `confirmAndPersistWithdrawal`.
-  const settled = await confirmAndPersistWithdrawal(env, repo, {
+  const settled = await confirmAndPersistWithdrawal(repo, {
     withdrawalId: created.id,
     gatewayUrl: instance.gatewayUrl,
     signature,
