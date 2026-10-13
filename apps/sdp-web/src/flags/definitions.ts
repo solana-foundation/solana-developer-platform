@@ -291,7 +291,6 @@ export function defineDashboardFlags({
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
   const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
   const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
-  const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
   return {
@@ -315,7 +314,6 @@ export function defineDashboardFlags({
     rampProviderBvnk,
     rampProviderMoneygram,
     rampProviderCoinbase,
-    rampProviderMural,
     rampProviderStripe,
   };
 }

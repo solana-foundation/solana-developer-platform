@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
+import {
+  RETIRED_RAMP_PROVIDERS,
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpRampProviderStages,
+} from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
@@ -392,6 +396,60 @@ describe("Ramp webhook event inbox", () => {
     expect(rows[0]?.status).toBe("failed");
     expect(rows[0]?.attempts).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
   });
+
+  /** Inserts a replayable row directly: `insertEvent` only takes a live provider. */
+  async function seedStoredEvent(provider: string): Promise<string> {
+    const id = `rwe_stored_${provider}`;
+    const longAgo = "2026-06-18T00:00:00.000Z";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO ramp_webhook_events (id, provider, environment, payload, created_at, updated_at)
+         VALUES (?, ?, 'production', '{}'::jsonb, ?, ?)`
+      )
+      .bind(id, provider, longAgo, longAgo)
+      .run();
+    return id;
+  }
+
+  it.each(RETIRED_RAMP_PROVIDERS)(
+    "parks a retired %s event for want of a processor, without making it terminal",
+    async (provider) => {
+      const id = await seedStoredEvent(provider);
+
+      expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(0);
+
+      const row = await getDb(env)
+        .prepare("SELECT status, terminal, last_error FROM ramp_webhook_events WHERE id = ?")
+        .bind(id)
+        .first<{ status: string; terminal: boolean; last_error: string | null }>();
+      expect(row).toEqual({
+        status: "failed",
+        terminal: false,
+        last_error: `no webhook processor for provider ${provider}`,
+      });
+    }
+  );
+
+  it("leaves an event from a provider this deployment does not know untouched", async () => {
+    const unknown = await seedStoredEvent("not-a-ramp-provider");
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+      .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
+      .run();
+
+    expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(1);
+
+    expect(await readTransferStatus()).toBe("completed");
+    expect(await readInboxRows()).toEqual([
+      { id: unknown, status: "pending", attempts: 0, last_error: null },
+    ]);
+  });
+
   describe("with one ramp provider in the release channel and another out", () => {
     // Today every provider is `experimental`, so `beta` would leave them all out:
     // these stages put MoonPay in `beta` and keep Lightspark out of it.

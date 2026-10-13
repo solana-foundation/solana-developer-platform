@@ -13,8 +13,9 @@ import {
 } from "../../src/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
-import { createLocalApiClient } from "../support/local-api-client";
+import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
+import { fetchApiReleaseChannel, isModuleServed } from "../support/release-channel";
 
 interface ReadOnlyFixture {
   issuanceTransactions: TokenTransactionListItem[];
@@ -112,6 +113,14 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       "https://api-preview.solana.com",
     ]).toContain(env.sdpApiBaseUrl);
 
+    // Issuance answers 403 outside its release channel (stage on `beta`), so it is
+    // read and required only where the API serves it.
+    const issuanceServed = isModuleServed(
+      await fetchApiReleaseChannel(env.sdpApiBaseUrl),
+      "issuance"
+    );
+    const readIssuanceTransactions = async (api: LocalApiClient, path: string) =>
+      issuanceServed ? api.get<TokenTransactionListItem[]>(path) : [];
     fixture = await provisionWithAdminSession(browser, async (session) => {
       expect(session.identity.email).toBe(env.clerkTestEmail);
       expect(session.identity.organizationId).toBe(env.clerkOrgId);
@@ -141,7 +150,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       })}`;
       const [walletData, issuanceTransactions, transfers] = await Promise.all([
         api.get<{ wallets: PaymentsDashboardWallet[] }>(walletsPath),
-        api.get<TokenTransactionListItem[]>(issuancePath),
+        readIssuanceTransactions(api, issuancePath),
         api.get<PaymentTransferSummary[]>(transfersPath),
       ]);
       const firstTransfer = transfers[0];
@@ -191,10 +200,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       ).toBeGreaterThan(0);
       if (!RESEEDED_STAGE) {
         expect(
-          resolvedFixture.issuanceTransactions.length,
-          "home activity needs a real issuance transaction"
-        ).toBeGreaterThan(0);
-        expect(
           resolvedFixture.transfers.length,
           "payments needs a real transfer fixture"
         ).toBeGreaterThan(0);
@@ -212,6 +217,12 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       );
       return resolvedFixture;
     });
+    if (issuanceServed && !RESEEDED_STAGE) {
+      expect(
+        fixture.issuanceTransactions.length,
+        "home activity needs a real issuance transaction"
+      ).toBeGreaterThan(0);
+    }
   });
 
   test("home loads one combined activity request", async ({ page }) => {

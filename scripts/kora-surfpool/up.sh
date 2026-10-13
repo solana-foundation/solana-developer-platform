@@ -90,12 +90,8 @@ configure_embedded_remote_rpc() {
     return 0
   fi
 
-  local remote_rpc_url
-  remote_rpc_url="$(node "${ROOT_DIR}/scripts/kora-surfpool/select-remote-rpc.mjs")"
-  if [ -n "${remote_rpc_url}" ]; then
-    SURFPOOL_REMOTE_RPC_URL="${remote_rpc_url}"
-    export SURFPOOL_REMOTE_RPC_URL
-  fi
+  SURFPOOL_REMOTE_RPC_URL="$(node "${ROOT_DIR}/scripts/kora-surfpool/select-remote-rpc.mjs")"
+  export SURFPOOL_REMOTE_RPC_URL
 }
 
 embedded_surfpool_config_matches() {

@@ -4,7 +4,7 @@ import type {
   MoneygramTransferDetails,
   PaymentTransferSummary,
   PaymentTransferType,
-  RampProviderId,
+  PersistedRampProviderId,
 } from "@sdp/types";
 import {
   ArrowRightIcon,
@@ -24,7 +24,7 @@ import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
@@ -48,19 +48,16 @@ function TransferStatusBadge({ status }: { status: PaymentTransferSummary["statu
   return <Badge variant={statusVariant(status)}>{t(statusMessageKey(status))}</Badge>;
 }
 
-function TransferProviderCell({ provider }: { provider: RampProviderId | undefined }) {
+function TransferProviderCell({ provider }: { provider: PersistedRampProviderId | undefined }) {
   if (provider === undefined) {
     return <span className="text-sm text-tertiary">—</span>;
   }
+  const logo = getRampProviderLogo(provider);
   return (
     <div className="flex items-center gap-2">
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
+      {logo === undefined ? null : (
+        <Image src={logo} alt="" width={20} height={20} className="size-5 rounded" />
+      )}
       <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
     </div>
   );
@@ -493,7 +490,7 @@ export function CounterpartyTransactions({
 }) {
   const t = useTranslations();
   const [typeFilter, setTypeFilter] = useState<PaymentTransferType | null>(null);
-  const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
+  const [providerFilter, setProviderFilter] = useState<PersistedRampProviderId | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
 
   const availableTypes = useMemo(

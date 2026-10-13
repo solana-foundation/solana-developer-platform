@@ -49,20 +49,18 @@ or an explicit entry there.
 
 ## Counterparty provider lookups
 
-Provider webhooks resolve tenants from provider references. Mural still
-lives on the counterparty row (`mural_organization_id`, with a
-`provider_data` JSON fallback); BVNK moved to
+Provider webhooks resolve tenants from provider references held on
 `counterparty_provider_accounts` rows of kind `customer_link`
 (`provider_customer_reference`). Migration
 `0080_counterparty_provider_lookup_integrity.sql` (re-scoped by
-`0082_scope_customer_link_uniqueness.sql`) makes both lookup keys unique
-among active rows: the *effective* mural key —
-`COALESCE(mural_organization_id, provider_data JSON path)` — and the
-`(provider, provider_customer_reference)` pair for active BVNK and
+`0082_scope_customer_link_uniqueness.sql`) makes the
+`(provider, provider_customer_reference)` pair unique among active BVNK and
 Lightspark customer links. A reference therefore resolves to at most one
-tenant in every migration phase; two tenants racing to claim the same
-reference get a unique-violation failure instead of a silent cross-tenant
-resolution.
+tenant; two tenants racing to claim the same reference get a
+unique-violation failure instead of a silent cross-tenant resolution. 0080
+also made a now-retired ramp provider's counterparty-row lookup key unique.
+Nothing reads or writes that key any more, but its unique indexes remain until
+a follow-up migration removes them.
 
 The customer-link uniqueness applies only to providers whose customers SDP
 creates one-per-counterparty (BVNK — which also routes webhooks by customer
@@ -77,11 +75,11 @@ by design and never constrained.
 
 The migration pre-checks for active counterparties that already share an
 effective reference (one row claiming it in the denormalized column, another
-only in `provider_data` JSON — a state the historical indexes permitted) and
-stops with the conflicting ids. Those rows are *already* broken in
-production: the webhook lookups fail closed on the ambiguity today. Which
-row legitimately owns the provider relationship is a business decision, so
-the migration never picks a winner. Confirm ownership with the provider,
+only in `provider_data` JSON, a state the historical indexes permitted) and
+stops with the conflicting ids. Those rows were *already* broken: the
+webhook lookup failed closed on the ambiguity. Which row legitimately owns
+the provider relationship is a business decision, so the migration never
+picks a winner. Confirm ownership with the provider,
 then archive the loser or clear its stale reference via
 `runWithOperatorDatabaseAccess` (recording why), and re-run the migration.
 

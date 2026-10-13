@@ -9,7 +9,6 @@ Several payment flows take a counterparty instead of a raw address:
 
 - **Transfer batches and recurring payments** take a `counterpartyId` plus a `counterpartyAccountId` for each recipient, and pay that account's Solana address. See [Payouts and disbursements](/docs/payments/send-payouts).
 - **Onramp quotes** (`POST /v1/payments/ramps/onramp/quote`) require a `counterpartyId`. The ramp provider's own customer record may be resolved or created from that counterparty. See [Ramps](/docs/payments/ramps).
-- **Subscriptions** (`POST /v1/payments/subscriptions`) take the `counterpartyId` of the counterparty being billed.
 
 The Counterparties API has 13 operations, covering field options, the counterparty records, their payment accounts, the provider accounts ramp providers hold for them, and ramp requirements.
 
@@ -240,7 +239,7 @@ Before you request a ramp quote, check whether the counterparty is ready for the
 
 | Query param | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | Onramp: `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. Offramp: `lightspark`, `moonpay`, `bvnk`, `moneygram`, `mural`. |
+| `provider` | yes | Onramp: `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `stripe`. Offramp: `lightspark`, `moonpay`, `bvnk`, `moneygram`. |
 | `direction` | yes | `onramp` or `offramp`. |
 | `assetRail` | yes | Canonical SDP crypto asset rail, such as `usdc.solana`. |
 | `fiatCurrency` | yes | ISO currency code, such as `USD`. |
@@ -313,17 +312,15 @@ Every response carries `provider`, `direction`, and `status`. The other fields d
 | `collect_account` | `lightspark` | `payout` | Lightspark offramp needs a payout account for the corridor. See [Lightspark offramp corridors](#lightspark-offramp-corridors). |
 | `counterparty_collect_agreement` | `bvnk` | `agreements` | The counterparty must accept the listed provider agreements. Each has `name`, `displayName`, `description`, `url`, and `privacyPolicyUrl`. |
 | `counterparty_agreement_signing` | `bvnk` | none | Agreement acceptance is being confirmed with the provider. |
-| `terms_of_service_required` | `mural` | `termsOfServiceUrl` | The counterparty must accept the provider's terms of service. |
-| `onboarding_not_started` | `lightspark`, `mural` | none | Onboarding with the provider hasn't started. |
-| `customer_verification_required` | `bvnk`, `mural` | `verificationUrl` | The provider needs the counterparty to complete verification on a provider-hosted page. BVNK generates a new link for each response. |
-| `customer_verifying` | `bvnk`, `mural` | none | The provider is reviewing the counterparty. |
-| `customer_verification_failed` | `bvnk`, `mural` | none | Verification failed at the provider. |
+| `onboarding_not_started` | `lightspark` | none | Onboarding with the provider hasn't started. |
+| `customer_verification_required` | `bvnk` | `verificationUrl` | The provider needs the counterparty to complete verification on a provider-hosted page. BVNK generates a new link for each response. |
+| `customer_verifying` | `bvnk` | none | The provider is reviewing the counterparty. |
+| `customer_verification_failed` | `bvnk` | none | Verification failed at the provider. |
 | `customer_funding_account_provisioning` | `bvnk` | none | The provider is setting up a funding account for the counterparty. |
-| `funding_account_provisioning` | `mural` | none | The provider is setting up a funding account for the counterparty. |
 | `customer_funding_account_provisioning_failed` | `bvnk` | none | Funding-account setup failed at the provider. |
 | `unsupported` | all | `reason` | The provider doesn't support this request for the counterparty, for example because of the fiat currency. `reason` explains why. |
 
-The in-progress states `counterparty_agreement_signing`, `customer_verifying`, `customer_funding_account_provisioning`, and `funding_account_provisioning` change on the provider's side. Read the requirements again to see the current state.
+The in-progress states `counterparty_agreement_signing`, `customer_verifying`, and `customer_funding_account_provisioning` change on the provider's side. Read the requirements again to see the current state.
 
 Each entry in `fields` describes one value the provider needs:
 

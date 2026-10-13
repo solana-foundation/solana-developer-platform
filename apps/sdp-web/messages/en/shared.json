@@ -419,7 +419,6 @@
     "rampBvnkDescription": "Business payments between fiat and stablecoins.",
     "rampMoneygramDescription": "Cash and bank transfers through the MoneyGram network.",
     "rampCoinbaseDescription": "Fiat onramp and offramp through Coinbase accounts.",
-    "rampMuralDescription": "Stablecoin payouts and invoicing rails.",
     "rampStripeDescription": "Fiat onramp through Stripe checkout.",
     "complianceRangeDescription": "Transaction screening and risk monitoring for Solana.",
     "complianceEllipticDescription": "Blockchain analytics and transaction screening.",

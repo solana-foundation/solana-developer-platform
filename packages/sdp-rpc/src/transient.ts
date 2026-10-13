@@ -54,14 +54,10 @@ export function isTransientRpcError(error: unknown): boolean {
  * `withGatewayRpc` for the one-shot refresh retry that depends on this).
  */
 export function isUnauthorizedRpcError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const context = (error as { context?: unknown }).context;
-  if (!context || typeof context !== "object") {
-    return false;
-  }
-  return (context as { statusCode?: unknown }).statusCode === 401;
+  return (
+    isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+    error.context.statusCode === 401
+  );
 }
 
 /**
@@ -72,14 +68,10 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
  * rather than an error — see `getChannelTokenBalance`.
  */
 export function isForbiddenRpcError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const context = (error as { context?: unknown }).context;
-  if (!context || typeof context !== "object") {
-    return false;
-  }
-  return (context as { statusCode?: unknown }).statusCode === 403;
+  return (
+    isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+    error.context.statusCode === 403
+  );
 }
 
 const TRANSIENT_RPC_RETRY_DELAYS_MS = [250, 750, 1500];

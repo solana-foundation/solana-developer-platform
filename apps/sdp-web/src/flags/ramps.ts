@@ -7,7 +7,6 @@ import {
   rampProviderLightspark,
   rampProviderMoneygram,
   rampProviderMoonpay,
-  rampProviderMural,
   rampProviderStripe,
 } from "@/flags";
 
@@ -21,7 +20,6 @@ const RAMP_PROVIDER_FLAGS = {
   bvnk: rampProviderBvnk,
   moneygram: rampProviderMoneygram,
   coinbase: rampProviderCoinbase,
-  mural: rampProviderMural,
   stripe: rampProviderStripe,
 } as const satisfies RampProviderFlagReads;
 

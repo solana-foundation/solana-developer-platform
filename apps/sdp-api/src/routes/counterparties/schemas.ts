@@ -20,12 +20,9 @@ export const counterpartyIdParamsSchema = z.object({
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z
     .object({
-      provider: z.enum(
-        ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
-        {
-          error: "provider does not support onramp requirements",
-        }
-      ),
+      provider: z.enum(["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "stripe"], {
+        error: "provider does not support onramp requirements",
+      }),
       direction: z.literal("onramp"),
       assetRail: onrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
@@ -46,7 +43,7 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
       .strict(),
     z
       .object({
-        provider: z.enum(["moonpay", "bvnk", "moneygram", "mural"], {
+        provider: z.enum(["moonpay", "bvnk", "moneygram"], {
           error: "provider does not support offramp requirements",
         }),
         direction: z.literal("offramp"),
@@ -128,21 +125,6 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
     }),
   ]),
   z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
-  z.discriminatedUnion("direction", [
-    z.object({
-      provider: z.literal("mural"),
-      direction: z.literal("onramp"),
-      assetRail: onrampCryptoRailSchema,
-      destinationCustodyWalletId: z.string().min(1),
-      fiatCurrency: rampFiatCurrencySchema,
-    }),
-    z.object({
-      provider: z.literal("mural"),
-      direction: z.literal("offramp"),
-      assetRail: offrampCryptoRailSchema,
-      fiatCurrency: rampFiatCurrencySchema,
-    }),
-  ]),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
 ]);
 

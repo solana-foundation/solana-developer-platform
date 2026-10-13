@@ -9,11 +9,12 @@ import type {
   Permission,
   SdpRampProviderStages,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
@@ -300,14 +301,6 @@ export interface Env {
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
-
-  // Mural Pay ramps configuration
-  MURAL_PAY_API_KEY?: string;
-  MURAL_PAY_TRANSFER_API_KEY?: string;
-  MURAL_PAY_WEBHOOK_PUBLIC_KEY?: string;
-  MURAL_PAY_SANDBOX_API_KEY?: string;
-  MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
-  MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
   // MoneyGram ramps configuration
   MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
