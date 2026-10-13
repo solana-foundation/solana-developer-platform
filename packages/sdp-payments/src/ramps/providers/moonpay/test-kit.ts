@@ -1,9 +1,23 @@
-import type { RampProviderTestKit } from "../../test-kit";
+import { createHmac } from "node:crypto";
+import type { SdpEnvironment } from "@sdp/types";
+import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
 
-const SANDBOX_API_KEY = "pk_test_contract";
-const LIVE_API_KEY = "pk_live_contract";
-// biome-ignore lint/security/noSecrets: a public wallet address, not a credential.
-const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+const API_KEYS = {
+  sandbox: "pk_test_contract",
+  production: "pk_live_contract",
+} as const satisfies Record<SdpEnvironment, string>;
+
+const SECRET_KEYS = {
+  sandbox: "sk_test_contract",
+  production: "sk_live_contract",
+} as const satisfies Record<SdpEnvironment, string>;
+
+/** The widget hosts a hosted quote may point at, by mode. */
+const WIDGET_HOSTS = {
+  sandbox: ["buy-sandbox.moonpay.com", "sell-sandbox.moonpay.com"],
+  production: ["buy.moonpay.com", "sell.moonpay.com"],
+} as const satisfies Record<SdpEnvironment, readonly string[]>;
+
 const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 
 /** A MoonPay v3 buy quote, as `GET /v3/currencies/sol/buy_quote` answers. */
@@ -18,6 +32,14 @@ const BUY_QUOTE = {
   quoteCurrencyCode: "sol",
 };
 
+const BUY_QUOTE_EXCHANGE: RecordedExchange = {
+  method: "GET",
+  url: /^https:\/\/api\.moonpay\.com\/v3\/currencies\/sol\/buy_quote\?/,
+  query: { baseCurrencyCode: "usd", baseCurrencyAmount: "50" },
+  status: 200,
+  body: BUY_QUOTE,
+};
+
 /** A MoonPay v3 sell quote, as `GET /v3/currencies/sol/sell_quote` answers. */
 const SELL_QUOTE = {
   baseCurrencyAmount: 1,
@@ -29,30 +51,52 @@ const SELL_QUOTE = {
   quoteCurrencyCode: "usd",
 };
 
+const SELL_QUOTE_EXCHANGE: RecordedExchange = {
+  method: "GET",
+  url: /^https:\/\/api\.moonpay\.com\/v3\/currencies\/sol\/sell_quote\?/,
+  query: { quoteCurrencyCode: "usd", baseCurrencyAmount: "1" },
+  status: 200,
+  body: SELL_QUOTE,
+};
+
+/**
+ * Whether a widget URL is on `mode`'s host with `mode`'s key and signature.
+ * The signature is recomputed here as MoonPay checks it: an HMAC-SHA256 of the
+ * query without it, keyed by the mode's secret.
+ */
+function signedForMode(hostedUrl: string, mode: SdpEnvironment): boolean {
+  const url = new URL(hostedUrl);
+  const signature = url.searchParams.get("signature");
+  url.searchParams.delete("signature");
+  return (
+    WIDGET_HOSTS[mode].some((host) => host === url.host) &&
+    url.searchParams.get("apiKey") === API_KEYS[mode] &&
+    signature === createHmac("sha256", SECRET_KEYS[mode]).update(url.search).digest("base64")
+  );
+}
+
 /**
  * MoonPay's contract kit. Estimates are HTTP reads; quotes are signed widget
- * URLs built locally, so they record no exchange.
+ * URLs built locally, so they record no exchange and are checked by URL.
  */
 export const MOONPAY_TEST_KIT: RampProviderTestKit = {
   env: {
-    MOONPAY_SANDBOX_API_KEY: SANDBOX_API_KEY,
-    MOONPAY_SANDBOX_SECRET_KEY: "sk_test_contract",
-    MOONPAY_API_KEY: LIVE_API_KEY,
-    MOONPAY_SECRET_KEY: "sk_live_contract",
+    MOONPAY_SANDBOX_API_KEY: API_KEYS.sandbox,
+    MOONPAY_SANDBOX_SECRET_KEY: SECRET_KEYS.sandbox,
+    MOONPAY_API_KEY: API_KEYS.production,
+    MOONPAY_SECRET_KEY: SECRET_KEYS.production,
   },
   onramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "50" },
-      exchanges: [
-        { method: "GET", url: /\/v3\/currencies\/sol\/buy_quote\?/, status: 200, body: BUY_QUOTE },
-      ],
+      exchanges: [BUY_QUOTE_EXCHANGE],
     },
     quote: {
       input: {
         assetRail: "sol.solana",
         fiatCurrency: "USD",
         fiatAmount: "50",
-        destinationWalletAddress: WALLET,
+        destinationWalletAddress: CONTRACT_WALLET,
         externalCustomerId: "cpty_contract_onramp",
         paymentTransferId: TRANSFER_ID,
       },
@@ -62,21 +106,14 @@ export const MOONPAY_TEST_KIT: RampProviderTestKit = {
   offramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", cryptoAmount: "1" },
-      exchanges: [
-        {
-          method: "GET",
-          url: /\/v3\/currencies\/sol\/sell_quote\?/,
-          status: 200,
-          body: SELL_QUOTE,
-        },
-      ],
+      exchanges: [SELL_QUOTE_EXCHANGE],
     },
     quote: {
       input: {
         assetRail: "sol.solana",
         fiatCurrency: "USD",
         cryptoAmount: "1",
-        sourceWalletAddress: WALLET,
+        sourceWalletAddress: CONTRACT_WALLET,
         externalCustomerId: "cpty_contract_offramp",
         paymentTransferId: TRANSFER_ID,
       },
@@ -84,15 +121,11 @@ export const MOONPAY_TEST_KIT: RampProviderTestKit = {
     },
   },
   usesModeCredential: (request, mode) =>
-    new URL(request.url).searchParams.get("apiKey") ===
-    (mode === "sandbox" ? SANDBOX_API_KEY : LIVE_API_KEY),
+    new URL(request.url).searchParams.get("apiKey") === API_KEYS[mode],
+  quoteUsesModeCredential: (quote, mode) =>
+    quote.deliveryMode === "hosted" && signedForMode(quote.hostedUrl, mode),
   malformedEstimate: {
     direction: "onramp",
-    exchange: {
-      method: "GET",
-      url: /\/buy_quote\?/,
-      status: 200,
-      body: { ...BUY_QUOTE, feeAmount: "1.5" },
-    },
+    exchange: { ...BUY_QUOTE_EXCHANGE, body: { ...BUY_QUOTE, feeAmount: "1.5" } },
   },
 };

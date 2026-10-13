@@ -1,9 +1,10 @@
 import { basicAuthHeader } from "../../shared";
-import type { RampProviderTestKit } from "../../test-kit";
+import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
 
 const SECRET_KEY = "sk_test_contract";
-// biome-ignore lint/security/noSecrets: a public wallet address, not a credential.
-const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+const FIAT_AMOUNT = "100";
+const CUSTOMER_ID = "cpty_contract_onramp";
+const CUSTOMER_IP = "203.0.113.7";
 
 const USDC_QUOTE = {
   id: "q_usdc",
@@ -24,6 +25,19 @@ const QUOTES = {
   destination_network_quotes: { solana: [USDC_QUOTE] },
 };
 
+const QUOTES_EXCHANGE: RecordedExchange = {
+  method: "GET",
+  url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp\/quotes\?/,
+  query: {
+    source_amount: FIAT_AMOUNT,
+    source_currency: "usd",
+    "destination_currencies[]": "usdc",
+    "destination_networks[]": "solana",
+  },
+  status: 200,
+  body: QUOTES,
+};
+
 /** A Stripe onramp session, as `POST /v1/crypto/onramp_sessions` answers. */
 const SESSION = {
   id: "cos_contract",
@@ -31,6 +45,23 @@ const SESSION = {
   client_secret: "cos_contract_secret_abc",
   status: "initialized",
   redirect_url: null,
+};
+
+const SESSION_EXCHANGE: RecordedExchange = {
+  method: "POST",
+  url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp_sessions$/,
+  form: {
+    "wallet_addresses[solana]": CONTRACT_WALLET,
+    lock_wallet_address: "true",
+    source_amount: FIAT_AMOUNT,
+    source_currency: "usd",
+    destination_currency: "usdc",
+    destination_network: "solana",
+    customer_ip_address: CUSTOMER_IP,
+    "metadata[externalCustomerId]": CUSTOMER_ID,
+  },
+  status: 200,
+  body: SESSION,
 };
 
 /**
@@ -41,23 +72,19 @@ export const STRIPE_TEST_KIT: RampProviderTestKit = {
   env: { STRIPE_SECRET_KEY: SECRET_KEY, STRIPE_PUBLISHABLE_KEY: "pk_test_contract" },
   onramp: {
     estimate: {
-      input: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: "100" },
-      exchanges: [
-        { method: "GET", url: /\/v1\/crypto\/onramp\/quotes\?/, status: 200, body: QUOTES },
-      ],
+      input: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: FIAT_AMOUNT },
+      exchanges: [QUOTES_EXCHANGE],
     },
     quote: {
       input: {
         assetRail: "usdc.solana",
         fiatCurrency: "USD",
-        fiatAmount: "100",
-        destinationWalletAddress: WALLET,
-        externalCustomerId: "cpty_contract_onramp",
-        customerIpAddress: "203.0.113.7",
+        fiatAmount: FIAT_AMOUNT,
+        destinationWalletAddress: CONTRACT_WALLET,
+        externalCustomerId: CUSTOMER_ID,
+        customerIpAddress: CUSTOMER_IP,
       },
-      exchanges: [
-        { method: "POST", url: /\/v1\/crypto\/onramp_sessions$/, status: 200, body: SESSION },
-      ],
+      exchanges: [SESSION_EXCHANGE],
     },
   },
   usesModeCredential: (request) =>
@@ -65,9 +92,7 @@ export const STRIPE_TEST_KIT: RampProviderTestKit = {
   malformedEstimate: {
     direction: "onramp",
     exchange: {
-      method: "GET",
-      url: /\/v1\/crypto\/onramp\/quotes\?/,
-      status: 200,
+      ...QUOTES_EXCHANGE,
       body: {
         ...QUOTES,
         destination_network_quotes: { solana: [{ ...USDC_QUOTE, destination_amount: 96.5 }] },
