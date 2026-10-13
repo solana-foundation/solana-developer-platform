@@ -60,22 +60,16 @@ LOCK TABLE organizations, projects, custody_configs, custody_connections,
     custody_wallets, custody_scope_defaults
     IN ACCESS EXCLUSIVE MODE;
 
--- Fails the migration, rather than deleting or moving anything, when a custody
--- config belongs to a Production project.
-DO $$
-DECLARE
-    production_config_count BIGINT;
-BEGIN
-    SELECT COUNT(*) INTO production_config_count
-      FROM custody_configs config
-      JOIN projects project ON project.id = config.project_id
-     WHERE project.environment <> 'sandbox';
-
-    IF production_config_count > 0 THEN
-        RAISE EXCEPTION '% custody config(s) belong to a Production project', production_config_count;
-    END IF;
-END;
-$$;
+-- Deletes every custody config that belongs to a Production project, since the
+-- project_environment foreign key below counts archived configs too. Stage and
+-- Production applied this file while it still failed on such a config, and
+-- held none; only dev drifted. The delete cascades to the config's
+-- custody_wallets and custody_scope_defaults rows, and fails with 23503 if a
+-- payments, earn, dvp, or issuance row still references one of those wallets.
+DELETE FROM custody_configs config
+ USING projects project
+ WHERE project.id = config.project_id
+   AND project.environment <> 'sandbox';
 
 -- Fails the migration, rather than deleting anything, when a custody
 -- connection is organization-scoped or bound to a credential outside its own
