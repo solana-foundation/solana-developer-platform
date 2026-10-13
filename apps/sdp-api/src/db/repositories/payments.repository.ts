@@ -313,14 +313,24 @@ export interface PaymentsRepository {
     claimValue: Record<string, unknown>;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Lists transfers in the given statuses whose project is in the open cluster scope's
+   * environment, oldest update first. System-only.
+   *
+   * @param params - The status, type, signature and timestamp filters and the page.
+   * @returns The matching transfers.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
    * next: least-recently-polled first (never-polled rows first), bounded to
-   * rows confirmed after the given floor. System-only.
+   * rows confirmed after the given floor and to projects in the open cluster
+   * scope's environment. System-only.
    *
    * @param params - The confirmed_at eligibility floor and the page size.
    * @returns The next page of the finalization poll queue.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listConfirmedTransfersToPoll(params: {
     confirmedAfter: string;
