@@ -14,3 +14,10 @@ ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS removed_at TEXT;
 UPDATE organization_members
    SET removed_at = sdp_iso_now()
  WHERE status <> 'active' AND removed_at IS NULL;
+
+-- The Clerk membership a row was last admitted through, when admission read it
+-- live from Clerk (the webhooks); NULL for a join from a session claim. A Clerk
+-- membership deletion applies only to the membership it names, or to a row
+-- with none recorded, so a late deletion of an old membership cannot remove a
+-- member Clerk has since re-added.
+ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS clerk_membership_id TEXT;
