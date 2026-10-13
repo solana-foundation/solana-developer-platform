@@ -15,18 +15,17 @@
  * 3. Upgrade "confirmed" transfers to "finalized" once the cluster reports
  *    finality — confirmed is transitional, not terminal.
  *
- * Chain reads run per project environment, each in that environment's cluster
- * scope: a Production project's transfer is checked on mainnet-beta, a Sandbox
- * project's on devnet.
+ * The job runner runs it once per environment, each in that environment's
+ * cluster scope: rows are selected for the scope's environment and checked on
+ * its cluster, so a Production project's transfer is read on mainnet-beta and
+ * a Sandbox project's on devnet.
  */
 
 import { withTransientRpcRetry } from "@sdp/rpc";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { runInClusterScope } from "@sdp/rpc/scope";
 import { getSignatureStatuses, type SignatureStatusInfo, type SolanaRpc } from "@sdp/rpc/solana";
-import type { ProjectEnvironment, TransferChainVerdictStatus } from "@sdp/types";
+import type { TransferChainVerdictStatus } from "@sdp/types";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
-import { getDb } from "@/db";
 import {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
@@ -41,7 +40,6 @@ import type {
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { clusterScopeForProject } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -79,42 +77,6 @@ function hasValidStoredSignature(
     );
     return false;
   }
-}
-
-/**
- * Group transfers by their project's environment, so each group's chain reads run in that
- * environment's cluster scope.
- *
- * @param env - Runtime environment for the project lookup.
- * @param transfers - The transfers to group.
- * @returns The transfers per environment.
- * @throws AppError `INTERNAL_ERROR` when a transfer has no project; every transfer belongs to one.
- * @throws AppError `NOT_FOUND` when a transfer's project does not exist.
- */
-async function groupByProjectEnvironment<TTransfer extends PaymentTransferRow>(
-  env: Env,
-  transfers: TTransfer[]
-): Promise<Map<ProjectEnvironment, TTransfer[]>> {
-  const db = getDb(env);
-  const environmentByProject = new Map<string, ProjectEnvironment>();
-  const byEnvironment = new Map<ProjectEnvironment, TTransfer[]>();
-  for (const transfer of transfers) {
-    if (transfer.project_id === null) {
-      throw internalError(`Transfer ${transfer.id} is missing a project`);
-    }
-    let environment = environmentByProject.get(transfer.project_id);
-    if (environment === undefined) {
-      environment = (await clusterScopeForProject(db, transfer.project_id)).environment;
-      environmentByProject.set(transfer.project_id, environment);
-    }
-    const group = byEnvironment.get(environment);
-    if (group) {
-      group.push(transfer);
-    } else {
-      byEnvironment.set(environment, [transfer]);
-    }
-  }
-  return byEnvironment;
 }
 
 function partitionByValidStoredSignature(transfers: PaymentTransferRow[]) {
@@ -246,7 +208,7 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
 
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
-  await finalizeConfirmedTransfers(env, repo, now, nowIso);
+  await finalizeConfirmedTransfers(repo, now, nowIso);
 }
 
 /**
@@ -279,14 +241,12 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * that window the transaction will never finalize, so the row rests at
  * confirmed and stops costing RPC.
  *
- * @param env - Runtime environment for RPC and repository construction.
  * @param repo - System payments repository.
  * @param now - Tick time anchoring the finalization window.
  * @param nowIso - Timestamp applied to every polled row.
  * @returns Resolves when the page's poll has been recorded.
  */
 async function finalizeConfirmedTransfers(
-  env: Env,
   repo: PaymentsRepository,
   now: Date,
   nowIso: string
@@ -313,11 +273,10 @@ async function finalizeConfirmedTransfers(
     });
   }
 
-  for (const [environment, transfers] of await groupByProjectEnvironment(env, confirmedTransfers)) {
-    await runInClusterScope({ projectId: null, environment }, () =>
-      pollConfirmedTransfersForFinality(repo, transfers, nowIso)
-    );
+  if (confirmedTransfers.length === 0) {
+    return;
   }
+  await pollConfirmedTransfersForFinality(repo, confirmedTransfers, nowIso);
 }
 
 /**
@@ -484,11 +443,10 @@ async function syncProcessingTransfersOnChain(
     }
   }
 
-  for (const [environment, transfers] of await groupByProjectEnvironment(env, processingWithSig)) {
-    await runInClusterScope({ projectId: null, environment }, () =>
-      syncProcessingTransfersOnCluster(env, repo, transfers, nowIso)
-    );
+  if (processingWithSig.length === 0) {
+    return;
   }
+  await syncProcessingTransfersOnCluster(env, repo, processingWithSig, nowIso);
 }
 
 /**
