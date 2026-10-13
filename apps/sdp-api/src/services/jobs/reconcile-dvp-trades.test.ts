@@ -1,24 +1,28 @@
-import { getBase58Decoder, signature } from "@solana/kit";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import { getBase58Decoder, type Signature, signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runPerCluster } from "@/cron/cluster-runs";
 import { getDb } from "@/db";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
 import { createPostgresDvpLegTransferRepository } from "@/db/repositories/dvp-leg-transfer.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import {
+  type ClusterRpcReply,
+  installClusterRpcResponder,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+  signatureStatusesReply,
+} from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const getBlockHeight = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
-const getSignatureStatusesMock = vi.hoisted(() => vi.fn());
 const resolveDvpClose = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-  getSignatureStatuses: getSignatureStatusesMock,
-}));
 vi.mock("@/services/dvp/read-chain", () => ({ readDvpTradeObservation }));
 vi.mock("@/services/dvp/closing-transaction", () => ({ resolveDvpClose }));
 const syncDvpLegTransfers = vi.hoisted(() => vi.fn());
@@ -38,7 +42,24 @@ const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 
 /** The RPC's answer for a transfer that landed: any confirmation status. */
-const LANDED_STATUS = [{ slot: 5n, confirmations: 1n, confirmationStatus: "confirmed", err: null }];
+const LANDED_STATUS: StubSignatureStatus = {
+  slot: 5,
+  confirmations: 1,
+  confirmationStatus: "confirmed",
+  err: null,
+};
+
+const INTERNAL_ERROR: ClusterRpcReply = { error: { code: -32603, message: "Internal error" } };
+
+function reconcileSandboxTrades(): Promise<void> {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    reconcileDvpTrades(env)
+  );
+}
+
+function closeSignature(byte: number): Signature {
+  return signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
+}
 
 function leg(amount: bigint, frozen = false) {
   return { exists: true, amount, frozen };
@@ -89,7 +110,7 @@ async function seedTrade(
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
          escrow_a, escrow_b, status,
-         create_signature, create_last_valid_block_height
+         create_signature, create_last_valid_block_height, environment
        ) VALUES (
          ?, ?, ?, ?,
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
@@ -105,7 +126,7 @@ async function seedTrade(
          '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         ?, ?, ?
+         ?, ?, ?, 'sandbox'
        )`
     )
     .bind(
@@ -154,13 +175,21 @@ async function statusOf(id: string): Promise<Record<string, unknown> | null> {
 }
 
 describe("reconcileDvpTrades", () => {
+  const rpc = installClusterRpcResponder();
+
+  function signatureStatusReadSizes(): number[] {
+    return rpc.requests
+      .filter((request) => request.method === "getSignatureStatuses")
+      .map((request) => signatureStatusesRead(request).signatures.length);
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     env.MARKETS_ENABLED = "true";
-    getBlockHeight.mockResolvedValue(1_000n);
+    rpc.answer("getBlockHeight", 1_000);
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
-    getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
+    rpc.respondSignatureStatuses(() => LANDED_STATUS);
     resolveDvpClose.mockResolvedValue({ kind: "absent" });
     syncDvpLegTransfers.mockResolvedValue(0);
     readDvpTradeObservation.mockResolvedValue(observation());
@@ -218,7 +247,7 @@ describe("reconcileDvpTrades", () => {
     env.MARKETS_ENABLED = undefined;
     await seedTrade("markets_off", "created");
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
     await expect(statusOf("markets_off")).resolves.toMatchObject({ observed_at: null });
@@ -232,7 +261,7 @@ describe("reconcileDvpTrades", () => {
       observation({ legA: leg(1000n), legB: leg(2000n), clusterUnixTimestamp })
     );
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const row = await statusOf("dvp_funding");
     expect(row).toMatchObject({
@@ -270,7 +299,7 @@ describe("reconcileDvpTrades", () => {
     it("reads both legs of a trade whose history was never read", async () => {
       await seedTrade("dvp_ledger_new", "created");
 
-      await reconcileDvpTrades(env);
+      await reconcileSandboxTrades();
 
       expect(
         syncDvpLegTransfers.mock.calls.map(([, , leg, scan]) => [leg.tradeId, leg.side, scan])
@@ -292,7 +321,7 @@ describe("reconcileDvpTrades", () => {
       await quiet("dvp_ledger_quiet");
       await scanned("dvp_ledger_quiet", new Date().toISOString());
 
-      await reconcileDvpTrades(env);
+      await reconcileSandboxTrades();
 
       expect(syncDvpLegTransfers).not.toHaveBeenCalled();
     });
@@ -302,7 +331,7 @@ describe("reconcileDvpTrades", () => {
       await scanned("dvp_ledger_moved", new Date().toISOString());
       readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(500n) }));
 
-      await reconcileDvpTrades(env);
+      await reconcileSandboxTrades();
 
       expect(syncDvpLegTransfers).toHaveBeenCalledTimes(2);
     });
@@ -314,7 +343,7 @@ describe("reconcileDvpTrades", () => {
       await quiet("dvp_ledger_unfinished");
       await scanned("dvp_ledger_unfinished", null);
 
-      await reconcileDvpTrades(env);
+      await reconcileSandboxTrades();
 
       expect(syncDvpLegTransfers).toHaveBeenCalledTimes(4);
     });
@@ -326,7 +355,7 @@ describe("reconcileDvpTrades", () => {
         observation({ legA: leg(1000n), legB: leg(2000n) })
       );
 
-      await reconcileDvpTrades(env);
+      await reconcileSandboxTrades();
 
       await expect(statusOf("dvp_ledger_down")).resolves.toMatchObject({ status: "funded" });
     });
@@ -341,7 +370,7 @@ describe("reconcileDvpTrades", () => {
       observation({ legA: leg(1000n), legB: leg(2000n), clusterUnixTimestamp: BigInt(expiry + 1) })
     );
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_cluster_expired")).resolves.toMatchObject({ status: "expired" });
   });
@@ -349,9 +378,9 @@ describe("reconcileDvpTrades", () => {
   it("resolves a creating trade once its create blockhash has expired", async () => {
     await seedTrade("dvp_dead_create", "creating", { createLastValidBlockHeight: "900" });
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
-    getBlockHeight.mockResolvedValue(901n);
+    rpc.answer("getBlockHeight", 901);
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_dead_create")).resolves.toMatchObject({ status: "create_failed" });
   });
@@ -359,9 +388,9 @@ describe("reconcileDvpTrades", () => {
   it("leaves a creating trade alone while its blockhash can still land", async () => {
     await seedTrade("dvp_live_create", "creating", { createLastValidBlockHeight: "2000" });
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
-    getBlockHeight.mockResolvedValue(1_000n);
+    rpc.answer("getBlockHeight", 1_000);
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_live_create")).resolves.toMatchObject({ status: "creating" });
   });
@@ -374,7 +403,7 @@ describe("reconcileDvpTrades", () => {
     });
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_young_claim")).resolves.toMatchObject({ status: "creating" });
   });
@@ -387,7 +416,7 @@ describe("reconcileDvpTrades", () => {
     });
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_orphaned_claim")).resolves.toMatchObject({
       status: "create_failed",
@@ -402,7 +431,7 @@ describe("reconcileDvpTrades", () => {
     });
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_signed_old_claim")).resolves.toMatchObject({ status: "creating" });
   });
@@ -411,7 +440,7 @@ describe("reconcileDvpTrades", () => {
     await seedTrade("dvp_frozen", "created");
     readDvpTradeObservation.mockResolvedValue(observation({ legA: leg(0n, true) }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_frozen")).resolves.toMatchObject({
       status: "created",
@@ -423,7 +452,7 @@ describe("reconcileDvpTrades", () => {
     await seedTrade("dvp_gone", "funded");
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_gone")).resolves.toMatchObject({ status: "closed_unknown" });
   });
@@ -433,7 +462,7 @@ describe("reconcileDvpTrades", () => {
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
     resolveDvpClose.mockResolvedValue({ kind: "resolved", status: "settled", signature: SIG });
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_external_settle")).resolves.toMatchObject({
       status: "settled",
@@ -454,7 +483,7 @@ describe("reconcileDvpTrades", () => {
     resolveDvpClose.mockResolvedValue({ kind: "capped" });
     const before = Date.now();
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const row = await statusOf("dvp_capped");
     expect(row?.close_resolution_attempts).toBe(3);
@@ -475,8 +504,8 @@ describe("reconcileDvpTrades", () => {
     resolveDvpClose.mockResolvedValue({ kind: "absent" });
     const before = Date.now();
 
-    await reconcileDvpTrades(env);
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
+    await reconcileSandboxTrades();
 
     const row = await statusOf("dvp_absent");
     expect(row?.close_resolution_attempts).toBe(1);
@@ -495,7 +524,7 @@ describe("reconcileDvpTrades", () => {
       .run();
     readDvpTradeObservation.mockResolvedValue(observation({ tradeAccountExists: false }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     expect(resolveDvpClose).not.toHaveBeenCalled();
   });
@@ -508,7 +537,7 @@ describe("reconcileDvpTrades", () => {
     await seedTrade("dvp_rpc_down", "funded");
     readDvpTradeObservation.mockRejectedValue(new Error("429 Too Many Requests"));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const row = await statusOf("dvp_rpc_down");
     expect(row).toMatchObject({ status: "funded" });
@@ -521,9 +550,9 @@ describe("reconcileDvpTrades", () => {
       createLastValidBlockHeight: "1",
     });
     readDvpTradeObservation.mockRejectedValue(new Error("socket hang up"));
-    getBlockHeight.mockResolvedValue(999_999n);
+    rpc.answer("getBlockHeight", 999_999);
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_creating_rpc_down")).resolves.toMatchObject({
       status: "creating",
@@ -539,7 +568,7 @@ describe("reconcileDvpTrades", () => {
       .mockRejectedValueOnce(new Error("rpc exploded"))
       .mockResolvedValue(observation({ legA: leg(1000n), legB: leg(2000n) }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     await expect(statusOf("dvp_broken")).resolves.toMatchObject({ status: "created" });
     await expect(statusOf("dvp_healthy")).resolves.toMatchObject({ status: "funded" });
@@ -551,7 +580,7 @@ describe("reconcileDvpTrades", () => {
       .prepare("UPDATE dvp_trades SET closed_at = sdp_iso_now() WHERE id = 'dvp_settled'")
       .run();
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
@@ -624,7 +653,7 @@ describe("reconcileDvpTrades", () => {
       .bind(SIG, "dvp_claim_sweep_b")
       .run();
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const remaining = await claims.listForTrade("dvp_claim_sweep");
     const receipt = await claims.listForTrade("dvp_claim_sweep_b");
@@ -645,25 +674,61 @@ describe("reconcileDvpTrades", () => {
     await seedTrade("dvp_close_dead", "funded");
     await seedTrade("dvp_close_live", "funded");
     const trades = createPostgresDvpTradeRepository(getDb(env));
-    const signatureOf = (byte: number) =>
-      signature(getBase58Decoder().decode(new Uint8Array(64).fill(byte)));
     await trades.claimClose("dvp_close_dead", {
       action: "settle",
-      signature: signatureOf(7),
+      signature: closeSignature(7),
       expiryHeight: "999",
     });
     await trades.claimClose("dvp_close_live", {
       action: "cancel",
-      signature: signatureOf(8),
+      signature: closeSignature(8),
       expiryHeight: "1000",
     });
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const read = async (id: string) =>
-      (await trades.getByIdAsParty(id))?.closeClaim?.signature ?? null;
+      (
+        await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+          trades.getByIdAsParty(id)
+        )
+      )?.closeClaim?.signature ?? null;
     expect(await read("dvp_close_dead")).toBeNull();
-    expect(await read("dvp_close_live")).toBe(signatureOf(8));
+    expect(await read("dvp_close_live")).toBe(closeSignature(8));
+  });
+
+  it("releases each cluster's close locks against that cluster's own block height", async () => {
+    await seedTrade("dvp_close_sandbox", "funded");
+    await seedTrade("dvp_close_production", "funded");
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE dvp_trades SET project_id = ?, environment = 'production' WHERE id = ?")
+      .bind(`${PROJECT_ID}_production`, "dvp_close_production")
+      .run();
+    const trades = createPostgresDvpTradeRepository(db);
+    await trades.claimClose("dvp_close_sandbox", {
+      action: "settle",
+      signature: closeSignature(9),
+      expiryHeight: "900",
+    });
+    await trades.claimClose("dvp_close_production", {
+      action: "settle",
+      signature: closeSignature(10),
+      expiryHeight: "900",
+    });
+    rpc.respond("getBlockHeight", (request) => ({
+      result: request.cluster === CLUSTER_BY_SDP_ENVIRONMENT.sandbox ? 1_000 : 800,
+    }));
+
+    await runPerCluster("reconcile-dvp-trades", () => reconcileDvpTrades(env));
+
+    const locks = await db
+      .prepare("SELECT id, close_claim_signature FROM dvp_trades ORDER BY id")
+      .all<{ id: string; close_claim_signature: string | null }>();
+    expect(locks.results).toEqual([
+      { id: "dvp_close_production", close_claim_signature: closeSignature(10) },
+      { id: "dvp_close_sandbox", close_claim_signature: null },
+    ]);
   });
 
   // PRO-1974. Expired receipts are asked about in chunks of 256, not one call
@@ -701,17 +766,17 @@ describe("reconcileDvpTrades", () => {
         await claims.recordFundingTx(tradeId, side, receipt);
       }
     }
-    getSignatureStatusesMock
-      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
-      .mockImplementation(async (_rpc: unknown, signatures: string[]) =>
-        signatures.map(() => null)
-      );
+    let statusReads = 0;
+    rpc.respond("getSignatureStatuses", (request) => {
+      statusReads += 1;
+      return statusReads === 1
+        ? INTERNAL_ERROR
+        : signatureStatusesReply(signatureStatusesRead(request).signatures.map(() => null));
+    });
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
-    expect(getSignatureStatusesMock.mock.calls.map(([, signatures]) => signatures.length)).toEqual([
-      256, 1,
-    ]);
+    expect(signatureStatusReadSizes()).toEqual([256, 1]);
     const remaining = await db
       .prepare("SELECT COUNT(*)::int AS count FROM dvp_leg_funding_claims")
       .first<{ count: number }>();
@@ -735,9 +800,9 @@ describe("reconcileDvpTrades", () => {
       .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
       .bind(SIG, "dvp_dead_broadcast")
       .run();
-    getSignatureStatusesMock.mockResolvedValue([null]);
+    rpc.respondSignatureStatuses(() => null);
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const after = await claims.listForTrade("dvp_dead_broadcast");
     expect(after).toHaveLength(0);
@@ -773,16 +838,14 @@ describe("reconcileDvpTrades", () => {
       .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
       .bind(SIG, "dvp_failed_broadcast")
       .run();
-    getSignatureStatusesMock.mockResolvedValue([
-      {
-        slot: 5n,
-        confirmations: 1n,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, "Custom"] },
-      },
-    ]);
+    rpc.respondSignatureStatuses(() => ({
+      slot: 5,
+      confirmations: 1,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, { Custom: 1 }] },
+    }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const after = await claims.listForTrade("dvp_failed_broadcast");
     expect(after).toHaveLength(0);
@@ -807,16 +870,14 @@ describe("reconcileDvpTrades", () => {
       .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
       .bind(SIG, "dvp_processed_failure")
       .run();
-    getSignatureStatusesMock.mockResolvedValue([
-      {
-        slot: 5n,
-        confirmations: 0n,
-        confirmationStatus: "processed",
-        err: { InstructionError: [0, "Custom"] },
-      },
-    ]);
+    rpc.respondSignatureStatuses(() => ({
+      slot: 5,
+      confirmations: 0,
+      confirmationStatus: "processed",
+      err: { InstructionError: [0, { Custom: 1 }] },
+    }));
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     expect(await claims.listForTrade("dvp_processed_failure")).toHaveLength(1);
   });
@@ -840,9 +901,9 @@ describe("reconcileDvpTrades", () => {
       .prepare("UPDATE dvp_leg_funding_claims SET funding_tx = ? WHERE trade_id = ? AND side = 'a'")
       .bind(SIG, "dvp_expired_receipt")
       .run();
-    getSignatureStatusesMock.mockResolvedValue([null]);
+    rpc.respondSignatureStatuses(() => null);
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     expect(await claims.listForTrade("dvp_expired_receipt")).toHaveLength(0);
   });
@@ -867,7 +928,7 @@ describe("reconcileDvpTrades", () => {
       .bind(SIG, "dvp_landed_broadcast")
       .run();
 
-    await reconcileDvpTrades(env);
+    await reconcileSandboxTrades();
 
     const after = await claims.listForTrade("dvp_landed_broadcast");
     expect(after).toHaveLength(1);
