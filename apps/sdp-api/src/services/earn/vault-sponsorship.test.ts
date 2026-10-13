@@ -27,7 +27,6 @@ function scope(env: Partial<Env> = {}) {
   return {
     env: {
       EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
-      SOLANA_NETWORK: "devnet",
       KORA_RPC_URL_DEVNET: "https://kora-devnet.example",
       ...env,
     } as Env,
