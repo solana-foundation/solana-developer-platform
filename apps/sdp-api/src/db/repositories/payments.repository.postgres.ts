@@ -808,6 +808,9 @@ export function createPostgresPaymentsRepository(
       if (tenantScope) {
         clauses.push("organization_id = ?", "project_id IS NOT DISTINCT FROM ?");
         values.push(tenantScope.organizationId, tenantScope.projectId);
+      } else {
+        clauses.push("project_id IN (SELECT id FROM projects WHERE environment = ?)");
+        values.push(currentClusterScope().environment);
       }
       const row = await db
         .prepare(
