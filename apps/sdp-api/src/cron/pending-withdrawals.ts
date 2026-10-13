@@ -7,6 +7,7 @@
  * graceful shutdown. Gated on the Private Channels feature flag.
  */
 
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
@@ -24,7 +25,8 @@ export interface PendingWithdrawalsReconciliationDeps {
 export function runPendingWithdrawalsReconciliation(
   deps: PendingWithdrawalsReconciliationDeps
 ): void {
-  const work = () => trackPendingWithdrawals(deps.env);
+  const work = () =>
+    runPerCluster("track-pending-withdrawals", () => trackPendingWithdrawals(deps.env));
 
   // Never invoke `work` eagerly — a sync throw before the first await must become
   // a rejected promise the BackgroundRunner can track, not propagate to the

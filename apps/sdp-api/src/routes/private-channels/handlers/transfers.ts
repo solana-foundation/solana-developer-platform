@@ -6,13 +6,11 @@ import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createChannelTransfer, mapPrivateChannelError } from "@/services/private-channels";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import { resolveAbandonedTransferReservation } from "@/services/private-channels/transfer";
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
-import {
-  getPrivateChannelTransferRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
+import { getPrivateChannelTransferRepository } from "../context";
 import { requireIdempotencyKey } from "../helpers";
 import { authorizeMovementReplay, matchesTransferReplay, requireMovementWrite } from "../replay";
 import {
@@ -111,7 +109,7 @@ export async function createPrivateChannelTransfer(
       projectId: context.projectId,
       userId: context.auth.userId,
     });
-    const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+    const projectRpc = loadProjectRpcClient();
     const transfer = await createChannelTransfer(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,

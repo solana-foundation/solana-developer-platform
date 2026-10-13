@@ -5,24 +5,24 @@
  *
  * Reconciles non-terminal deposits each cron tick:
  *  1. `pending` with no signature, stuck > 5 min → failed (never broadcast).
- *  2. `submitted` with a signature → getSignatureStatuses on the deposit's
- *     project's configured RPC → `confirmed` / `failed`; signature not found + stale
- *     → failed. Status reads are batched per tick: every submitted signature
- *     targeting the same project RPC rides a single getSignatureStatuses call
- *     instead of one RPC round trip per row.
+ *  2. `submitted` with a signature → getSignatureStatuses on the cluster scope's
+ *     managed RPC → `confirmed` / `failed`; signature not found + stale → failed.
+ *     Status reads are batched per tick: every submitted signature rides a single
+ *     getSignatureStatuses call instead of one RPC round trip per row.
  *
  * `confirmed → settled` is not driven: the operator's channel-side credit is
  * off-chain and gateway `getTransaction` is Operator-only, so we can't observe
  * it. The UI surfaces the credit via the channel-balance read.
  *
- * The reconciler builds the project's RPC client on SDP's managed pool each
- * tick. The audit context on each deposit is never consulted here.
+ * Runs once per environment under that environment's cluster scope, sweeping
+ * only that environment's deposits on the scope's managed RPC pool. The audit
+ * context on each deposit is never consulted here.
  * All status transitions are compare-and-swap (`expectedStatus`) so a concurrent
  * worker can't regress state.
  */
 
 import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
-import type { Signature } from "@solana/kit";
+import { assertIsSignature, type Signature } from "@solana/kit";
 import {
   createPrivateChannelDepositRepository,
   createPrivateChannelInstanceRepository,
@@ -32,10 +32,7 @@ import {
 } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
 import { emitDepositEvent } from "@/services/private-channels/deposit-events";
-import {
-  loadProjectRpcClient,
-  type PrivateChannelProjectRpcClient,
-} from "@/services/private-channels/project-rpc";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { Env } from "@/types/env";
 
 const STUCK_AFTER_MS = 5 * 60 * 1000;
@@ -52,7 +49,6 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
   // Cache instance rows across the tick — a busy project's deposits share one row
   // and we don't want to hit Postgres once per deposit.
   const instances = new Map<string, PrivateChannelInstanceRow | null>();
-  const projectRpcs = new Map<string, Promise<PrivateChannelProjectRpcClient>>();
   const loadInstance = async (id: string) => {
     if (instances.has(id)) {
       return instances.get(id) ?? null;
@@ -61,52 +57,21 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
     instances.set(id, row);
     return row;
   };
-  const loadProjectRpc = (instance: PrivateChannelInstanceRow) => {
-    const key = `${instance.organization_id}:${instance.project_id}`;
-    const cached = projectRpcs.get(key);
-    if (cached) return cached;
-    const loaded = loadProjectRpcClient({
-      env,
-      organizationId: instance.organization_id,
-      projectId: instance.project_id,
-    });
-    projectRpcs.set(key, loaded);
-    return loaded;
-  };
-
   const now = Date.now();
 
-  // Submitted deposits bucketed by project RPC: every signature targeting the
-  // same project shares one batched getSignatureStatuses call per tick instead
-  // of paying one RPC round trip per row. Buckets stay well under the RPC's
-  // 256-signature cap because MAX_PER_RUN bounds the whole tick.
-  const buckets = new Map<
-    string,
-    { projectRpc: Promise<PrivateChannelProjectRpcClient>; deposits: PrivateChannelDepositRow[] }
-  >();
+  // Every submitted signature in the tick shares one batched
+  // getSignatureStatuses call; MAX_PER_RUN keeps it under the RPC's
+  // 256-signature cap.
+  const submittedDeposits: SubmittedDeposit[] = [];
 
-  const reconcileSubmitted = async (
-    deposit: PrivateChannelDepositRow,
-    instance: PrivateChannelInstanceRow
-  ): Promise<void> => {
-    if (!deposit.signature) {
+  const reconcileSubmitted = async (deposit: PrivateChannelDepositRow): Promise<void> => {
+    const storedSignature = deposit.signature;
+    if (!storedSignature) {
       await failIfStale(env, repo, deposit, now, "Deposit was submitted without a signature.");
       return;
     }
-    const key = `${instance.organization_id}:${instance.project_id}`;
-    let bucket = buckets.get(key);
-    if (!bucket) {
-      const projectRpc = loadProjectRpc(instance);
-      // The RPC client starts resolving during pass 1, but its rejection is
-      // only awaited — inside a try/catch — in pass 2. Attach a no-op handler
-      // now so a failed project lookup can't surface as an unhandled rejection
-      // in the window before pass 2 runs (the API shuts down on those); the
-      // same promise still re-raises when pass 2 awaits it.
-      projectRpc.catch(() => {});
-      bucket = { projectRpc, deposits: [] };
-      buckets.set(key, bucket);
-    }
-    bucket.deposits.push(deposit);
+    assertIsSignature(storedSignature);
+    submittedDeposits.push({ deposit, signature: storedSignature });
   };
 
   // Pass 1 — local transitions (stale fails, CAS promotions) and bucketing; no
@@ -131,7 +96,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
         if (promoted) {
           const instance = await loadInstance(promoted.instance_id);
           if (instance) {
-            await reconcileSubmitted(promoted, instance);
+            await reconcileSubmitted(promoted);
           }
         }
       } else if (deposit.status === "submitted") {
@@ -145,7 +110,7 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
           await failStale(env, repo, deposit, now, "Deposit instance no longer connected.");
           continue;
         }
-        await reconcileSubmitted(deposit, instance);
+        await reconcileSubmitted(deposit);
       }
       // `confirmed` intentionally has no transition here — see module docstring.
     } catch (err) {
@@ -153,48 +118,74 @@ export async function trackPendingDeposits(env: Env): Promise<void> {
     }
   }
 
-  // Pass 2 — one batched status read per project RPC, then per-row verdicts.
-  await Promise.all(
-    [...buckets.values()].map(async (bucket) => {
-      let statuses: Array<SignatureStatusInfo | null>;
-      try {
-        // searchTransactionHistory because every caller of this is already past the
-        // node's short recent-status cache: a submitted row is only polled on the
-        // reconciler's cadence, and the signed-pending promotion reaches here
-        // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
-        // gets failed as "not found on chain", and the dashboard hands the caller a
-        // fresh idempotency key for a deposit that already moved funds.
-        statuses = await getSignatureStatuses(
-          (await bucket.projectRpc).rpc,
-          bucket.deposits.map((deposit) => deposit.signature as Signature),
-          { searchTransactionHistory: true }
-        );
-      } catch (err) {
-        getLogger().error(
-          {
-            deposits: bucket.deposits.length,
-            error: err instanceof Error ? err.message : String(err),
-          },
-          "trackPendingDeposits: batched getSignatureStatuses failed"
-        );
-        return;
-      }
-      if (statuses.length !== bucket.deposits.length) {
-        getLogger().error(
-          { deposits: bucket.deposits.length, statuses: statuses.length },
-          "trackPendingDeposits: getSignatureStatuses returned a mismatched batch"
-        );
-        return;
-      }
-      for (const [index, deposit] of bucket.deposits.entries()) {
-        try {
-          await applySubmittedVerdict(env, repo, deposit, statuses[index] ?? null, now);
-        } catch (err) {
-          logReconcileError(deposit.id, "submitted", err);
-        }
-      }
-    })
-  );
+  // Pass 2 — one batched status read on the scope's RPC, then per-row verdicts.
+  await reconcileSubmittedBatch(env, repo, submittedDeposits, now);
+}
+
+/** A submitted deposit with its validated signature. */
+interface SubmittedDeposit {
+  deposit: PrivateChannelDepositRow;
+  signature: Signature;
+}
+
+/**
+ * Read every submitted deposit's status in one batched call on the open cluster scope's managed
+ * RPC pool, then apply each verdict. A failed or mismatched batch is logged and left for the next tick.
+ *
+ * @param env - Process env for the repository and event writes.
+ * @param repo - The deposit repository the verdicts are written through.
+ * @param submittedDeposits - The tick's submitted deposits with their signatures.
+ * @param now - The tick's clock, for the stale-not-found verdict.
+ * @returns Resolves once every verdict is applied or logged.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+async function reconcileSubmittedBatch(
+  env: Env,
+  repo: PrivateChannelDepositRepository,
+  submittedDeposits: SubmittedDeposit[],
+  now: number
+): Promise<void> {
+  if (submittedDeposits.length === 0) {
+    return;
+  }
+  const { rpc } = loadProjectRpcClient();
+  let statuses: Array<SignatureStatusInfo | null>;
+  try {
+    // searchTransactionHistory because every caller of this is already past the
+    // node's short recent-status cache: a submitted row is only polled on the
+    // reconciler's cadence, and the signed-pending promotion reaches here
+    // strictly AFTER STUCK_AFTER_MS. Without it an executed deposit reads null,
+    // gets failed as "not found on chain", and the dashboard hands the caller a
+    // fresh idempotency key for a deposit that already moved funds.
+    statuses = await getSignatureStatuses(
+      rpc,
+      submittedDeposits.map((submitted) => submitted.signature),
+      { searchTransactionHistory: true }
+    );
+  } catch (err) {
+    getLogger().error(
+      {
+        deposits: submittedDeposits.length,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingDeposits: batched getSignatureStatuses failed"
+    );
+    return;
+  }
+  if (statuses.length !== submittedDeposits.length) {
+    getLogger().error(
+      { deposits: submittedDeposits.length, statuses: statuses.length },
+      "trackPendingDeposits: getSignatureStatuses returned a mismatched batch"
+    );
+    return;
+  }
+  for (const [index, { deposit }] of submittedDeposits.entries()) {
+    try {
+      await applySubmittedVerdict(env, repo, deposit, statuses[index] ?? null, now);
+    } catch (err) {
+      logReconcileError(deposit.id, "submitted", err);
+    }
+  }
 }
 
 function logReconcileError(depositId: string, status: string, err: unknown): void {

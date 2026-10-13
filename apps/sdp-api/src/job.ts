@@ -249,15 +249,23 @@ export async function runCronJob(): Promise<void> {
         );
         if (privateChannelsEnabled) {
           const outcomes = await Promise.allSettled([
-            monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
-            monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
+            monitored(PENDING_DEPOSITS_MONITOR, () =>
+              runPerCluster("track-pending-deposits", () => trackPendingDeposits(env))
+            ),
+            monitored(PENDING_WITHDRAWALS_MONITOR, () =>
+              runPerCluster("track-pending-withdrawals", () => trackPendingWithdrawals(env))
+            ),
           ]);
           failures.push(...rejectionReasons(outcomes));
         } else {
           await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
           await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
         }
-        await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
+        await collect(
+          monitored(RINGS_INDEXING_MONITOR, () =>
+            runPerCluster("poll-rings-indexing", () => pollRingsIndexing(env))
+          )
+        );
         await collect(
           monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))
         );

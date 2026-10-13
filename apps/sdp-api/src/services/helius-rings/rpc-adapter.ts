@@ -1,4 +1,5 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import {
   createRpc,
   createRpcFromTransport,
@@ -16,15 +17,10 @@ import {
 import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, type RingsAdapterFailureCode } from "./adapter-error";
-import { requireRingsHeliusRpcUrl } from "./rpc-config";
-
-function createRingsHeliusRpc(env: Env): { rpc: SolanaRpc; rpcUrl: string } {
-  const rpcUrl = requireRingsHeliusRpcUrl(env);
-  return { rpc: createRpc(env, { rpcUrl }), rpcUrl };
-}
 
 /**
- * Broadcasts the signed outer transaction through the configured Helius RPC.
+ * Broadcasts the signed outer transaction through the operation's persisted
+ * connection RPC, or the open cluster scope's managed RPC pool when none is given.
  *
  * Failures are retryable because the RPC cannot tell a dropped transaction from
  * a transient outage. Retrying is only safe because of the submission outbox: a
@@ -35,21 +31,33 @@ function createRingsHeliusRpc(env: Env): { rpc: SolanaRpc; rpcUrl: string } {
 export interface SubmitRingsOuterTransactionInput {
   env: Env;
   signedTxBase64: string;
-  /** Persisted Rings connection URL. Legacy callers may omit it. */
+  /** Persisted Rings connection URL; omitted, the scope's managed pool broadcasts. */
   rpcUrl?: string;
-  /** Test seam; production resolves the env RPC. */
+  /** Test seam; production resolves the connection or the managed pool. */
   rpc?: SolanaRpc;
 }
 
+/**
+ * Broadcast signed Rings bytes and classify a failure into a `RingsAdapterError`.
+ *
+ * @param input - The bytes and where to broadcast them.
+ * @param input.env - Process env; decides whether a persisted URL is dialed through the guarded transport.
+ * @param input.signedTxBase64 - The signed outer transaction, base64-encoded.
+ * @param input.rpcUrl - The operation's persisted connection URL, dialed explicitly; omitted, the open cluster scope's managed pool broadcasts.
+ * @param input.rpc - Test seam that replaces both.
+ * @returns The transaction signature the RPC reports.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no `rpcUrl` or `rpc` is given outside a cluster scope.
+ * @throws RingsAdapterError when the broadcast fails, with the persisted URL redacted from its message.
+ */
 export async function submitRingsOuterTransaction(
   input: SubmitRingsOuterTransactionInput
 ): Promise<string> {
-  let resolvedRpcUrl: string | undefined;
+  let persistedRpcUrl: string | undefined;
   let rpc: SolanaRpc;
   if (input.rpc) {
     rpc = input.rpc;
   } else if (input.rpcUrl) {
-    resolvedRpcUrl = input.rpcUrl;
+    persistedRpcUrl = input.rpcUrl;
     // A persisted connection URL is tenant-controlled, so outside development
     // it is dialed through the guarded transport: DNS-checked at connect time,
     // redirects re-guarded per hop. Development keeps the plain client — local
@@ -59,9 +67,7 @@ export async function submitRingsOuterTransaction(
         ? createRpc(input.env, { rpcUrl: input.rpcUrl })
         : createRpcFromTransport(createCustomerRpcTransport(input.rpcUrl));
   } else {
-    const configuredRpc = createRingsHeliusRpc(input.env);
-    rpc = configuredRpc.rpc;
-    resolvedRpcUrl = configuredRpc.rpcUrl;
+    rpc = createClusterRpc();
   }
   const signedBytes = getBase64Codec().encode(input.signedTxBase64);
 
@@ -72,12 +78,9 @@ export async function submitRingsOuterTransaction(
     throw new RingsAdapterError(classified.failureCode, classified.message, {
       retryable: classified.retryable,
       cause: error,
-      // withHeliusApiKey can place the encoded credential in the URL path, so
-      // query-only URL redaction is not sufficient.
-      sensitiveValues: [input.env.SOLANA_RPC_HELIUS_API_KEY ?? ""],
-      // Pre-keyed URLs have no separate credential value to redact. Sanitize
-      // the exact endpoint while retaining its origin for diagnostics.
-      sensitiveUrls: resolvedRpcUrl && !input.env.SOLANA_RPC_HELIUS_API_KEY ? [resolvedRpcUrl] : [],
+      // A persisted URL may carry its credential; sanitize the exact endpoint
+      // while retaining its origin for diagnostics.
+      sensitiveUrls: persistedRpcUrl ? [persistedRpcUrl] : [],
     });
   }
 }
@@ -157,13 +160,15 @@ function readDiagnosticLogs(error: unknown): readonly string[] {
  * A string because the height is a uint64 compared against
  * `last_valid_block_height`, a NUMERIC column read as a string; `number` would
  * lose precision inside the range the column allows.
+ *
+ * @param input - Where to read the height.
+ * @param input.rpc - Test seam; production reads the open cluster scope's managed RPC pool.
+ * @returns The block height, or `null` when the RPC call failed.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, or `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
  */
-export async function readRingsBlockHeight(input: {
-  env: Env;
-  rpc?: SolanaRpc;
-}): Promise<string | null> {
+export async function readRingsBlockHeight(input: { rpc?: SolanaRpc }): Promise<string | null> {
+  const rpc = input.rpc ?? createClusterRpc();
   try {
-    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
     return (await rpc.getBlockHeight().send()).toString();
   } catch {
     // Not knowing the height means this tick cannot judge expiry — a reason to
@@ -183,14 +188,19 @@ export type RingsSignatureOutcome = "landed" | "failed" | "absent";
  * against. Absence is reported only when the RPC answered and had nothing; a
  * call that fails returns `null`, since an unreachable RPC is not evidence a
  * transaction never landed.
+ *
+ * @param input - The signature and where to ask.
+ * @param input.signature - The outer transaction's signature.
+ * @param input.rpc - Test seam; production reads the open cluster scope's managed RPC pool.
+ * @returns What the chain knows about the signature, or `null` when the RPC call failed.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, or `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
  */
 export async function readRingsSignatureStatus(input: {
-  env: Env;
   signature: string;
   rpc?: SolanaRpc;
 }): Promise<RingsSignatureOutcome | null> {
+  const rpc = input.rpc ?? createClusterRpc();
   try {
-    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
     const [status] = await getSignatureStatuses(rpc, [input.signature as Signature], {
       searchTransactionHistory: true,
     });

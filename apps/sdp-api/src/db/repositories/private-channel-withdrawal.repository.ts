@@ -103,8 +103,12 @@ export interface PrivateChannelWithdrawalRepository {
   /** Opportunistic sweep of non-terminal withdrawals for a project. */
   listNonTerminalByProject(scope: WithdrawalProjectScope): Promise<PrivateChannelWithdrawalRow[]>;
   /**
-   * Global sweep of non-terminal withdrawals, oldest-updated first. Used by the
-   * cron reconciler; `limit` caps the per-tick work.
+   * Sweep of the open cluster scope's environment's non-terminal withdrawals,
+   * oldest-updated first. Used by the cron reconciler.
+   *
+   * @param limit - Caps the per-tick work.
+   * @returns The environment's non-terminal withdrawals.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listNonTerminal(limit: number): Promise<PrivateChannelWithdrawalRow[]>;
   /** Delete guard. */

@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivateChannelTransferContext } from "@sdp/types";
 import type { AppDb } from "@/db";
 import {
@@ -176,11 +177,12 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       const result = await db
         .prepare(
           `SELECT * FROM private_channel_withdrawals
-             WHERE status IN ('pending', 'submitted', 'confirmed')
+             WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+               AND status IN ('pending', 'submitted', 'confirmed')
              ORDER BY updated_at ASC, id ASC
              LIMIT ?`
         )
-        .bind(limit)
+        .bind(currentClusterScope().environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

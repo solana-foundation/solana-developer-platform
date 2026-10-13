@@ -1,4 +1,3 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Context } from "hono";
 import {
   createPrivateChannelDepositRepository,
@@ -12,9 +11,7 @@ import {
   createPrivateChannelWithdrawalRepository,
   createProjectUserRepository,
 } from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
-import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { Env } from "@/types/env";
 
 /** Hono request context bound to the app `Env`. */
@@ -62,15 +59,4 @@ export function getPrivateChannelUserRepository(c: AppContext) {
 
 export function getProjectUserRepository(c: AppContext) {
   return createProjectUserRepository(c.env);
-}
-
-/** Load this request's project RPC client without exposing its endpoint. */
-export function loadPrivateChannelProjectRpcClient(c: AppContext) {
-  const auth = getAuth(c);
-  return loadProjectRpcClient({
-    env: c.env,
-    organizationId: auth.organizationId,
-    projectId: requireProjectId(c),
-    environment: currentClusterScope().environment,
-  });
 }
