@@ -1,4 +1,4 @@
-import { runInClusterScope } from "@sdp/rpc/scope";
+import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
@@ -3307,7 +3307,15 @@ describe("Payments routes — recurring", () => {
     const { sandboxPayment, productionPayment } =
       await activateDueRecurringPaymentsInBothEnvironments(now);
     const requestsBefore = rpc.requests.length;
-    const feePaymentAdapterCallsBefore = createFeePaymentAdapterMock.mock.calls.length;
+    const stubbedAdapter = createFeePaymentAdapterMock.getMockImplementation();
+    if (stubbedAdapter === undefined) {
+      throw new Error("Expected the payments route hooks to stub createFeePaymentAdapter");
+    }
+    const sponsorships: { koraUserId: string | undefined; cluster: string }[] = [];
+    createFeePaymentAdapterMock.mockImplementation((feePaymentEnv, koraUserId) => {
+      sponsorships.push({ koraUserId, cluster: currentClusterScope().cluster });
+      return stubbedAdapter(feePaymentEnv, koraUserId);
+    });
 
     await runPerCluster("collect-recurring-payments", async () => {
       await collectDueRecurringPayments(env, now);
@@ -3329,9 +3337,6 @@ describe("Payments routes — recurring", () => {
         mintReads.filter((read) => read.cluster === "mainnet-beta").map((read) => read.params[0])
       )
     ).toEqual(new Set([MAINNET_USDC_MINT]));
-    const sponsorships = createFeePaymentAdapterMock.mock.calls
-      .slice(feePaymentAdapterCallsBefore)
-      .map(([, koraUserId, cluster]) => ({ koraUserId, cluster }));
     expect(sponsorships).toContainEqual({
       koraUserId: expect.stringContaining(`:project:${TEST_PROJECT.id}:`),
       cluster: "devnet",
