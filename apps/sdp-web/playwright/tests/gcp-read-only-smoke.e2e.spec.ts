@@ -290,11 +290,17 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await walletCard.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
 
     await expect(page).toHaveURL(
-      new RegExp(`${projectHref(fixture.project.id, "/dashboard/wallets")}/.`),
+      projectHref(
+        fixture.project.id,
+        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.walletId)}`
+      ),
       { timeout: 20_000 }
     );
-    const walletIdentity = drillDownWallet.label ?? drillDownWallet.publicKey;
-    await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
+    // Both designs head the page with the wallet's label, or "Untitled wallet" without one.
+    const walletHeading = drillDownWallet.label?.trim() || "Untitled wallet";
+    await expect(
+      page.getByRole("heading", { name: walletHeading, exact: true }).first()
+    ).toBeVisible({ timeout: 20_000 });
     await assertExactIdentityAndProject(page, fixture);
     capture.assertClean();
   });
