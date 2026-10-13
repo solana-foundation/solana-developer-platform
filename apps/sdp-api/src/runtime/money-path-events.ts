@@ -27,7 +27,7 @@ export function describeError(error: unknown): { error_name: string; error_code?
  * wording, which the API never returns. Only ramp-specific logs add these; the
  * shared vendor-call event stays name and code only (EARN-025).
  *
- * @param error - The thrown value.
+ * @param cause - The thrown value.
  * @returns The scrubbed diagnostics, or undefined when the error carries none.
  */
 export function paymentsErrorDiagnostics(cause: unknown): Record<string, unknown> | undefined {
