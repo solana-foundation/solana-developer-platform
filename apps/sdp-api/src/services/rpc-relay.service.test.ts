@@ -169,6 +169,30 @@ describe("rpc-relay.service", () => {
     expect((await resolveNextTarget()).providerId).toBe("alchemy");
   });
 
+  it("keeps an unparseable pool URL as one target labelled by its provider", async () => {
+    vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "not a url");
+    vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test/?api-key=xyz");
+
+    const targets = await runInClusterScope(SANDBOX_SCOPE, () =>
+      resolveRoundRobinRpcTargets({ cache: kv.cache })
+    );
+
+    expect(targets).toEqual([
+      {
+        cluster: "devnet",
+        providerId: "triton",
+        endpoint: "not a url",
+        endpointLabel: "unparseable triton URL",
+      },
+      {
+        cluster: "devnet",
+        providerId: "helius",
+        endpoint: "https://rpc.helius.test/?api-key=xyz",
+        endpointLabel: "https://rpc.helius.test",
+      },
+    ]);
+  });
+
   it("serves a Production scope from the mainnet-beta pool, each cluster on its own cursor", async () => {
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://devnet.triton.test");
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "https://devnet.default.test");
