@@ -15,6 +15,7 @@ import {
   UNIFIED_TRANSACTION_SDP_MODULES,
 } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
+import { z } from "zod";
 
 /**
  * Value-level visibility for the public OpenAPI document. Removing a module's
@@ -167,11 +168,10 @@ export function publishedModules(
 
 /** Whether a public document for `modules` may name `value`. Unclassified values are core. */
 export function isValuePublished(
-  value: unknown,
+  value: string,
   modules: ReadonlySet<SdpModule>,
   releaseChannel: SdpReleaseChannel
 ): boolean {
-  if (typeof value !== "string") return true;
   const owner = VALUE_OWNERS.get(value);
   if (!owner) return true;
   if ("module" in owner) return modules.has(owner.module);
@@ -192,11 +192,34 @@ export function valueGates(): Record<string, Owner> {
 }
 
 const EMPTY = Symbol("empty schema");
-type Json = unknown;
+type Json = string | number | boolean | null | Json[] | JsonObject;
 type JsonObject = { [key: string]: Json };
 type Published = (value: Json) => boolean;
 
-function isJsonObject(value: Json): value is JsonObject {
+/** The generated document as checked JSON, so the walkers below never see `unknown`. */
+const jsonSchema: z.ZodType<Json> = z.json();
+
+function isKept(value: Json | typeof EMPTY): value is Json {
+  return value !== EMPTY;
+}
+
+/**
+ * The pruned document handed back as an OpenAPIObject: pruning only removes
+ * members from what the generator produced, so its top level is all that can
+ * have gone wrong.
+ */
+const openApiDocumentSchema = z.custom<OpenAPIObject>((value) => {
+  const json = jsonSchema.safeParse(value);
+  return (
+    json.success &&
+    isJsonObject(json.data) &&
+    typeof json.data.openapi === "string" &&
+    isJsonObject(json.data.info) &&
+    isJsonObject(json.data.paths)
+  );
+}, "The public OpenAPI document pruned to nothing");
+
+function isJsonObject(value: Json | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -261,7 +284,7 @@ function pruneExamples(value: Json, context: Context): JsonObject | undefined {
 
 function pruneProperties(
   value: JsonObject,
-  required: Json,
+  required: Json | undefined,
   context: Context
 ): JsonObject | typeof EMPTY {
   const properties: JsonObject = {};
@@ -281,9 +304,13 @@ function pruneParameters(parameters: Json[], context: Context): Json[] {
   // An operation's parameter list: a query parameter left with no value goes.
   return parameters
     .filter(
-      (parameter) => !isJsonObject(parameter) || pruneNode(parameter.schema, context) !== EMPTY
+      (parameter) =>
+        !isJsonObject(parameter) ||
+        parameter.schema === undefined ||
+        pruneNode(parameter.schema, context) !== EMPTY
     )
-    .map((parameter) => pruneNode(parameter, context));
+    .map((parameter) => pruneNode(parameter, context))
+    .filter(isKept);
 }
 
 /**
@@ -293,7 +320,7 @@ function pruneParameters(parameters: Json[], context: Context): Json[] {
  */
 function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   if (Array.isArray(node)) {
-    return node.map((entry) => pruneNode(entry, context)).filter((entry) => entry !== EMPTY);
+    return node.map((entry) => pruneNode(entry, context)).filter(isKept);
   }
   if (!isJsonObject(node)) return node;
 
@@ -310,15 +337,13 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
       const kept = pruneExamples(value, context);
       if (kept !== undefined) result.examples = kept;
     } else if ((key === "oneOf" || key === "anyOf") && Array.isArray(value)) {
-      const branches = value
-        .map((branch) => pruneNode(branch, context))
-        .filter((branch) => branch !== EMPTY);
+      const branches = value.map((branch) => pruneNode(branch, context)).filter(isKept);
       if (branches.length === 0) return EMPTY;
       result[key] = branches;
     } else if (key === "allOf" && Array.isArray(value)) {
       const branches = value.map((branch) => pruneNode(branch, context));
       if (branches.includes(EMPTY)) return EMPTY;
-      result.allOf = branches;
+      result.allOf = branches.filter(isKept);
     } else if (key === "items") {
       const kept = pruneNode(value, context);
       if (kept === EMPTY) return EMPTY;
@@ -355,20 +380,14 @@ export function pruneUnpublishedValues(
   publishEarn: boolean
 ): OpenAPIObject {
   const modules = publishedModules(releaseChannel, publishEarn);
-  const pruned = pruneNode(document, {
-    published: (value) => isValuePublished(value, modules, releaseChannel),
+  // The generator's output is plain JSON; checking it as such types every node.
+  const json = jsonSchema.parse(JSON.parse(JSON.stringify(document)));
+  const pruned = pruneNode(json, {
+    // Only strings name modules; numbers, booleans and null are always kept.
+    published: (value) =>
+      typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
     inResponse: false,
   });
-  if (!isOpenApiObject(pruned)) throw new Error("The public OpenAPI document pruned to nothing");
-  return pruned;
-}
-
-/** Pruning only removes members, so a pruned document keeps its top-level shape. */
-function isOpenApiObject(value: Json): value is OpenAPIObject {
-  return (
-    isJsonObject(value) &&
-    typeof value.openapi === "string" &&
-    isJsonObject(value.info) &&
-    isJsonObject(value.paths)
-  );
+  if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");
+  return openApiDocumentSchema.parse(pruned);
 }

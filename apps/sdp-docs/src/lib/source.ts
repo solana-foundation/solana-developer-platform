@@ -3,7 +3,7 @@ import { loader, type VirtualFile } from "fumadocs-core/source";
 import { icons } from "lucide-react";
 import { createElement } from "react";
 import { docs } from "../../.source/server";
-import { isPagePublished, isRecord } from "./release-channel";
+import { isPagePublished, parsePageGateFields } from "./release-channel";
 
 type FumadocsSource = {
   files: VirtualFile[] | (() => VirtualFile[]);
@@ -23,8 +23,7 @@ const normalizedFiles = typeof mdxSource.files === "function" ? mdxSource.files(
  */
 function isFileInChannel(file: VirtualFile): boolean {
   if (file.type !== "page") return true;
-  if (!isRecord(file.data)) throw new Error(`${file.path}: page has no frontmatter data`);
-  return isPagePublished(file.data, file.path);
+  return isPagePublished(parsePageGateFields(file.data, file.path), file.path);
 }
 
 /**

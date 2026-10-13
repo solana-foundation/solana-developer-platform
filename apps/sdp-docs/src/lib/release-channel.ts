@@ -6,6 +6,7 @@ import type {
   SdpReleaseChannel,
 } from "@sdp/types";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import generatedSurface from "../generated/public-surface.json";
 
 /**
@@ -73,23 +74,45 @@ export function isModulePublished(module: SdpModule | undefined, surface = publi
   return module === undefined || isGatePublished({ module }, surface);
 }
 
-/** A plain object, such as parsed frontmatter or a page's data. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * The frontmatter fields that gate a page. Every other field passes through
+ * (Fumadocs owns titles and descriptions); empty frontmatter parses to null.
+ */
+const pageGateFieldsSchema = z
+  .looseObject({ module: z.string().optional(), rampProvider: z.string().optional() })
+  .refine(
+    (fields) => fields.module === undefined || fields.rampProvider === undefined,
+    "a page takes module or rampProvider, not both"
+  );
+
+export type PageGateFields = z.infer<typeof pageGateFieldsSchema>;
+
+const frontmatterSchema = z.union([
+  z.null().transform((): PageGateFields => ({})),
+  pageGateFieldsSchema,
+]);
+
+/** Parses a page's frontmatter (raw YAML, or Fumadocs' page data) for its gate fields. */
+export function parsePageGateFields(value: unknown, where: string): PageGateFields {
+  const parsed = frontmatterSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error(`${where}: invalid frontmatter: ${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
 }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
-/** A raw MDX page's frontmatter block, or undefined. */
-export function frontmatterOf(source: string): { raw: string; data: Record<string, unknown> } {
-  const raw = source.match(FRONTMATTER)?.[0] ?? "";
-  const body = source.match(FRONTMATTER)?.[1];
-  if (body === undefined) return { raw, data: {} };
-  const data: unknown = parseYaml(body);
-  // Empty frontmatter parses to null; anything else must be a mapping.
-  if (data === null) return { raw, data: {} };
-  if (!isRecord(data)) throw new Error("Frontmatter must be a YAML mapping");
-  return { raw, data };
+/** A raw MDX page's frontmatter block (empty when it has none) and its gate fields. */
+export function frontmatterOf(
+  source: string,
+  where: string
+): { raw: string; data: PageGateFields } {
+  const match = source.match(FRONTMATTER);
+  if (!match) return { raw: "", data: {} };
+  const [raw, body] = match;
+  if (body === undefined) throw new Error(`${where}: frontmatter block has no body`);
+  return { raw, data: parsePageGateFields(parseYaml(body), where) };
 }
 
 /**
@@ -97,25 +120,15 @@ export function frontmatterOf(source: string): { raw: string; data: Record<strin
  * module, `rampProvider: <provider>` for a page about one ramp provider (which
  * implies Ramps). Undefined for a page every channel publishes.
  */
-export function pageGateOf(
-  data: { module?: unknown; rampProvider?: unknown },
-  where: string
-): ChannelGate | undefined {
-  if (data.module !== undefined && data.rampProvider !== undefined) {
-    throw new Error(`${where}: a page takes module or rampProvider, not both`);
-  }
-  for (const key of ["module", "rampProvider"] as const) {
-    const value = data[key];
-    if (value === undefined || value === null) continue;
-    if (typeof value !== "string") throw new Error(`${where}: ${key} must be a string`);
-    return parseGate(key, value, where);
-  }
+export function pageGateOf(data: PageGateFields, where: string): ChannelGate | undefined {
+  if (data.module !== undefined) return parseGate("module", data.module, where);
+  if (data.rampProvider !== undefined) return parseGate("rampProvider", data.rampProvider, where);
   return undefined;
 }
 
 /** Whether the build publishes a page with this frontmatter. */
 export function isPagePublished(
-  data: { module?: unknown; rampProvider?: unknown },
+  data: PageGateFields,
   where: string,
   surface = publicSurface
 ): boolean {
@@ -125,5 +138,5 @@ export function isPagePublished(
 
 /** Whether a raw MDX page is published by this build. */
 export function isPageSourcePublished(source: string, where: string): boolean {
-  return isPagePublished(frontmatterOf(source).data, where);
+  return isPagePublished(frontmatterOf(source, where).data, where);
 }

@@ -95,6 +95,22 @@ describe("API playground release channel", () => {
     expect(JSON.stringify(transactions?.expectedResponse)).not.toMatch(/"(issuance|dvp|rings)"/);
   });
 
+  it("filters every playground's forms on every channel without rejecting their examples", () => {
+    const builders = [
+      buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
+      buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t),
+      buildCounterpartyPlaygroundEndpointConfigs([], t),
+      buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
+    ];
+    for (const releaseChannel of ["experimental", "beta", "stable"] as const) {
+      for (const endpoints of builders) {
+        expect(() =>
+          filterPlaygroundEndpointsToReleaseChannel(endpoints, releaseChannel)
+        ).not.toThrow();
+      }
+    }
+  });
+
   it("keeps every catalog operation on an experimental deployment", () => {
     for (const module of ["wallets", "payments", "counterparties", "issuance"] as const) {
       const endpoints = getOpenApiPlaygroundEndpoints(module);

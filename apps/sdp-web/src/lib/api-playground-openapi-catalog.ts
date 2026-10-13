@@ -8,6 +8,7 @@ import {
 } from "@sdp/types";
 // biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { z } from "zod";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
@@ -103,24 +104,30 @@ function publishedIn(releaseChannel: SdpReleaseChannel): Published {
   };
 }
 
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/** Example responses are JSON (the catalog's, and the hand-authored forms'). */
+const jsonSchema: z.ZodType<Json> = z.json();
+
 /** An example response without values the channel does not run (the API prunes the same way). */
-function pruneExample(value: unknown, published: Published): unknown {
+function pruneExample(value: Json, published: Published): Json | undefined {
   if (typeof value === "string") return published(value) ? value : undefined;
   if (Array.isArray(value)) {
     return value
       .map((entry) => pruneExample(entry, published))
-      .filter((entry) => entry !== undefined);
+      .filter((entry): entry is Json => entry !== undefined);
   }
   if (typeof value === "object" && value !== null) {
     const entries = Object.entries(value);
     if (entries.some(([, field]) => typeof field === "string" && !published(field))) {
       return undefined;
     }
-    return Object.fromEntries(
-      entries
-        .map(([key, field]) => [key, pruneExample(field, published)] as const)
-        .filter(([, field]) => field !== undefined)
-    );
+    const kept: { [key: string]: Json } = {};
+    for (const [key, field] of entries) {
+      const prunedField = pruneExample(field, published);
+      if (prunedField !== undefined) kept[key] = prunedField;
+    }
+    return kept;
   }
   return value;
 }
@@ -133,7 +140,7 @@ function pruneField(
   const keepDefault = field.defaultValue === undefined || published(field.defaultValue);
   return {
     ...field,
-    ...(options === undefined ? {} : { options }),
+    options,
     defaultValue: keepDefault ? field.defaultValue : options?.[0]?.value,
   };
 }
@@ -166,7 +173,7 @@ export function filterPlaygroundEndpointsToReleaseChannel(
       ...endpoint,
       pathFields: endpoint.pathFields.map((field) => pruneField(field, published)),
       bodyFields: endpoint.bodyFields.map((field) => pruneField(field, published)),
-      expectedResponse: pruneExample(endpoint.expectedResponse, published),
+      expectedResponse: pruneExample(jsonSchema.parse(endpoint.expectedResponse), published),
     }));
 }
 

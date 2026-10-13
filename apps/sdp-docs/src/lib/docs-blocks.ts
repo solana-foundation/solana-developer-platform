@@ -152,7 +152,7 @@ export function expandDocsBlocks(
 ): string {
   const surface = options.surface ?? publicSurface;
   // Frontmatter is not MDX; blank it (keeping offsets) for the parse.
-  const { raw } = frontmatterOf(source);
+  const { raw } = frontmatterOf(source, where);
   const tree = parser.parse(raw.replace(/[^\n]/g, " ") + source.slice(raw.length));
   const blocks: { start: number; end: number; markdown: string }[] = [];
   const [leadProvider] = publishedRampProviderIds(surface.rampProviders);
