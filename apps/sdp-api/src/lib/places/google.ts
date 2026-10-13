@@ -1,4 +1,4 @@
-import { extractProviderErrorMessage } from "@sdp/payments/ramps/fetch";
+import { providerErrorMessageSchema } from "@sdp/payments/ramps/fetch";
 import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { z } from "zod";
@@ -23,10 +23,8 @@ async function googleJson<TSchema extends z.ZodTypeAny>(
   }
   if (!response.ok) {
     throw providerUnavailable(
-      extractProviderErrorMessage(
-        payload,
-        `Google Maps request failed with status ${response.status}`
-      ),
+      providerErrorMessageSchema.parse(payload) ??
+        `Google Maps request failed with status ${response.status}`,
       { provider: "google", providerStatus: response.status }
     );
   }

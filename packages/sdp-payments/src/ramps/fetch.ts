@@ -1,6 +1,6 @@
 import { scrubTelemetryString } from "@sdp/redaction";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { z } from "zod";
+import { z } from "zod";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 
 export interface ProviderRequestInit<TBody> {
@@ -59,40 +59,29 @@ export function isDefinitiveProviderRejection(error: unknown): boolean {
   );
 }
 
-/**
- * Reads the message a provider put in its error body, scrubbed. Ramp providers
- * validate the counterparty fields we submit and echo them back in the
- * failure ("email jane@doe.test is already registered", "phone must be
- * E.164"), so the identifier never survives, only the wording.
- *
- * @param payload - Parsed provider error body.
- * @returns The scrubbed message, or undefined when the body carries none.
- */
-function readProviderErrorMessage(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
-  // SAFETY: every field is declared unknown and type-checked before use.
-  const record = payload as {
-    error?: { message?: unknown };
-    message?: unknown;
-    reason?: unknown;
-    // Coinbase/CDP shape: { errorMessage, errorType }.
-    errorMessage?: unknown;
-  };
-  const message = record.error?.message ?? record.message ?? record.reason ?? record.errorMessage;
-  return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : undefined;
-}
+/** One message field of a provider error body: non-blank text, else absent. */
+const providerErrorText = z.string().regex(/\S/).optional().catch(undefined);
 
 /**
- * The scrubbed message a provider put in its error body, or `fallback`.
- *
- * @param payload - Parsed provider error body.
- * @param fallback - Returned when the body carries no message.
- * @returns The scrubbed provider message or the fallback.
+ * Parses a provider error body down to its message, scrubbed: a nested
+ * `error.message`, then `message`, `reason`, or Coinbase/CDP's `errorMessage`.
+ * Ramp providers validate the counterparty fields we submit and echo them back
+ * in the failure ("email jane@doe.test is already registered", "phone must be
+ * E.164"), so the identifier never survives, only the wording. A body that is
+ * not an object, or carries none of these as text, parses to undefined.
  */
-export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
-  const message = readProviderErrorMessage(payload);
-  return message === undefined ? fallback : message;
-}
+export const providerErrorMessageSchema = z
+  .object({
+    error: z.object({ message: providerErrorText }).optional().catch(undefined),
+    message: providerErrorText,
+    reason: providerErrorText,
+    errorMessage: providerErrorText,
+  })
+  .transform((body) => {
+    const message = body.error?.message ?? body.message ?? body.reason ?? body.errorMessage;
+    return message === undefined ? undefined : scrubTelemetryString(message);
+  })
+  .catch(undefined);
 
 /**
  * Performs a provider HTTP request and returns the raw response plus its
@@ -171,7 +160,7 @@ export async function providerFetchJson<TSchema extends z.ZodType, TBody = never
   if (!response.ok) {
     // The provider's own wording is for operators, never for the caller: it
     // rides in diagnostics, which are logged and not serialized.
-    const providerMessage = readProviderErrorMessage(parsed);
+    const providerMessage = providerErrorMessageSchema.parse(parsed);
     throw new SdpPaymentsError(
       classifyProviderStatus(response.status),
       `${provider} request failed with status ${response.status}`,

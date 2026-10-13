@@ -3,8 +3,8 @@ import { afterEach, describe, it } from "node:test";
 import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 import {
-  extractProviderErrorMessage,
   isDefinitiveProviderRejection,
+  providerErrorMessageSchema,
   providerFetch,
   providerFetchJson,
 } from "./fetch";
@@ -56,41 +56,46 @@ describe("isDefinitiveProviderRejection", () => {
   }
 });
 
-describe("extractProviderErrorMessage", () => {
+describe("providerErrorMessageSchema", () => {
   it("scrubs the counterparty fields providers echo back", () => {
-    // Ramp providers validate what we submit and repeat it in the failure. That
-    // message is both logged and returned, so it is the one place every
-    // provider's error passes through.
-    const message = extractProviderErrorMessage(
-      { message: "email jane.doe@example.com is already registered" },
-      "fallback"
-    );
+    // Ramp providers validate what we submit and repeat it in the failure, and
+    // every provider's error message passes through this one parse.
+    const message = providerErrorMessageSchema.parse({
+      message: "email jane.doe@example.com is already registered",
+    });
 
     assert.equal(message, "email [REDACTED_EMAIL] is already registered");
   });
 
   it("keeps the part of the message a developer acts on", () => {
-    const message = extractProviderErrorMessage(
-      { error: { message: "phone must be in E.164 format" } },
-      "fallback"
-    );
+    const message = providerErrorMessageSchema.parse({
+      error: { message: "phone must be in E.164 format" },
+    });
 
     assert.equal(message, "phone must be in E.164 format");
   });
 
   it("scrubs a credential that leaked into the provider payload", () => {
-    const message = extractProviderErrorMessage(
-      { errorMessage: 'unauthorized: {"apiKey":"ramp-secret"}' },
-      "fallback"
-    );
+    const message = providerErrorMessageSchema.parse({
+      errorMessage: 'unauthorized: {"apiKey":"ramp-secret"}',
+    });
 
-    assert.ok(!message.includes("ramp-secret"));
+    assert.ok(message !== undefined && !message.includes("ramp-secret"));
     assert.ok(message.startsWith("unauthorized"));
   });
 
-  it("falls back when the payload carries no message", () => {
-    assert.equal(extractProviderErrorMessage({ status: 500 }, "fallback"), "fallback");
-    assert.equal(extractProviderErrorMessage(null, "fallback"), "fallback");
+  it("reads past a field that is not text", () => {
+    assert.equal(
+      providerErrorMessageSchema.parse({ error: { message: 42 }, message: "flat" }),
+      "flat"
+    );
+    assert.equal(providerErrorMessageSchema.parse({ message: "   ", reason: "why" }), "why");
+  });
+
+  it("parses a body with no message to undefined", () => {
+    for (const body of [{ status: 500 }, { error: "invalid_grant" }, null, "oops", [1]]) {
+      assert.equal(providerErrorMessageSchema.parse(body), undefined, JSON.stringify(body));
+    }
   });
 });
 
