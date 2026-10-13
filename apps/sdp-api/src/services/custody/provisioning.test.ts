@@ -1,7 +1,13 @@
 import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   findPrivyWalletByExternalId,
+  type ProvisionCoinbaseCdpOptions,
+  type ProvisionCoinbaseCdpResult,
+  type ProvisionUtilaOptions,
+  type ProvisionUtilaResult,
   provisionCoinbaseCdpAccount,
   provisionParaWallet,
   provisionPrivyWallet,
@@ -49,7 +55,8 @@ describe("coinbase account provisioning", () => {
     const names: string[] = [];
     const fetchMock = mockCreateCapturingNames(names);
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseCdpAccountIn(
+      "sandbox",
       createCoinbaseEnv({
         ENVIRONMENT: "production",
       }),
@@ -70,17 +77,30 @@ describe("coinbase account provisioning", () => {
     mockCreateCapturingNames(names);
 
     const base = { orgId: "org_abc", projectId: "proj_1" };
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, orgId: "org_other" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv({ COINBASE_CDP_NETWORK: "solana" }), base);
-    await provisionCoinbaseCdpAccount(
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), base);
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), base);
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
+      ...base,
+      orgId: "org_other",
+    });
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
+      ...base,
+      projectId: "proj_2",
+    });
+    await provisionCoinbaseCdpAccountIn("production", createCoinbaseEnv(), base);
+    await provisionCoinbaseCdpAccountIn(
+      "sandbox",
       createCoinbaseEnv({ COINBASE_CDP_ACCOUNT_NAMESPACE: "staging" }),
       base
     );
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-1" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, walletSeed: "seed-2" });
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
+      ...base,
+      walletSeed: "seed-1",
+    });
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
+      ...base,
+      walletSeed: "seed-2",
+    });
 
     // Retries of the same identity are deterministic…
     expect(names[1]).toBe(names[0]);
@@ -97,11 +117,11 @@ describe("coinbase account provisioning", () => {
     mockCreateCapturingNames(names);
 
     const longPrefix = `org_${"a".repeat(60)}`;
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
       orgId: `${longPrefix}x`,
       projectId: "proj_1",
     });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
       orgId: `${longPrefix}y`,
       projectId: "proj_1",
     });
@@ -134,7 +154,8 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(
+    const result = await provisionCoinbaseCdpAccountIn(
+      "sandbox",
       createCoinbaseEnv({
         COINBASE_CDP_ACCOUNT_NAMESPACE: "local",
       }),
@@ -163,7 +184,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
         orgId: "org_abc",
         projectId: "proj_1",
         walletSeed: "seed-1",
@@ -186,7 +207,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
       orgId: "org_abc",
       projectId: "proj_1",
     });
@@ -228,7 +249,7 @@ describe("coinbase account provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+    const result = await provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
       orgId: "org_abc",
       reuseExisting: true,
     });
@@ -255,7 +276,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -282,7 +303,7 @@ describe("coinbase account provisioning", () => {
       });
 
     await expect(
-      provisionCoinbaseCdpAccount(createCoinbaseEnv(), {
+      provisionCoinbaseCdpAccountIn("sandbox", createCoinbaseEnv(), {
         orgId: "org_abc",
         reuseExisting: true,
       })
@@ -598,7 +619,7 @@ describe("utila wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionUtilaWallet(createUtilaEnv(), {
+    const result = await provisionUtilaWalletIn("sandbox", createUtilaEnv(), {
       displayName: "Root Wallet",
     });
 
@@ -632,7 +653,7 @@ describe("utila wallet provisioning", () => {
       }
     );
 
-    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+    await expect(provisionUtilaWalletIn("sandbox", createUtilaEnv(), {})).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       message: "Utila CreateWallet failed (403): code=PERMISSION_DENIED",
     });
@@ -654,7 +675,7 @@ describe("utila wallet provisioning", () => {
       }
     );
 
-    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+    await expect(provisionUtilaWalletIn("sandbox", createUtilaEnv(), {})).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       message: "Utila CreateWallet failed (502): code=unavailable",
     });
@@ -688,6 +709,7 @@ describe("utila wallet provisioning", () => {
         serviceAccountPrivateKeyPem: utilaPrivateKeyPem,
         vaultId: "vaults/vault_123",
         apiBaseUrl: "https://api.utila.io",
+        network: "networks/solana-devnet",
       },
       {}
     );
@@ -849,6 +871,26 @@ describe("para wallet provisioning", () => {
     expect(fetchMock).toHaveBeenCalledTimes(9);
   });
 });
+
+function provisionCoinbaseCdpAccountIn(
+  environment: SdpEnvironment,
+  env: Env,
+  options: ProvisionCoinbaseCdpOptions
+): Promise<ProvisionCoinbaseCdpResult> {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    provisionCoinbaseCdpAccount(env, options)
+  );
+}
+
+function provisionUtilaWalletIn(
+  environment: SdpEnvironment,
+  env: Env,
+  options: ProvisionUtilaOptions
+): Promise<ProvisionUtilaResult> {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    provisionUtilaWallet(env, options)
+  );
+}
 
 function createCoinbaseEnv(overrides: Partial<Env> = {}): Env {
   return {
