@@ -1,3 +1,4 @@
+-- sdp:migration-compat: breaking
 -- A DvP trade records the environment of the project that created it, so a
 -- counterparty acting from another project can be refused a trade from the
 -- other environment. Party reads run under the caller's cluster scope, and the
@@ -13,7 +14,10 @@
 -- Expand step: the column stays nullable so the deployed image, which does
 -- not write it yet, keeps inserting trades (MATCH SIMPLE skips a NULL
 -- environment). The DvP code that writes it ships next, and a contract
--- migration then sets NOT NULL.
+-- migration then sets NOT NULL in the same deploy, so no NULL row written by
+-- the old image outlives the rollout. Marked breaking because the composite
+-- foreign key covers the existing project_id column; the schema itself stays
+-- rollback-safe.
 
 SET LOCAL lock_timeout = '5s';
 
