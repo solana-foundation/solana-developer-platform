@@ -219,6 +219,30 @@ describe("details step", () => {
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
+  it("keeps the form and the key when the answer is lost, so Create wallet again resends the same key", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), {
+      target: { value: "Lost answer treasury" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /couldn't confirm whether the wallet was created/
+    );
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    const [first, retry] = mocks.initialize.mock.calls.map(([form]) => form);
+    expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
+    expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
+    expect(mocks.createWallet).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
   it("points to adding a wallet when the provider was set up in the meantime", async () => {
     mocks.initialize.mockResolvedValueOnce({ status: "provider_already_set_up" } as never);
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
