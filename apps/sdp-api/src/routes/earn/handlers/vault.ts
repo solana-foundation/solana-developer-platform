@@ -176,8 +176,8 @@ export async function createEarnVaultDeposit(
     EarnVaultDepositBody,
     EarnVaultDepositResolved
   >(c);
-  const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
-    resolved;
+  const { strategy, wallet, auth, projectId, provider, tokenMint, shareMint } = resolved;
+  const { environment } = currentClusterScope();
   const requestId = resolved.requestId;
 
   // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
@@ -276,7 +276,6 @@ interface EarnVaultDepositResolved {
   wallet: CustodyRuntimeWalletProjection;
   auth: ApiKeyContext;
   projectId: string;
-  environment: SdpEnvironment;
   provider: EarnProviderId;
   tokenMint: string;
   shareMint: string;
@@ -394,7 +393,6 @@ export async function extractEarnVaultDeposit(
     wallet,
     auth,
     projectId,
-    environment,
     provider,
     tokenMint,
     shareMint,
@@ -470,7 +468,7 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     }
     const position = await repo.getPositionById({
       organizationId: resolved.auth.organizationId,
-      environment: resolved.environment,
+      environment: currentClusterScope().environment,
       positionId: movement.position_id,
     });
     if (!position) {
