@@ -1,5 +1,9 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import { isTerminalRampTransferStatus } from "@sdp/types";
+import {
+  isTerminalRampTransferStatus,
+  RAMP_TRANSFER_TRANSITIONS,
+  type RampTransferTransitionId,
+} from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
 import type {
   PaymentsRepository,
@@ -15,61 +19,26 @@ import {
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
-const RAMP_SETTLEMENT_STATUS = {
-  awaiting_payment: "awaiting_payment",
-  settling: "settling",
-  settled: "completed",
-  failed: "failed",
-  expired: "expired",
-} as const satisfies Record<Exclude<RampSettlementEvent["kind"], "ignore">, PaymentTransferStatus>;
+// Named, not derived from the event kind, so a renamed transition fails typecheck here.
+const RAMP_SETTLEMENT_TRANSITION = {
+  awaiting_payment: "provider_awaiting_payment",
+  settling: "provider_settling",
+  settled: "provider_settled",
+  failed: "provider_failed",
+  expired: "provider_expired",
+} as const satisfies Record<
+  Exclude<RampSettlementEvent["kind"], "ignore">,
+  RampTransferTransitionId
+>;
 
 // `expired` is carved out of the shared terminal set: it is derived from provider
 // ABSENCE (an abandoned checkout the provider never saw), and a provider event
 // proving activity must be able to revive it — signed widget URLs do not expire,
 // so a customer can complete checkout after the abandonment horizon.
+// RAMP_TRANSFER_TRANSITIONS refuses these sources too; this returns before any write.
 function isSettlementFinalStatus(status: PaymentTransferStatus): boolean {
   return status !== "expired" && isTerminalRampTransferStatus(status);
 }
-
-// awaiting_payment self-transition is allowed: a provider may issue a NEW
-// deposit wallet while still awaiting payment (MoonPay does on sale
-// re-confirmation), and the refreshed cryptoDeposit must land.
-const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
-  awaiting_payment: ["pending", "awaiting_payment", "expired"],
-  settling: [
-    "pending",
-    "awaiting_payment",
-    "processing",
-    "confirmed",
-    "finalized",
-    "settling",
-    "expired",
-  ],
-  settled: [
-    "pending",
-    "awaiting_payment",
-    "processing",
-    "confirmed",
-    "finalized",
-    "settling",
-    "expired",
-  ],
-  failed: [
-    "pending",
-    "awaiting_payment",
-    "processing",
-    "confirmed",
-    "finalized",
-    "settling",
-    "expired",
-  ],
-  // `settling` is deliberately absent: a stale redelivered EXPIRED event must
-  // not regress a transfer another event already revived into processing.
-  expired: ["pending", "awaiting_payment"],
-} as const satisfies Record<
-  Exclude<RampSettlementEvent["kind"], "ignore">,
-  readonly PaymentTransferStatus[]
->;
 
 /**
  * Builds the guarded transfer update one settlement event produces.
@@ -81,13 +50,12 @@ const ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES = {
 function buildRampSettlementUpdate(
   transfer: PaymentTransferRow,
   event: Exclude<RampSettlementEvent, { kind: "ignore" }>
-): Parameters<PaymentsRepository["updateTransferStatusGuarded"]>[0] {
-  const update: Parameters<PaymentsRepository["updateTransferStatusGuarded"]>[0] = {
+): Parameters<PaymentsRepository["transitionRampTransfer"]>[0] {
+  const update: Parameters<PaymentsRepository["transitionRampTransfer"]>[0] = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
-    fromStatuses: ALLOWED_RAMP_SETTLEMENT_SOURCE_STATUSES[event.kind],
-    toStatus: RAMP_SETTLEMENT_STATUS[event.kind],
+    transition: RAMP_SETTLEMENT_TRANSITION[event.kind],
     updatedAt: new Date().toISOString(),
   };
   if (event.onchain) {
@@ -187,7 +155,7 @@ export async function applyRampSettlementEvent(
   const { applied, linkedReference } = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
     const updated =
-      await createSystemTransactionalPaymentsRepository(client).updateTransferStatusGuarded(update);
+      await createSystemTransactionalPaymentsRepository(client).transitionRampTransfer(update);
     if (
       updated !== null &&
       event.providerCustomerId !== undefined &&
@@ -229,18 +197,19 @@ export async function applyRampSettlementEvent(
     });
   }
 
-  if (applied) {
-    logEvent("info", {
-      event: "sdp_api_ramp_settlement_applied",
-      flow: "ramp-settlement",
-      organization_id: transfer.organization_id,
-      project_id: transfer.project_id,
-      transfer_id: transfer.id,
-      provider: transfer.provider,
-      provider_reference: event.reference,
-      from_status: transfer.status,
-      to_status: RAMP_SETTLEMENT_STATUS[event.kind],
-    });
-  }
+  // Refused covers both an illegal source status and a lost race: the CAS
+  // cannot tell them apart, and neither wrote anything.
+  logEvent("info", {
+    event: applied ? "sdp_api_ramp_settlement_applied" : "sdp_api_ramp_settlement_refused",
+    flow: "ramp-settlement",
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    provider: transfer.provider,
+    provider_reference: event.reference,
+    transition: update.transition,
+    from_status: transfer.status,
+    to_status: RAMP_TRANSFER_TRANSITIONS[update.transition].to,
+  });
   return { applied };
 }

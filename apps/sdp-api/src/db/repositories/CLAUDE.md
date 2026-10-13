@@ -117,6 +117,28 @@ Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
 
+## Ramps: one transition table
+
+`RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
+status change that goes through it, with its source statuses, target and ramp
+types (HOO-2033).
+
+- **Sources come from the table, never the caller.**
+  `PaymentsRepository.transitionRampTransfer` applies the named entry as a
+  compare-and-swap on status and type, so an illegal source matches zero rows,
+  the same answer a lost race gives. The settlement core logs that as
+  `sdp_api_ramp_settlement_refused`.
+- **No terminal status is a source except `expired`**, which a provider
+  observation revives.
+- **Only the settlement core writes through it so far.** Cancel, MoonPay quote
+  fill and failure, and the off-ramp deposit claim and outcome still set the
+  status themselves; BVNK's writers go with BVNK (HOO-2037). The inventory is
+  in `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
+  guarded writes per file, so a new `updateTransferStatusGuarded` call fails it
+  even in a listed file.
+- **Add a transition to the table, not a source set to a call site.** Mirror
+  what the writer allows today, and let `transitionRampTransfer` read it.
+
 ## Ramps: retired provider ids
 
 A removed ramp provider's id moves from `RAMP_PROVIDERS` to
@@ -146,6 +168,8 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   release-channel and integration gates) to a live provider that runs the same
   pair in the regenerated support table. Tests that pick "a currency provider X
   doesn't list" from `RAMP_FIAT_CURRENCIES` can run out of candidates.
-- **Merge only after an operator count shows no open transfers for it in stage
-  and prod.** A merge to main deploys to prod in the same run, so the drain
-  check gates the merge, not a later deploy.
+- **Drain check only once real money has moved.** Ramp traffic so far ran on
+  devnet and provider sandboxes (as of 2026-10-13), so removals need no count.
+  After a provider has carried real-money transfers, merge its removal only
+  once an operator count shows none open in stage and prod: a merge to main
+  deploys to prod in the same run.

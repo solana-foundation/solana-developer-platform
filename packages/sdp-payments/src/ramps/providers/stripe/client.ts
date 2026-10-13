@@ -2,6 +2,7 @@ import { isDecimalString } from "@sdp/solana/amount";
 import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
@@ -73,30 +74,33 @@ interface StripeForm {
   [key: string]: StripeFormValue;
 }
 
-interface StripeOnrampSessionResponse {
-  id: string;
-  client_secret: string;
-  status: string;
-  redirect_url: string | null;
-  transaction_details?: { destination_amount?: string | null };
-}
+/** A string that is not blank: Stripe's session id and client secret. */
+const stripeSessionFieldSchema = z.string().regex(/\S/);
 
-interface StripeOnrampQuoteEntry {
-  id: string;
-  destination_network: string;
-  destination_currency: string;
-  destination_amount: string;
-  fees: { network_fee_monetary: string; transaction_fee_monetary: string };
-  source_total_amount: string;
-}
+/** The fields `createOnrampQuote` reads from a Stripe onramp session. */
+const stripeOnrampSessionSchema = z.object({
+  id: stripeSessionFieldSchema,
+  client_secret: stripeSessionFieldSchema,
+  redirect_url: z.string().nullable().optional(),
+});
 
-interface StripeOnrampQuotesResponse {
-  id: string;
-  source_amount: string;
-  source_currency: string;
-  rate_fetched_at: number;
-  destination_network_quotes: Record<string, StripeOnrampQuoteEntry[] | undefined>;
-}
+/** The fields `estimateOnramp` reads from Stripe's onramp quotes. */
+/**
+ * The fields `estimateOnramp` reads from Stripe's quotes. The request names one
+ * network and one currency, so every entry is one the adapter can pick.
+ */
+const stripeOnrampQuotesSchema = z.object({
+  destination_network_quotes: z.record(
+    z.string(),
+    z.array(
+      z.object({
+        destination_currency: z.string(),
+        destination_amount: z.string(),
+        fees: z.object({ network_fee_monetary: z.string(), transaction_fee_monetary: z.string() }),
+      })
+    )
+  ),
+});
 
 function readStripeConfig(env: Record<string, string | undefined>): StripeConfig {
   const secretKey = env.STRIPE_SECRET_KEY?.trim();
@@ -197,15 +201,6 @@ function buildCustomerInformation(info: StripeCustomerInfo | undefined): StripeF
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function assertSessionField(value: string | undefined, field: string): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw providerUnavailable(`Stripe session response is missing ${field}.`, {
-      provider: "stripe",
-    });
-  }
-  return value;
-}
-
 function sumStripeFees(left: string, right: string): string {
   if (!isDecimalString(left) || !isDecimalString(right)) {
     throw providerUnavailable("Stripe returned an invalid decimal amount", { provider: "stripe" });
@@ -222,30 +217,39 @@ function stripeHeaders(secretKey: string, contentType?: string): HeadersInit {
   };
 }
 
-async function stripeRequest<TResponse>(
+async function stripeRequest<TSchema extends z.ZodType>(
   secretKey: string,
   url: string,
-  form: StripeForm
-): Promise<TResponse> {
-  return providerFetchJson<TResponse, URLSearchParams>("stripe", url, {
-    method: "POST",
-    headers: stripeHeaders(secretKey, "application/x-www-form-urlencoded"),
-    body: encodeStripeForm(form),
-  });
+  form: StripeForm,
+  schema: TSchema
+): Promise<z.output<TSchema>> {
+  return providerFetchJson(
+    "stripe",
+    url,
+    {
+      method: "POST",
+      headers: stripeHeaders(secretKey, "application/x-www-form-urlencoded"),
+      body: encodeStripeForm(form),
+    },
+    schema
+  );
 }
 
-async function stripeGet<TResponse>(
+async function stripeGet<TSchema extends z.ZodType>(
   secretKey: string,
   url: string,
-  query: StripeForm
-): Promise<TResponse> {
+  query: StripeForm,
+  schema: TSchema
+): Promise<z.output<TSchema>> {
   const params = encodeStripeForm(query);
   const queryString = params.toString();
   const requestUrl = queryString ? `${url}?${queryString}` : url;
-  return providerFetchJson<TResponse>("stripe", requestUrl, {
-    method: "GET",
-    headers: stripeHeaders(secretKey),
-  });
+  return providerFetchJson(
+    "stripe",
+    requestUrl,
+    { method: "GET", headers: stripeHeaders(secretKey) },
+    schema
+  );
 }
 
 export class StripeRampClient implements RampProvider {
@@ -293,7 +297,7 @@ export class StripeRampClient implements RampProvider {
     const config = readStripeConfig(env);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
 
-    const quotes = await stripeGet<StripeOnrampQuotesResponse>(
+    const quotes = await stripeGet(
       config.secretKey,
       `${STRIPE_API_BASE_URL}/v1/crypto/onramp/quotes`,
       {
@@ -301,7 +305,8 @@ export class StripeRampClient implements RampProvider {
         source_currency: input.fiatCurrency.toLowerCase(),
         destination_currencies: [currency],
         destination_networks: [network],
-      }
+      },
+      stripeOnrampQuotesSchema
     );
 
     const networkQuotes = quotes.destination_network_quotes[network];
@@ -368,7 +373,7 @@ export class StripeRampClient implements RampProvider {
       throw badRequest("Stripe on-ramp requires a fiat currency.", { provider: this.id });
     }
 
-    const session = await stripeRequest<StripeOnrampSessionResponse>(
+    const session = await stripeRequest(
       config.secretKey,
       `${STRIPE_API_BASE_URL}/v1/crypto/onramp_sessions`,
       {
@@ -383,10 +388,11 @@ export class StripeRampClient implements RampProvider {
         destination_networks: [STRIPE_ONRAMP_NETWORK],
         metadata: { externalCustomerId: input.externalCustomerId },
         customer_information: buildCustomerInformation(input.stripeCustomerInfo),
-      }
+      },
+      stripeOnrampSessionSchema
     );
 
-    const id = assertSessionField(session.id, "id");
+    const id = session.id;
     // The redirect URL is Stripe-account-configured (we never set it), so its
     // host set cannot be pinned here; it still must be a plain HTTPS URL —
     // protocol-relative or active-content values fail the whole quote closed.
@@ -404,7 +410,7 @@ export class StripeRampClient implements RampProvider {
       id,
       status: "pending",
       deliveryMode: "session_widget",
-      clientSecret: assertSessionField(session.client_secret, "client_secret"),
+      clientSecret: session.client_secret,
       sessionId: id,
       publishableKey: config.publishableKey,
       ...(session.redirect_url ? { redirectUrl: session.redirect_url } : {}),
