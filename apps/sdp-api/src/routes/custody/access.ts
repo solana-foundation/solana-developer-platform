@@ -5,7 +5,6 @@ import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   assertApiKeyNotWalletScoped,
   isApiKeyWalletAccessDenied,
-  loadFreshApiKeyWalletScope,
   resolveApiKeyCustodyWalletId,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
@@ -30,21 +29,18 @@ type WalletPermissions = Parameters<typeof resolveApiKeyCustodyWalletId>[2];
 
 /**
  * A custody wallet the request names by provider wallet id (or custody wallet
- * id): the key's binding, read fresh with deactivated wallets kept, never the
- * cached snapshot, which drops a binding once its wallet is inactive. A denied
- * binding reads as a missing wallet, as the handlers answer.
+ * id): the key's bindings as authentication read them on this request
+ * (HOO-2048), deactivated wallets kept. A denied binding reads as a missing
+ * wallet, as the handlers answer.
  */
-async function authorizeCustodyWalletBinding(
+function authorizeCustodyWalletBinding(
   c: AppContext,
   walletId: string,
   requiredPermissions: WalletPermissions,
-  notFound: () => AppError,
-  /** A fresh `any` scope the caller already loaded, so it is not read twice. */
-  loaded?: Awaited<ReturnType<typeof loadFreshApiKeyWalletScope>>
-): Promise<void> {
-  const access = loaded ?? (await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any"));
+  notFound: () => AppError
+): void {
   try {
-    resolveApiKeyCustodyWalletId(access, walletId, requiredPermissions, true);
+    resolveApiKeyCustodyWalletId(getAuth(c), walletId, requiredPermissions, true);
   } catch (error) {
     if (isApiKeyWalletAccessDenied(error)) throw notFound();
     throw error;
@@ -101,7 +97,7 @@ async function authorizeCustodyWallet(
   requiredPermissions: WalletPermissions,
   options: { allowRecordIdAlias: boolean; notFound: () => AppError }
 ): Promise<void> {
-  await authorizeCustodyWalletBinding(c, walletId, requiredPermissions, walletNotFound);
+  authorizeCustodyWalletBinding(c, walletId, requiredPermissions, walletNotFound);
   await assertCustodyWalletInProject(c, walletId, options.allowRecordIdAlias, options.notFound);
 }
 
@@ -149,8 +145,8 @@ export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput
 }
 
 /** Signer check: the wallet the body names, or the key's own signing wallet. */
-export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): Promise<void> {
-  const auth = await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
+export function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): void {
+  const auth = getAuth(c);
   const walletId = resolveApiKeySigningWalletId(auth, body<{ walletId?: string }>(input).walletId, [
     "wallets:write",
   ]);
@@ -162,5 +158,5 @@ export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput)
     );
   }
   // An unknown wallet is a 400 here, which is never stored, so the handler resolves it.
-  return authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound, auth);
+  authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound);
 }

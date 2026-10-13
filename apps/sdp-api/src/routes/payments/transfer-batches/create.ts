@@ -57,7 +57,7 @@ export async function authorizeTransferBatch(
   const body = input.body as CreateTransferBatchInput;
   // Read fresh, never from the cached snapshot, which drops a binding once its
   // wallet is inactive and would refuse the replay of a batch that ran.
-  await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
+  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
 }
 

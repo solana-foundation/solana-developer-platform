@@ -14,7 +14,7 @@ import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import * as organizationAccess from "@/lib/organization-access";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -913,35 +913,59 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
-  it("rejects recovery after authorization discovers that the key was revoked", async () => {
+  // Authentication reads the key's row, and its wallet bindings, fresh on every
+  // request; the route checks that snapshot rather than re-reading it later.
+  it("rejects recovery for a key revoked since its cache entry was written", async () => {
     const original = await abandonedWithdrawal();
-    const listWallets = CustodyRuntimeTargets.prototype.listWallets;
-    const inventory = vi
-      .spyOn(CustodyRuntimeTargets.prototype, "listWallets")
-      .mockImplementationOnce(async function (this: CustodyRuntimeTargets, params) {
+    await getDb(env)
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
+      .bind(API_KEY.id)
+      .run();
+
+    const response = await postWithdrawal(
+      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+      apiKeyHeaders()
+    );
+    expect(response.status).toBe(401);
+    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
+    expect(
+      await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        id: original.id,
+      })
+    ).toMatchObject({ status: "pending" });
+  });
+
+  // The race the route's own liveness check covers: a revocation landing just
+  // after authentication's read, while the request is in flight.
+  it("rejects recovery when the key is revoked right after authentication", async () => {
+    const original = await abandonedWithdrawal();
+    const authenticate = organizationAccess.enforceApiKeyOrganizationAccess;
+    vi.spyOn(organizationAccess, "enforceApiKeyOrganizationAccess").mockImplementationOnce(
+      async (...args) => {
+        const access = await authenticate(...args);
         await getDb(env)
           .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
           .bind(API_KEY.id)
           .run();
-        return listWallets.call(this, params);
-      });
-    try {
-      const response = await postWithdrawal(
-        { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-        apiKeyHeaders()
-      );
-      expect(response.status).toBe(403);
-      expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
-      expect(
-        await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          id: original.id,
-        })
-      ).toMatchObject({ status: "pending" });
-    } finally {
-      inventory.mockRestore();
-    }
+        return access;
+      }
+    );
+
+    const response = await postWithdrawal(
+      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+      apiKeyHeaders()
+    );
+    expect(response.status).toBe(403);
+    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
+    expect(
+      await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        id: original.id,
+      })
+    ).toMatchObject({ status: "pending" });
   });
 
   it("does not create new work for a read-only key", async () => {

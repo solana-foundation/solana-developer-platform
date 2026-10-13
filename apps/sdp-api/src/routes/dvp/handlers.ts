@@ -24,8 +24,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
-  assertFreshApiKeyActive,
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { createDvpTrade } from "@/services/dvp/create";
@@ -481,11 +480,6 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // Liveness first, for EVERY key. Create provisions the settlement wallet and
-  // spends sponsored Kora budget on the project's behalf, even when both party
-  // slots are pasted addresses, so a revoked key must not get that far on a
-  // stale snapshot.
-  await assertFreshApiKeyActive(getDb(c.env), auth);
   // A wallet-scoped key only SEES trades its bound wallets are party to, and
   // visibility filters on the READ scope — a binding can hold payments:write
   // without payments:read, so the guard checks read admission, not write. A
@@ -508,7 +502,7 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     ...("walletId" in body.partyB ? [body.partyB.walletId] : []),
   ];
   for (const walletId of assertedWalletIds) {
-    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, walletId, ["payments:write"]);
+    assertApiKeyCustodyWalletAccess(auth, walletId, ["payments:write"]);
   }
 
   const trade = await createDvpTrade(c.env, c, {

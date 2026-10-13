@@ -745,10 +745,22 @@ jobs:
           pnpm --filter sdp-docs generate:ai
 
       - name: Committed docs artifacts match generated output
-        run: git diff --exit-code apps/sdp-docs/public
+        run: git diff --exit-code apps/sdp-docs/public apps/sdp-docs/src/generated
 
-      - name: Check docs links
+      - name: Docs release-channel tests
+        run: pnpm --filter sdp-docs test
+
+      - name: Check docs links (experimental)
         run: pnpm --filter sdp-docs check:links
+
+      # Production runs stable: its pages must never link to a page or API
+      # reference family the stable build leaves out.
+      - name: Check docs links (stable)
+        env:
+          SDP_RELEASE_CHANNEL: stable
+        run: |
+          pnpm --filter sdp-docs generate:api
+          pnpm --filter sdp-docs check:links
 
   integration_tests_shard:
     name: Integration Tests (${{ matrix.name }})

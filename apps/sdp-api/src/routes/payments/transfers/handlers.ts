@@ -294,7 +294,7 @@ export async function authorizeTransfer(
   const body = input.body as CreateTransferBody;
   // Read fresh, never from the cached snapshot, which drops a binding once its
   // wallet is inactive and would refuse the replay of a transfer that ran.
-  await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
+  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({

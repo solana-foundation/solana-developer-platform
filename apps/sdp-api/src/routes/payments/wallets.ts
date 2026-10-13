@@ -5,10 +5,9 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import {
+  assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
-  assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
-  loadFreshApiKeyWalletScope,
   resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -174,54 +173,29 @@ export function resolveWalletByCustodyWalletId(
 
 /**
  * The access check for a route that names a wallet by its provider wallet ID
- * (HOO-1918, ADR 0008): the key's binding, read fresh with deactivated wallets
- * kept. The cached snapshot is never consulted, because it drops a binding once
- * its wallet is inactive and would refuse the replay of a request that ran.
- * Resolving the wallet (ownership, whether it is active) stays in the handler.
+ * (HOO-1918, ADR 0008): the key's bindings as authentication read them on this
+ * request (HOO-2048), deactivated wallets kept, so the replay of a request
+ * that ran is never refused. Resolving the wallet (ownership, whether it is
+ * active) stays in the handler.
  */
-export async function authorizeProviderWallet(
+export function authorizeProviderWallet(
   c: AppContext,
   walletId: string,
   requiredWalletPermissions: Permission[]
-): Promise<void> {
-  assertApiKeyWalletAccess(
-    await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any"),
-    walletId,
-    requiredWalletPermissions
-  );
+): void {
+  assertApiKeyWalletAccess(getAuth(c), walletId, requiredWalletPermissions);
 }
 
 /**
- * The access check for a route that names a custody wallet by its id
- * (HOO-1918, ADR 0008): the key's binding, read fresh with deactivated wallets
- * kept, never the cached snapshot (see {@link authorizeProviderWallet}). A
- * no-op for callers that are not wallet-scoped API keys.
+ * {@link authorizeProviderWallet} for a route that names a custody wallet by
+ * its id. A no-op for callers that are not wallet-scoped API keys.
  */
-export async function authorizeCustodyPaymentWallet(
+export function authorizeCustodyPaymentWallet(
   c: AppContext,
   custodyWalletId: string,
   requiredWalletPermissions: Permission[]
-): Promise<void> {
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    getAuth(c),
-    custodyWalletId,
-    requiredWalletPermissions,
-    "any"
-  );
-}
-
-export async function assertFreshPaymentWalletAccess(
-  c: AppContext,
-  wallet: CustodyWallet,
-  requiredWalletPermissions: Permission[]
-): Promise<void> {
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    getAuth(c),
-    wallet.id,
-    requiredWalletPermissions
-  );
+): void {
+  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
 }
 
 export function assertPaymentWalletExactAccess(
@@ -229,13 +203,7 @@ export function assertPaymentWalletExactAccess(
   custodyWalletId: string,
   requiredWalletPermissions: Permission[]
 ): void {
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
-    getAuth(c),
-    requiredWalletPermissions
-  );
-  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(custodyWalletId)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
+  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
 }
 
 export async function admitExactPaymentWallet(
@@ -243,7 +211,7 @@ export async function admitExactPaymentWallet(
   wallet: CustodyWallet,
   requiredWalletPermissions: Permission[]
 ): Promise<void> {
-  await assertFreshPaymentWalletAccess(c, wallet, requiredWalletPermissions);
+  assertPaymentWalletExactAccess(c, wallet.id, requiredWalletPermissions);
   await admitPaymentWalletRuntimeExecution(c, wallet);
 }
 
