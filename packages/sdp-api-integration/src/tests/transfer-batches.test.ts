@@ -1,7 +1,7 @@
 import { apiTestSupport } from "@sdp/api/test-support";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
-import { type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
+import { getSignatureStatuses } from "@sdp/rpc/solana";
+import { address, type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -14,6 +14,7 @@ import {
   SOLANA_CONFIGURED,
   TEST_PROJECT,
 } from "../helpers/integration";
+import { requireIntegrationLaneRpc } from "../helpers/kora-lane";
 
 const { trackPendingTransfers } = apiTestSupport;
 
@@ -58,7 +59,7 @@ async function waitForSignatureCommitment(
   target: Exclude<Commitment, "processed">,
   timeoutMs: number
 ): Promise<void> {
-  const rpc = createRpc(env);
+  const rpc = requireIntegrationLaneRpc();
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const statuses = await getSignatureStatuses(rpc, signatures, {
@@ -84,22 +85,14 @@ async function waitForSignatureCommitment(
 /**
  * Reads an address's lamport balance from the integration validator.
  *
- * @param address - Account to read.
+ * @param accountAddress - Account to read.
  * @returns Balance in lamports.
  */
-async function getLamports(address: string): Promise<number> {
-  const response = await fetch(env.SOLANA_RPC_URL as string, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getBalance",
-      params: [address, { commitment: "confirmed" }],
-    }),
-  });
-  const payload = (await response.json()) as { result: { value: number } };
-  return payload.result.value;
+async function getLamports(accountAddress: string): Promise<number> {
+  const { value } = await requireIntegrationLaneRpc()
+    .getBalance(address(accountAddress), { commitment: "confirmed" })
+    .send();
+  return Number(value);
 }
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches On-Chain", () => {

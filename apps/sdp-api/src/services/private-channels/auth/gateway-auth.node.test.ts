@@ -2,7 +2,6 @@ import { PrivateChannelError } from "@sdp/private-channels";
 import { isUnauthorizedRpcError } from "@sdp/rpc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
-import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./gateway-auth";
 
 // Mock the packages whose runtime graph doesn't resolve in the node pool. gateway-auth
@@ -10,12 +9,10 @@ import type { SpcAuthContext } from "./gateway-auth";
 // isUnauthorizedRpcError (@sdp/rpc) IS used so the 401 classification is exercised end-to-end.
 const { createChannelGatewayRpc } = vi.hoisted(() => ({
   // Return a sentinel identifying which token the rpc was built with.
-  createChannelGatewayRpc: vi.fn(
-    (_env: unknown, url: string, opts?: { headers?: Record<string, string> }) => ({
-      url,
-      authorization: opts?.headers?.Authorization,
-    })
-  ),
+  createChannelGatewayRpc: vi.fn((url: string, opts?: { headers?: Record<string, string> }) => ({
+    url,
+    authorization: opts?.headers?.Authorization,
+  })),
 }));
 vi.mock("@sdp/private-channels", () => ({
   createChannelGatewayRpc,
@@ -38,7 +35,6 @@ vi.mock("@/db/repositories", () => ({
 
 import { withGatewayRpc, withSpcAuth } from "./gateway-auth";
 
-const ENV = {} as Env;
 const URL = "https://gw.example";
 
 /** The token sentinel our mocked createChannelGatewayRpc returns in place of a SolanaRpc. */
@@ -68,7 +64,7 @@ describe("withGatewayRpc", () => {
     const h = context("tok-1");
     const run = vi.fn(async (rpc: unknown) => (rpc as FakeRpc).authorization);
 
-    const result = await withGatewayRpc(ENV, URL, h, run);
+    const result = await withGatewayRpc(URL, h, run);
 
     expect(result).toBe("Bearer tok-1");
     expect(run).toHaveBeenCalledTimes(1);
@@ -83,7 +79,7 @@ describe("withGatewayRpc", () => {
       return authorization;
     });
 
-    const result = await withGatewayRpc(ENV, URL, h, run);
+    const result = await withGatewayRpc(URL, h, run);
 
     expect(result).toBe("Bearer fresh");
     expect(h.refresh).toHaveBeenCalledTimes(1);
@@ -96,7 +92,7 @@ describe("withGatewayRpc", () => {
       throw rpcHttpError(403);
     });
 
-    await expect(withGatewayRpc(ENV, URL, h, run)).rejects.toEqual(rpcHttpError(403));
+    await expect(withGatewayRpc(URL, h, run)).rejects.toEqual(rpcHttpError(403));
     expect(h.refresh).not.toHaveBeenCalled();
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -107,7 +103,7 @@ describe("withGatewayRpc", () => {
       throw rpcHttpError(401);
     });
 
-    await expect(withGatewayRpc(ENV, URL, h, run)).rejects.toEqual(rpcHttpError(401));
+    await expect(withGatewayRpc(URL, h, run)).rejects.toEqual(rpcHttpError(401));
     expect(h.refresh).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledTimes(2);
   });
@@ -119,7 +115,7 @@ describe("withGatewayRpc", () => {
       throw rpcHttpError(401);
     });
 
-    await expect(withGatewayRpc(ENV, URL, h, run)).rejects.toThrow("auth unavailable");
+    await expect(withGatewayRpc(URL, h, run)).rejects.toThrow("auth unavailable");
     expect(run).toHaveBeenCalledTimes(1);
   });
 });

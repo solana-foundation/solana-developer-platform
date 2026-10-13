@@ -1,4 +1,6 @@
-import { address, createSolanaRpc } from "@solana/kit";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
+import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { kaminoClusterConfig } from "./programs";
 import { discoverKaminoPositionVaults } from "./sdk";
@@ -30,8 +32,12 @@ describe("discoverKaminoPositionVaults", () => {
   const owner = address("11111111111111111111111111111112");
   const runtime: KaminoRuntime = {
     cluster: "devnet",
-    rpc: createSolanaRpc("https://devnet.kamino-discovery.test"),
-    readRpc: createSolanaRpc("https://devnet.kamino-discovery-reads.test"),
+    rpc: createEndpointRpc("https://devnet.kamino-discovery.test", {
+      timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+    }),
+    readRpc: createEndpointRpc("https://devnet.kamino-discovery-reads.test", {
+      timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+    }),
   };
 
   it("uses the cluster-bound all-vault census and returns only its candidate keys", async () => {

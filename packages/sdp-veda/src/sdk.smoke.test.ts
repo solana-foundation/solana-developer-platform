@@ -1,4 +1,6 @@
-import { address, createSolanaRpc } from "@solana/kit";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
+import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { planInstructionCount, planProgramAddresses } from "./guards";
 import { toClusterConfig } from "./programs";
@@ -47,7 +49,7 @@ describe.skipIf(!configured)("Veda plans against a live chain", () => {
   // callback, so branding an empty address at suite scope would fail collection
   // for everyone rather than skipping quietly.
   const runtime = (): VedaRuntime => {
-    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const rpc = createEndpointRpc(RPC_URL ?? "", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
     return { cluster: "devnet", rpc, readRpc: rpc };
   };
   const config = () =>

@@ -1,3 +1,5 @@
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type { SolanaCluster } from "@sdp/types";
 import {
@@ -6,7 +8,6 @@ import {
   appendTransactionMessageInstructions,
   compileTransaction,
   compressTransactionMessageUsingAddressLookupTables,
-  createSolanaRpc,
   createTransactionMessage,
   fetchAddressesForLookupTables,
   generateKeyPairSigner,
@@ -53,11 +54,7 @@ async function cheat(method: string, params: unknown[]) {
   if (!response.ok || body.error) throw new Error(body.error?.message ?? response.statusText);
 }
 
-async function compile(
-  rpc: ReturnType<typeof createSolanaRpc>,
-  owner: TransactionSigner,
-  plan: KaminoInstructionPlan
-) {
+async function compile(rpc: SolanaRpc, owner: TransactionSigner, plan: KaminoInstructionPlan) {
   const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   const lookupTables = await fetchAddressesForLookupTables([...plan.lookupTables], rpc);
   return pipe(
@@ -104,7 +101,7 @@ async function execute(
 describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
   it("enforces the deposit floor, lands a deposit, and redeems partial and full positions", async () => {
     if (CLUSTER !== "mainnet-beta" && CLUSTER !== "devnet") throw new Error("Unsupported cluster");
-    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const rpc = createEndpointRpc(RPC_URL ?? "", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
     const runtime: KaminoRuntime = { cluster: CLUSTER as SolanaCluster, rpc, readRpc: rpc };
     const owner = await generateKeyPairSigner();
     await cheat("surfnet_setAccount", [owner.address, { lamports: 1_000_000_000 }]);
@@ -233,7 +230,7 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
   }, 180_000);
   it("does not refund a concurrent creation claimant who paid no rent", async () => {
     if (CLUSTER !== "mainnet-beta" && CLUSTER !== "devnet") throw new Error("Unsupported cluster");
-    const rpc = createSolanaRpc(RPC_URL ?? "");
+    const rpc = createEndpointRpc(RPC_URL ?? "", { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
     const runtime: KaminoRuntime = { cluster: CLUSTER as SolanaCluster, rpc, readRpc: rpc };
     const owner = await generateKeyPairSigner();
     const firstPayer = await generateKeyPairSigner();

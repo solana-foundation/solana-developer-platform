@@ -3326,7 +3326,7 @@ describe("Payments routes — ramps", () => {
       fetchSpy.mockRestore();
     });
 
-    it("records the Sandbox scope's devnet USDC mint on the quote transfer, whatever the process network", async () => {
+    it("records the Sandbox scope's devnet USDC mint on the quote transfer", async () => {
       const counterpartyId = await seedCounterparty({ externalId: "moneygram_scope_mint" });
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         moneygramSessionResponse({
@@ -3353,7 +3353,7 @@ describe("Payments routes — ramps", () => {
             fiatAmount: "25",
           }),
         },
-        { ...env, SOLANA_NETWORK: "mainnet-beta" }
+        env
       );
 
       expect(res.status).toBe(200);

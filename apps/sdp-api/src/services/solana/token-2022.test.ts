@@ -1,7 +1,21 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as RpcModule from "@sdp/rpc/solana";
 import { type FeePaymentPort, Token2022Service } from "@sdp/solana/token-2022";
-import * as Kit from "@solana/kit";
+import {
+  type Address,
+  appendTransactionMessageInstructions,
+  blockhash,
+  createNoopSigner,
+  createTransactionMessage,
+  generateKeyPairSigner,
+  getBase64Encoder,
+  getTransactionDecoder,
+  type KeyPairSigner,
+  pipe,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signature,
+} from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import { getBurnCheckedInstruction } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,18 +27,18 @@ function sandboxMosaicRpc() {
 }
 
 const lifetime = {
-  blockhash: Kit.blockhash("11111111111111111111111111111111"),
+  blockhash: blockhash("11111111111111111111111111111111"),
   lastValidBlockHeight: 100n,
 };
-const signature = Kit.signature("1".repeat(64));
+const SENT_SIGNATURE = signature("1".repeat(64));
 
 // Namespace spies rely on mosaic-sdk being in server.deps.inline in vitest.config.ts.
 describe("Token2022Service burn", () => {
   const clusterRpc = installClusterRpcStub();
-  let authority: Kit.KeyPairSigner;
-  let mint: Kit.Address;
-  let tokenAccount: Kit.Address;
-  let sponsor: Kit.Address;
+  let authority: KeyPairSigner;
+  let mint: Address;
+  let tokenAccount: Address;
+  let sponsor: Address;
   let feePayment: FeePaymentPort;
 
   function sentTransactions() {
@@ -32,19 +46,19 @@ describe("Token2022Service burn", () => {
   }
 
   beforeEach(async () => {
-    authority = await Kit.generateKeyPairSigner();
-    mint = (await Kit.generateKeyPairSigner()).address;
-    tokenAccount = (await Kit.generateKeyPairSigner()).address;
-    sponsor = (await Kit.generateKeyPairSigner()).address;
+    authority = await generateKeyPairSigner();
+    mint = (await generateKeyPairSigner()).address;
+    tokenAccount = (await generateKeyPairSigner()).address;
+    sponsor = (await generateKeyPairSigner()).address;
     feePayment = {
       providerId: "test-sponsor",
       getFeePayer: vi.fn().mockResolvedValue(sponsor),
       signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn().mockResolvedValue(signature),
+      signAndSend: vi.fn().mockResolvedValue(SENT_SIGNATURE),
     };
-    clusterRpc.answer("sendTransaction", signature);
+    clusterRpc.answer("sendTransaction", SENT_SIGNATURE);
     vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
-      signature,
+      signature: SENT_SIGNATURE,
       slot: 42n,
       confirmationStatus: "confirmed",
       err: null,
@@ -58,16 +72,16 @@ describe("Token2022Service burn", () => {
     });
     vi.spyOn(MosaicSdk, "createBurnTransaction").mockImplementation(
       async (_rpc, _mint, owner, _amount, payer) =>
-        Kit.pipe(
-          Kit.createTransactionMessage({ version: 0 }),
-          (tx) => Kit.setTransactionMessageLifetimeUsingBlockhash(lifetime, tx),
+        pipe(
+          createTransactionMessage({ version: 0 }),
+          (tx) => setTransactionMessageLifetimeUsingBlockhash(lifetime, tx),
           (tx) =>
-            Kit.setTransactionMessageFeePayerSigner(
-              typeof payer === "string" ? Kit.createNoopSigner(payer) : payer,
+            setTransactionMessageFeePayerSigner(
+              typeof payer === "string" ? createNoopSigner(payer) : payer,
               tx
             ),
           (tx) =>
-            Kit.appendTransactionMessageInstructions(
+            appendTransactionMessageInstructions(
               [
                 getBurnCheckedInstruction({
                   account: tokenAccount,
@@ -96,7 +110,7 @@ describe("Token2022Service burn", () => {
         amount: 1.25,
         authority,
       })
-    ).resolves.toEqual({ signature, slot: 42n });
+    ).resolves.toEqual({ signature: SENT_SIGNATURE, slot: 42n });
     expect(MosaicSdk.createBurnTransaction).toHaveBeenCalledWith(
       expect.anything(),
       mint,
@@ -123,18 +137,18 @@ describe("Token2022Service burn", () => {
     const service = new Token2022Service(sandboxMosaicRpc(), authority, feePayment);
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
-    ).resolves.toEqual({ signature, slot: 42n });
+    ).resolves.toEqual({ signature: SENT_SIGNATURE, slot: 42n });
     const [bytes] = vi.mocked(feePayment.signAndSend).mock.calls[0];
-    const transaction = Kit.getTransactionDecoder().decode(bytes);
+    const transaction = getTransactionDecoder().decode(bytes);
     expect(transaction.signatures[authority.address]).toBeInstanceOf(Uint8Array);
     expect(transaction.signatures[sponsor]).toBeNull();
     expect(sentTransactions()).toEqual([]);
-    expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), signature);
+    expect(RpcModule.confirmTransaction).toHaveBeenCalledWith(expect.anything(), SENT_SIGNATURE);
   });
 
   it.each(["direct", "sponsored"])("reports confirmation errors for %s burns", async (mode) => {
     vi.mocked(RpcModule.confirmTransaction).mockResolvedValueOnce({
-      signature,
+      signature: SENT_SIGNATURE,
       slot: 42n,
       confirmationStatus: "confirmed",
       err: { InstructionError: [0, { Custom: 6000n }] },
@@ -160,8 +174,8 @@ describe("Token2022Service burn", () => {
       { mint, source: tokenAccount, amount: 1.25, authority: authority.address },
       simulate
     );
-    const bytes = Kit.getBase64Encoder().encode(prepared.serializedTx);
-    const transaction = Kit.getTransactionDecoder().decode(bytes);
+    const bytes = getBase64Encoder().encode(prepared.serializedTx);
+    const transaction = getTransactionDecoder().decode(bytes);
     expect(transaction.signatures).toEqual({ [authority.address]: null });
     expect(feePayment.getFeePayer).not.toHaveBeenCalled();
     expect(prepared).toMatchObject(lifetime);
