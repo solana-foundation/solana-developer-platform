@@ -1,5 +1,12 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
+import {
+  installClusterRpcResponder,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+} from "@/test/helpers/cluster-rpc";
+import { env } from "@/test/helpers/env";
+import { testSignature } from "@/test/helpers/signatures";
 
 // --- Mocks (hoisted so the vi.mock factories can reference them) --------------
 
@@ -27,28 +34,37 @@ vi.mock("@/db/repositories", () => ({
 const { emitDepositEvent } = vi.hoisted(() => ({ emitDepositEvent: vi.fn() }));
 vi.mock("@/services/private-channels/deposit-events", () => ({ emitDepositEvent }));
 
-const { createRpc, getSignatureStatuses } = vi.hoisted(() => ({
-  createRpc: vi.fn(() => ({})),
-  getSignatureStatuses: vi.fn(),
-}));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc, getSignatureStatuses }));
-
-const { loadProjectRpcClient, PROJECT_RPC } = vi.hoisted(() => {
-  const PROJECT_RPC = { __projectRpc: true };
-  return {
-    PROJECT_RPC,
-    loadProjectRpcClient: vi.fn(async () => ({
-      cluster: "devnet",
-      rpc: PROJECT_RPC,
-    })),
-  };
-});
-vi.mock("@/services/private-channels/project-rpc", () => ({ loadProjectRpcClient }));
-
 import { trackPendingDeposits } from "./track-pending-deposits";
 
 const NOW_ISO = "2026-07-17T00:00:00.000Z";
 const STALE_ISO = "2026-07-16T23:00:00.000Z"; // > 5 min in the past
+
+const SIG_1 = testSignature(1);
+const SIG_2 = testSignature(2);
+const SIG_3 = testSignature(3);
+const SIG_4 = testSignature(4);
+const SIG_6 = testSignature(6);
+const SIG_7 = testSignature(7);
+const SIG_8 = testSignature(8);
+
+const CONFIRMED: StubSignatureStatus = {
+  slot: 1,
+  confirmations: 1,
+  confirmationStatus: "confirmed",
+  err: null,
+};
+const FINALIZED: StubSignatureStatus = {
+  slot: 1,
+  confirmations: null,
+  confirmationStatus: "finalized",
+  err: null,
+};
+const ERRORED: StubSignatureStatus = {
+  slot: 1,
+  confirmations: 1,
+  confirmationStatus: "confirmed",
+  err: { InstructionError: [0, "InvalidAccountData"] },
+};
 
 function depositRow(overrides: Record<string, unknown>) {
   return {
@@ -62,7 +78,7 @@ function depositRow(overrides: Record<string, unknown>) {
     mint: "mint-1",
     amount: "10",
     status: "submitted",
-    signature: "sig",
+    signature: SIG_1,
     settlement_ref: null,
     failure_reason: null,
     context: {},
@@ -92,7 +108,7 @@ function instanceRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(NOW_ISO));
   depositRepo.updateDeposit.mockImplementation(async (input: Record<string, unknown>) => ({
     ...depositRow({}),
@@ -102,29 +118,45 @@ beforeEach(() => {
 });
 
 describe("trackPendingDeposits", () => {
+  const rpc = installClusterRpcResponder();
+
+  function answerStatuses(statuses: ReadonlyMap<string, StubSignatureStatus>): void {
+    rpc.respondSignatureStatuses((signature) => {
+      const status = statuses.get(signature);
+      return status === undefined ? null : status;
+    });
+  }
+
+  function statusReads() {
+    return rpc.requests
+      .filter((request) => request.method === "getSignatureStatuses")
+      .map(signatureStatusesRead);
+  }
+
+  function track() {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      trackPendingDeposits(env)
+    );
+  }
+
   it("does nothing when there are no non-terminal deposits", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([]);
-    await trackPendingDeposits({} as Env);
+    await track();
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
-    expect(loadProjectRpcClient).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
-  it("advances submitted → confirmed via the project's configured RPC", async () => {
+  it("advances submitted → confirmed via the scope's cluster RPC", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d1", status: "submitted", signature: "sig1" }),
+      depositRow({ id: "d1", status: "submitted", signature: SIG_1 }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+    answerStatuses(new Map([[SIG_1, CONFIRMED]]));
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
-    expect(loadProjectRpcClient).toHaveBeenCalledWith({
-      env: expect.anything(),
-      organizationId: "org",
-      projectId: "proj",
-    });
-    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1"], {
-      searchTransactionHistory: true,
-    });
+    expect(statusReads()).toEqual([
+      { cluster: "devnet", signatures: [SIG_1], searchTransactionHistory: true },
+    ]);
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d1", status: "confirmed", expectedStatus: "submitted" })
     );
@@ -139,11 +171,11 @@ describe("trackPendingDeposits", () => {
 
   it("fails a submitted deposit whose signature returns an on-chain error", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d2", status: "submitted", signature: "sig2" }),
+      depositRow({ id: "d2", status: "submitted", signature: SIG_2 }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ err: { InstructionError: [0, "Custom"] } }]);
+    answerStatuses(new Map([[SIG_2, ERRORED]]));
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d2", status: "failed", expectedStatus: "submitted" })
@@ -159,22 +191,22 @@ describe("trackPendingDeposits", () => {
 
   it("does not fail a submitted deposit whose signature is briefly missing on-chain", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d3", status: "submitted", signature: "sig3", updated_at: NOW_ISO }),
+      depositRow({ id: "d3", status: "submitted", signature: SIG_3, updated_at: NOW_ISO }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([undefined]);
+    answerStatuses(new Map());
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
   });
 
   it("fails a submitted deposit whose signature has stayed missing past the stale window", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d4", status: "submitted", signature: "sig4", updated_at: STALE_ISO }),
+      depositRow({ id: "d4", status: "submitted", signature: SIG_4, updated_at: STALE_ISO }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([undefined]);
+    answerStatuses(new Map());
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d4", status: "failed", expectedStatus: "submitted" })
@@ -186,7 +218,7 @@ describe("trackPendingDeposits", () => {
       depositRow({ id: "d5", status: "pending", signature: null, updated_at: STALE_ISO }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d5", status: "failed", expectedStatus: "pending" })
@@ -195,11 +227,11 @@ describe("trackPendingDeposits", () => {
 
   it("promotes a stale pending deposit that carries a signature and asks the chain", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d7", status: "pending", signature: "sig7", updated_at: STALE_ISO }),
+      depositRow({ id: "d7", status: "pending", signature: SIG_7, updated_at: STALE_ISO }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
+    answerStatuses(new Map([[SIG_7, FINALIZED]]));
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7", status: "submitted", expectedStatus: "pending" })
@@ -218,15 +250,15 @@ describe("trackPendingDeposits", () => {
    */
   it("asks the chain's history when promoting, so an executed deposit is not failed", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d7b", status: "pending", signature: "sig7b", updated_at: STALE_ISO }),
+      depositRow({ id: "d7b", status: "pending", signature: SIG_7, updated_at: STALE_ISO }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
+    answerStatuses(new Map([[SIG_7, FINALIZED]]));
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
-    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, expect.any(Array), {
-      searchTransactionHistory: true,
-    });
+    expect(statusReads()).toEqual([
+      { cluster: "devnet", signatures: [SIG_7], searchTransactionHistory: true },
+    ]);
     expect(depositRepo.updateDeposit).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7b", status: "failed" })
     );
@@ -234,57 +266,56 @@ describe("trackPendingDeposits", () => {
 
   it("keeps a fresh pending deposit with a signature untouched for its live request", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d8", status: "pending", signature: "sig8", updated_at: NOW_ISO }),
+      depositRow({ id: "d8", status: "pending", signature: SIG_8, updated_at: NOW_ISO }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
   });
 
   it("leaves confirmed deposits alone — settled is unreachable under the chain oracle", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d6", status: "confirmed", signature: "sig6" }),
+      depositRow({ id: "d6", status: "confirmed", signature: SIG_6 }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
   it("stalls a submitted deposit whose instance was deleted, then fails it past the stale window", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d7", status: "submitted", signature: "sig7", updated_at: STALE_ISO }),
+      depositRow({ id: "d7", status: "submitted", signature: SIG_7, updated_at: STALE_ISO }),
     ]);
     instanceRepo.getById.mockResolvedValueOnce(null);
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7", status: "failed", expectedStatus: "submitted" })
     );
   });
 
-  it("batches every submitted deposit sharing a project RPC into one getSignatureStatuses call", async () => {
+  it("batches every submitted deposit in the tick into one getSignatureStatuses call", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d1", status: "submitted", signature: "sig1" }),
-      depositRow({ id: "d2", status: "submitted", signature: "sig2" }),
-      depositRow({ id: "d3", status: "submitted", signature: "sig3" }),
+      depositRow({ id: "d1", status: "submitted", signature: SIG_1 }),
+      depositRow({ id: "d2", status: "submitted", signature: SIG_2 }),
+      depositRow({ id: "d3", status: "submitted", signature: SIG_3 }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([
-      { confirmationStatus: "confirmed" },
-      { err: { InstructionError: [0, "Custom"] } },
-      undefined,
+    answerStatuses(
+      new Map([
+        [SIG_1, CONFIRMED],
+        [SIG_2, ERRORED],
+      ])
+    );
+
+    await track();
+
+    expect(statusReads()).toEqual([
+      { cluster: "devnet", signatures: [SIG_1, SIG_2, SIG_3], searchTransactionHistory: true },
     ]);
-
-    await trackPendingDeposits({} as Env);
-
-    // One batched read for the whole tick, not one RPC per row.
-    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
-    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1", "sig2", "sig3"], {
-      searchTransactionHistory: true,
-    });
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d1", status: "confirmed", expectedStatus: "submitted" })
     );
@@ -298,8 +329,8 @@ describe("trackPendingDeposits", () => {
 
   it("batches the promoted signed-pending deposit alongside already-submitted rows", async () => {
     const rows = [
-      depositRow({ id: "d1", status: "submitted", signature: "sig1" }),
-      depositRow({ id: "d2", status: "pending", signature: "sig2", updated_at: STALE_ISO }),
+      depositRow({ id: "d1", status: "submitted", signature: SIG_1 }),
+      depositRow({ id: "d2", status: "pending", signature: SIG_2, updated_at: STALE_ISO }),
     ];
     depositRepo.listNonTerminal.mockResolvedValueOnce(rows);
     // A real CAS update returns the full row, signature included.
@@ -307,17 +338,18 @@ describe("trackPendingDeposits", () => {
       const original = rows.find((row) => row.id === input.id);
       return { ...(original ?? depositRow({})), ...input };
     });
-    getSignatureStatuses.mockResolvedValueOnce([
-      { confirmationStatus: "finalized" },
-      { confirmationStatus: "confirmed" },
+    answerStatuses(
+      new Map([
+        [SIG_1, FINALIZED],
+        [SIG_2, CONFIRMED],
+      ])
+    );
+
+    await track();
+
+    expect(statusReads()).toEqual([
+      { cluster: "devnet", signatures: [SIG_1, SIG_2], searchTransactionHistory: true },
     ]);
-
-    await trackPendingDeposits({} as Env);
-
-    expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
-    expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1", "sig2"], {
-      searchTransactionHistory: true,
-    });
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d2", status: "submitted", expectedStatus: "pending" })
     );
@@ -326,13 +358,29 @@ describe("trackPendingDeposits", () => {
     );
   });
 
+  it("leaves a malformed stored signature out of the batch and reconciles the rest", async () => {
+    depositRepo.listNonTerminal.mockResolvedValueOnce([
+      depositRow({ id: "d1", status: "submitted", signature: "not-a-signature" }),
+      depositRow({ id: "d2", status: "submitted", signature: SIG_2 }),
+    ]);
+    answerStatuses(new Map([[SIG_2, CONFIRMED]]));
+
+    await track();
+
+    expect(statusReads()).toEqual([
+      { cluster: "devnet", signatures: [SIG_2], searchTransactionHistory: true },
+    ]);
+    expect(depositRepo.updateDeposit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "d2", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
   it("skips no rows when the batched status read fails — the next tick rescans", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([
-      depositRow({ id: "d1", status: "submitted", signature: "sig1" }),
+      depositRow({ id: "d1", status: "submitted", signature: SIG_1 }),
     ]);
-    getSignatureStatuses.mockRejectedValueOnce(new Error("rpc unavailable"));
 
-    await trackPendingDeposits({} as Env);
+    await track();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
     expect(emitDepositEvent).not.toHaveBeenCalled();
