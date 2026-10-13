@@ -15,7 +15,7 @@ import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstr
 /**
  * The dashboard's Idempotency-Key contract (HOO-1918), driven through the real UI against the
  * local API: one key per user action, kept across double submits, lost answers, refusals that
- * settle nothing and reloads, and retired once the action is definitively answered. Each test
+ * settle nothing and reloads, and retired by a success, a replay or a 422. Each test
  * checks the keys the browser sent and what the API holds afterwards.
  */
 
