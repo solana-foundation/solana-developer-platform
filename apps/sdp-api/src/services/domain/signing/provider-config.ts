@@ -13,7 +13,6 @@ export interface FireblocksProviderConfig {
   apiKey: string;
   apiSecretEncrypted: string;
   vaultAccountId: string;
-  assetId: string;
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
 }
@@ -31,7 +30,6 @@ export interface CoinbaseCdpProviderConfig {
   provider: "coinbase_cdp";
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
-  network?: "solana" | "solana-devnet";
   accountPolicy?: string;
   requestDelayMs?: number;
 }
@@ -59,7 +57,6 @@ export interface DfnsProviderConfig {
   provider: "dfns";
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
-  network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
 }
@@ -68,7 +65,6 @@ export interface IbmHavenProviderConfig {
   provider: "ibm_haven";
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
-  network?: "Solana" | "SolanaDevnet";
   walletId?: string;
   signingKeyId?: string;
 }
@@ -78,7 +74,6 @@ export interface AnchorageProviderConfig {
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   walletId?: string;
-  network?: "solana" | "solana-devnet";
 }
 
 export interface UtilaProviderConfig {
@@ -86,7 +81,6 @@ export interface UtilaProviderConfig {
   /** @deprecated Legacy persisted value; runtime endpoints come from server environment only. */
   apiBaseUrl?: string;
   vaultId?: string;
-  network?: "networks/solana-mainnet" | "networks/solana-devnet";
 }
 
 export type ProviderConfigRecord =
