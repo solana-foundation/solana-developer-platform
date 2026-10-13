@@ -3,7 +3,6 @@ import type {
   BvnkOfframpChannelSettlement,
   BvnkRampSettlement,
   CoinbaseRampSettlement,
-  LightsparkRampSettlement,
   MoonpayRampSettlement,
   PaymentTransferSummary,
   SolanaCluster,
@@ -11,11 +10,7 @@ import type {
 import type { PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { explorerTxUrl } from "@/lib/explorer";
-import {
-  formatDisplayAmount,
-  formatMinorCurrencyAmount,
-  shortenAddress,
-} from "./payments-overview.utils";
+import { formatDisplayAmount, shortenAddress } from "./payments-overview.utils";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 type RampTransferDirection = "onramp" | "offramp";
@@ -230,30 +225,6 @@ const BVNK_OFFRAMP_FIELDS: readonly TransferDetailFieldSpec<BvnkOfframpChannelSe
   },
 ];
 
-const LIGHTSPARK_FIELDS: readonly TransferDetailFieldSpec<LightsparkRampSettlement>[] = [
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.fees",
-    text: (settlement) =>
-      formatMinorCurrencyAmount(
-        settlement.fees,
-        settlement.sentAmount.currencyCode,
-        settlement.sentAmount.decimals
-      ),
-  },
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.exchangeRate",
-    text: (settlement) => {
-      const sent = settlement.sentAmount.amount / 10 ** settlement.sentAmount.decimals;
-      const received = settlement.receivedAmount.amount / 10 ** settlement.receivedAmount.decimals;
-      return received > 0
-        ? `1 ${settlement.receivedAmount.currencyCode} = ${(sent / received).toFixed(4)} ${settlement.sentAmount.currencyCode}`
-        : null;
-    },
-  },
-];
-
 function rowsFromSpecs<TSettlement>(
   specs: readonly TransferDetailFieldSpec<TSettlement>[],
   settlement: TSettlement,
@@ -342,17 +313,6 @@ function coinbaseBuilder(
   const settlement = transfer.settlement;
   return settlement !== undefined && settlement.provider === "coinbase"
     ? rowsFromSpecs(COINBASE_FIELDS, settlement, context, t)
-    : [];
-}
-
-function lightsparkBuilder(
-  transfer: PaymentTransferSummary,
-  context: TransferDetailFieldContext,
-  t: Translate
-): ProviderTransferDetailRow[] {
-  const settlement = transfer.settlement;
-  return settlement !== undefined && settlement.provider === "lightspark"
-    ? rowsFromSpecs(LIGHTSPARK_FIELDS, settlement, context, t)
     : [];
 }
 
@@ -448,7 +408,6 @@ const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
 > = {
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
   coinbase: { onramp: coinbaseBuilder },
-  lightspark: { onramp: lightsparkBuilder, offramp: lightsparkBuilder },
   bvnk: { onramp: bvnkBuilder, offramp: bvnkOfframpBuilder },
 };
 

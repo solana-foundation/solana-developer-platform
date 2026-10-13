@@ -112,15 +112,6 @@ export async function simulateSandboxTransfer(
   }
   let simulate: () => Promise<unknown>;
   switch (provider) {
-    case "lightspark": {
-      const quoteId = transfer.provider_reference;
-      if (quoteId === null) {
-        throw internalError("Lightspark on-ramp transfer has no quote reference.");
-      }
-      const payload = { quoteId, currencyCode: transfer.fiat_currency };
-      simulate = () => RAMP_PROVIDER_CLIENTS.lightspark.sandboxSend(rampRuntime(c), payload);
-      break;
-    }
     case "bvnk": {
       // TODO(PRO-2035): remove with the legacy `bvnk.simulation` codec field.
       if (readBvnkOnrampTransferData(transfer.provider_data).simulation !== undefined) {

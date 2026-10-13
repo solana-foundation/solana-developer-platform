@@ -60,43 +60,10 @@ export function assertRampQuoteBindingMatches(
   }
 }
 
-/**
- * Provider-data payload carrying the quote/session expiry the reference is
- * bound to. Providers without a reported expiry contribute nothing.
- */
-export function rampQuoteExpiryProviderData(quote: PaymentRampQuote): Record<string, unknown> {
-  const expiresAt =
-    quote.provider === "lightspark" && quote.expiresAt ? quote.expiresAt : undefined;
-  return expiresAt ? { rampQuote: { expiresAt } } : {};
-}
-
-/** Reads the bound quote/session expiry recorded at quote creation, if any. */
-export function readRampQuoteExpiry(transfer: PaymentTransferRow): string | null {
-  const rampQuote = transfer.provider_data.rampQuote;
-  if (!rampQuote || typeof rampQuote !== "object" || Array.isArray(rampQuote)) {
-    return null;
-  }
-  const expiresAt = (rampQuote as Record<string, unknown>).expiresAt;
-  return typeof expiresAt === "string" && expiresAt.trim() ? expiresAt : null;
-}
-
-/** True when the transfer's bound quote/session expiry has passed. */
-export function isRampQuoteBindingExpired(
-  transfer: PaymentTransferRow,
-  now: number = Date.now()
-): boolean {
-  const expiresAt = readRampQuoteExpiry(transfer);
-  if (!expiresAt) {
-    return false;
-  }
-  const expiryMs = Date.parse(expiresAt);
-  return Number.isFinite(expiryMs) && expiryMs <= now;
-}
-
 function isCryptoDepositInstruction(
   instruction: PaymentRampInstruction
 ): instruction is Extract<PaymentRampInstruction, { kind: "crypto_deposit" }> {
-  return "kind" in instruction && instruction.kind === "crypto_deposit";
+  return instruction.kind === "crypto_deposit";
 }
 
 /**

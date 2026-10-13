@@ -22,15 +22,14 @@ Webhooks are **not** under `/v1`. They land at `POST /webhooks/payments/ramps/{s
 
 `verify(context: RampWebhookValidationContext): Promise<Payload>`. `context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed verification secret/key from `env`, verify the signature over the **raw** body, then `JSON.parse` and return the payload. Throw `UNAUTHORIZED` on a missing/invalid signature; throw `badRequest` on non-JSON. Use `apps/sdp-api/src/lib/webhook-signature.ts` and supply the upstream timestamp as `timestampSeconds`; the helper enforces replay tolerance as well as signature verification.
 
-The shared verifier currently supports HMAC-SHA256 and ECDSA P-256/SHA-256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
+The shared verifier currently supports HMAC-SHA256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
 
 This is one of the few places `unknown` is allowed — it's a genuine trust boundary, narrowed immediately by `parse`.
 
-Signature variety across the five registered webhook providers:
+Signature variety across the four registered webhook providers:
 
 | Provider | Header | Algorithm | Env keys |
 |---|---|---|---|
-| Lightspark | `x-grid-signature` | ECDSA P-256 / SHA-256 (public key) | `LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY` / `LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY` |
 | MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_WEBHOOK_KEY` / `MOONPAY_SANDBOX_WEBHOOK_KEY` |
 | BVNK | `x-signature` | HMAC-SHA256 (base64) | `BVNK_WEBHOOK_SECRET` / `BVNK_SANDBOX_WEBHOOK_SECRET` |
 | Coinbase | `x-hook0-signature` | HMAC-SHA256 (hex, `t=…,v0=…`) | `COINBASE_CDP_RAMPS_WEBHOOK_SECRET` |

@@ -1,11 +1,10 @@
-import {
-  type Counterparty,
-  type CounterpartyAccount,
-  isCountryCode,
-  type PaymentRampQuoteDeliveryMode,
-  type PaymentRecurringPayment,
-  type PaymentTransferRecipient,
-  type RampProviderId,
+import type {
+  Counterparty,
+  CounterpartyAccount,
+  PaymentRampQuoteDeliveryMode,
+  PaymentRecurringPayment,
+  PaymentTransferRecipient,
+  RampProviderId,
 } from "@sdp/types";
 import {
   CREATED_BY,
@@ -273,7 +272,7 @@ function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
 
 /** Where the demo provider asks an off-ramp's crypto to be sent. */
 export function rampDepositAddress(rampId: string): string {
-  return demoAddress(`lightspark-deposit:${rampId}`);
+  return demoAddress(`ramp-deposit:${rampId}`);
 }
 
 /** How each provider hands a ramp over, and the prefix of the reference it gives it. */
@@ -281,7 +280,6 @@ export const DEMO_RAMP_PROVIDERS: Record<
   RampProviderId,
   { deliveryMode: PaymentRampQuoteDeliveryMode; reference: string }
 > = {
-  lightspark: { deliveryMode: "manual_instructions", reference: "LS" },
   bvnk: { deliveryMode: "manual_instructions", reference: "BVNK" },
   moonpay: { deliveryMode: "hosted", reference: "MP" },
   coinbase: { deliveryMode: "hosted", reference: "CB" },
@@ -353,26 +351,6 @@ function applyRampCancel(world: DemoWorld, op: DemoOpOf<"ramp-cancel">): void {
   transfer.status = "canceled";
   transfer.updatedAt = iso(op.at);
   if (transfer.cryptoDeposit) delete transfer.cryptoDeposit;
-}
-
-function applyPayoutAccount(world: DemoWorld, op: DemoOpOf<"payout-account">): void {
-  if (!contactById(world, op.cp)) return;
-  world.providerAccounts.push({
-    counterpartyId: op.cp,
-    account: {
-      id: op.id,
-      provider: "lightspark",
-      kind: "payout_account",
-      fiatCurrency: op.fiat,
-      destinationCountry: isCountryCode(op.country) ? op.country : null,
-      paymentRail: op.rail,
-      status: "active",
-      providerStatus: "VERIFIED",
-      createdAt: iso(op.at),
-      ...(op.bank ? { bankName: op.bank } : {}),
-      ...(op.last4 ? { accountNumberLast4: op.last4 } : {}),
-    },
-  });
 }
 
 function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
@@ -571,9 +549,6 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
       return;
     case "verified":
       if (contactById(world, op.id)) world.verifications[consentKey(op.provider, op.id)] = op.at;
-      return;
-    case "payout-account":
-      applyPayoutAccount(world, op);
       return;
     case "request":
       applyRequest(world, op);

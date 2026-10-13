@@ -1,4 +1,3 @@
-import { createVerify } from "node:crypto";
 import { unauthorized } from "@/lib/errors";
 
 const encoder = new TextEncoder();
@@ -7,9 +6,11 @@ export const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 300;
 
 type WebhookSignatureEncoding = "base64" | "hex";
 
-type WebhookSignatureAlgorithm =
-  | { type: "hmac-sha256"; secret: string; encoding: WebhookSignatureEncoding }
-  | { type: "ecdsa-sha256"; publicKeyPem: string; encoding: WebhookSignatureEncoding };
+type WebhookSignatureAlgorithm = {
+  type: "hmac-sha256";
+  secret: string;
+  encoding: WebhookSignatureEncoding;
+};
 
 export interface VerifyWebhookSignatureInput {
   provider: string;
@@ -17,7 +18,7 @@ export interface VerifyWebhookSignatureInput {
   signedPayload: string;
   algorithm: WebhookSignatureAlgorithm;
   /** Seconds since epoch from the provider's signed timestamp. Required — every provider
-   * signs one (MoonPay header, Lightspark/BVNK body), and a non-finite value (missing or
+   * signs one (MoonPay header, BVNK body), and a non-finite value (missing or
    * unparseable) is rejected rather than skipping the replay window. */
   timestampSeconds: number;
 }
@@ -48,29 +49,6 @@ async function verifyHmacSha256(
     new Uint8Array(signatureBytes),
     encoder.encode(signedPayload)
   );
-}
-
-/**
- * Verifies an ECDSA P-256/SHA-256 webhook signature against the provider's signed payload.
- *
- * @param publicKeyPem - Provider webhook public key in PEM/SPKI format. Literal "\\n"
- * sequences are normalized to real newlines before verification because PEM keys are
- * commonly stored in environment variables that way.
- * @param signedPayload - Exact string the provider signed, usually the raw request body.
- * @param signatureBytes - Decoded DER signature bytes from the provider header.
- * @returns Whether the signature matches the payload for the given public key.
- */
-function verifyEcdsaSha256(
-  publicKeyPem: string,
-  signedPayload: string,
-  signatureBytes: Uint8Array
-): boolean {
-  return createVerify("SHA256")
-    .update(signedPayload)
-    .verify(
-      { key: publicKeyPem.replace(/\\n/g, "\n"), format: "pem", type: "spki" },
-      signatureBytes
-    );
 }
 
 /**
@@ -109,16 +87,7 @@ export async function verifyWebhookSignature(input: VerifyWebhookSignatureInput)
     throw unauthorized(`Invalid ${provider} webhook signature`);
   }
 
-  let valid: boolean;
-  switch (algorithm.type) {
-    case "hmac-sha256":
-      valid = await verifyHmacSha256(algorithm.secret, signedPayload, signatureBytes);
-      break;
-    case "ecdsa-sha256":
-      valid = verifyEcdsaSha256(algorithm.publicKeyPem, signedPayload, signatureBytes);
-      break;
-  }
-
+  const valid = await verifyHmacSha256(algorithm.secret, signedPayload, signatureBytes);
   if (!valid) {
     throw unauthorized(`Invalid ${provider} webhook signature`);
   }

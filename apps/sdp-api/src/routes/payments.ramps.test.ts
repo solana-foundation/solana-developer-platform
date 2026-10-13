@@ -189,7 +189,7 @@ async function seedCoinbaseOnrampTransfer(params: {
 }
 
 // Today every ramp provider is `experimental`; these stages put only MoonPay in
-// `beta`, so a `beta` deployment runs Ramps without BVNK or Lightspark.
+// `beta`, so a `beta` deployment runs Ramps with MoonPay alone.
 const moonpayOnlyBetaApp = createApp({
   observability: noopObservability,
   rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
@@ -559,7 +559,7 @@ describe("Payments routes — ramps", () => {
     expect(body.data.pairs).toContainEqual({
       source: "USD",
       dest: "usdc.solana",
-      providers: expect.arrayContaining(["lightspark", "bvnk"]),
+      providers: expect.arrayContaining(["bvnk", "stripe"]),
     });
   });
 
@@ -847,7 +847,7 @@ describe("Payments routes — ramps", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
           body: JSON.stringify({
-            provider: "lightspark",
+            provider: "stripe",
             counterpartyId,
             destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             assetRail: "usdc.solana",
@@ -862,7 +862,7 @@ describe("Payments routes — ramps", () => {
       expect(await res.json()).toEqual({
         error: {
           code: "FORBIDDEN",
-          message: "Lightspark is not available in this release channel.",
+          message: "Stripe is not available in this release channel.",
           details: { reason: "provider_not_in_release_channel" },
         },
         meta: { requestId: expect.any(String) },
@@ -1885,9 +1885,9 @@ describe("Payments routes — ramps", () => {
     });
 
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
-    const LIGHTSPARK_SIM_SEED = {
-      provider: "lightspark",
-      providerReference: "Quote:sim-1",
+    const GENERIC_SIM_SEED = {
+      provider: "bvnk",
+      providerReference: "bvnk_sim_reference",
       fiatCurrency: "USD",
       fiatAmount: "250.00",
       organizationId: TEST_ORG.id,
@@ -1962,19 +1962,21 @@ describe("Payments routes — ramps", () => {
         }>();
     }
 
-    async function seedBvnkSimulatableTransfer(): Promise<string> {
-      const counterpartyId = await seedCounterparty({ externalId: "d1b_simulate_bvnk" });
+    async function seedBvnkSimulatableTransfer(
+      transferId: string = SIMULATE_TRANSFER_ID
+    ): Promise<string> {
+      const counterpartyId = await seedCounterparty({ externalId: `d1b_simulate_${transferId}` });
       await seedBvnkFundingWallet(getDb(env), {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         counterpartyId,
-        providerCustomerReference: "bvnk_simulate_1",
+        providerCustomerReference: `bvnk_simulate_${transferId}`,
         walletId: TEST_BVNK_WALLET_ID,
         stage: "provisioned",
         metadata: {},
       });
       await seedBvnkOnrampTransfer(getDb(env), {
-        id: SIMULATE_TRANSFER_ID,
+        id: transferId,
         status: "awaiting_payment",
         counterpartyId,
         organizationId: TEST_ORG.id,
@@ -2058,28 +2060,18 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("derives the Lightspark payload from the transfer, claims the slot once, and answers 409 on repeat", async () => {
-      const transferId = "xfr_lightspark_sim_1";
-      const counterpartyId = await seedCounterparty({ providerData: {} });
-      await seedSimulatableTransfer({
-        ...LIGHTSPARK_SIM_SEED,
-        id: transferId,
-        counterpartyId,
-      });
+    it("claims the simulation slot once and answers 409 on repeat", async () => {
+      await seedBvnkSimulatableTransfer();
       const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
 
-      const first = await simulateRequest(transferId);
-      const second = await simulateRequest(transferId);
+      const first = await simulateRequest(SIMULATE_TRANSFER_ID);
+      const second = await simulateRequest(SIMULATE_TRANSFER_ID);
 
       expect(first.status).toBe(204);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
-      expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
-        quoteId: "Quote:sim-1",
-        currencyCode: "USD",
-      });
-      const transfer = await readSimulationTransfer(transferId);
+      const transfer = await readSimulationTransfer(SIMULATE_TRANSFER_ID);
       expect(required(required(transfer).provider_data.sandboxSimulation).requestedAt).toBeTruthy();
 
       expect(second.status).toBe(409);
@@ -2090,36 +2082,30 @@ describe("Payments routes — ramps", () => {
     });
 
     it("rejects an unavailable provider before calling it or claiming the simulation slot", async () => {
-      const transferId = "xfr_lightspark_sim_unavailable";
-      const counterpartyId = await seedCounterparty({ providerData: {} });
-      await seedSimulatableTransfer({
-        ...LIGHTSPARK_SIM_SEED,
-        id: transferId,
-        counterpartyId,
-      });
-      const before = await readSimulationTransfer(transferId);
-      const originalLightsparkSandboxSecret = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET;
-      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      await seedBvnkSimulatableTransfer();
+      const before = await readSimulationTransfer(SIMULATE_TRANSFER_ID);
+      const originalBvnkSandboxSecret = env.BVNK_SANDBOX_HAWK_SECRET_KEY;
+      env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
       const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
 
       try {
-        const res = await simulateRequest(transferId);
+        const res = await simulateRequest(SIMULATE_TRANSFER_ID);
 
         expect(res.status).toBe(503);
         const body: { error: { code: string; message: string } } = await res.json();
         expect(body.error).toMatchObject({
           code: "PROVIDER_NOT_CONFIGURED",
-          message: "Lightspark is not configured for sandbox projects in this deployment.",
+          message: "BVNK is not configured for sandbox projects in this deployment.",
         });
         expect(simulateSpy).not.toHaveBeenCalled();
-        const transfer = await readSimulationTransfer(transferId);
+        const transfer = await readSimulationTransfer(SIMULATE_TRANSFER_ID);
         expect(transfer).not.toBeNull();
         expect(required(transfer).provider_data).not.toHaveProperty("sandboxSimulation");
         expect(transfer).toEqual(before);
       } finally {
-        env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkSandboxSecret;
+        env.BVNK_SANDBOX_HAWK_SECRET_KEY = originalBvnkSandboxSecret;
         simulateSpy.mockRestore();
       }
     });
@@ -2127,9 +2113,9 @@ describe("Payments routes — ramps", () => {
     it.each([
       {
         name: "releases the claim on a definitive provider rejection so a retry succeeds",
-        transferId: "xfr_lightspark_sim_release",
-        error: badRequest("Grid rejected the sandbox send", {
-          provider: "lightspark",
+        transferId: "xfr_123e4567-e89b-12d3-a456-426614174abd",
+        error: badRequest("BVNK rejected the sandbox pay-in", {
+          provider: "bvnk",
           providerStatus: 400,
         }),
         firstStatus: 400,
@@ -2139,9 +2125,9 @@ describe("Payments routes — ramps", () => {
       },
       {
         name: "keeps the claim on an ambiguous provider failure so a retry gets 409",
-        transferId: "xfr_lightspark_sim_ambiguous",
-        error: providerUnavailable("Failed to reach the lightspark API", {
-          provider: "lightspark",
+        transferId: "xfr_123e4567-e89b-12d3-a456-426614174abe",
+        error: providerUnavailable("Failed to reach the bvnk API", {
+          provider: "bvnk",
         }),
         firstStatus: 503,
         claimAfterFailure: true,
@@ -2158,10 +2144,9 @@ describe("Payments routes — ramps", () => {
         secondStatus,
         providerCalls,
       }) => {
-        const counterpartyId = await seedCounterparty({ providerData: {} });
-        await seedSimulatableTransfer({ ...LIGHTSPARK_SIM_SEED, id: transferId, counterpartyId });
+        await seedBvnkSimulatableTransfer(transferId);
         const simulateSpy = vi
-          .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+          .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
           .mockRejectedValueOnce(error)
           .mockResolvedValueOnce({ accepted: true });
 
@@ -2201,8 +2186,8 @@ describe("Payments routes — ramps", () => {
         name: "a transfer that is not awaiting payment",
         transferId: "xfr_sim_rejected_settling",
         seed: {
-          ...LIGHTSPARK_SIM_SEED,
-          providerReference: "Quote:sim-settling",
+          ...GENERIC_SIM_SEED,
+          providerReference: "bvnk_sim_settling",
           status: "settling",
         },
         counterpartyProviderData: {},
@@ -2212,7 +2197,7 @@ describe("Payments routes — ramps", () => {
       {
         name: "an off-ramp transfer",
         transferId: "xfr_sim_rejected_offramp",
-        seed: { ...LIGHTSPARK_SIM_SEED, providerReference: "Quote:sim-offramp", type: "offramp" },
+        seed: { ...GENERIC_SIM_SEED, providerReference: "bvnk_sim_offramp", type: "offramp" },
         counterpartyProviderData: {},
         status: 400,
         message: "Only on-ramp transfers",
@@ -2221,7 +2206,7 @@ describe("Payments routes — ramps", () => {
         name: "a provider without sandbox simulation",
         transferId: "xfr_sim_rejected_coinbase",
         seed: {
-          ...LIGHTSPARK_SIM_SEED,
+          ...GENERIC_SIM_SEED,
           provider: "coinbase",
           providerReference: "Quote:coinbase-sim-1",
         },
@@ -2237,10 +2222,7 @@ describe("Payments routes — ramps", () => {
         const counterpartyId = await seedCounterparty({ providerData: counterpartyProviderData });
         await seedSimulatableTransfer({ ...seed, id: transferId, counterpartyId });
         const before = await readSimulationTransfer(transferId);
-        const spies = [
-          vi.spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend").mockResolvedValue({}),
-          vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin").mockResolvedValue({}),
-        ];
+        const spies = [vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin").mockResolvedValue({})];
 
         try {
           const res = await simulateRequest(transferId);
@@ -2262,8 +2244,8 @@ describe("Payments routes — ramps", () => {
       }
     );
 
-    it("hides another tenant's transfer without calling Lightspark or changing the row", async () => {
-      const transferId = "xfr_lightspark_sim_other_tenant";
+    it("hides another tenant's transfer without calling the provider or changing the row", async () => {
+      const transferId = "xfr_sim_other_tenant";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -2287,9 +2269,9 @@ describe("Payments routes — ramps", () => {
         .bind("org_test_other_sim", "proj_other_sim", counterpartyId)
         .run();
       await seedSimulatableTransfer({
-        ...LIGHTSPARK_SIM_SEED,
+        ...GENERIC_SIM_SEED,
         id: transferId,
-        providerReference: "Quote:sim-other-tenant",
+        providerReference: "bvnk_sim_other_tenant",
         counterpartyId,
         organizationId: "org_test_other_sim",
         projectId: "proj_other_sim",
@@ -2299,7 +2281,7 @@ describe("Payments routes — ramps", () => {
         .bind(transferId)
         .first<PaymentTransferRow>();
       const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
 
       const res = await simulateRequest(transferId);
@@ -2602,278 +2584,6 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(409);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("already bound");
-      fetchSpy.mockRestore();
-    });
-  });
-
-  describe("lightspark offramp quote account selection", () => {
-    async function seedLightsparkProviderAccount(input: {
-      id: string;
-      counterpartyId: string;
-      providerCustomerReference: string;
-      externalAccountReference: string | null;
-      fiatCurrency: string | null;
-      destinationCountry: string | null;
-      paymentRail: string | null;
-      providerStatus: string | null;
-    }): Promise<string> {
-      await getDb(env)
-        .prepare(
-          `INSERT INTO counterparty_provider_accounts (
-             id, organization_id, project_id, counterparty_id, provider,
-             provider_customer_reference, kind, external_account_reference, fiat_currency,
-             destination_country, payment_rail, provider_status, status, metadata
-           ) VALUES (?, ?, ?, ?, 'lightspark', ?, ?, ?, ?, ?, ?, ?, 'active', '{}')`
-        )
-        .bind(
-          input.id,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          input.counterpartyId,
-          input.providerCustomerReference,
-          input.fiatCurrency === null ? "customer_link" : "payout_account",
-          input.externalAccountReference,
-          input.fiatCurrency,
-          input.destinationCountry,
-          input.paymentRail,
-          input.providerStatus
-        )
-        .run();
-      return input.id;
-    }
-
-    async function seedLightsparkCounterparty(
-      accounts: readonly {
-        id: string;
-        externalAccountReference: string;
-        paymentRail: string;
-      }[]
-    ): Promise<string> {
-      const counterpartyId = await seedCounterparty({
-        providerData: { lightspark: { purposeOfPayment: "SELF" } },
-      });
-      await seedLightsparkProviderAccount({
-        id: `${counterpartyId}_customer_link`,
-        counterpartyId,
-        providerCustomerReference: "Customer:cus_quote_test",
-        externalAccountReference: null,
-        fiatCurrency: null,
-        destinationCountry: null,
-        paymentRail: null,
-        providerStatus: null,
-      });
-      for (const account of accounts) {
-        await seedLightsparkProviderAccount({
-          id: account.id,
-          counterpartyId,
-          providerCustomerReference: "Customer:cus_quote_test",
-          externalAccountReference: account.externalAccountReference,
-          fiatCurrency: "USD",
-          destinationCountry: "MY",
-          paymentRail: account.paymentRail,
-          providerStatus: "ACTIVE",
-        });
-      }
-      return counterpartyId;
-    }
-
-    function mockGridQuote() {
-      const quotePage = JSON.stringify({
-        id: "Quote:qt_selection_test",
-        quoteStatus: "CREATED",
-        exchangeRate: 4.2,
-        totalSendingAmount: 25000000,
-        sendingCurrency: { code: "USDC", decimals: 6 },
-        totalReceivingAmount: 105,
-        receivingCurrency: { code: "USD", decimals: 2 },
-        feesIncluded: 0,
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      });
-      return vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-        Promise.resolve(
-          new Response(quotePage, {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          })
-        )
-      );
-    }
-
-    const quoteRequest = (body: Record<string, unknown>) =>
-      app.request(
-        "/v1/payments/ramps/offramp/quote",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            provider: "lightspark",
-            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-            assetRail: "usdc.solana",
-            cryptoAmount: "25",
-            fiatCurrency: "USD",
-            destinationCountry: "MY",
-            ...body,
-          }),
-        },
-        env
-      );
-
-    it("resolves an explicit providerAccountId and records it on the transfer", async () => {
-      const counterpartyId = await seedLightsparkCounterparty([
-        {
-          id: "cpa_quote_ach",
-          externalAccountReference: "ExternalAccount:ach",
-          paymentRail: "ACH",
-        },
-        {
-          id: "cpa_quote_swift",
-          externalAccountReference: "ExternalAccount:swift",
-          paymentRail: "SWIFT",
-        },
-      ]);
-      const fetchSpy = mockGridQuote();
-
-      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_swift" });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: { quote: { id: string }; transferId: string } };
-      expect(body.data.quote.id).toBe("Quote:qt_selection_test");
-      const gridBody = JSON.parse(String(required(fetchSpy.mock.calls[0][1]).body)) as {
-        destination: { accountId: string };
-      };
-      expect(gridBody.destination.accountId).toBe("ExternalAccount:swift");
-
-      const transfer = await getDb(env)
-        .prepare("SELECT provider_data FROM payment_transfers WHERE id = ?")
-        .bind(body.data.transferId)
-        .first<{ provider_data: unknown }>();
-      assert(transfer);
-      const providerData =
-        typeof transfer.provider_data === "string"
-          ? (JSON.parse(transfer.provider_data) as Record<string, unknown>)
-          : (transfer.provider_data as Record<string, unknown>);
-      expect(providerData.payoutProviderAccountId).toBe("cpa_quote_swift");
-      fetchSpy.mockRestore();
-    });
-
-    it("rejects a providerAccountId owned by another counterparty", async () => {
-      const counterpartyId = await seedLightsparkCounterparty([
-        {
-          id: "cpa_quote_own",
-          externalAccountReference: "ExternalAccount:own",
-          paymentRail: "ACH",
-        },
-      ]);
-      const otherCounterpartyId = await seedCounterparty({
-        providerData: { lightspark: { purposeOfPayment: "SELF" } },
-      });
-      await seedLightsparkProviderAccount({
-        id: "cpa_quote_foreign",
-        counterpartyId: otherCounterpartyId,
-        providerCustomerReference: "Customer:cus_other",
-        externalAccountReference: "ExternalAccount:foreign",
-        fiatCurrency: "USD",
-        destinationCountry: "MY",
-        paymentRail: "SWIFT",
-        providerStatus: "ACTIVE",
-      });
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-      const res = await quoteRequest({ counterpartyId, providerAccountId: "cpa_quote_foreign" });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("BAD_REQUEST");
-      expect(body.error.message).toContain("providerAccountId");
-      expect(fetchSpy).not.toHaveBeenCalled();
-      fetchSpy.mockRestore();
-    });
-
-    it("rejects an explicitly selected account that is pending or provider-inactive", async () => {
-      const counterpartyId = await seedLightsparkCounterparty([
-        {
-          id: "cpa_quote_active",
-          externalAccountReference: "ExternalAccount:active",
-          paymentRail: "SWIFT",
-        },
-      ]);
-      await seedLightsparkProviderAccount({
-        id: "cpa_quote_pending",
-        counterpartyId,
-        providerCustomerReference: "Customer:cus_quote_test",
-        externalAccountReference: null,
-        fiatCurrency: "USD",
-        destinationCountry: "MY",
-        paymentRail: "ACH",
-        providerStatus: null,
-      });
-      await seedLightsparkProviderAccount({
-        id: "cpa_quote_created",
-        counterpartyId,
-        providerCustomerReference: "Customer:cus_quote_test",
-        externalAccountReference: "ExternalAccount:created",
-        fiatCurrency: "USD",
-        destinationCountry: "MY",
-        paymentRail: "ACH",
-        providerStatus: "CREATED",
-      });
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-      for (const providerAccountId of ["cpa_quote_pending", "cpa_quote_created"]) {
-        const res = await quoteRequest({ counterpartyId, providerAccountId });
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as { error: { code: string; message: string } };
-        expect(body.error.code).toBe("BAD_REQUEST");
-        expect(body.error.message).toContain("providerAccountId");
-      }
-      expect(fetchSpy).not.toHaveBeenCalled();
-      fetchSpy.mockRestore();
-    });
-
-    it("rejects an ambiguous corridor when no providerAccountId is given", async () => {
-      const counterpartyId = await seedLightsparkCounterparty([
-        {
-          id: "cpa_quote_multi_a",
-          externalAccountReference: "ExternalAccount:multi_a",
-          paymentRail: "ACH",
-        },
-        {
-          id: "cpa_quote_multi_b",
-          externalAccountReference: "ExternalAccount:multi_b",
-          paymentRail: "SWIFT",
-        },
-      ]);
-      const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-      const res = await quoteRequest({ counterpartyId });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { message: string } };
-      expect(body.error.message).toContain("explicit external-account selection is required");
-      expect(fetchSpy).not.toHaveBeenCalled();
-      fetchSpy.mockRestore();
-    });
-
-    it("keeps implicit resolution for a single-account corridor", async () => {
-      const counterpartyId = await seedLightsparkCounterparty([
-        {
-          id: "cpa_quote_single",
-          externalAccountReference: "ExternalAccount:single",
-          paymentRail: "SWIFT",
-        },
-      ]);
-      const fetchSpy = mockGridQuote();
-
-      const res = await quoteRequest({ counterpartyId });
-
-      expect(res.status).toBe(200);
-      const gridBody = JSON.parse(String(required(fetchSpy.mock.calls[0][1]).body)) as {
-        destination: { accountId: string };
-      };
-      expect(gridBody.destination.accountId).toBe("ExternalAccount:single");
       fetchSpy.mockRestore();
     });
   });

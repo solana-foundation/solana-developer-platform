@@ -63,9 +63,9 @@ Nothing reads or writes that key any more, but its unique indexes remain until
 a follow-up migration removes them.
 
 The customer-link uniqueness applies only to providers whose customers SDP
-creates one-per-counterparty (BVNK — which also routes webhooks by customer
-reference — and Lightspark). MoonPay settlements are matched by the
-transfer's `provider_reference` and record the customer link as a
+creates one-per-counterparty (BVNK, which also routes webhooks by customer
+reference, and the now-retired Lightspark). MoonPay settlements are matched
+by the transfer's `provider_reference` and record the customer link as a
 byproduct, and one MoonPay account legitimately links to many
 counterparties (the buyer owns the MoonPay account and can be a
 counterparty of several organizations), so MoonPay links are many-to-one

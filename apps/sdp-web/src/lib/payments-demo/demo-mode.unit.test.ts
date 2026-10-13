@@ -170,7 +170,7 @@ describe("scope", () => {
     expect((await call("GET", "/v1/projects")).status).toBeNull();
   });
 
-  it("offers Lightspark as the only ramp, on the organization's real provider answer", async () => {
+  it("offers every ramp provider, on the organization's real provider answer", async () => {
     // An organization-level read names no project; the request's own project header decides.
     browser.projectHeader = PROJECT;
     upstream.mockResolvedValueOnce(
@@ -201,7 +201,7 @@ describe("scope", () => {
 
   it("offers only the ramp providers the channel-capped flags leave on", async () => {
     browser.projectHeader = PROJECT;
-    browser.rampProviders = ["lightspark", "bvnk"];
+    browser.rampProviders = ["moonpay", "bvnk"];
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
@@ -214,7 +214,7 @@ describe("scope", () => {
     const ramps = body.data.providers.ramps as Record<RampProviderId, { enabled: boolean }>;
     expect(RAMP_PROVIDERS.filter((provider) => ramps[provider].enabled).sort()).toEqual([
       "bvnk",
-      "lightspark",
+      "moonpay",
     ]);
     upstream.mockClear();
   });
@@ -374,9 +374,9 @@ describe("ramps and the release channel", () => {
     });
 
   it("refuses a quote from a provider the channel leaves out, as the API would", async () => {
-    browser.rampProviders = ["lightspark"];
-    expect((await quote("moonpay")).status).toBe(400);
-    expect((await quote("lightspark")).status).toBe(201);
+    browser.rampProviders = ["coinbase"];
+    expect((await quote("stripe")).status).toBe(400);
+    expect((await quote("coinbase")).status).toBe(201);
   });
 
   it("leaves a sample ramp transfer of a hidden provider out of the lists", async () => {
@@ -391,9 +391,20 @@ describe("ramps and the release channel", () => {
 });
 
 describe("ramps", () => {
+  /** Walks a contact through BVNK's demo onboarding: agreements, the identity check, review. */
+  async function onboardBvnk(counterpartyId: string) {
+    await call("POST", `/v1/counterparties/${counterpartyId}/requirements`, {
+      provider: "bvnk",
+      direction: "offramp",
+      agreementConsent: true,
+    });
+    await call("POST", "/v1/payments/demo/verifications", { provider: "bvnk", counterpartyId });
+    vi.setSystemTime(new Date(Date.now() + 14_000));
+  }
+
   it("runs a deposit from quote to a completed transfer, then credits the wallet", async () => {
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=lightspark&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
     const estimate = await call("POST", "/v1/payments/ramps/onramp/estimate", {
@@ -404,7 +415,7 @@ describe("ramps", () => {
     expect(estimate.body.data.estimates[0].status).toBe("ok");
 
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "lightspark",
+      provider: "coinbase",
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
@@ -413,7 +424,7 @@ describe("ramps", () => {
     });
     expect(quoted.status).toBe(201);
     const { quote, transferId } = quoted.body.data;
-    expect(quote.paymentInstructions[0].accountOrWalletInfo.accountType).toBe("US_ACCOUNT");
+    expect(quote.deliveryMode).toBe("hosted");
     const waiting = await data<{ transfer: { status: string } }>(
       `/v1/payments/transfers/${transferId}`
     );
@@ -433,37 +444,20 @@ describe("ramps", () => {
     expect(done.transfer.signature).toBeTruthy();
   });
 
-  it("pays out to a saved bank account once the crypto is sent", async () => {
-    const requirements = await data<{
-      status: string;
-      payout: { accounts: { id: string; destinationCountry: string }[] };
-    }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
+  it("pays out once the crypto is sent", async () => {
+    await onboardBvnk("demo_cpty_jane");
+    const requirements = await data<{ status: string }>(
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
-    expect(requirements.status).toBe("collect_account");
-    const saved = requirements.payout.accounts[0];
-    expect(saved?.destinationCountry).toBe("US");
-
-    const advanced = await call("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-      provider: "lightspark",
-      direction: "offramp",
-      assetRail: "usdc.solana",
-      fiatCurrency: "USD",
-      destinationCustodyWalletId: "demo_cwlt_treasury",
-      collectedData: { destinationCountry: "US" },
-      providerAccountId: saved?.id,
-    });
-    expect(advanced.body.data).toMatchObject({ status: "ready", providerAccountId: saved?.id });
+    expect(requirements.status).toBe("ready");
 
     const quoted = await call("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "lightspark",
+      provider: "bvnk",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
       cryptoAmount: "300",
       fiatCurrency: "USD",
-      destinationCountry: "US",
-      providerAccountId: saved?.id,
     });
     const { quote, transferId } = quoted.body.data;
     const deposit = quote.paymentInstructions[0];
@@ -477,35 +471,16 @@ describe("ramps", () => {
       amount: "300",
     });
     expect(funded.body.data.transfer.id).toBe(transferId);
-    vi.setSystemTime(new Date(NOW.getTime() + 6_000));
+    vi.setSystemTime(new Date(Date.now() + 6_000));
     expect(
       (await data<{ transfer: { status: string } }>(`/v1/payments/transfers/${transferId}`))
         .transfer.status
     ).toBe("completed");
   });
 
-  it("adds a new bank account from the collected details", async () => {
-    const advanced = await call("POST", "/v1/counterparties/demo_cpty_priya/requirements", {
-      provider: "lightspark",
-      direction: "offramp",
-      fiatCurrency: "GBP",
-      collectedData: {
-        destinationCountry: "GB",
-        bankName: "Monzo",
-        accountNumber: "12345678",
-        sortCode: "040004",
-      },
-    });
-    const id: string = advanced.body.data.providerAccountId;
-    const accounts = await data<{ accounts: { id: string; bankName: string }[] }>(
-      "/v1/counterparties/demo_cpty_priya/provider-accounts"
-    );
-    expect(accounts.accounts.find((entry) => entry.id === id)?.bankName).toBe("Monzo");
-  });
-
   it("cancels a deposit before it is paid", async () => {
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "lightspark",
+      provider: "coinbase",
       counterpartyId: "demo_cpty_kai",
       destinationCustodyWalletId: "demo_cwlt_payroll",
       assetRail: "usdc.solana",
@@ -613,7 +588,7 @@ describe("every ramp provider", () => {
     });
     expect(await status()).toBe("customer_verification_required");
 
-    expect((await simulateVerification("demo_cpty_jane", "lightspark")).status).toBe(400);
+    expect((await simulateVerification("demo_cpty_jane", "moonpay")).status).toBe(400);
     expect((await simulateVerification()).status).toBe(200);
     expect(await status()).toBe("customer_verifying");
     expect((await simulateVerification()).status).toBe(409);

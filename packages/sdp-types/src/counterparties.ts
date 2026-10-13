@@ -127,9 +127,6 @@ export interface CounterpartyProviderAccount {
   status: CounterpartyAccountStatus;
   providerStatus: string | null;
   createdAt: string;
-  bankName?: string;
-  accountNumberLast4?: string;
-  paymentRails?: string[];
   customerLink?: CounterpartyProviderCustomerLink;
   /** The provider's own wallet/account id; present on wallet kinds whose provider reference exists. */
   providerAccountReference?: string;

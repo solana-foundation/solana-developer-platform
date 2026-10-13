@@ -20,7 +20,6 @@ export const docs = defineDocs({
  */
 const ROTATOR_PROVIDERS = [
   "moonpay",
-  "lightspark",
   "bvnk",
   "coinbase",
   "stripe",

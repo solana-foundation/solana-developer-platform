@@ -60,7 +60,6 @@ export const {
   newDesignPayDeposit,
   newDesignActivity,
   rampProviderMoonpay,
-  rampProviderLightspark,
   rampProviderBvnk,
   rampProviderCoinbase,
   rampProviderStripe,

@@ -39,17 +39,8 @@ function OfframpManualQuoteStep({
 }) {
   const { selectedRampPair, fields, transferStatus } = wizard;
 
-  // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
   if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
     return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
-  }
-
-  if (!quote.paymentInstructions) {
-    return (
-      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
-        {t("DashboardPayments.ramps.quoteMissingInstructions")}
-      </div>
-    );
   }
 
   const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
@@ -60,7 +51,6 @@ function OfframpManualQuoteStep({
       amount={fields.amount.trim()}
       quote={quote}
       fiatCurrency={selectedRampPair.fiatCurrency}
-      cryptoToken={cryptoToken}
       instructions={quote.paymentInstructions}
       description={t("DashboardPayments.ramps.offrampManualDescription", depositCopy)}
     />
@@ -159,11 +149,7 @@ function OfframpWithdrawStep({ wizard }: { wizard: OfframpWizard }) {
 
 function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
   const {
-    fields,
     requirementFields,
-    selectedProviderAccountId,
-    payoutAccounts,
-    selectPayoutAccount,
     collectedData,
     setCollectedField,
     requirementsBlocker,
@@ -196,33 +182,17 @@ function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  const requirementsKey = [
-    "offramp-requirements",
-    collectedData.destinationCountry ?? "",
-    collectedData.paymentRails ?? "",
-    selectedProviderAccountId,
-  ].join(":");
-
-  // Native fieldset[disabled] freezes every nested input, combobox trigger and
-  // account-chooser button while the advance POST is in flight, so mid-flight
-  // edits can't desync the form from what the provider was sent. A corridor
-  // blocker renders above STILL-ENABLED fields: the country select is the only
-  // way out of a blocked corridor, so it must stay interactive.
+  // Native fieldset[disabled] freezes every nested input and combobox trigger
+  // while the advance POST is in flight, so mid-flight edits can't desync the
+  // form from what the provider was sent.
   return (
     <div className="space-y-4">
       <RequirementsBlocker message={requirementsBlocker} />
       <fieldset disabled={isAdvancing} className="min-w-0">
         <RequirementsFields
-          key={requirementsKey}
-          provider={fields.provider}
           fields={requirementFields}
           values={collectedData}
           onChange={setCollectedField}
-          payoutAccountPicker={{
-            accounts: payoutAccounts,
-            selectedProviderAccountId,
-            onSelect: selectPayoutAccount,
-          }}
         />
       </fieldset>
     </div>

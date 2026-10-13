@@ -18,7 +18,7 @@ Complete the [ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) an
 
 ## Sequence
 
-Do them in this order. For unsupported directions, skip business-flow implementation but still satisfy the required `RampProvider` methods with empty rail/entity support and explicit typed rejection; only `createOnrampQuote` and `listExternalAccountDetails` are optional today.
+Do them in this order. For unsupported directions, skip business-flow implementation but still satisfy the required `RampProvider` methods with empty rail/entity support and explicit typed rejection; only `createOnrampQuote` is optional today.
 
 1. **register-provider** — add the id, package client, API schemas/dispatch, availability, setup registry, mode-keyed config, webhook registration decision, and dashboard catalog. Make the skeleton compile.
 2. **rail-discovery** — declare which fiat/crypto rails you support.

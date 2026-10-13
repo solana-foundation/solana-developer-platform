@@ -425,7 +425,6 @@
     "emptyTitle": "No integrations match",
     "emptyBody": "Try a different search or clear the filters.",
     "rampMoonpayDescription": "Card and bank fiat onramp and offramp.",
-    "rampLightsparkDescription": "Fiat settlement rails over the Lightning Network.",
     "rampBvnkDescription": "Business payments between fiat and stablecoins.",
     "rampCoinbaseDescription": "Fiat onramp and offramp through Coinbase accounts.",
     "rampStripeDescription": "Fiat onramp through Stripe checkout.",

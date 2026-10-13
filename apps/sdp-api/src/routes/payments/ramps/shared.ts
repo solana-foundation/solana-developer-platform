@@ -61,13 +61,10 @@ import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
 import { advanceBvnkRequirements } from "./providers/bvnk";
-import { advanceLightsparkRequirements } from "./providers/lightspark";
 import {
   assertRampQuoteBindingMatches,
-  isRampQuoteBindingExpired,
   type RampQuoteBinding,
   rampQuoteCryptoDepositProviderData,
-  rampQuoteExpiryProviderData,
 } from "./quote-binding";
 
 type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
@@ -260,12 +257,8 @@ export async function persistRampQuoteTransfer(
     projectId: input.projectId,
   });
   if (existing) {
-    // Idempotent replay only: the same reference with any changed input, or a
-    // reference whose bound session/quote already expired, fails closed.
+    // Idempotent replay only: the same reference with any changed input fails closed.
     assertRampQuoteBindingMatches(existing, binding);
-    if (isRampQuoteBindingExpired(existing)) {
-      throw conflict("Provider quote/session reference has expired; create a new quote.");
-    }
     return existing.id;
   }
 
@@ -295,7 +288,6 @@ export async function persistRampQuoteTransfer(
       rampsMemo: input.rampsMemo,
       providerData: {
         ...(input.providerData ?? {}),
-        ...rampQuoteExpiryProviderData(input.quote),
         ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
       serializedTx: null,
@@ -327,8 +319,6 @@ export async function advanceCounterpartyRequirements(
   switch (input.provider) {
     case "moonpay":
       return readyCounterparty("moonpay", input.direction);
-    case "lightspark":
-      return advanceLightsparkRequirements(c, input);
     case "bvnk":
       return advanceBvnkRequirements(c, input);
     case "coinbase":

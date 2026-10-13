@@ -1,6 +1,5 @@
 import type { Address } from "@solana/addresses";
 import { z } from "zod";
-import type { CountryCode } from "./countries";
 import type {
   CustodyProvider,
   CustodyWalletAggregate,
@@ -231,12 +230,6 @@ export const PAYMENT_TRANSFER_STATUS_TONE = {
   expired: "neutral",
 } as const satisfies Record<PaymentTransferStatus, PaymentTransferStatusTone>;
 
-export interface LightsparkGridAmount {
-  amount: number;
-  currencyCode: string;
-  decimals: number;
-}
-
 /** MoonPay transaction economics, captured verbatim from a terminal webhook. */
 export interface MoonpayRampSettlement {
   provider: "moonpay";
@@ -253,18 +246,6 @@ export interface MoonpayRampSettlement {
   areFeesIncluded: boolean;
   usdRate: number;
   cryptoTransactionId?: string;
-  failureReason?: string;
-}
-
-/** Lightspark (Grid) outgoing-payment economics, captured verbatim from a terminal webhook. */
-export interface LightsparkRampSettlement {
-  provider: "lightspark";
-  status: "COMPLETED" | "FAILED" | "EXPIRED" | "REFUND_FAILED";
-  sentAmount: LightsparkGridAmount;
-  receivedAmount: LightsparkGridAmount;
-  exchangeRate: number;
-  fees: number;
-  settledAt?: string;
   failureReason?: string;
 }
 
@@ -370,7 +351,6 @@ export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSett
 
 export type RampTransferSettlement =
   | MoonpayRampSettlement
-  | LightsparkRampSettlement
   | CoinbaseRampSettlement
   | BvnkRampSettlement
   | BvnkOfframpChannelSettlement;
@@ -1113,38 +1093,6 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export interface LightsparkProviderPaymentRampInstruction {
-  provider: "lightspark";
-  accountOrWalletInfo: {
-    accountType: string;
-    accountNumber?: string;
-    routingNumber?: string;
-    paymentRails?: string[];
-    reference?: string;
-    bankName?: string;
-    address?: Address;
-    assetType?: CryptoAssetSymbol;
-  };
-
-  instructionsNotes?: string;
-  isPlatformAccount?: boolean;
-}
-
-export type LightsparkCryptoDepositPaymentRampInstruction =
-  LightsparkProviderPaymentRampInstruction &
-    CryptoDepositPaymentRampInstruction & {
-      provider: "lightspark";
-      accountOrWalletInfo: LightsparkProviderPaymentRampInstruction["accountOrWalletInfo"] & {
-        accountType: "SOLANA_WALLET";
-        address: Address;
-        assetType: CryptoAssetSymbol;
-      };
-    };
-
-export type LightsparkPaymentRampInstruction =
-  | LightsparkProviderPaymentRampInstruction
-  | LightsparkCryptoDepositPaymentRampInstruction;
-
 export type BvnkOnboardingStatus =
   | "verification_required"
   | "verifying"
@@ -1197,7 +1145,7 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
-export type PaymentRampInstruction = LightsparkPaymentRampInstruction | BvnkPaymentRampInstruction;
+export type PaymentRampInstruction = BvnkPaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -1295,31 +1243,12 @@ interface PaymentOfframpQuoteRequestBase {
   rampsMemo?: Record<string, string>;
 }
 
-/**
- * Off-ramp quote request. Lightspark payouts are corridor-addressed: the
- * fiat currency and destination country select the payout external account,
- * so both are required on that arm.
- */
-export type PaymentOfframpQuoteRequest =
-  | (PaymentOfframpQuoteRequestBase & {
-      provider: "lightspark";
-      fiatCurrency: RampFiatCurrency;
-      destinationCountry: CountryCode;
-      providerAccountId?: string;
-    })
-  | (PaymentOfframpQuoteRequestBase & {
-      provider: Exclude<RampProviderId, "lightspark">;
-      fiatCurrency?: RampFiatCurrency;
-    });
+export type PaymentOfframpQuoteRequest = PaymentOfframpQuoteRequestBase & {
+  provider: RampProviderId;
+  fiatCurrency?: RampFiatCurrency;
+};
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
-
-export interface PaymentRampQuoteCurrency {
-  code: string;
-  decimals: number;
-  name?: string;
-  symbol?: string;
-}
 
 interface BasePaymentRampQuote {
   id: string;
@@ -1329,25 +1258,6 @@ interface BasePaymentRampQuote {
 }
 
 export type PaymentRampQuote =
-  | (BasePaymentRampQuote & {
-      provider: "lightspark";
-      deliveryMode: "manual_instructions";
-      /** Bank/wallet funding instructions to send the fiat to. */
-      paymentInstructions?: LightsparkPaymentRampInstruction[];
-      /** Units of destination crypto per unit of source fiat. */
-      exchangeRate?: number;
-      /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
-      totalSendingAmount?: number;
-      sendingCurrency: PaymentRampQuoteCurrency;
-      /** Final crypto amount received in its smallest unit. */
-      totalReceivingAmount?: number;
-      receivingCurrency: PaymentRampQuoteCurrency;
-      /** Fees included in the sending amount, denominated in the fiat currency's smallest unit. */
-      feesIncluded?: number;
-      feeCurrency: PaymentRampQuoteCurrency;
-      /** ISO timestamp after which the locked rate is no longer valid. */
-      expiresAt?: string;
-    })
   | (BasePaymentRampQuote & {
       provider: "bvnk";
       deliveryMode: "manual_instructions";

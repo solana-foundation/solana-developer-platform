@@ -60,7 +60,7 @@ describe("integration provider route feature gates", () => {
     mocks.rampProviders.mockResolvedValue(["moonpay"]);
 
     await expect(
-      IntegrationDetailPage({ params: Promise.resolve({ provider: "lightspark" }) })
+      IntegrationDetailPage({ params: Promise.resolve({ provider: "stripe" }) })
     ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(mocks.auth).not.toHaveBeenCalled();
   });

@@ -8,13 +8,7 @@ import {
   type RampProviderId,
 } from "@sdp/types";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type {
-  CounterpartyRequirements,
-  PayoutRequirementAccount,
-  PayoutRequirementTree,
-  RequirementField,
-  RequirementOption,
-} from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getRampProviderLabel } from "../ramps";
@@ -66,9 +60,6 @@ interface WriteContext {
   ops: readonly DemoOp[];
   now: Date;
 }
-
-/** The provider whose payouts go to a contact's saved bank account. */
-const PAYOUT_ACCOUNT_PROVIDER = "lightspark";
 
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -224,95 +215,6 @@ function screenAddress({ body, now }: WriteContext): DemoWriteResult {
 
 // ─── Ramps: requirements ─────────────────────────────────────────────────────
 
-interface Corridor {
-  country: string;
-  rails: RequirementOption[];
-}
-
-/** A rail as the provider lists it, value and English name (the API's own language). */
-function rail(value: string, name = value): RequirementOption {
-  return { value, label: name };
-}
-
-/** A bank detail the provider asks for, with the pattern it checks. */
-function bankField(key: string, name: string, pattern?: string): RequirementField {
-  return { kind: "text", key, label: name, required: true, ...(pattern ? { pattern } : {}) };
-}
-
-const PAYOUT_CORRIDORS: Record<string, Corridor[]> = {
-  USD: [{ country: "US", rails: [rail("ACH"), rail("WIRE", "Wire")] }],
-  EUR: [
-    { country: "DE", rails: [rail("SEPA")] },
-    { country: "FR", rails: [rail("SEPA")] },
-    { country: "IE", rails: [rail("SEPA")] },
-  ],
-  GBP: [{ country: "GB", rails: [rail("FPS", "Faster Payments")] }],
-};
-
-const BANK_NAME_FIELD = bankField("bankName", "Bank name");
-const US_ACCOUNT_FIELDS = [
-  BANK_NAME_FIELD,
-  bankField("accountNumber", "Account number", "^\\d{4,17}$"),
-  bankField("routingNumber", "Routing number", "^\\d{9}$"),
-];
-
-const RAIL_FIELDS: Record<string, RequirementField[]> = {
-  ACH: US_ACCOUNT_FIELDS,
-  WIRE: US_ACCOUNT_FIELDS,
-  SEPA: [BANK_NAME_FIELD, bankField("iban", "IBAN", "^[A-Z]{2}\\d{2}[A-Z0-9]{10,30}$")],
-  FPS: [
-    BANK_NAME_FIELD,
-    bankField("accountNumber", "Account number", "^\\d{8}$"),
-    bankField("sortCode", "Sort code", "^\\d{6}$"),
-  ],
-};
-
-function corridorsFor(fiatCurrency: string): Corridor[] {
-  return PAYOUT_CORRIDORS[fiatCurrency] ?? PAYOUT_CORRIDORS.USD ?? [];
-}
-
-function savedPayoutAccounts(
-  world: DemoWorld,
-  counterpartyId: string,
-  fiatCurrency: string
-): PayoutRequirementAccount[] {
-  return world.providerAccounts
-    .filter(
-      (entry) =>
-        entry.counterpartyId === counterpartyId &&
-        entry.account.provider === PAYOUT_ACCOUNT_PROVIDER &&
-        entry.account.fiatCurrency === fiatCurrency &&
-        entry.account.destinationCountry !== null
-    )
-    .map(({ account }) => ({
-      id: account.id,
-      destinationCountry:
-        account.destinationCountry as PayoutRequirementAccount["destinationCountry"],
-      paymentRail: account.paymentRail,
-      status: "ACTIVE",
-      ...(account.bankName ? { bankName: account.bankName } : {}),
-      ...(account.accountNumberLast4 ? { accountNumberLast4: account.accountNumberLast4 } : {}),
-    }));
-}
-
-function payoutTree(
-  world: DemoWorld,
-  counterpartyId: string,
-  fiatCurrency: string
-): PayoutRequirementTree {
-  const corridors = corridorsFor(fiatCurrency);
-  const rails = new Set(corridors.flatMap((corridor) => corridor.rails.map((rail) => rail.value)));
-  return {
-    countryRails: Object.fromEntries(
-      corridors.map((corridor) => [corridor.country, corridor.rails])
-    ) as PayoutRequirementTree["countryRails"],
-    railFields: Object.fromEntries(
-      [...rails].map((rail) => [rail, RAIL_FIELDS[rail] ?? [BANK_NAME_FIELD]])
-    ),
-    accounts: savedPayoutAccounts(world, counterpartyId, fiatCurrency),
-  };
-}
-
 /** Whether the dashboard offers this ramp provider (the channel-capped flags), so the demo answers for it. */
 function isOfferedRampProvider(world: DemoWorld, value: string): value is RampProviderId {
   return (world.rampProviders as readonly string[]).includes(value);
@@ -389,42 +291,27 @@ function bvnkStanding(
 
 /**
  * Where a demo contact stands with a ramp provider. Most are ready at once; BVNK first runs its
- * onboarding (agreements, then an identity check); a Lightspark payout asks which bank account to
- * pay, offering the ones saved and a form for a new one.
+ * onboarding (agreements, then an identity check). A provider the demo doesn't offer is refused,
+ * as the advance refuses it.
  */
 function requirementsFor(
   world: DemoWorld,
   counterpartyId: string,
   params: URLSearchParams,
   now: Date
-): CounterpartyRequirements {
-  const provider = params.get("provider") ?? PAYOUT_ACCOUNT_PROVIDER;
+): DemoAnswer {
+  const provider = params.get("provider") ?? "";
   const direction = params.get("direction") === "offramp" ? "offramp" : "onramp";
   if (!isOfferedRampProvider(world, provider)) {
-    return {
-      provider: PAYOUT_ACCOUNT_PROVIDER,
-      direction,
-      status: "unsupported",
-      reason: "That provider isn't part of the demo.",
-    };
+    return error(400, "That provider isn't part of the demo.").answer(world);
   }
-  if (provider === "bvnk") return bvnkStanding(world, counterpartyId, direction, now);
-  if (provider !== "lightspark") return { provider, direction, status: "ready" };
-  if (direction === "onramp") return { provider, direction, status: "ready" };
-  return {
-    provider,
-    direction,
-    status: "collect_account",
-    payout: payoutTree(world, counterpartyId, params.get("fiatCurrency") ?? "USD"),
-  };
+  if (provider === "bvnk") return ok({ data: bvnkStanding(world, counterpartyId, direction, now) });
+  return ok({ data: { provider, direction, status: "ready" } });
 }
 
 const advanceSchema = z.object({
   provider: z.string(),
   direction: z.enum(["onramp", "offramp"]),
-  fiatCurrency: z.string().default("USD"),
-  collectedData: z.record(z.string(), z.string()).optional(),
-  providerAccountId: z.string().optional(),
   agreementConsent: z.boolean().optional(),
 });
 
@@ -433,7 +320,7 @@ function advanceRequirements({ segments, body, world, now }: WriteContext): Demo
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   const input = parse(advanceSchema, body);
   if ("failure" in input) return input.failure;
-  const { provider, direction, fiatCurrency, collectedData, providerAccountId } = input.data;
+  const { provider, direction } = input.data;
   if (!isOfferedRampProvider(world, provider))
     return error(400, "That provider isn't part of the demo.");
   if (provider === "bvnk") {
@@ -453,40 +340,7 @@ function advanceRequirements({ segments, body, world, now }: WriteContext): Demo
       })
     );
   }
-  if (provider !== "lightspark" || direction === "onramp") {
-    return record([], () => ok({ data: { provider, direction, status: "ready" } }));
-  }
-  const ready = (id: string) =>
-    ok({ data: { provider, direction, status: "ready", providerAccountId: id } });
-  if (providerAccountId !== undefined) {
-    const saved = savedPayoutAccounts(world, counterpartyId, fiatCurrency);
-    if (!saved.some((account) => account.id === providerAccountId)) {
-      return error(404, "That bank account is not saved for this contact.", "not_found");
-    }
-    return record([], () => ready(providerAccountId));
-  }
-  const country = collectedData?.destinationCountry;
-  const corridor = corridorsFor(fiatCurrency).find((candidate) => candidate.country === country);
-  if (!country || !corridor) return error(400, "Choose the country the bank account is in.");
-  const rail = collectedData?.paymentRails ?? corridor.rails[0]?.value ?? "ACH";
-  const accountNumber = collectedData?.accountNumber ?? collectedData?.iban ?? "";
-  const id = newDemoId("cppa");
-  return record(
-    [
-      {
-        k: "payout-account",
-        id,
-        at: now.getTime(),
-        cp: counterpartyId,
-        country,
-        rail,
-        fiat: fiatCurrency,
-        bank: collectedData?.bankName?.trim() || null,
-        last4: accountNumber.length >= 4 ? accountNumber.slice(-4) : null,
-      },
-    ],
-    () => ready(id)
-  );
+  return record([], () => ok({ data: { provider, direction, status: "ready" } }));
 }
 
 // ─── Ramps: estimates and quotes ─────────────────────────────────────────────
@@ -506,7 +360,6 @@ const USD_PER_UNIT: Record<string, number> = {
 };
 /** Each provider's cut of what is sent, so the provider cards compare the way real ones do. */
 const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
-  lightspark: 0.01,
   bvnk: 0.008,
   moonpay: 0.035,
   coinbase: 0.015,
@@ -629,46 +482,13 @@ const offrampQuoteSchema = z.object({
   assetRail: z.string(),
   cryptoAmount: amountSchema,
   fiatCurrency: z.string().default("USD"),
-  providerAccountId: z.string().optional(),
 });
-
-/** The bank account an on-ramp's customer pays into, as the provider shows it. */
-function fundingAccount(fiatCurrency: string, reference: string) {
-  if (fiatCurrency === "EUR") {
-    return {
-      accountType: "IBAN",
-      accountNumber: "DE89370400440532013000",
-      paymentRails: ["SEPA"],
-      reference,
-      bankName: "Lightspark Sandbox Bank",
-    };
-  }
-  if (fiatCurrency === "GBP") {
-    return {
-      accountType: "GB_ACCOUNT",
-      accountNumber: "31926819",
-      routingNumber: "601613",
-      paymentRails: ["FPS"],
-      reference,
-      bankName: "Lightspark Sandbox Bank",
-    };
-  }
-  return {
-    accountType: "US_ACCOUNT",
-    accountNumber: "000123456789",
-    routingNumber: "021000021",
-    paymentRails: ["ACH", "WIRE"],
-    reference,
-    bankName: "Lightspark Sandbox Bank",
-  };
-}
 
 /** Everything a provider's demo quote is drawn from. */
 interface QuoteContext {
   quoteId: string;
   transferId: string;
   reference: string;
-  expiresAt: string;
   fiatCurrency: string;
   amounts: RampAmounts;
   crypto: string;
@@ -701,28 +521,6 @@ function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQ
   const base = { id: q.quoteId, status: "pending" as const };
   const { amounts, fiatCurrency, reference } = q;
   switch (provider) {
-    case "lightspark":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "manual_instructions",
-        paymentInstructions: [
-          {
-            provider,
-            accountOrWalletInfo: fundingAccount(fiatCurrency, reference),
-            instructionsNotes: "Include the reference so the payment is matched to this deposit.",
-            isPlatformAccount: true,
-          },
-        ],
-        exchangeRate: amounts.rate,
-        totalSendingAmount: Math.round(amounts.fiat * 100),
-        sendingCurrency: { code: fiatCurrency, decimals: 2 },
-        totalReceivingAmount: Number(toBaseUnits(q.crypto, amounts.decimals)),
-        receivingCurrency: { code: amounts.symbol, decimals: amounts.decimals },
-        feesIncluded: Math.round(amounts.fee * 100),
-        feeCurrency: { code: fiatCurrency, decimals: 2 },
-        expiresAt: q.expiresAt,
-      };
     case "bvnk":
       return {
         ...base,
@@ -812,36 +610,9 @@ function offrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRamp
         deliveryMode: "hosted",
         hostedUrl: `https://sell-sandbox.moonpay.com/?externalTransactionId=${q.transferId}`,
       };
-    default:
-      return {
-        ...base,
-        provider: "lightspark",
-        deliveryMode: "manual_instructions",
-        paymentInstructions: [
-          {
-            provider: "lightspark",
-            kind: "crypto_deposit",
-            destinationAddress: q.depositAddress,
-            cryptoCurrency: symbol,
-            network: "SOLANA",
-            reference,
-            accountOrWalletInfo: {
-              accountType: "SOLANA_WALLET",
-              address: q.depositAddress,
-              assetType: symbol,
-            },
-            instructionsNotes: "Send exactly this amount; the payout starts once it arrives.",
-          },
-        ],
-        exchangeRate: 1 / amounts.rate,
-        totalSendingAmount: Number(toBaseUnits(q.crypto, amounts.decimals)),
-        sendingCurrency: { code: symbol, decimals: amounts.decimals },
-        totalReceivingAmount: Math.round(amounts.fiat * 100),
-        receivingCurrency: { code: fiatCurrency, decimals: 2 },
-        feesIncluded: Math.round(amounts.fee * 100),
-        feeCurrency: { code: fiatCurrency, decimals: 2 },
-        expiresAt: q.expiresAt,
-      };
+    case "coinbase":
+    case "stripe":
+      throw new Error(`${getRampProviderLabel(provider)} runs no off-ramp in the demo.`);
   }
 }
 
@@ -889,7 +660,6 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     quoteId,
     transferId: id,
     reference: rampReference(provider, quoteId),
-    expiresAt: new Date(at + QUOTE_TTL_MS).toISOString(),
     depositAddress: rampDepositAddress(id) as Address,
   };
 
@@ -1462,7 +1232,7 @@ export function demoFlowRead(
     if (!contactById(world, counterpartyId)) {
       return { status: 404, body: { error: { code: "not_found", message: "Contact not found." } } };
     }
-    return ok({ data: requirementsFor(world, counterpartyId, params, now) });
+    return requirementsFor(world, counterpartyId, params, now);
   }
   return undefined;
 }

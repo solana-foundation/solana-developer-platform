@@ -702,17 +702,13 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter ramp transfers by provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "moonpay",
             "required": false,
             "kind": "select",
             "options": [
               {
                 "label": "moonpay",
                 "value": "moonpay"
-              },
-              {
-                "label": "lightspark",
-                "value": "lightspark"
               },
               {
                 "label": "bvnk",
@@ -2813,24 +2809,12 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
               },
               {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
                 "label": "BRL",
                 "value": "BRL"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
               },
               {
                 "label": "CAD",
@@ -2869,20 +2853,8 @@
                 "value": "GBP"
               },
               {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
               },
               {
                 "label": "IDR",
@@ -2891,14 +2863,6 @@
               {
                 "label": "ILS",
                 "value": "ILS"
-              },
-              {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
               },
               {
                 "label": "JOD",
@@ -2917,16 +2881,8 @@
                 "value": "LKR"
               },
               {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
               },
               {
                 "label": "NGN",
@@ -2949,14 +2905,6 @@
                 "value": "PEN"
               },
               {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
-              },
-              {
                 "label": "PLN",
                 "value": "PLN"
               },
@@ -2965,16 +2913,8 @@
                 "value": "RON"
               },
               {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
                 "label": "SEK",
                 "value": "SEK"
-              },
-              {
-                "label": "SGD",
-                "value": "SGD"
               },
               {
                 "label": "THB",
@@ -2989,14 +2929,6 @@
                 "value": "TWD"
               },
               {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
-              },
-              {
                 "label": "USD",
                 "value": "USD"
               },
@@ -3005,20 +2937,8 @@
                 "value": "VND"
               },
               {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -3065,10 +2985,6 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
               },
@@ -3094,7 +3010,7 @@
               {
                 "source": "USD",
                 "dest": "usdc.solana",
-                "providers": ["moonpay", "lightspark"]
+                "providers": ["moonpay", "stripe"]
               }
             ],
             "providerDetails": {
@@ -3166,24 +3082,12 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
               },
               {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
                 "label": "BRL",
                 "value": "BRL"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
               },
               {
                 "label": "CAD",
@@ -3222,20 +3126,8 @@
                 "value": "GBP"
               },
               {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
               },
               {
                 "label": "IDR",
@@ -3244,14 +3136,6 @@
               {
                 "label": "ILS",
                 "value": "ILS"
-              },
-              {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
               },
               {
                 "label": "JOD",
@@ -3270,16 +3154,8 @@
                 "value": "LKR"
               },
               {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
               },
               {
                 "label": "NGN",
@@ -3302,14 +3178,6 @@
                 "value": "PEN"
               },
               {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
-              },
-              {
                 "label": "PLN",
                 "value": "PLN"
               },
@@ -3318,16 +3186,8 @@
                 "value": "RON"
               },
               {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
                 "label": "SEK",
                 "value": "SEK"
-              },
-              {
-                "label": "SGD",
-                "value": "SGD"
               },
               {
                 "label": "THB",
@@ -3342,14 +3202,6 @@
                 "value": "TWD"
               },
               {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
-              },
-              {
                 "label": "USD",
                 "value": "USD"
               },
@@ -3358,20 +3210,8 @@
                 "value": "VND"
               },
               {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -3386,10 +3226,6 @@
               {
                 "label": "moonpay",
                 "value": "moonpay"
-              },
-              {
-                "label": "lightspark",
-                "value": "lightspark"
               },
               {
                 "label": "bvnk",
@@ -3470,36 +3306,20 @@
               "deliveryMode": "hosted",
               "paymentInstructions": [
                 {
-                  "provider": "lightspark",
-                  "kind": "crypto_deposit",
-                  "destinationAddress": "So11111111111111111111111111111111111111112",
-                  "cryptoCurrency": "USDC",
+                  "provider": "bvnk",
+                  "kind": "fiat_funding",
+                  "onboardingStatus": "ready",
+                  "fiatCurrency": "USD",
+                  "beneficiaryAddress": "11111111111111111111111111111111",
                   "network": "SOLANA",
-                  "accountOrWalletInfo": {
-                    "accountType": "USD_ACCOUNT",
-                    "accountNumber": "0000000000000000",
-                    "routingNumber": "000000000",
-                    "paymentRails": ["ACH", "WIRE"],
-                    "reference": "quote-reference-example",
-                    "bankName": "Example Bank",
-                    "address": "ExampleSolanaWalletAddress11111111111111111",
-                    "assetType": "USDC"
-                  }
+                  "paymentReference": "SDP-ONRAMP xfr_9f3b1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
+                  "remittanceInformationPrefix": "LCA-ONRAMP",
+                  "bankAccount": {
+                    "routingNumber": "021000021"
+                  },
+                  "instructionsNotes": "example"
                 }
-              ],
-              "sendingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "receivingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "feeCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "expiresAt": "2025-01-01T00:00:00.000Z"
+              ]
             },
             "transferId": "transfer_example"
           },
@@ -3911,7 +3731,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3984,24 +3804,12 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
               },
               {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
                 "label": "BRL",
                 "value": "BRL"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
               },
               {
                 "label": "CAD",
@@ -4040,20 +3848,8 @@
                 "value": "GBP"
               },
               {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
               },
               {
                 "label": "IDR",
@@ -4062,14 +3858,6 @@
               {
                 "label": "ILS",
                 "value": "ILS"
-              },
-              {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
               },
               {
                 "label": "JOD",
@@ -4088,16 +3876,8 @@
                 "value": "LKR"
               },
               {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
               },
               {
                 "label": "NGN",
@@ -4120,14 +3900,6 @@
                 "value": "PEN"
               },
               {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
-              },
-              {
                 "label": "PLN",
                 "value": "PLN"
               },
@@ -4136,16 +3908,8 @@
                 "value": "RON"
               },
               {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
                 "label": "SEK",
                 "value": "SEK"
-              },
-              {
-                "label": "SGD",
-                "value": "SGD"
               },
               {
                 "label": "THB",
@@ -4160,14 +3924,6 @@
                 "value": "TWD"
               },
               {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
-              },
-              {
                 "label": "USD",
                 "value": "USD"
               },
@@ -4176,20 +3932,8 @@
                 "value": "VND"
               },
               {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -4198,13 +3942,6 @@
             "label": "destinationCustodyWalletId",
             "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
-            "required": false
-          },
-          {
-            "key": "destinationCountry",
-            "label": "destinationCountry",
-            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
-            "defaultValue": "US",
             "required": false
           }
         ],
@@ -4385,17 +4122,13 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter by ramp provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "bvnk",
             "required": false,
             "kind": "select",
             "options": [
               {
                 "label": "moonpay",
                 "value": "moonpay"
-              },
-              {
-                "label": "lightspark",
-                "value": "lightspark"
               },
               {
                 "label": "bvnk",
@@ -5431,17 +5164,14 @@
             "accounts": [
               {
                 "id": "counterparty_provider_account_example",
-                "provider": "lightspark",
-                "kind": "payout_account",
+                "provider": "bvnk",
+                "kind": "funding_wallet",
                 "fiatCurrency": "USD",
                 "destinationCountry": "US",
                 "paymentRail": "ACH",
                 "status": "active",
                 "providerStatus": "ACTIVE",
                 "createdAt": "2025-01-01T00:00:00.000Z",
-                "bankName": "Example Bank",
-                "accountNumberLast4": "6789",
-                "paymentRails": ["ACH", "WIRE"],
                 "customerLink": {
                   "provider": "bvnk",
                   "id": "counterparty_provider_account_customer",

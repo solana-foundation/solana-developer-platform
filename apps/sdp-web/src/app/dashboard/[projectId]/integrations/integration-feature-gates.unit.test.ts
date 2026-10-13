@@ -50,6 +50,6 @@ describe("integration feature gates", () => {
     const flags = { ...ALL_DISABLED, rampProviders: ["moonpay"] as const };
 
     expect(isIntegrationProviderEnabled("moonpay", flags)).toBe(true);
-    expect(isIntegrationProviderEnabled("lightspark", flags)).toBe(false);
+    expect(isIntegrationProviderEnabled("stripe", flags)).toBe(false);
   });
 });

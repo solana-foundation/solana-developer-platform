@@ -160,10 +160,6 @@ export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
 export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
-const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
-
-const TEST_LIGHTSPARK_GRID_CLIENT_SECRET = "lightspark_client_secret";
-
 export { TEST_BVNK_HAWK_AUTH_ID, TEST_BVNK_HAWK_SECRET_KEY, TEST_BVNK_WALLET_ID } from "./bvnk";
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
@@ -179,14 +175,6 @@ let originalMoonPaySecretKey: string | undefined;
 let originalMoonPayOnrampUrl: string | undefined;
 
 let originalMoonPayOfframpUrl: string | undefined;
-
-let originalLightsparkGridSandboxClientId: string | undefined;
-
-let originalLightsparkGridSandboxClientSecret: string | undefined;
-
-let originalLightsparkGridClientId: string | undefined;
-
-let originalLightsparkGridClientSecret: string | undefined;
 
 let savedBvnkSandboxEnv: BvnkSandboxEnvSnapshot | undefined;
 
@@ -587,10 +575,6 @@ export function installPaymentsRouteTestHooks(): void {
     originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
     originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
-    originalLightsparkGridSandboxClientId = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID;
-    originalLightsparkGridSandboxClientSecret = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET;
-    originalLightsparkGridClientId = env.LIGHTSPARK_GRID_CLIENT_ID;
-    originalLightsparkGridClientSecret = env.LIGHTSPARK_GRID_CLIENT_SECRET;
     savedBvnkSandboxEnv = stubBvnkSandboxEnv(env);
     originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
     originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
@@ -602,10 +586,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MOONPAY_SECRET_KEY = undefined;
     env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
     env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = TEST_LIGHTSPARK_GRID_CLIENT_ID;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = TEST_LIGHTSPARK_GRID_CLIENT_SECRET;
-    env.LIGHTSPARK_GRID_CLIENT_ID = undefined;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = undefined;
     env.BVNK_HAWK_AUTH_ID = undefined;
     env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = undefined;
@@ -621,10 +601,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
     env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
     env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = originalLightsparkGridSandboxClientId;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkGridSandboxClientSecret;
-    env.LIGHTSPARK_GRID_CLIENT_ID = originalLightsparkGridClientId;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = originalLightsparkGridClientSecret;
     if (savedBvnkSandboxEnv !== undefined) {
       restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
     }

@@ -1,4 +1,3 @@
-import type { RampExternalAccountDetails } from "@sdp/payments/ramps/types";
 import {
   BVNK_CUSTOMER_LINK_STAGE,
   type BvnkCounterpartyProviderCustomerLink,
@@ -19,7 +18,6 @@ import { badRequestParams, badRequestQuery, internalError, notFound } from "@/li
 import { success } from "@/lib/response";
 import { rampRuntime } from "@/routes/payments/context";
 import { loadRampListingAdmission } from "@/routes/payments/ramps/admission";
-import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import type { AppContext } from "../counterparties/context";
 import { getCounterpartiesRepository } from "../counterparties/context";
 import { readBvnkFundingWalletBalances } from "./bvnk-funding-wallet-balances";
@@ -30,7 +28,7 @@ import {
 } from "./schemas";
 
 /**
- * Lists parent-scoped provider accounts with just-in-time provider enrichment.
+ * Lists parent-scoped provider accounts, with live BVNK funding-wallet balances.
  *
  * @param c - Authenticated request context.
  * @returns Provider-account rows in the standard success envelope.
@@ -70,13 +68,8 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       ...query.data,
     })
   ).filter((row) => isRetiredRampProviderId(row.provider) || admits(row.provider));
-  const runtime = rampRuntime(c);
-  const enriched = await enrichCounterpartyProviderAccounts(
-    runtime,
-    rows.filter((row) => row.kind === "payout_account")
-  );
   const walletBalances = await readBvnkFundingWalletBalances(
-    runtime,
+    rampRuntime(c),
     rows.filter((row) => row.kind === "funding_wallet")
   );
 
@@ -102,7 +95,7 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       accounts.push(baseProviderAccount(customerLink, customerLink));
     }
     for (const row of payoutRows) {
-      accounts.push(mapProviderAccount(row, enriched, customerLink));
+      accounts.push(mapPayoutAccount(row, customerLink));
     }
     for (const row of fundingWalletRows) {
       accounts.push(mapFundingWalletAccount(row, walletBalances, customerLink));
@@ -140,35 +133,20 @@ function baseProviderAccount(
 }
 
 /**
- * Projects a payout-account row with its JIT provider details: the provider's
- * own status replaces the stored one and the bank facts ride along.
+ * Projects a stored payout-account row; its corridor columns must be present.
  *
  * @param row - Parent-scoped payout-account row.
- * @param enriched - Sanitized provider details indexed by row id.
  * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
  * @returns Public provider-account response row.
  */
-function mapProviderAccount(
+function mapPayoutAccount(
   row: CounterpartyProviderAccountRow,
-  enriched: ReadonlyMap<string, RampExternalAccountDetails>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
   if (row.fiat_currency === null || row.destination_country === null) {
     throw internalError("External provider-account row is missing corridor data.");
   }
-  const result = baseProviderAccount(row, customerLink);
-  const detail = enriched.get(row.id);
-  if (detail !== undefined) {
-    result.providerStatus = detail.providerStatus;
-    if (detail.bankName !== undefined) {
-      result.bankName = detail.bankName;
-    }
-    if (detail.accountNumberLast4 !== undefined) {
-      result.accountNumberLast4 = detail.accountNumberLast4;
-    }
-    result.paymentRails = detail.paymentRails;
-  }
-  return result;
+  return baseProviderAccount(row, customerLink);
 }
 
 /**
@@ -216,7 +194,6 @@ function mapCustomerLink(
     case "bvnk":
       return mapBvnkCustomerLink(row);
     case "moonpay":
-    case "lightspark":
     case "coinbase":
     case "stripe":
       return mapGenericCustomerLink(row, row.provider);

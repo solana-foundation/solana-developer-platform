@@ -6,11 +6,10 @@ import type {
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
-import { getCryptoRailAssetLabel, isCountryCode } from "@sdp/types";
+import { getCryptoRailAssetLabel } from "@sdp/types";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useMemo } from "react";
 import useSWR from "swr";
 import useSWRMutation from "swr/mutation";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
@@ -46,7 +45,7 @@ type CryptoDepositInstruction = Extract<PaymentRampInstruction, { kind: "crypto_
 function isCryptoDepositInstruction(
   instruction: PaymentRampInstruction
 ): instruction is CryptoDepositInstruction {
-  return "kind" in instruction && instruction.kind === "crypto_deposit";
+  return instruction.kind === "crypto_deposit";
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -90,7 +89,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
-  const [quoteExpired, setQuoteExpired] = useState(false);
   const {
     trigger: triggerCreateTransfer,
     data: onchainSendResult,
@@ -122,70 +120,21 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       provider,
       selectedRampPair,
       assetRail,
-      collectedData,
-      selectedProviderAccountId,
-      selectedPayoutAccount,
       rampsMemo,
-    }) => {
-      const base = {
+    }) =>
+      ({
         counterpartyId: fields.counterpartyId,
         sourceCustodyWalletId: selectedWallet.id,
         assetRail,
         cryptoAmount: fields.amount.trim(),
         rampsMemo,
-      };
-      if (provider !== "lightspark") {
-        return {
-          ...base,
-          provider,
-          fiatCurrency: selectedRampPair.fiatCurrency,
-        } satisfies PaymentOfframpQuoteRequest;
-      }
-      const destinationCountry =
-        selectedPayoutAccount !== null
-          ? selectedPayoutAccount.destinationCountry
-          : collectedData.destinationCountry;
-      if (destinationCountry === undefined || !isCountryCode(destinationCountry)) {
-        throw new Error(
-          "Select a payout destination country in the requirements step before requesting a Lightspark quote."
-        );
-      }
-      return {
-        ...base,
         provider,
         fiatCurrency: selectedRampPair.fiatCurrency,
-        destinationCountry,
-        ...(selectedProviderAccountId === null
-          ? {}
-          : { providerAccountId: selectedProviderAccountId }),
-      } satisfies PaymentOfframpQuoteRequest;
-    },
+      }) satisfies PaymentOfframpQuoteRequest,
     onQuoteCreated: () => {
       resetCreateTransfer();
-      setQuoteExpired(false);
     },
   });
-
-  const quoteExpiresAt =
-    wizard.quote?.deliveryMode === "manual_instructions" && "expiresAt" in wizard.quote
-      ? wizard.quote.expiresAt
-      : undefined;
-
-  useEffect(() => {
-    if (!quoteExpiresAt) {
-      return;
-    }
-    const remainingMs = Date.parse(quoteExpiresAt) - Date.now();
-    if (!Number.isFinite(remainingMs)) {
-      return;
-    }
-    if (remainingMs <= 0) {
-      setQuoteExpired(true);
-      return;
-    }
-    const timeoutId = window.setTimeout(() => setQuoteExpired(true), remainingMs);
-    return () => window.clearTimeout(timeoutId);
-  }, [quoteExpiresAt]);
 
   const transferStatusKey = wizard.quoteTransferId
     ? paymentsQueryKeys.offrampTransferStatus({ transferId: wizard.quoteTransferId })
@@ -207,7 +156,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const depositTarget = useMemo((): RampCryptoDeposit | null => {
     const quote = wizard.quote;
     if (quote?.deliveryMode === "manual_instructions") {
-      const instruction = quote.paymentInstructions?.find(isCryptoDepositInstruction);
+      const instruction = quote.paymentInstructions.find(isCryptoDepositInstruction);
       return instruction
         ? {
             destinationAddress: instruction.destinationAddress,
@@ -281,15 +230,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     if (onchainSendLoading || onchainSendResult) {
       return;
     }
-    // Re-check the timestamp at call time — the armed timeout only covers renders.
-    if (quoteExpiresAt && Date.parse(quoteExpiresAt) <= Date.now()) {
-      setQuoteExpired(true);
-      toast.error(t("DashboardPayments.ramps.quoteExpired"), {
-        description: t("DashboardPayments.ramps.status.quoteExpiredPayoutDescription"),
-        position: "bottom-right",
-      });
-      return;
-    }
 
     await submitOfframpDeposit(
       {
@@ -318,7 +258,6 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     onchainSendLoading,
     onchainSendResult: onchainSendResult ?? null,
     sendCryptoToDeposit,
-    quoteExpired,
   };
 }
 

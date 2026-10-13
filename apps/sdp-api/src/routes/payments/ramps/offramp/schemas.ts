@@ -2,7 +2,6 @@ import { z } from "zod";
 import { paymentAmountSchema } from "../../schemas";
 import {
   offrampCryptoRailSchema,
-  rampDestinationCountrySchema,
   rampFiatCurrencySchema,
   rampProviderSchema,
   rampsMemoSchema,
@@ -28,17 +27,8 @@ const offrampQuoteBaseShape = {
   rampsMemo: rampsMemoSchema.optional(),
 };
 
-export const createOfframpQuoteSchema = z.discriminatedUnion("provider", [
-  z.strictObject({
-    provider: z.literal("lightspark"),
-    ...offrampQuoteBaseShape,
-    fiatCurrency: rampFiatCurrencySchema,
-    destinationCountry: rampDestinationCountrySchema,
-    providerAccountId: z.string().min(1).optional(),
-  }),
-  z.strictObject({
-    provider: z.enum(["moonpay", "bvnk", "coinbase", "stripe"]),
-    ...offrampQuoteBaseShape,
-    fiatCurrency: rampFiatCurrencySchema.optional(),
-  }),
-]);
+export const createOfframpQuoteSchema = z.strictObject({
+  provider: z.enum(["moonpay", "bvnk", "coinbase", "stripe"]),
+  ...offrampQuoteBaseShape,
+  fiatCurrency: rampFiatCurrencySchema.optional(),
+});

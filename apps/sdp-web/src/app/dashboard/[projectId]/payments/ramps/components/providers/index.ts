@@ -3,11 +3,6 @@ import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-re
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
-import {
-  getLightsparkOnboardingCopy,
-  getLightsparkProvisioningDetail,
-  getLightsparkSimulateLabels,
-} from "./lightspark";
 
 export interface OnboardingCopy {
   title: string;
@@ -17,7 +12,6 @@ export interface OnboardingCopy {
 }
 
 type BvnkRequirements = Extract<CounterpartyRequirements, { provider: "bvnk" }>;
-type LightsparkRequirements = Extract<CounterpartyRequirements, { provider: "lightspark" }>;
 type ReadyRequirement = Extract<CounterpartyRequirements, { status: "ready" }>;
 
 export type BvnkOnboardingPanelStatus = Exclude<
@@ -28,23 +22,10 @@ export type BvnkOnboardingPanelStatus = Exclude<
   | "counterparty_collect_agreement"
   | "unsupported"
 >;
-export type LightsparkOnboardingPanelStatus = Exclude<
-  LightsparkRequirements["status"] | ReadyRequirement["status"],
-  "collect" | "collect_counterparty" | "collect_account" | "onboarding_not_started" | "unsupported"
->;
 
-type BvnkPanelOnboardingRequirements =
+type PanelOnboardingRequirements =
   | Extract<CounterpartyRequirements, { provider: "bvnk"; status: BvnkOnboardingPanelStatus }>
   | (ReadyRequirement & { provider: "bvnk" });
-type LightsparkPanelOnboardingRequirements =
-  | Extract<
-      CounterpartyRequirements,
-      { provider: "lightspark"; status: LightsparkOnboardingPanelStatus }
-    >
-  | (ReadyRequirement & { provider: "lightspark" });
-type PanelOnboardingRequirements =
-  | BvnkPanelOnboardingRequirements
-  | LightsparkPanelOnboardingRequirements;
 
 const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> = new Set([
   "customer_verification_required",
@@ -56,20 +37,6 @@ const BVNK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["stat
   "ready",
 ]);
 
-const LIGHTSPARK_ONBOARDING_PANEL_STATUSES: ReadonlySet<CounterpartyRequirements["status"]> =
-  new Set(["ready"]);
-
-const isBvnkPanelOnboardingRequirements = (
-  requirements: CounterpartyRequirements
-): requirements is BvnkPanelOnboardingRequirements =>
-  requirements.provider === "bvnk" && BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
-
-const isLightsparkPanelOnboardingRequirements = (
-  requirements: CounterpartyRequirements
-): requirements is LightsparkPanelOnboardingRequirements =>
-  requirements.provider === "lightspark" &&
-  LIGHTSPARK_ONBOARDING_PANEL_STATUSES.has(requirements.status);
-
 /**
  * Whether a requirements status is an onboarding-lifecycle state the panel can
  * render, as opposed to a form-collection or terminal-block state.
@@ -80,14 +47,9 @@ const isLightsparkPanelOnboardingRequirements = (
 export function isOnboardingPanelStatus(
   requirements: CounterpartyRequirements
 ): requirements is PanelOnboardingRequirements {
-  switch (requirements.provider) {
-    case "bvnk":
-      return isBvnkPanelOnboardingRequirements(requirements);
-    case "lightspark":
-      return isLightsparkPanelOnboardingRequirements(requirements);
-    default:
-      return false;
-  }
+  return (
+    requirements.provider === "bvnk" && BVNK_ONBOARDING_PANEL_STATUSES.has(requirements.status)
+  );
 }
 
 export interface SimulateActionLabels {
@@ -104,7 +66,7 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
  * never render the onboarding panel, so callers must gate on this before rendering it.
  */
 export function hasOnboardingLifecycle(provider: RampProviderId): boolean {
-  return provider === "bvnk" || provider === "lightspark";
+  return provider === "bvnk";
 }
 
 /**
@@ -118,14 +80,7 @@ export function onboardingCopy(
   onboarding: PanelOnboardingRequirements,
   t: Translate
 ): OnboardingCopy {
-  switch (onboarding.provider) {
-    case "bvnk":
-      return getBvnkOnboardingCopy(t)[onboarding.status];
-    case "lightspark":
-      return getLightsparkOnboardingCopy(t)[onboarding.status];
-  }
-  const exhaustive: never = onboarding;
-  throw new Error(`No onboarding copy for ramp provider: ${String(exhaustive)}`);
+  return getBvnkOnboardingCopy(t)[onboarding.status];
 }
 
 /** Sandbox simulate-action labels for providers that support the simulate flow; null otherwise (caller hides the action). */
@@ -136,8 +91,6 @@ export function simulateActionLabels(
   switch (provider) {
     case "bvnk":
       return getBvnkSimulateLabels(t);
-    case "lightspark":
-      return getLightsparkSimulateLabels(t);
     default:
       return null;
   }
@@ -152,8 +105,6 @@ export function provisioningDetail(
   switch (provider) {
     case "bvnk":
       return getBvnkProvisioningDetail(t)[direction];
-    case "lightspark":
-      return getLightsparkProvisioningDetail(t)[direction];
     default:
       throw new Error(`No provisioning detail for ramp provider: ${provider}`);
   }

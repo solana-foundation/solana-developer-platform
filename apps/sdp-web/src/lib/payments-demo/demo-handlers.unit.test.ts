@@ -107,15 +107,14 @@ describe("contacts", () => {
 describe("ramp requirements", () => {
   it("refuses an unknown contact, and an unknown provider", () => {
     expect(read("/v1/counterparties/demo_cpty_nobody/requirements").status).toBe(404);
-    expect(read("/v1/counterparties/demo_cpty_jane/requirements?provider=acme").body.data).toEqual(
-      expect.objectContaining({ status: "unsupported", direction: "onramp" })
-    );
+    expect(refusal(read("/v1/counterparties/demo_cpty_jane/requirements?provider=acme"))).toEqual([
+      400,
+      "invalid_request",
+    ]);
     const advance = (body: unknown, id = "demo_cpty_jane") =>
       write("POST", `/v1/counterparties/${id}/requirements`, body);
-    expect(advance({ provider: "lightspark", direction: "onramp" }, "demo_cpty_x")?.status).toBe(
-      404
-    );
-    expect(advance({ provider: "lightspark" })?.status).toBe(400);
+    expect(advance({ provider: "moonpay", direction: "onramp" }, "demo_cpty_x")?.status).toBe(404);
+    expect(advance({ provider: "moonpay" })?.status).toBe(400);
     expect(advance({ provider: "acme", direction: "onramp" })?.status).toBe(400);
   });
 
@@ -131,12 +130,6 @@ describe("ramp requirements", () => {
         })?.body.data.status
       ).toBe("ready");
     }
-    expect(
-      write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-        provider: "lightspark",
-        direction: "onramp",
-      })?.body.data.status
-    ).toBe("ready");
   });
 
   it("walks BVNK's onboarding: agreements, identity check, review, account, ready", () => {
@@ -177,69 +170,10 @@ describe("ramp requirements", () => {
   it("refuses Simulate verification for another provider or an unknown contact", () => {
     const simulate = (provider: string, counterpartyId?: string) =>
       write("POST", "/v1/payments/demo/verifications", { provider, counterpartyId });
-    expect(simulate("lightspark", "demo_cpty_kai")?.status).toBe(400);
+    expect(simulate("moonpay", "demo_cpty_kai")?.status).toBe(400);
     expect(simulate("bvnk")?.status).toBe(400);
     expect(simulate("bvnk", "demo_cpty_nobody")?.status).toBe(404);
     expect(ops).toEqual([]);
-  });
-
-  it("asks a Lightspark payout which bank account to pay, in the payout's currency", () => {
-    const tree = (fiat?: string) =>
-      read(
-        `/v1/counterparties/demo_cpty_acme/requirements?provider=lightspark&direction=offramp${
-          fiat ? `&fiatCurrency=${fiat}` : ""
-        }`
-      ).body.data;
-    expect(tree("EUR").status).toBe("collect_account");
-    expect(Object.keys(tree("EUR").payout.countryRails)).toEqual(["DE", "FR", "IE"]);
-    expect(tree("EUR").payout.accounts.map((account: { id: string }) => account.id)).toEqual([
-      "demo_cppa_acme_0",
-    ]);
-    expect(Object.keys(tree("GBP").payout.countryRails)).toEqual(["GB"]);
-    // A currency without corridors of its own falls back to US banks.
-    expect(Object.keys(tree("JPY").payout.countryRails)).toEqual(["US"]);
-    expect(tree().payout.accounts).toEqual([]);
-  });
-
-  it("pays a saved bank account, or saves the one collected", () => {
-    const advance = (body: Record<string, unknown>) =>
-      write("POST", "/v1/counterparties/demo_cpty_acme/requirements", {
-        provider: "lightspark",
-        direction: "offramp",
-        fiatCurrency: "EUR",
-        ...body,
-      });
-    expect(advance({ providerAccountId: "demo_cppa_acme_0" })?.body.data.providerAccountId).toBe(
-      "demo_cppa_acme_0"
-    );
-    expect(refusal(advance({ providerAccountId: "demo_cppa_jane_0" }))).toEqual([404, "not_found"]);
-    expect(advance({ collectedData: {} })?.status).toBe(400);
-    expect(advance({ collectedData: { destinationCountry: "US" } })?.status).toBe(400);
-
-    const saved = advance({
-      collectedData: {
-        destinationCountry: "DE",
-        bankName: "  Deutsche Demo  ",
-        iban: "DE89370400440532013000",
-      },
-    });
-    const id: string = saved?.body.data.providerAccountId;
-    expect(id).toMatch(/^demo_new_cppa_/);
-    const added = world().providerAccounts.find((entry) => entry.account.id === id)?.account;
-    expect(added).toEqual(
-      expect.objectContaining({
-        paymentRail: "SEPA",
-        bankName: "Deutsche Demo",
-        accountNumberLast4: "3000",
-      })
-    );
-
-    const bare = advance({ collectedData: { destinationCountry: "FR", paymentRails: "SEPA" } });
-    const bareAccount = world().providerAccounts.find(
-      (entry) => entry.account.id === bare?.body.data.providerAccountId
-    )?.account;
-    expect(bareAccount?.bankName).toBeUndefined();
-    expect(bareAccount?.accountNumberLast4).toBeUndefined();
   });
 });
 
@@ -343,7 +277,7 @@ describe("ramp estimates and quotes", () => {
   it("refuses an on-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
       write("POST", "/v1/payments/ramps/onramp/quote", {
-        provider: "lightspark",
+        provider: "coinbase",
         counterpartyId: "demo_cpty_jane",
         destinationCustodyWalletId: TREASURY,
         assetRail: "usdc.solana",
@@ -381,8 +315,12 @@ describe("ramp estimates and quotes", () => {
       expect(quoted?.status, provider).toBe(201);
       modes[provider] = quoted?.body.data.quote.deliveryMode;
     }
-    expect(modes.lightspark).toBe("manual_instructions");
-    expect(Object.keys(modes).length).toBeGreaterThan(3);
+    expect(modes).toEqual({
+      moonpay: "hosted",
+      bvnk: "manual_instructions",
+      coinbase: "hosted",
+      stripe: "session_widget",
+    });
   });
 
   it("draws bank instructions for the deposit's currency", () => {
@@ -399,29 +337,27 @@ describe("ramp estimates and quotes", () => {
       return quoted?.status === 201 ? quoted.body.data.quote.paymentInstructions[0] : null;
     };
     for (const fiat of ["USD", "EUR", "GBP", "MXN", "ARS"]) {
-      for (const provider of ["lightspark", "bvnk"]) {
-        const instruction = instructions(provider, fiat);
-        if (instruction) expect(instruction.provider).toBe(provider);
-      }
+      const instruction = instructions("bvnk", fiat);
+      if (instruction) expect(instruction.provider).toBe("bvnk");
     }
   });
 
   it("refuses an off-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
       write("POST", "/v1/payments/ramps/offramp/quote", {
-        provider: "lightspark",
+        provider: "moonpay",
         counterpartyId: "demo_cpty_jane",
         sourceCustodyWalletId: "demo_cwlt_settlement",
-        assetRail: "usdc.solana",
-        fiatCurrency: "USD",
-        cryptoAmount: "100",
+        assetRail: "sol.solana",
+        fiatCurrency: "EUR",
+        cryptoAmount: "1",
         ...body,
       });
     expect(quote({ cryptoAmount: "-1" })?.status).toBe(400);
     expect(quote({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
     expect(quote({ provider: "bvnk", counterpartyId: "demo_cpty_priya" })?.status).toBe(409);
     expect(quote({ sourceCustodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
-    expect(quote({ fiatCurrency: "JPY" })?.body.error.message).toMatch(/doesn't run USDC to JPY/);
+    expect(quote({ fiatCurrency: "JPY" })?.body.error.message).toMatch(/doesn't run SOL to JPY/);
     expect(refusal(quote({ cryptoAmount: "999999" }))).toEqual([400, "insufficient_funds"]);
     expect(ops).toEqual([]);
   });
@@ -447,8 +383,9 @@ describe("ramp estimates and quotes", () => {
 
 describe("ramp pay-ins and cancels", () => {
   function deposit(counterpartyId = "demo_cpty_jane") {
+    onboardBvnk(counterpartyId);
     return write("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "lightspark",
+      provider: "bvnk",
       counterpartyId,
       destinationCustodyWalletId: TREASURY,
       assetRail: "usdc.solana",
@@ -463,7 +400,7 @@ describe("ramp pay-ins and cancels", () => {
     expect(simulate({})?.status).toBe(400);
     // The provider's own sandbox payloads are not what the API takes any more.
     expect(
-      simulate({ provider: "lightspark", payload: { counterpartyId: "demo_cpty_jane" } })?.status
+      simulate({ provider: "bvnk", payload: { counterpartyId: "demo_cpty_jane" } })?.status
     ).toBe(400);
     expect(refusal(simulate({ transferId: "demo_xfr_nobody" }))).toEqual([404, "not_found"]);
     const { transferId } = deposit();
@@ -527,8 +464,9 @@ describe("transfers and batches", () => {
   });
 
   it("funds an off-ramp's payout once, from a wallet that can cover it", () => {
+    onboardBvnk("demo_cpty_jane");
     const quoted = write("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "lightspark",
+      provider: "bvnk",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_settlement",
       assetRail: "usdc.solana",

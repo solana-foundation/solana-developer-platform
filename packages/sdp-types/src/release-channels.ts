@@ -93,7 +93,6 @@ export type SdpRampProviderStages = Record<RampProviderId, SdpReleaseChannel>;
 /** Each ramp provider's maturity. Promoting a provider is a one-line change here. */
 export const SDP_RAMP_PROVIDER_STAGES = {
   moonpay: "experimental",
-  lightspark: "experimental",
   bvnk: "experimental",
   coinbase: "experimental",
   stripe: "experimental",

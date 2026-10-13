@@ -2,14 +2,12 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest } from "@/lib/errors";
 import { BvnkWebhookProcessor } from "./bvnk";
 import { CoinbaseWebhookProcessor } from "./coinbase";
-import { LightsparkWebhookProcessor } from "./lightspark";
 import { MoonpayWebhookProcessor } from "./moonpay";
 import type { WebhookProcessor } from "./processor";
 import { StripeWebhookProcessor } from "./stripe";
 
 export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   moonpay: new MoonpayWebhookProcessor(),
-  lightspark: new LightsparkWebhookProcessor(),
   bvnk: new BvnkWebhookProcessor(),
   coinbase: new CoinbaseWebhookProcessor(),
   stripe: new StripeWebhookProcessor(),

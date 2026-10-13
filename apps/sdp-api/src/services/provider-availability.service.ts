@@ -244,19 +244,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return prod || sandbox;
       },
     },
-    lightspark: {
-      label: "Lightspark",
-      isConfigured: (env, testMode) => {
-        const prod = hasAllEnv(env, ["LIGHTSPARK_GRID_CLIENT_ID", "LIGHTSPARK_GRID_CLIENT_SECRET"]);
-        const sandbox = hasAllEnv(env, [
-          "LIGHTSPARK_GRID_SANDBOX_CLIENT_ID",
-          "LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET",
-        ]);
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
-    },
     bvnk: {
       label: "BVNK",
       isConfigured: (env, testMode) => {

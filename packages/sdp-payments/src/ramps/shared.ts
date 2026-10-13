@@ -135,17 +135,6 @@ export const RAMP_RAIL_DUMPS = {
     currencies: { name: "moonpay/currencies", file: dumpFile("moonpay/currencies") },
     countries: { name: "moonpay/countries", file: dumpFile("moonpay/countries") },
   },
-  lightspark: {
-    offrampRates: {
-      name: "lightspark/exchange-rates__source-usdc",
-      file: dumpFile("lightspark/exchange-rates__source-usdc"),
-    },
-    onrampRates: {
-      name: "lightspark/exchange-rates__destination-usdc",
-      file: dumpFile("lightspark/exchange-rates__destination-usdc"),
-    },
-    openapi: { name: "lightspark/openapi", file: dumpFile("lightspark/openapi") },
-  },
   bvnk: {
     cryptoAnon: { name: "bvnk/crypto__anon", file: dumpFile("bvnk/crypto__anon") },
     fiatAnon: { name: "bvnk/fiat__anon", file: dumpFile("bvnk/fiat__anon") },

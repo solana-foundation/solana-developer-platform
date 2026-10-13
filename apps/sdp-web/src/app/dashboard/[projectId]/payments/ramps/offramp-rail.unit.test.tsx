@@ -85,9 +85,6 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     collectedData: {},
     setCollectedField: noop,
     requirementFields: [],
-    selectedProviderAccountId: null,
-    payoutAccounts: [],
-    selectPayoutAccount: noop,
     requirementsBlocker: null,
     liveWallets: [],
     walletsLoading: false,
@@ -125,7 +122,6 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     onchainSendLoading: false,
     onchainSendResult: null,
     sendCryptoToDeposit: asyncNoop,
-    quoteExpired: false,
     ...overrides,
   };
 }

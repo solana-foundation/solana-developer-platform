@@ -72,13 +72,13 @@ describe("ramp providers outside the release channel", () => {
   });
 
   it.each([
-    ["GET", "/onramp/currency?provider=lightspark"],
-    ["GET", "/offramp/currency?provider=lightspark"],
+    ["GET", "/onramp/currency?provider=stripe"],
+    ["GET", "/offramp/currency?provider=bvnk"],
     [
       "GET",
-      "/counterparties/cp_1/requirements?provider=lightspark&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",
+      "/counterparties/cp_1/requirements?provider=stripe&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",
     ],
-    ["GET", "/counterparties/cp_1/provider-accounts?provider=lightspark"],
+    ["GET", "/counterparties/cp_1/provider-accounts?provider=stripe"],
     ["POST", "/coinbase/events"],
   ])("refuses %s %s, which names an excluded provider, with 403", async (method, path) => {
     const response = await app.request(path, { method }, env);
