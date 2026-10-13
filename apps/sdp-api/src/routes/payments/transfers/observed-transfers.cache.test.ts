@@ -3,7 +3,7 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import { type SdpEnvironment, SOL_MINT } from "@sdp/types";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcRawAnswers } from "@/test/helpers/cluster-rpc";
 import {
   buildObservedTransfersForSignatures,
   clearObservedTransferCaches,
@@ -73,7 +73,7 @@ function buildOnDevnet(signatures: Parameters<typeof buildObservedTransfersForSi
 }
 
 describe("observed-transfers parsed-transaction cache", () => {
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcRawAnswers();
 
   function getTransactionCalls() {
     return rpc.calls.filter((call) => call.method === "getTransaction");
@@ -210,6 +210,17 @@ describe("observed-transfers parsed-transaction cache", () => {
         created_at: timestamp,
         updated_at: timestamp,
       },
+    ]);
+  });
+
+  it("reports system transfer lamports above 2^53 exactly", async () => {
+    rpc.answerRawJson(
+      "getTransaction",
+      JSON.stringify(parsedSolTransfer(0)).replace('"lamports":0', '"lamports":9007199254740993')
+    );
+
+    expect(await buildOnDevnet([signatureEntry(8, "finalized")])).toMatchObject([
+      { token: SOL_MINT, amount: "9007199.254740993" },
     ]);
   });
 
