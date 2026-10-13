@@ -436,13 +436,7 @@ function transferRow(
           resolveTransferTokenLabel(transfer.token, issuedTokenSymbolsByMint),
           locale
         );
-  const savedAddress =
-    transfer.direction === "inbound" || transfer.type === "onramp"
-      ? transfer.destination
-      : transfer.source;
-  const wallet =
-    walletName(walletsById, transfer.custodyWalletId) ??
-    (savedAddress ? shortenAddress(savedAddress) : null);
+  const wallet = walletName(walletsById, transfer.custodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS[activityKind(transfer)]);
   return {
     href: projectHref(
@@ -473,8 +467,7 @@ function batchRow(
 ): Parameters<typeof ActivityRow>[0] {
   const { t, locale, projectId, walletsById, issuedTokenSymbolsByMint } = context;
   const summary = summarizeBatch(batch, recipients);
-  const wallet =
-    walletName(walletsById, batch.sourceCustodyWalletId) ?? shortenAddress(batch.sourceAddress);
+  const wallet = walletName(walletsById, batch.sourceCustodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS.batch);
   return {
     href: projectHref(projectId, PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches),

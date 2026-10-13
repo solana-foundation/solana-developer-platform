@@ -556,10 +556,20 @@ describe("fetchTransferBatchRecipients", () => {
 });
 
 describe("fetchTransferBatches", () => {
-  it("preserves exact and nullable batch sources without provider metadata", async () => {
+  it("preserves exact and nullable batch sources with retained provider metadata", async () => {
     const batches = [
-      { id: "batch-a", sourceCustodyWalletId: "wallet-a", sourceAddress: "saved-address-a" },
-      { id: "batch-null", sourceCustodyWalletId: null, sourceAddress: "saved-address-null" },
+      {
+        id: "batch-a",
+        sourceCustodyWalletId: "wallet-a",
+        sourceProviderWalletId: "provider-wallet",
+        sourceAddress: "saved-address-a",
+      },
+      {
+        id: "batch-null",
+        sourceCustodyWalletId: null,
+        sourceProviderWalletId: "provider-wallet",
+        sourceAddress: "saved-address-null",
+      },
     ];
     const request = vi.fn().mockResolvedValue(Response.json({ data: batches }));
 
@@ -592,7 +602,17 @@ describe("fetchPaymentTransfers", () => {
       expected: [{ id: "", custodyWalletId: null }],
     },
     {
-      body: { data: [{}, { id: "transfer-a", custodyWalletId: "wallet-a", rampsMemo: {} }] },
+      body: {
+        data: [
+          {},
+          {
+            id: "transfer-a",
+            custodyWalletId: "wallet-a",
+            providerWalletId: "provider-wallet",
+            rampsMemo: {},
+          },
+        ],
+      },
       expected: [{ id: "transfer-a", custodyWalletId: "wallet-a" }],
     },
   ])(
@@ -604,11 +624,23 @@ describe("fetchPaymentTransfers", () => {
     }
   );
 
-  it("keeps exact and unresolved history when provider metadata is absent", async () => {
+  it("keeps exact and unresolved history with the same retained provider reference", async () => {
     const request = vi.fn().mockResolvedValue(
       transfersResponse([
-        { id: "exact", custodyWalletId: "wallet-a", status: "confirmed", rampsMemo: {} },
-        { id: "unresolved", custodyWalletId: null, status: "confirmed", rampsMemo: {} },
+        {
+          id: "exact",
+          custodyWalletId: "wallet-a",
+          providerWalletId: "provider-wallet",
+          status: "confirmed",
+          rampsMemo: {},
+        },
+        {
+          id: "unresolved",
+          custodyWalletId: null,
+          providerWalletId: "provider-wallet",
+          status: "confirmed",
+          rampsMemo: {},
+        },
       ])
     );
 
@@ -681,7 +713,7 @@ describe("fetchPaymentTransfers", () => {
     });
   });
 
-  it.each(["", "   ", " wallet-1 "])(
+  it.each([undefined, "", "   ", " wallet-1 "])(
     "fails closed when providerWalletId is %j",
     async (providerWalletId) => {
       const request = vi.fn(

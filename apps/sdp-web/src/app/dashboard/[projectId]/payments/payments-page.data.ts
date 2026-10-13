@@ -47,7 +47,7 @@ export const paymentsWalletsResponseSchema = z.object({
 
 const paymentTransferRequiredFieldsSchema = z.object({
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
-  providerWalletId: z.string().min(1).regex(/^\S+$/).optional(),
+  providerWalletId: z.string().min(1).regex(/^\S+$/),
   rampsMemo: z.record(z.string(), z.string()),
 });
 
