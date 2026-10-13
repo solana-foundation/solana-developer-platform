@@ -75,6 +75,10 @@
                 ],
                 "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
               },
+              "@solana/web3.js": {
+                "importNames": ["Connection", "*"],
+                "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+              },
               "@solana/rpc-spec": {
                 "importNames": ["createRpc", "createJsonRpcApi", "*"],
                 "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
@@ -284,6 +288,10 @@
                     ],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@solana/rpc-spec": {
                     "importNames": ["createRpc", "createJsonRpcApi", "*"],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
@@ -355,6 +363,10 @@
                       "*"
                     ],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@solana/rpc-spec": {
                     "importNames": ["createRpc", "createJsonRpcApi", "*"],
@@ -431,6 +443,10 @@
                     ],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
                   "@solana/rpc-spec": {
                     "importNames": ["createRpc", "createJsonRpcApi", "*"],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
@@ -479,8 +495,7 @@
         "**/apps/sdp-api/scripts/inventory-veda-catalogue.ts",
         "**/apps/sdp-api/src/cron/earn-metrics-refresh.ts",
         "**/apps/sdp-api/src/routes/webhooks/handlers.ts",
-        "**/apps/sdp-api/src/services/jobs/replay-ramp-webhook-events.ts",
-        "**/apps/sdp-api/scripts/inventory-veda-catalogue.ts"
+        "**/apps/sdp-api/src/services/jobs/replay-ramp-webhook-events.ts"
       ],
       "linter": {
         "rules": {
@@ -513,6 +528,10 @@
                       "*"
                     ],
                     "message": "Build Solana RPC clients only through @sdp/rpc/factory: createClusterRpc() and its siblings for the managed pool (the cluster comes from the open cluster scope), createEndpointRpc() for an endpoint outside the pool (a channel gateway, a tenant URL). See docs/decisions/0007-cluster-scope-ambient.md."
+                  },
+                  "@solana/web3.js": {
+                    "importNames": ["Connection", "*"],
+                    "message": "Build Solana RPC clients only through @sdp/rpc/factory: a web3.js Connection must send through createClusterJsonRpcFetch() over the managed pool. See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@solana/rpc-spec": {
                     "importNames": ["createRpc", "createJsonRpcApi", "*"],
