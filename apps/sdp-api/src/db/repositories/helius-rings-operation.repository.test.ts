@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
@@ -719,7 +720,9 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       await setUpdatedAt(done.operation.id, "2026-01-01T00:00:00.000Z");
       await setUpdatedAt(waiting.operation.id, "2026-01-01T00:00:00.000Z");
 
-      const swept = await repo.listInFlightOperations({ staleBefore: "2026-06-01T00:00:00.000Z" });
+      const swept = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        repo.listInFlightOperations({ staleBefore: "2026-06-01T00:00:00.000Z" })
+      );
 
       // `draft` is excluded because nothing is in flight yet, `completed`
       // because it is terminal, and the fresh row because it was just touched.

@@ -11,6 +11,7 @@ import { custodyProviderNotInReleaseChannel } from "@/services/provider-availabi
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -500,6 +501,8 @@ async function postTransfer(body: Record<string, unknown>, headers: Record<strin
 }
 
 describe("Private Channels — transfer access and routes", () => {
+  installClusterRpcStub();
+
   afterAll(() => {
     createOrgSignerMock.mockRestore();
     env.PRIVY_APP_ID = originalPrivy.appId;
