@@ -65,6 +65,7 @@ const quote = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="onramp_quote.py" rotate-providers
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
@@ -141,6 +142,7 @@ const result = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="compliance_action.py" rotate-token-ops
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
@@ -722,7 +724,7 @@ Every SDP operation that changes on-chain state ends in a Solana transaction tha
 
 | Operation | Execute | Prepare |
 | --- | --- | --- |
-| Token deploy | `POST /v1/issuance/tokens/{tokenId}/deploy` | — |
+| Token deploy | `POST /v1/issuance/tokens/{tokenId}/deploy` | Not usable yet (see below) |
 | Mint, burn | `POST .../mint`, `POST .../burn` | `POST .../mint/prepare`, `POST .../burn/prepare` |
 | Seize, force burn | `POST .../seize`, `POST .../force-burn` | `POST .../seize/prepare`, `POST .../force-burn/prepare` |
 | Authority transfer | `POST .../authority` | `POST .../authority/prepare` |
@@ -731,6 +733,8 @@ Every SDP operation that changes on-chain state ends in a Solana transaction tha
 | Recurring payments | `/v1/payments/recurring-payments` routes | No |
 
 For mint, burn, seize, force burn, and authority transfer, the prepare route takes the same request body as the execute route.
+
+The API reference also lists `POST .../deploy/prepare`, `deploy/confirm`, and `deploy/prepare-metadata`. The transaction `deploy/prepare` returns must also be signed by a new mint account whose key SDP generates and doesn't return, so it can't land. Deploy with the execute route.
 
 ## Execute
 
@@ -797,6 +801,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_123/mint/prepare \
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="prepare-mint.ts"
+import {
   createSolanaRpc,
   getBase64EncodedWireTransaction,
   getBase64Encoder,
@@ -2465,7 +2470,7 @@ A **holder enrollment** records that a wallet is cleared to hold a specific toke
 | `verified` | Verification passed. |
 | `rejected` | Verification failed. |
 
-SDP updates `kyc_status` from identity verification results reported for the counterparty linked to the wallet. The public API has no endpoint to set it directly, so link a counterparty when you enroll a wallet that should receive a status.
+Nothing sets `kyc_status` automatically today: no identity verification provider is connected, and the public API has no endpoint to set it, so new wallets stay `unverified`. Linking a counterparty when you enroll a wallet records who the wallet belongs to.
 
 Enrollment is a record in SDP only. It does not add the wallet to the token's [allowlist](/docs/tokens/allowlists) or change anything onchain; manage who can receive the token through the allowlist endpoints.
 
@@ -4331,7 +4336,7 @@ This tutorial walks you through issuing a regulated stablecoin on Solana. The pr
 
 ## 1. What this work demands
 
-**1. Custody is not your laptop.** A regulated stablecoin is held by a federally chartered custodian. For a US issuer operating under the GENIUS Act framework, that usually means Anchorage Digital Bank or an equivalent federally chartered crypto bank. The custodian holds the signing keys for the mint, freeze, and permanent-delegate authorities. Not the engineer at the issuer.
+**1. Custody is not your laptop.** A regulated stablecoin's reserves are held by a federally chartered custodian. For a US issuer operating under the GENIUS Act framework, that usually means Anchorage Digital Bank or an equivalent federally chartered crypto bank. The signing keys for the mint, freeze, and permanent-delegate authorities live with a custody provider, never on an engineer's machine.
 
 **2. Compliance is integrated from day one.** Every transfer destination gets screened before the transfer is built. Every frozen account ties back to a court order, sanctions notice, or internal compliance ticket. The integration is not bolted on later; it sits on the same API surface as the mint and burn endpoints.
 
@@ -4414,7 +4419,7 @@ Request one SOL.
 
 </Steps>
 
-The browser faucet is more reliable than the RPC `requestAirdrop` method, which is heavily rate-limited. Production readers operating under Anchorage do not handle this step manually; the bank funds the custody address as part of its standard operational support.
+The browser faucet is more reliable than the RPC `requestAirdrop` method, which is heavily rate-limited. Mainnet has no faucet, so in production you fund the signing wallet from your own treasury.
 
 ### 5. API base URL
 
@@ -4483,7 +4488,7 @@ Custody wallets configured: 2
 Deployment wallet: cwlt_123
 ```
 
-If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. The list holds only the sandbox project's wallets that this key's **Wallet access** allows. If it returns no wallets, create one in the sandbox project ([Set up wallets](/docs/guides/setup-wallets)) or check the key's wallet access. For the Anchorage pipeline, contact your onboarding lead.
+If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. The list holds only the sandbox project's wallets that this key's **Wallet access** allows. If it returns no wallets, create one in the sandbox project ([Set up wallets](/docs/guides/setup-wallets)) or check the key's wallet access.
 
 Keep both values. `signingCustodyWalletId` is the exact SDP Wallet record `id` (`cwlt_*`) used by issuance requests. It is not the provider-specific `walletId` or the Solana `publicKey`; `custodyAddress` is that public key and is used only where an on-chain address is required.
 
@@ -5051,9 +5056,9 @@ The production project is separate from the sandbox project. Nothing you built i
 
 - **Production access**. Production access is enabled per organization. Until it is enabled for yours, the production project doesn't appear in the workspace switcher or in `GET /v1/projects`.
 - **API keys**. Sandbox keys can't reach production. Create new Developer and Admin keys in the production project from the dashboard, as in Section 2. An API key can only create keys in its own project, so your first production key has to come from the dashboard. Production keys start with `sk_live_`.
-- **Custody wallets**. Wallets belong to a project, so set up custody in the production project. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow.
+- **Custody wallets**. Wallets belong to a project, and a production project uses custody connections only: connect your own Privy account to the production project from the dashboard, then create the signing wallets in that connection with `connectionId`. See [Set up wallets](/docs/guides/setup-wallets). Reserve custody with your bank stays separate from these signing wallets.
 - **Token**. Tokens belong to a project too. Create and deploy the token again in the production project (Section 4); you get a new `tok_*` ID and a new mint address. The sandbox token stays on devnet.
-- **Solana network**. Production projects run on mainnet-beta instead of devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
+- **Solana network**. Production projects run on mainnet-beta instead of devnet. Fund the production signing wallet on mainnet yourself; there is no faucet.
 - **API base URL**. Unchanged: `https://api.solana.com` serves both projects, and the key decides which one a request reaches.
 - **Screening providers**. Confirm the production provider mix matches your compliance team's policy. Run a `POST /v1/compliance/address-screenings` against a known address to verify each provider returns `status: "ok"` before live traffic.
 - **Idempotency-Key strategy**. In production, generate idempotency keys deterministically per operation (for example, `mint-${reserveDepositReference}`) rather than purely random per attempt. This lets your runbook resend safely without minting twice.

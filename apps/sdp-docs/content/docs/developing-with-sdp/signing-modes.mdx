@@ -12,7 +12,7 @@ Every SDP operation that changes on-chain state ends in a Solana transaction tha
 
 | Operation | Execute | Prepare |
 | --- | --- | --- |
-| Token deploy | `POST /v1/issuance/tokens/{tokenId}/deploy` | — |
+| Token deploy | `POST /v1/issuance/tokens/{tokenId}/deploy` | Not usable yet (see below) |
 | Mint, burn | `POST .../mint`, `POST .../burn` | `POST .../mint/prepare`, `POST .../burn/prepare` |
 | Seize, force burn | `POST .../seize`, `POST .../force-burn` | `POST .../seize/prepare`, `POST .../force-burn/prepare` |
 | Authority transfer | `POST .../authority` | `POST .../authority/prepare` |
@@ -21,6 +21,8 @@ Every SDP operation that changes on-chain state ends in a Solana transaction tha
 | Recurring payments | `/v1/payments/recurring-payments` routes | No |
 
 For mint, burn, seize, force burn, and authority transfer, the prepare route takes the same request body as the execute route.
+
+The API reference also lists `POST .../deploy/prepare`, `deploy/confirm`, and `deploy/prepare-metadata`. The transaction `deploy/prepare` returns must also be signed by a new mint account whose key SDP generates and doesn't return, so it can't land. Deploy with the execute route.
 
 ## Execute
 
