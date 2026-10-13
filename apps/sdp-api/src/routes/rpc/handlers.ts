@@ -1,3 +1,5 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { assertEndpointServesCluster } from "@sdp/rpc/factory";
 import {
   type ResolvedRpcTarget,
   resolveRoundRobinRpcTargets,
@@ -43,13 +45,16 @@ function shouldRoundRobinFaucetRequest(payload: unknown, methodNames: string[]):
 }
 
 /**
- * POST a JSON-RPC payload to a managed provider, bounded by the relay timeout.
+ * POST a JSON-RPC payload to a managed provider, bounded by the relay timeout, once the provider
+ * is proven to serve the target's cluster.
  *
  * @param target - The managed provider to send to.
  * @param payload - The validated JSON-RPC request or batch.
  * @returns The upstream response and its body, parsed as JSON when it is JSON.
+ * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the provider serves another cluster.
  */
 async function relayToTarget(target: ResolvedRpcTarget, payload: unknown) {
+  await assertEndpointServesCluster(target.cluster, target.endpoint);
   const upstream = await fetch(target.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -94,7 +99,10 @@ function isTimeoutError(error: unknown): boolean {
 // The caller can safely resend the same signed bytes on a timeout, but only
 // if it can tell "the upstream never answered" apart from "the upstream said
 // no" — hence distinct codes instead of one generic relay error.
-function toRelayError(error: unknown): AppError {
+function toRelayError(error: unknown): AppError | SdpRpcError {
+  if (error instanceof SdpRpcError) {
+    return error;
+  }
   if (isTimeoutError(error)) {
     return new AppError("SOLANA_RPC_TIMEOUT");
   }
@@ -116,7 +124,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
   await assertFaucetDestinationsOwned(getDb(c.env), auth.organizationId, payload);
 
   if (shouldRoundRobinFaucetRequest(payload, methodNames)) {
-    const targets = await resolveRoundRobinRpcTargets({ env: c.env, cache: c.var.kv.cache });
+    const targets = await resolveRoundRobinRpcTargets({ cache: c.var.kv.cache });
 
     let lastResponse: ReturnType<typeof buildRelayResponse> | null = null;
     let lastError: unknown = null;
@@ -141,7 +149,7 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
     throw toRelayError(lastError);
   }
 
-  const target = await resolveRpcTarget({ env: c.env, cache: c.var.kv.cache });
+  const target = await resolveRpcTarget({ cache: c.var.kv.cache });
 
   try {
     const { upstream, upstreamBody } = await relayToTarget(target, payload);

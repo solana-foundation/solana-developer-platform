@@ -10,7 +10,6 @@ import type {
   EarnVaultWithdrawal,
   EarnVaultWithdrawalResponse,
   EarnVaultWithdrawalsPage,
-  SdpEnvironment,
 } from "@sdp/types";
 import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -1030,7 +1029,6 @@ interface EarnVaultWithdrawalResolved {
   wallet: CustodyRuntimeWalletProjection;
   auth: ApiKeyContext;
   projectId: string;
-  environment: SdpEnvironment;
   requestId: string;
   idempotencyFingerprint: string;
 }
@@ -1096,7 +1094,6 @@ export async function extractEarnVaultWithdrawal(
     wallet,
     auth,
     projectId,
-    environment,
     requestId,
     idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
       environment,
@@ -1259,7 +1256,8 @@ export async function createEarnVaultWithdrawal(
     EarnVaultWithdrawalBody,
     EarnVaultWithdrawalResolved
   >(c);
-  const { position, wallet, auth, projectId, environment } = resolved;
+  const { position, wallet, auth, projectId } = resolved;
+  const { environment } = currentClusterScope();
   const requestId = resolved.requestId;
 
   const result = await withdrawFromVault(c.env, {

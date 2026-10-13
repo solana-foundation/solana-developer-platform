@@ -262,6 +262,26 @@ function withGenesisGuard(
 }
 
 /**
+ * Prove `endpointUrl` serves `cluster`, for callers that send raw JSON-RPC instead of going
+ * through `createClusterRpc()`. Shares the door's per-endpoint proof cache and in-flight probe,
+ * so an endpoint the door already proved costs nothing.
+ *
+ * @param cluster - The cluster the endpoint is configured for.
+ * @param endpointUrl - The managed pool endpoint.
+ * @returns Resolves once the endpoint holds an unexpired genesis match for `cluster`.
+ * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ */
+export async function assertEndpointServesCluster(
+  cluster: SolanaCluster,
+  endpointUrl: string
+): Promise<void> {
+  const genesisProofKey = `${cluster} ${endpointUrl}`;
+  const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
+  if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
+  await proveGenesis(createDefaultRpcTransport({ url: endpointUrl }), cluster, genesisProofKey);
+}
+
+/**
  * A transient failure that happened before the request left SDP (the genesis probe failed), so
  * the pool may try another endpoint even for `sendTransaction`.
  */
