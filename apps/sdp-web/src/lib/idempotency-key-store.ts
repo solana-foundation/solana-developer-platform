@@ -702,16 +702,17 @@ export function createActionMemo<T>(storeKey: string, schema: z.ZodType<T>): Act
  * What a `dashboardFetch` result settles about its key: a success is
  * definitive, a refusal is read by `keyAnswerFor`'s status rule, and a
  * failure below 400 (a followed redirect, a body nobody could read) or no
- * answer at all is open. A replay mark is not visible here, so a replayed
- * failure reads as a refusal, which can only keep a value longer.
+ * answer at all is open. A failure sdp-api marked `Idempotent-Replayed` is
+ * definitive, so the value retires on the same answer as the key.
  *
  * @param result - The `dashboardFetch` result.
  */
 export function dashboardFetchKeyAnswer(result: {
   ok: boolean;
   status: number | null;
+  replayed?: boolean;
 }): ActionKeyAnswer {
   if (result.ok) return "definitive";
   if (result.status === null || result.status < 400) return "open";
-  return keyAnswerFor(result.status, false);
+  return keyAnswerFor(result.status, result.replayed === true);
 }

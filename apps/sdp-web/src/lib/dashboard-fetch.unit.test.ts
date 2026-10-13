@@ -187,6 +187,19 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keys[2]).not.toBe(keys[1]);
   });
 
+  it("reports a replayed failure to dashboardFetch's caller", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/requests`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(400, { "Idempotent-Replayed": "true" }))
+    );
+    const result = await dashboardFetch("/api/dashboard/payments/requests", {
+      method: "POST",
+      body: { amount: "1" },
+    });
+    expect(result).toMatchObject({ ok: false, status: 400, replayed: true });
+  });
+
   it("holds the key when the request never got an answer", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = vi

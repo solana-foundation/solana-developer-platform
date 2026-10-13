@@ -442,6 +442,15 @@ function PaymentRequestCreateForm({
         contact?.id ?? null,
         expiry,
       ]);
+      // Read from the clock once per action, so a retry resends the same body
+      // under the first attempt's key.
+      const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(expiry));
+      if (expiresAt === undefined) {
+        // The retry's frozen expiry has passed: not sent. Show the list to check.
+        toast.error(t("DashboardPayments.requests.staleRetryCheckList"));
+        router.push(projectHref(PAYMENT_REQUESTS_HREF));
+        return;
+      }
       const res = await dashboardFetch<{ data: PaymentRequest }>(
         "/api/dashboard/payments/requests",
         {
@@ -451,9 +460,7 @@ function PaymentRequestCreateForm({
             token: token.mintAddress,
             amount: amount.trim(),
             counterpartyId: contact ? contact.id : null,
-            // Read from the clock once per action, so a retry resends the same
-            // body under the first attempt's key.
-            expiresAt: expiresAtForAction(input, () => resolveExpiryDate(expiry)),
+            expiresAt,
           },
         }
       );

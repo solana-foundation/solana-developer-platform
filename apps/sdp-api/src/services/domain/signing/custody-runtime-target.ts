@@ -40,7 +40,7 @@ import {
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { privyWalletExternalId } from "./provider-wallet-lifecycle";
-import { boundSigningTime } from "./signing-timeout";
+import { boundSigningTime, custodySigningTimeoutMs } from "./signing-timeout";
 
 type ConfigAdapterResolver = (
   organizationId: string,
@@ -632,7 +632,11 @@ export class CustodyRuntimeTargets {
       target.kind === "config"
         ? await getConfigAdapter(organizationId, target.config)
         : await this.getConnectionAdapter(target, target.wallet);
-    const signer = await getTransactionSigner(adapter, target.wallet);
+    const signer = await getTransactionSigner(
+      adapter,
+      target.wallet,
+      custodySigningTimeoutMs(this.env)
+    );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
     // A start reads the organization's live row each time it signs; an exit
     // reads nothing.
@@ -1304,7 +1308,8 @@ function sortRuntimeWallets(
 
 function getTransactionSigner(
   adapter: SigningPort,
-  wallet: RuntimeWallet
+  wallet: RuntimeWallet,
+  timeoutMs: number
 ): Promise<TransactionSigner> {
   if (!isFullSigningPort(adapter)) {
     throw new SigningError(
@@ -1314,7 +1319,9 @@ function getTransactionSigner(
   }
   // Bounded, so a hung custody provider fails the request instead of holding
   // its Idempotency-Key (HOO-1918).
-  return adapter.getTransactionSigner(wallet.walletId, wallet.publicKey).then(boundSigningTime);
+  return adapter
+    .getTransactionSigner(wallet.walletId, wallet.publicKey)
+    .then((signer) => boundSigningTime(signer, timeoutMs));
 }
 
 function connectionTargetSelect(): string {

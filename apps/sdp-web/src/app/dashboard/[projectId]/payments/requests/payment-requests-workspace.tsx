@@ -267,6 +267,15 @@ function CreateRequestModal({
       result.data.expiry,
     ]);
 
+    // Read from the clock once per action, so a retry resends the same body
+    // under the first attempt's key.
+    const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(result.data.expiry));
+    if (expiresAt === undefined) {
+      // The retry's frozen expiry has passed: not sent. Close and refresh the list.
+      toast.error(t("DashboardPayments.requests.staleRetryCheckList"));
+      onCreated(null);
+      return;
+    }
     setSubmitting(true);
     const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
       method: "POST",
@@ -275,9 +284,7 @@ function CreateRequestModal({
         token: result.data.token,
         amount: result.data.amount,
         counterpartyId,
-        // Read from the clock once per action, so a retry resends the same
-        // body under the first attempt's key.
-        expiresAt: expiresAtForAction(input, () => resolveExpiryDate(result.data.expiry)),
+        expiresAt,
       },
     });
     settleExpiresAt(input, res);
