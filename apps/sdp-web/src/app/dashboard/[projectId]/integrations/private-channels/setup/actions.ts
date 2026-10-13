@@ -1,6 +1,6 @@
 "use server";
 
-import { privateChannelInstanceInputSchema } from "@sdp/private-channels";
+import { privateChannelInstanceInputSchema } from "@sdp/private-channels/schema";
 import type {
   PrivateChannelHealth,
   PrivateChannelInstance,
