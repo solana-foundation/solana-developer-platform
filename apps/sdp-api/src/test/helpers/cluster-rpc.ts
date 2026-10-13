@@ -72,18 +72,6 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
 }
 
 /**
- * Whether `input` targets a server on this machine, such as the local Clerk issuer serving JWKS.
- *
- * @param input - The resource a `fetch` call was made with.
- * @returns True when the request URL's host is a loopback address.
- */
-function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
-  const requestUrl =
-    typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url);
-  return LOOPBACK_HOSTNAMES.has(requestUrl.hostname);
-}
-
-/**
  * The cluster and parsed body of a JSON-RPC fetch the stub intercepts.
  *
  * @param input - The fetch target kit passed.
@@ -102,6 +90,18 @@ function readJsonRpcFetch(
     throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
   }
   return { cluster: clusterForUrl(input), body: JSON.parse(init.body) };
+}
+
+/**
+ * Whether `input` targets a server on this machine, such as the local Clerk issuer serving JWKS.
+ *
+ * @param input - The resource a `fetch` call was made with.
+ * @returns True when the request URL's host is a loopback address.
+ */
+function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
+  const requestUrl =
+    typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url);
+  return LOOPBACK_HOSTNAMES.has(requestUrl.hostname);
 }
 
 /**
@@ -189,6 +189,9 @@ export function installClusterRpcRequestLog(): ClusterRpcRequestLog {
   beforeEach(() => {
     const stubbedFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
+      if (isLoopbackRequest(input)) {
+        return stubbedFetch(input, init);
+      }
       const { cluster, body } = readJsonRpcFetch(input, init);
       const { method, params } = jsonRpcParamsSchema.parse(body);
       requests.push({ cluster, method, params });
