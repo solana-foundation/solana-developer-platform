@@ -556,6 +556,25 @@ function jsonTextWithBigInts(value: unknown): string {
 }
 
 /**
+ * Parse a JSON-RPC request body, keeping every integer beyond `Number.MAX_SAFE_INTEGER` exact: the
+ * reviver reads the integer's source text and returns a bigint, which kit's transport writes back
+ * as the bare integer. Safe integers and every other value parse as `JSON.parse` would.
+ *
+ * @param jsonText - The request body.
+ * @returns The parsed body, large integers as bigints.
+ */
+function parseJsonWithLargeIntegers(jsonText: string): unknown {
+  return JSON.parse(jsonText, (_key, value: unknown, context?: { source?: string }) =>
+    typeof value === "number" &&
+    !Number.isSafeInteger(value) &&
+    context?.source !== undefined &&
+    /^-?\d+$/.test(context.source)
+      ? BigInt(context.source)
+      : value
+  );
+}
+
+/**
  * A `fetch` for a JSON-RPC client that can only dial a URL (a web3.js `Connection`): it ignores
  * the URL it is called with and sends the JSON-RPC body through the open cluster scope's managed
  * pool, so the genesis guard, failover and cooldowns are the same as `createClusterRpc()`'s, and
@@ -580,7 +599,7 @@ export function createClusterJsonRpcFetch(options: ClusterRpcOptions): typeof fe
     if (typeof init?.body !== "string") {
       throw new TypeError("The cluster JSON-RPC fetch sends only a JSON string body");
     }
-    const payload: unknown = JSON.parse(init.body);
+    const payload = parseJsonWithLargeIntegers(init.body);
     const response = await boundedTransport<unknown>({
       payload,
       ...(init.signal ? { signal: init.signal } : {}),

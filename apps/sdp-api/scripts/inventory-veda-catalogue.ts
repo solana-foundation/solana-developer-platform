@@ -25,11 +25,12 @@
  *   pnpm --filter @sdp/api earn:inventory:veda          # fetch + render
  *   pnpm --filter @sdp/api earn:inventory:veda:render   # re-render, no network
  *
- * NO credential, like Kamino's: Veda is read entirely on chain. It does need an
- * RPC endpoint per cluster (`SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`),
- * and `readVedaVaults` proves each endpoint's genesis hash before reading a
- * single account — so a mainnet URL in the devnet slot fails loudly instead of
- * quietly inventorying the wrong chain.
+ * NO credential, like Kamino's: Veda is read entirely on chain. Each cluster is
+ * read through the door inside that cluster's scope, so it needs the cluster's
+ * managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`), and every pool
+ * endpoint's genesis hash is proven before a single account is read — so a
+ * mainnet URL in the devnet slot fails loudly instead of quietly inventorying
+ * the wrong chain.
  *
  * Re-render only re-formats the committed snapshot; outcomes are baked in at
  * fetch time, so after changing an admission rule you must re-`fetch`.
@@ -39,7 +40,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { vedaLiquidity, vedaVaultName } from "@sdp/earn/providers/veda/client";
 import { readVedaVaults, VEDA_UNSET_AUTHORITY } from "@sdp/earn/providers/veda/vault-state";
-import { SOLANA_CLUSTERS, type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import {
+  SDP_ENVIRONMENT_BY_CLUSTER,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import {
   isVedaDepositMint,
   VEDA_DEPOSIT_TOKEN_SYMBOLS,
@@ -112,12 +119,6 @@ type VaultRow = z.infer<typeof vaultRowSchema>;
 type ClusterInventory = z.infer<typeof clusterSchema>;
 type Inventory = z.infer<typeof inventorySchema>;
 
-function rpcUrlFor(cluster: SolanaCluster): string {
-  const value =
-    cluster === "devnet" ? process.env.SOLANA_DEVNET_RPC_URL : process.env.SOLANA_MAINNET_RPC_URL;
-  return (value ?? "").trim();
-}
-
 async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventory> {
   const deployment = vedaDeployment(cluster);
   if (!deployment) {
@@ -129,18 +130,11 @@ async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventor
     };
   }
 
-  const rpcUrl = rpcUrlFor(cluster);
-  if (rpcUrl === "") {
-    return {
-      cluster,
-      skipped: `set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to inventory this cluster`,
-      configuredVaults: deployment.vaultStateAddresses.length,
-      rows: [],
-    };
-  }
-
   console.log(`Reading ${deployment.vaultStateAddresses.length} ${cluster} vault(s)…`);
-  const entries = await readVedaVaults(rpcUrl, cluster, deployment);
+  const entries = await runInClusterScope(
+    { projectId: null, environment: SDP_ENVIRONMENT_BY_CLUSTER[cluster] },
+    () => readVedaVaults(cluster, deployment)
+  );
 
   const rows = entries.map((entry): VaultRow => {
     const assets: AssetRow[] = entry.assets
