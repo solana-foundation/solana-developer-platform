@@ -57,7 +57,6 @@ export {
   VEDA_USER_WITHDRAW_STATE_ACCOUNT_SIZE,
   VEDA_WITHDRAW_REQUEST_ACCOUNT_SIZE,
 } from "./queue-rent";
-export { createVedaRpc, VEDA_RPC_REQUEST_TIMEOUT_MS, withVedaRpcTimeout } from "./rpc";
 export {
   assertVedaVaultUsable,
   buildVedaDepositPlan,

@@ -15,11 +15,11 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
+import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
-import { createKaminoReadRpc, createKaminoRpc } from "./rpc";
 import {
   buildKaminoDepositPlan,
   buildKaminoWithdrawPlan,
@@ -31,6 +31,12 @@ import {
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 
 export { KAMINO_POSITION_READ_CONCURRENCY } from "./concurrency";
+
+/**
+ * Maximum time a single Kamino RPC request may hold a worker open. Applied at the transport, so
+ * klend-sdk's own vault, reserve, farm and exchange-rate reads are bounded too.
+ */
+export const KAMINO_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * API-owned execution guard for one provider operation. The API injects its
@@ -94,48 +100,45 @@ export class KaminoVaultDirectClient
   implements EarnVaultDepositQuoteProvider, EarnVaultWithdrawQuoteProvider
 {
   /**
-   * Where a PROVEN RPC endpoint comes from and how its operation is bounded.
-   *
-   * Injected rather than read from `ctx.env.SOLANA_RPC_URL` directly, because
-   * that variable is PROCESS-level while the cluster is PER-REQUEST: syncing the
-   * sandbox environment inside a production deployment reaches this code with a
-   * MAINNET url. The API must prove the resolved URL's genesis before returning
-   * it. Keeping that resolver inside `runtime` makes proof a class invariant for
-   * deposit, positions, and future chain capabilities rather than something a
-   * route has to remember.
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
    */
-  constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: KaminoVaultOperationRunner
-  ) {
+  constructor(private readonly runOperation: KaminoVaultOperationRunner) {
     super();
   }
 
-  private async runtime(ctx: EarnRuntimeContext): Promise<KaminoRuntime> {
-    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-    if (!rpcUrl.trim()) {
-      throw new SdpKaminoError(
-        "VAULT_UNREADABLE",
-        `No Solana RPC endpoint configured for ${cluster}; Kamino cannot build a transaction.`
-      );
-    }
-    return { cluster, rpcUrl };
+  /**
+   * The operation's runtime: the request's cluster and the door clients for the open cluster
+   * scope, built here inside the scope so nothing below reads it. The door proves each endpoint's
+   * genesis before its first request.
+   *
+   * @param ctx - The request's runtime context.
+   * @returns The runtime every chain capability receives.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+   */
+  private runtime(ctx: EarnRuntimeContext): KaminoRuntime {
+    return {
+      cluster: CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment],
+      rpc: createClusterBoundedRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+      readRpc: createClusterReadRpc({ timeoutMs: KAMINO_RPC_REQUEST_TIMEOUT_MS }),
+    };
   }
 
-  /** Every chain capability enters through this proof-then-deadline boundary. */
+  /**
+   * Every chain capability enters through this runtime-then-deadline boundary.
+   *
+   * @param ctx - The request's runtime context.
+   * @param label - The operation's name, for the deadline's error.
+   * @param operation - The chain work, given the runtime and the deadline check.
+   * @returns Whatever `operation` returns.
+   */
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
     operation: (runtime: KaminoRuntime, assertActive: () => void) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
-      // Endpoint resolution/proof and provider work are one operation, so they
-      // consume one deadline rather than receiving independent budgets.
-      const runtime = await this.runtime(ctx);
+      const runtime = this.runtime(ctx);
       assertActive();
       return operation(runtime, assertActive);
     });
@@ -182,7 +185,7 @@ export class KaminoVaultDirectClient
       ctx,
       "Quoting the vault deposit",
       async (runtime, assertActive) => {
-        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        const slot = await runtime.rpc.getSlot().send();
         assertActive();
         return quoteKaminoDeposit(
           runtime,
@@ -248,7 +251,7 @@ export class KaminoVaultDirectClient
       ctx,
       "Building the vault withdrawal",
       async (runtime, assertActive) => {
-        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        const slot = await runtime.rpc.getSlot().send();
         assertActive();
         return buildKaminoWithdrawPlan(
           runtime,
@@ -283,7 +286,7 @@ export class KaminoVaultDirectClient
       ctx,
       "Quoting the vault withdrawal",
       async (runtime, assertActive) => {
-        const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+        const slot = await runtime.rpc.getSlot().send();
         assertActive();
         return quoteKaminoWithdraw(
           runtime,
@@ -326,7 +329,7 @@ export class KaminoVaultDirectClient
 
       // One shared slot makes the page internally consistent. The client carries
       // the same transport deadline as every nested Kamino SDK read below.
-      const slot = await createKaminoReadRpc(runtime.rpcUrl).getSlot().send();
+      const slot = await runtime.readRpc.getSlot().send();
       assertActive();
 
       const results = await readKaminoPositions(

@@ -615,7 +615,7 @@ async function settleMovement(
 }
 
 async function observeKaminoDepositReceipt(
-  chain: Pick<ChainObservation, "cluster" | "rpcUrl">,
+  chain: Pick<ChainObservation, "cluster" | "rpc">,
   movement: EarnMovementRow,
   position: EarnPositionRow
 ): Promise<KaminoDepositReceipt | null> {
@@ -631,7 +631,7 @@ async function observeKaminoDepositReceipt(
   )
     return null;
   try {
-    return await readKaminoDepositReceipt(chain, {
+    return await readKaminoDepositReceipt(chain.rpc, chain.cluster, {
       signature: movement.signature,
       owner,
       vault: position.vault_address,
@@ -662,6 +662,7 @@ export async function repairUnvaluedKaminoDeposits(
   for (const [environment, rows] of groupByEnvironment(movements)) {
     const cluster = earnClusterFor(environment);
     const rpcUrl = resolveClusterRpcUrl(env, cluster);
+    const rpc = createRpc(env, { rpcUrl });
     try {
       await assertClusterEndpoint(env, cluster, rpcUrl);
     } catch (error) {
@@ -680,7 +681,7 @@ export async function repairUnvaluedKaminoDeposits(
           positionId: movement.position_id,
         });
         const receipt = position
-          ? await observeKaminoDepositReceipt({ cluster, rpcUrl }, movement, position)
+          ? await observeKaminoDepositReceipt({ cluster, rpc }, movement, position)
           : null;
         if (!receipt) {
           stats.unobserved += 1;

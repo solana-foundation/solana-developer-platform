@@ -3,6 +3,7 @@ export {
   createWisdomTreeChainReader,
   tokenAccountBaseUnits,
   type WisdomTreeChainReader,
+  type WisdomTreeChainRpc,
 } from "./chain";
 export {
   assertWisdomTreeNotPortfolioProvider,

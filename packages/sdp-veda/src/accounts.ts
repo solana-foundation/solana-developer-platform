@@ -1,6 +1,10 @@
-import type { Address } from "@solana/kit";
+import type {
+  Address,
+  GetAccountInfoApi,
+  GetMinimumBalanceForRentExemptionApi,
+  Rpc,
+} from "@solana/kit";
 import { SdpVedaError } from "./errors";
-import { createVedaRpc } from "./rpc";
 
 /**
  * Whether an account currently exists on chain.
@@ -13,9 +17,16 @@ import { createVedaRpc } from "./rpc";
  *
  * Outside `./sdk.ts` because it needs no Veda SDK — just this repo's kit —
  * matching `./mint.ts`.
+ *
+ * @param rpc - A client for the plan's cluster.
+ * @param account - The account to look up.
+ * @returns Whether the account exists.
+ * @throws SdpVedaError `VAULT_UNREADABLE` when the read fails.
  */
-export async function accountExists(rpcUrl: string, account: Address): Promise<boolean> {
-  const rpc = createVedaRpc(rpcUrl);
+export async function accountExists(
+  rpc: Rpc<GetAccountInfoApi>,
+  account: Address
+): Promise<boolean> {
   try {
     const result = await rpc
       .getAccountInfo(account, { encoding: "base64", dataSlice: { offset: 0, length: 0 } })
@@ -33,12 +44,16 @@ export async function accountExists(rpcUrl: string, account: Address): Promise<b
  * plan targets rather than computed locally: rent parameters are cluster
  * state, and a hardcoded rate silently under-funds the day they change
  * (devnet's has already moved once during this integration).
+ *
+ * @param rpc - A client for the plan's cluster.
+ * @param bytes - The account's data size.
+ * @returns The rent-exempt minimum in lamports.
+ * @throws SdpVedaError `VAULT_UNREADABLE` when the read fails.
  */
 export async function minimumBalanceForRentExemption(
-  rpcUrl: string,
+  rpc: Rpc<GetMinimumBalanceForRentExemptionApi>,
   bytes: number
 ): Promise<bigint> {
-  const rpc = createVedaRpc(rpcUrl);
   try {
     return BigInt(await rpc.getMinimumBalanceForRentExemption(BigInt(bytes)).send());
   } catch (cause) {
