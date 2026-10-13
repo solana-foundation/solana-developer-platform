@@ -56,19 +56,24 @@ async function rotateScopeClusterEndpoints(
 }
 
 /**
- * The relay target for one managed endpoint, labelled without its credentials.
+ * The relay target for one managed endpoint, labelled without its credentials. A value that
+ * does not parse as a URL is labelled by its provider instead, so it fails when sent, like any
+ * unhealthy endpoint, rather than aborting the whole pool.
  *
  * @param cluster - The cluster the endpoint is configured for.
  * @param endpoint - A managed pool endpoint.
  * @returns The relay target for that endpoint.
  */
 function toRelayTarget(cluster: SolanaCluster, endpoint: ManagedRpcEndpoint): ResolvedRpcTarget {
-  const { protocol, host } = new URL(endpoint.endpointUrl);
+  const parsedUrl = URL.parse(endpoint.endpointUrl);
   return {
     cluster,
     providerId: endpoint.providerId,
     endpoint: endpoint.endpointUrl,
-    endpointLabel: `${protocol}//${host}`,
+    endpointLabel:
+      parsedUrl === null
+        ? `unparseable ${endpoint.providerId} URL`
+        : `${parsedUrl.protocol}//${parsedUrl.host}`,
   };
 }
 
