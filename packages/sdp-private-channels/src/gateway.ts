@@ -40,7 +40,7 @@ export function createChannelGatewayRpc(
 ): SolanaRpc {
   return createEndpointRpc(gatewayUrl, {
     timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
-    ...(options?.headers ? { headers: options.headers } : {}),
+    headers: options?.headers,
   });
 }
 
