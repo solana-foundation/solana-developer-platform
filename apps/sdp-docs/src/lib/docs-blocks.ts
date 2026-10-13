@@ -37,7 +37,8 @@ import {
  * checker. Both use one string, so the page and its text agree by construction.
  */
 
-const escapeCell = (value: string) => value.replace(/\|/g, "\\|");
+// Backslashes first, so an escaped pipe cannot be un-escaped by the cell text.
+const escapeCell = (value: string) => value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 
 function table(header: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.map(escapeCell).join(" | ")} |`;

@@ -128,7 +128,8 @@ export const ROTATE_PROVIDERS_TOKEN = '"moonpay"';
 
 /** The ramp providers this build publishes, in catalog order. */
 export function publishedRampProviderIds(published: readonly string[]): string[] {
-  return DOCS_RAMP_PROVIDERS.map((entry) => entry.provider).filter((id) => published.includes(id));
+  const publishedIds = new Set(published);
+  return DOCS_RAMP_PROVIDERS.map((entry) => entry.provider).filter((id) => publishedIds.has(id));
 }
 
 /** What each API-key operation family covers; its types come from the manifest. */

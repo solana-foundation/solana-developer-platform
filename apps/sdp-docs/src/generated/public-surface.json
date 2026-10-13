@@ -12,12 +12,7 @@
     "private_channels",
     "helius_rings"
   ],
-  "rampProviders": [
-    "moonpay",
-    "bvnk",
-    "coinbase",
-    "stripe"
-  ],
+  "rampProviders": ["moonpay", "bvnk", "coinbase", "stripe"],
   "allowedOperations": [
     {
       "family": "privacy",
@@ -46,10 +41,7 @@
     },
     {
       "family": "ramp",
-      "types": [
-        "ramp_onramp_quote",
-        "ramp_offramp_quote"
-      ]
+      "types": ["ramp_onramp_quote", "ramp_offramp_quote"]
     },
     {
       "family": "issuance",
@@ -71,10 +63,7 @@
     },
     {
       "family": "program",
-      "types": [
-        "dvp_fund",
-        "dvp_settle"
-      ]
+      "types": ["dvp_fund", "dvp_settle"]
     }
   ],
   "allModules": [
@@ -90,10 +79,5 @@
     "private_channels",
     "helius_rings"
   ],
-  "allRampProviders": [
-    "moonpay",
-    "bvnk",
-    "coinbase",
-    "stripe"
-  ]
+  "allRampProviders": ["moonpay", "bvnk", "coinbase", "stripe"]
 }
