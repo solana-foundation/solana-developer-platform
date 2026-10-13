@@ -61,7 +61,7 @@ async function insertTrade(id: string, swapDvp: string): Promise<void> {
          user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
          decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status
+         escrow_a, escrow_b, status, environment
        ) VALUES (?, ?, ?, ?,
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY', ?, ?,
          'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
@@ -69,7 +69,7 @@ async function insertTrade(id: string, swapDvp: string): Promise<void> {
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
          'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', 6, 6, '1000', '2000',
          '1900000000', ?, ?, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
-         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created')
+         '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', 'created', 'sandbox')
        ON CONFLICT (id) DO NOTHING`
     )
     .bind(
