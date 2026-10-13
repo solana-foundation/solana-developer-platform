@@ -200,7 +200,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     await inClusterScope("sandbox", () =>
       reconcileSponsorshipBudgets(
-        { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+        { SOLANA_NETWORK: "devnet", KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env,
         deps
       )
     );
@@ -216,39 +216,36 @@ describe("reconcileSponsorshipBudgets", () => {
     repository.listReconciliationCandidates.mockImplementation(async (network: string) =>
       network === "mainnet" ? [reservation({ id: "reservation_mainnet", network: "mainnet" })] : []
     );
-    const getProviderConfiguration = vi.fn(async (cluster: string) => {
-      if (cluster === "mainnet-beta") throw new Error("Kora is not configured for mainnet-beta");
-      return PROVIDER_CONFIGURATION;
-    });
 
     await expect(
       inClusterScope("production", () =>
         reconcileSponsorshipBudgets(
-          { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+          { SOLANA_NETWORK: "devnet", KORA_RPC_URL_DEVNET: "https://kora-devnet.example" } as Env,
           {
             repository,
             budgetRedis,
             getTransaction,
             isBlockhashValid,
-            getProviderConfiguration,
             now: () => new Date("2026-08-03T10:05:00.000Z"),
             sleep: vi.fn().mockResolvedValue(undefined),
           }
         )
       )
-    ).rejects.toThrow("Kora security configuration is unavailable");
+    ).rejects.toMatchObject({
+      message: "Kora security configuration is unavailable",
+      cause: { name: "FeePaymentError", code: "PROVIDER_NOT_AVAILABLE" },
+    });
 
-    expect(getProviderConfiguration).toHaveBeenCalledWith("mainnet-beta");
     expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("mainnet");
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });
 
   it.each([
-    { environment: "sandbox", network: "devnet", cluster: "devnet" },
-    { environment: "production", network: "mainnet", cluster: "mainnet-beta" },
+    { environment: "sandbox", network: "devnet" },
+    { environment: "production", network: "mainnet" },
   ] as const)(
     "reconciles only the $network reservations inside a $environment scope",
-    async ({ environment, network, cluster }) => {
+    async ({ environment, network }) => {
       const { repository, getProviderConfiguration, runIn } = harness(reservation());
       repository.listReconciliationCandidates.mockImplementation(
         async (candidateNetwork: string) =>
@@ -265,7 +262,7 @@ describe("reconcileSponsorshipBudgets", () => {
       expect(repository.getGlobalPolicy.mock.calls.map(([policyNetwork]) => policyNetwork)).toEqual(
         [network]
       );
-      expect(getProviderConfiguration).toHaveBeenCalledExactlyOnceWith(cluster);
+      expect(getProviderConfiguration).toHaveBeenCalledExactlyOnceWith();
       expect(
         repository.settleReservation.mock.calls.map(([reservationId]) => reservationId)
       ).toEqual([`reservation_${network}`]);

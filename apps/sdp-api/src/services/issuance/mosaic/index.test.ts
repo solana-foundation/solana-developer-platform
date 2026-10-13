@@ -16,7 +16,6 @@ const PROJECT_ID = "prj_mosaic_sponsorship_test";
 const SIGNER = createNoopSigner(address("11111111111111111111111111111111"));
 const PRODUCTION_SPONSORSHIP_SCOPE: SponsorshipScope = {
   environment: "production",
-  cluster: "mainnet-beta",
   organizationId: "org_mosaic_sponsorship_test",
   projectId: PROJECT_ID,
   actor: { type: "api_key", id: "key_mosaic_sponsorship_test" },
@@ -35,7 +34,7 @@ describe("createMosaicService sponsorship gate", () => {
     vi.clearAllMocks();
   });
 
-  it("lets the wallet pay when only the process cluster's Kora is configured", () => {
+  it("lets the wallet pay when only devnet's Kora is configured", () => {
     createInProduction(env);
 
     expect(createSponsorshipFeePayment).not.toHaveBeenCalled();

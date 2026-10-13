@@ -36,3 +36,23 @@ export function getIntegrationLaneKora(): IntegrationLaneKora {
   }
   throw new Error(`SURFPOOL_CLUSTER must be devnet or mainnet-beta, got ${laneCluster}`);
 }
+
+/** The lane Kora once its URL is known to be configured. */
+export interface ConfiguredIntegrationLaneKora extends IntegrationLaneKora {
+  rpcUrl: string;
+}
+
+/**
+ * The lane Kora for a suite that only runs once it is configured.
+ *
+ * @returns The lane cluster's Kora with its URL present.
+ * @throws Error when the lane cluster's `KORA_RPC_URL_<CLUSTER>` is unset.
+ */
+export function requireIntegrationLaneKora(): ConfiguredIntegrationLaneKora {
+  const laneKora = getIntegrationLaneKora();
+  const { rpcUrl } = laneKora;
+  if (!rpcUrl) {
+    throw new Error(`${laneKora.rpcUrlEnvKey} is required for this Kora suite`);
+  }
+  return { ...laneKora, rpcUrl };
+}
