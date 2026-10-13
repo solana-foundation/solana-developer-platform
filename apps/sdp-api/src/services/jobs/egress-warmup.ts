@@ -30,15 +30,13 @@ export async function waitForEgress(params: {
         return { outcome: "stopped", elapsedMs: Date.now() - startedAt, attempts };
       }
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, params.intervalMs);
-        params.stopSignal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true }
-        );
+        const finish = () => {
+          clearTimeout(timer);
+          params.stopSignal.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, params.intervalMs);
+        params.stopSignal.addEventListener("abort", finish, { once: true });
       });
     }
   }
