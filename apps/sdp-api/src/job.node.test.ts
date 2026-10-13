@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
@@ -246,9 +247,9 @@ describe("runCronJob", () => {
       vi.mocked(waitForEgress)
         .mockImplementationOnce(async () => {
           await vi.advanceTimersByTimeAsync(30_000);
-          return { ready: true, elapsedMs: 30_000, attempts: 6 };
+          return { outcome: "ready", elapsedMs: 30_000, attempts: 6 };
         })
-        .mockResolvedValueOnce({ ready: true, elapsedMs: 30_000, attempts: 6 });
+        .mockResolvedValueOnce({ outcome: "ready", elapsedMs: 30_000, attempts: 6 });
       await runCronJob();
       expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(
         expect.any(Object),
@@ -266,7 +267,7 @@ describe("runCronJob", () => {
       rpc.answer("getBlockHeight", 1);
       vi.mocked(waitForEgress).mockImplementation(async ({ probe }) => {
         await probe();
-        return { ready: true, elapsedMs: 0, attempts: 1 };
+        return { outcome: "ready", elapsedMs: 0, attempts: 1 };
       });
 
       await runCronJob();
@@ -276,6 +277,23 @@ describe("runCronJob", () => {
       expect(rpc.calls.filter((call) => call.cluster === "mainnet-beta")).toEqual([]);
       expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
       expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    });
+
+    it("stops the other cluster's wait once the first cluster proves egress", async () => {
+      vi.mocked(waitForEgress).mockImplementation(async ({ stopSignal }) => {
+        if (currentClusterScope().environment === "sandbox") {
+          return { outcome: "ready", elapsedMs: 0, attempts: 1 };
+        }
+        await vi.waitFor(() => {
+          expect(stopSignal.aborted).toBe(true);
+        });
+        return { outcome: "stopped", elapsedMs: 0, attempts: 1 };
+      });
+
+      await runCronJob();
+
+      expect(waitForEgress).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     });
   });
 
