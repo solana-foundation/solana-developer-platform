@@ -30,6 +30,7 @@ import {
   type RpcProvidersKey,
   SECTIONS,
   type SelectOption,
+  unlistedRpcUrlErrors,
   type Values,
   validateValues,
 } from "@sdp/env-config";
@@ -378,11 +379,11 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const outPath = getOutPath(argv);
 
-  const values = isNonInteractive(argv)
-    ? collectFromEnv(process.env)
-    : await collectInteractively();
+  const nonInteractive = isNonInteractive(argv);
+  const values = nonInteractive ? collectFromEnv(process.env) : await collectInteractively();
 
   const errors = validateValues(values);
+  if (nonInteractive) Object.assign(errors, unlistedRpcUrlErrors(values));
   const entries = Object.entries(errors);
   if (entries.length > 0) {
     note("\nConfiguration is incomplete:");

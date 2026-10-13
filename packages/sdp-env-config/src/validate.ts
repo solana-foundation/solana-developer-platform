@@ -49,11 +49,7 @@ function validateField(f: EnvField, values: Values): string | undefined {
   return optionMembershipError(f, values, selected);
 }
 
-/**
- * Validate only visible fields: required-but-empty, pattern, and option membership.
- * An RPC URL whose provider is not in its cluster's list is an error too, since
- * the generated .env would drop it.
- */
+/** Validate only visible fields: required-but-empty, pattern, and option membership. */
 export function validateValues(values: Values): Errors {
   const errors: Errors = {};
   for (const f of FIELDS) {
@@ -65,6 +61,19 @@ export function validateValues(values: Values): Errors {
     const error = validateField(f, values);
     if (error) errors[f.key] = error;
   }
+  return errors;
+}
+
+/**
+ * An error for every RPC URL whose provider is not in its cluster's provider list, since the
+ * generated .env would drop it. For values supplied explicitly (the non-interactive configurator);
+ * a form drops a deselected provider's URL on purpose, so it does not run this.
+ *
+ * @param values - The collected values.
+ * @returns One error per dropped RPC URL, keyed by its field.
+ */
+export function unlistedRpcUrlErrors(values: Values): Errors {
+  const errors: Errors = {};
   for (const slot of RPC_ENDPOINT_SLOTS) {
     if (
       !(values[slot.key] ?? "").trim() ||
