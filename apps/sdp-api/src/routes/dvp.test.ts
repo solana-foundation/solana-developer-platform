@@ -335,7 +335,7 @@ async function seedTradeFor(params: {
          user_a_settlement_destination, user_b_settlement_destination,
          escrow_a, escrow_b,
          counterparty_account_id_a, counterparty_account_id_b,
-         status, escrow_a_amount, escrow_a_frozen
+         status, escrow_a_amount, escrow_a_frozen, environment
        ) VALUES (
          ?, ?, ?, ?,
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
@@ -350,7 +350,7 @@ async function seedTradeFor(params: {
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
          ?, ?,
-         'created', ?, ?
+         'created', ?, ?, 'sandbox'
        )`
     )
     .bind(
@@ -2088,6 +2088,23 @@ describe("DvP routes", () => {
       expect(body.data.trade.yourSide).toBe("a");
       expect(body.data.trade.kind).toBe("principal");
     });
+  });
+
+  it("404s a Sandbox party for a trade a Production project created naming its wallet", async () => {
+    await seedPartyOrg();
+    await seedTradeFor({ tradeId: "dvp_party_other_environment" });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET project_id = ?, environment = 'production' WHERE id = ?")
+      .bind(`${TEST_PROJECT.id}_production`, "dvp_party_other_environment")
+      .run();
+
+    const res = await app.request(
+      "/v1/dvp/trades/dvp_party_other_environment",
+      { headers: partyAuthHeaders() },
+      env
+    );
+
+    expect(res.status).toBe(404);
   });
 
   // `payments:write` says the key may write. It does not say which wallet, and

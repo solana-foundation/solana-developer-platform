@@ -196,14 +196,23 @@ export interface DvpTradeRepositoryContext {
 }
 
 export interface DvpTradeRepository {
-  /** Writes the row at `creating`, before the create transaction is broadcast. */
+  /**
+   * Writes the row at `creating`, before the create transaction is broadcast,
+   * in the open cluster scope's environment.
+   *
+   * @param row - The trade to insert.
+   * @returns The inserted trade.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   create(row: DvpTradeInsert): Promise<DvpTradeRow>;
   /**
-   * Atomically releases a failed attempt's key and inserts its replacement claim.
+   * Atomically releases a failed attempt's key and inserts its replacement claim
+   * in the open cluster scope's environment.
    *
    * @param failedRowId - Failed attempt to release, or null for a first claim.
    * @param row - The replacement claim to insert.
    * @returns The newly inserted claim.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   claimWithKeyRelease(failedRowId: string | null, row: DvpTradeInsert): Promise<DvpTradeRow>;
   /**
@@ -239,7 +248,8 @@ export interface DvpTradeRepository {
   /** Null when unknown. Lookup by the address a counterparty actually sees. */
   getBySwapDvp(scope: DvpTradeScope, swapDvp: Address): Promise<DvpTradeRow | null>;
   /**
-   * Trades the reconciler should look at this tick, across every project.
+   * Trades the reconciler should look at this tick, across every project in the
+   * open cluster scope's environment.
    *
    * Three lanes, each stalest observation first, dealt in rounds of two live
    * trades, one expired trade still holding funds or a claim, and one trade kept
@@ -247,9 +257,14 @@ export interface DvpTradeRepository {
    * left in it within seven days of its expiry. An empty lane gives its turn to
    * the others, so no lane can starve another (PRO-1930, PRO-1974).
    *
-   * Deliberately UNSCOPED, unlike every read above. The reconciler is not acting
-   * for a caller — it is a background sweep, and scoping it to a project would
-   * mean a trade only advances while someone happens to be looking at it.
+   * Deliberately not project-scoped, unlike every read above. The reconciler is
+   * not acting for a caller — it is a background sweep, and scoping it to a
+   * project would mean a trade only advances while someone happens to be looking
+   * at it.
+   *
+   * @param limit - Trades to return, an integer from 1 to 256.
+   * @returns The tick's trades in lane order.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listOpenForReconciliation(limit: number): Promise<DvpTradeRow[]>;
   /**
@@ -326,10 +341,16 @@ export interface DvpTradeRepository {
   /** Frees a close lock, and only the one this signature holds. */
   releaseCloseClaim(id: string, signature: Signature): Promise<void>;
   /**
-   * Frees close locks whose transaction can no longer land.
+   * Frees close locks whose transaction can no longer land, on trades in the
+   * open cluster scope's environment.
    *
    * Past its last valid block height a close either landed, and the reconciler
-   * records the close from the chain, or never will.
+   * records the close from the chain, or never will. The height is a fact about
+   * one cluster, so only that cluster's trades are compared against it.
+   *
+   * @param blockHeight - The scope cluster's current block height.
+   * @returns How many locks were freed.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   releaseExpiredCloseClaims(blockHeight: bigint): Promise<number>;
   /**
@@ -360,7 +381,9 @@ export interface DvpTradeRepository {
    * appears in your list and arriving in both places would read as two trades.
    * Scoped by project rather than organization so an org that is genuinely both
    * the agent and a party — one project sets terms, another holds the wallet —
-   * still discovers it.
+   * still discovers it. Only trades in the open cluster scope's environment are
+   * returned: a trade on the other cluster names the same addresses but none
+   * of this environment's wallets can act on it.
    *
    * Reaching rows another organization owns is the point, and it is allowed by
    * exactly one thing: the `sdp_dvp_party_read` policy added in 0089, which
@@ -368,6 +391,14 @@ export interface DvpTradeRepository {
    * `user_a` or `user_b`. The address filter below is not the security boundary;
    * it is the query. The boundary is in the database and holds even if this
    * predicate is wrong.
+   *
+   * @param scope - The caller's organization, project and custody wallet addresses.
+   * @param scope.organizationId - The caller's organization.
+   * @param scope.projectId - The caller's project, whose own trades are excluded.
+   * @param scope.partyAddresses - The caller's custody wallet public keys.
+   * @param limit - Page size.
+   * @returns Open inbound trades, newest first.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listInboundForParty(scope: DvpInboundScope, limit: number): Promise<DvpTradeRow[]>;
   /**
@@ -384,6 +415,14 @@ export interface DvpTradeRepository {
    *
    * Callers must still decide WHICH leg is the caller's; being able to read a
    * trade is not permission to fund an arbitrary side of it.
+   *
+   * A trade in the other environment than the open cluster scope's reads as
+   * null, so a request on one cluster can never act on the other's trade.
+   *
+   * @param tradeId - The trade's id.
+   * @returns The trade, or null when it is unknown, unreadable to the caller, or
+   *   in the other environment.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   getByIdAsParty(tradeId: string): Promise<DvpTradeRow | null>;
 }

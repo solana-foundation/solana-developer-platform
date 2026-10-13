@@ -943,9 +943,10 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
 
   // This path is for a trade ANOTHER org created; reaching it for our own is
   // the scoped lookup refusing a wallet-scoped key, and answering here would
-  // launder the trade past its scope. `getByIdAsParty` is deliberately
-  // unfiltered and leans on RLS 0089, which enforces nothing in tests, so
-  // BOTH this guard and the key-scope check below are load-bearing.
+  // launder the trade past its scope. `getByIdAsParty` filters only by the
+  // scope's environment and otherwise leans on RLS 0089, which enforces
+  // nothing in tests, so BOTH this guard and the key-scope check below are
+  // load-bearing.
   if (trade.organizationId === auth.organizationId) {
     throw notFound("DvP trade not found");
   }

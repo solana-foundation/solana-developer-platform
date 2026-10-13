@@ -8,6 +8,7 @@
  * ordinary tenant isolation.
  */
 
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { z } from "zod";
 import type { RepositoryDbClient } from "./base";
 
@@ -97,7 +98,12 @@ export interface DvpLegFundingClaimRepository {
    * and what this table needs for exactly the same reason.
    *
    * Never touches a claim that was broadcast: `funding_tx` set means the row is
-   * a receipt rather than a lock.
+   * a receipt rather than a lock. Only claims on trades in the open cluster
+   * scope's environment are compared, because the height is that cluster's.
+   *
+   * @param blockHeight - The scope cluster's current block height.
+   * @returns How many claims were released.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   releaseExpired(blockHeight: bigint): Promise<number>;
   /**
@@ -106,7 +112,12 @@ export interface DvpLegFundingClaimRepository {
    * `releaseExpired` deliberately never touches a row with `funding_tx` set:
    * on the wire means possibly landed. Past the last-valid height only the
    * chain can say which, so resolution belongs to the reconciler's RPC read,
-   * never to the sweep.
+   * never to the sweep. Only claims on trades in the open cluster scope's
+   * environment are listed, because the height is that cluster's.
+   *
+   * @param blockHeight - The scope cluster's current block height.
+   * @returns The expired broadcast claims on open or expired trades.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listExpiredBroadcast(blockHeight: bigint): Promise<DvpLegFundingClaim[]>;
   /**
@@ -236,12 +247,15 @@ export function createPostgresDvpLegFundingClaimRepository(
     async releaseExpired(blockHeight) {
       const result = await db
         .prepare(
-          `DELETE FROM dvp_leg_funding_claims
-            WHERE funding_tx IS NULL
-              AND CAST(expiry_height AS NUMERIC) < ?
-            RETURNING trade_id`
+          `DELETE FROM dvp_leg_funding_claims c
+            USING dvp_trades t
+            WHERE t.id = c.trade_id
+              AND t.environment = ?
+              AND c.funding_tx IS NULL
+              AND CAST(c.expiry_height AS NUMERIC) < ?
+            RETURNING c.trade_id`
         )
-        .bind(blockHeight.toString())
+        .bind(currentClusterScope().environment, blockHeight.toString())
         .all<{ trade_id: string }>();
       return result.results.length;
     },
@@ -307,11 +321,12 @@ export function createPostgresDvpLegFundingClaimRepository(
                   c.signature, c.expiry_height, c.funding_tx
              FROM dvp_leg_funding_claims c
              JOIN dvp_trades t ON t.id = c.trade_id
-            WHERE c.funding_tx IS NOT NULL
+            WHERE t.environment = ?
+              AND c.funding_tx IS NOT NULL
               AND CAST(c.expiry_height AS NUMERIC) < ?
               AND t.status IN ('created', 'partially_funded', 'funded', 'expired')`
         )
-        .bind(blockHeight.toString())
+        .bind(currentClusterScope().environment, blockHeight.toString())
         .all<Record<string, unknown>>();
       return result.results.map(toDvpLegFundingClaim);
     },
