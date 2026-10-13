@@ -62,10 +62,11 @@ validation → **`authorize`** → **this step** → replay from the domain row 
   earlier `authorize` or `authorizeNone(reason)`; the stable route inventory pins every
   `authorizeNone` with its reason.
 - **Access, never state.** `authorize` answers "may this caller act on these resources?" (an API
-  key bound to the wallet, a schedule in the caller's project). A wallet-scoped key's bindings are
-  read fresh, deactivated wallets kept, never from the cached auth snapshot: the snapshot is built
-  from active wallets only, so it would refuse the replay of a request whose wallet was deactivated
-  since. Every id the request names (a counterparty account, a ramp deposit, a custody wallet) is
+  key bound to the wallet, a schedule in the caller's project). A wallet-scoped key's bindings come
+  from authentication, which reads them in its one uncached statement on every request (HOO-2048),
+  deactivated wallets kept; `authorize` checks them synchronously against `getAuth(c)` and never
+  re-reads them, so the replay of a request whose wallet was deactivated since is not refused.
+  Every id the request names (a counterparty account, a ramp deposit, a custody wallet) is
   looked up in the project here, whatever its status, so a wrong id is never stored as a 404 for
   24 hours. State ("the wallet is active", "the schedule is active") stays in the handler. A state
   check before this step would refuse the retry of a request that succeeded (the schedule is
@@ -218,7 +219,5 @@ lives in `@sdp/types`.
   issuance and ramps.
 - HOO-2046: stable routes validate path and query params at the route (the param sweep).
 - HOO-2047: payment requests in the public OpenAPI document.
-- HOO-2048: authorization reads wallet bindings fresh in the auth layer after #2262, instead of in
-  each `authorize` function.
 - Custody wallet create: an intent row before the provider call, for providers that do not dedupe
   on a request id (see "Two layers").

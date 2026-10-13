@@ -8,10 +8,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import {
-  replaceApiKeyWalletBindings,
-  upsertApiKeyWalletBinding,
-} from "@/services/api-key-wallets.service";
+import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -220,14 +217,6 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
         })
       )
     : undefined;
-  if (override.walletBindings) {
-    // Access checks read the bindings fresh (HOO-1918), so Postgres holds them too.
-    await replaceApiKeyWalletBindings(
-      getDb(env),
-      TEST_API_KEY.id,
-      override.walletBindings.map(({ walletId, permissions }) => ({ walletId, permissions }))
-    );
-  }
   await seedCachedApiKey(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,

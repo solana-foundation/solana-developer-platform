@@ -65,7 +65,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - **Idempotency-Key goes through one step, after authorize (hard rule).** Mutating routes of
   `stable` modules run `validate → authorize(fn) → idempotent()`; money routes use
   `key: "required"` at any stage. `authorize` checks access to every resource the request names
-  and never state, so a replay passes the same checks as a new request. No per-module key handling,
+  and never state, so a replay passes the same checks as a new request. Wallet bindings come from
+  authentication (`getAuth(c)`, read fresh per request); `authorize` never re-reads them. No per-module key handling,
   never on a route whose response carries a secret, and the domain row stays the recovery point.
   See `docs/decisions/0008-idempotency-keys.md`.
 - **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
