@@ -199,15 +199,15 @@ describe("providerFetchJson response schema", () => {
         { method: "GET" },
         quoteSchema
       ),
-      (error: unknown) => {
-        assert.ok(error instanceof SdpPaymentsError);
-        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
-        assert.equal(error.message, "moonpay returned an unexpected response");
-        assert.deepEqual(error.details, { provider: "moonpay" });
-        assert.deepEqual(error.diagnostics, {
+      (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(cause.message, "moonpay returned an unexpected response");
+        assert.deepEqual(cause.details, { provider: "moonpay" });
+        assert.deepEqual(cause.diagnostics, {
           issues: [{ path: "quoteCurrencyAmount", code: "invalid_type" }],
         });
-        assert.ok(!JSON.stringify(error.diagnostics).includes("jane.doe"));
+        assert.ok(!JSON.stringify(cause.diagnostics).includes("jane.doe"));
         return true;
       }
     );

@@ -209,11 +209,11 @@ describe("ramp provider contract", () => {
       it("fails closed on a response it cannot read", async () => {
         const { direction, exchange } = kit.malformedEstimate;
         replayExchanges([exchange]);
-        await assert.rejects(runEstimate(client, kit, direction, "sandbox"), (error: unknown) => {
-          assert.ok(error instanceof SdpPaymentsError);
-          assert.equal(error.code, "PROVIDER_UNAVAILABLE");
-          assert.equal(error.message, `${provider} returned an unexpected response`);
-          assert.ok(Array.isArray(error.diagnostics?.issues));
+        await assert.rejects(runEstimate(client, kit, direction, "sandbox"), (cause: unknown) => {
+          assert.ok(cause instanceof SdpPaymentsError);
+          assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+          assert.equal(cause.message, `${provider} returned an unexpected response`);
+          assert.ok(Array.isArray(cause.diagnostics?.issues));
           return true;
         });
       });
