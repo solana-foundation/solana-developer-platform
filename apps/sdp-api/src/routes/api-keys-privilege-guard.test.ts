@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -483,20 +484,27 @@ describe("API key privilege guards", () => {
 
 /** The custody wallet `wal_scope_own` names, so a binding to it resolves. */
 async function seedOwnScopeWallet(): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-       VALUES ('cust_privilege_scope', ?, ?, 'local', 'test-config',
-               'sdp-custody-encryption-v1', 'active')`
-    )
-    .bind(TEST_ORG.id, TEST_PROJECT.id)
-    .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES ('cwlt_privilege_scope', 'cust_privilege_scope', 'wal_scope_own',
-               'wal_scope_own_public_key', 'active')`
-    )
-    .run();
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cust_privilege_scope",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "local",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_privilege_scope",
+        owner: { kind: "config", custodyConfigId: "cust_privilege_scope" },
+        walletId: "wal_scope_own",
+        publicKey: "wal_scope_own_public_key",
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
 }
