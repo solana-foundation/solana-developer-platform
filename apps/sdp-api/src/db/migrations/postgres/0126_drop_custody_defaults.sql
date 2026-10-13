@@ -60,17 +60,6 @@ LOCK TABLE organizations, projects, custody_configs, custody_connections,
     custody_wallets, custody_scope_defaults
     IN ACCESS EXCLUSIVE MODE;
 
--- Deletes every custody config that belongs to a Production project, since the
--- project_environment foreign key below counts archived configs too. Stage and
--- Production applied this file while it still failed on such a config, and
--- held none; only dev drifted. The delete cascades to the config's
--- custody_wallets and custody_scope_defaults rows, and fails with 23503 if a
--- payments, earn, dvp, or issuance row still references one of those wallets.
-DELETE FROM custody_configs config
- USING projects project
- WHERE project.id = config.project_id
-   AND project.environment <> 'sandbox';
-
 -- Fails the migration, rather than deleting anything, when a custody
 -- connection is organization-scoped or bound to a credential outside its own
 -- project.
@@ -90,6 +79,18 @@ END;
 $$;
 
 DROP TABLE custody_scope_defaults;
+
+-- Deletes every custody config that belongs to a Production project, since the
+-- project_environment foreign key below counts archived configs too. Stage and
+-- Production applied this file while it still failed on such a config, and
+-- held none; only dev drifted. It runs after custody_scope_defaults is dropped,
+-- whose config foreign key is ON DELETE NO ACTION. The delete cascades to the
+-- config's custody_wallets, and fails with 23503 if a payments, earn, dvp, or
+-- issuance row still references one of those wallets.
+DELETE FROM custody_configs config
+ USING projects project
+ WHERE project.id = config.project_id
+   AND project.environment <> 'sandbox';
 
 ALTER TABLE custody_configs
     DROP CONSTRAINT custody_configs_default_wallet_fkey,

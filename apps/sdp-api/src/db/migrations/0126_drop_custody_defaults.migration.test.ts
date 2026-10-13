@@ -295,32 +295,67 @@ describe("0126 drop custody defaults migration", () => {
     ]);
   });
 
-  it("fails the migration and leaves it unrecorded when a custody config belongs to a Production project", async () => {
-    const tenant = await seedOrgProject(client, "0126_production_guard");
+  it("deletes every custody config on a Production project, with its saved default and wallets, and keeps the Sandbox config", async () => {
+    const tenant = await seedOrgProject(client, "0126_production_cleanup");
     const productionProjectId = `${tenant.projectId}_production`;
     await seedConfig({
-      id: "ccfg_0126_production_guard",
+      id: "ccfg_0126_production_cleanup_active",
       organizationId: tenant.organizationId,
       projectId: productionProjectId,
       provider: "privy",
       status: "active",
     });
-
-    await expect(runPostgresMigrations({ databaseUrl, migrationsDir })).rejects.toMatchObject({
-      code: RAISE_EXCEPTION,
-      message: "1 custody config(s) belong to a Production project",
+    await seedConfig({
+      id: "ccfg_0126_production_cleanup_archived",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      provider: "privy",
+      status: "archived",
+    });
+    await seedConfigWallet({
+      id: "cwal_0126_production_cleanup_production",
+      custodyConfigId: "ccfg_0126_production_cleanup_active",
+    });
+    await seedScopeDefault({
+      id: "csd_0126_production_cleanup",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      custodyConfigId: "ccfg_0126_production_cleanup_active",
+    });
+    await seedConfig({
+      id: "ccfg_0126_production_cleanup_sandbox",
+      organizationId: tenant.organizationId,
+      projectId: tenant.projectId,
+      provider: "privy",
+      status: "active",
+    });
+    await seedConfigWallet({
+      id: "cwal_0126_production_cleanup_sandbox",
+      custodyConfigId: "ccfg_0126_production_cleanup_sandbox",
     });
 
+    await runPostgresMigrations({ databaseUrl, migrationsDir });
+
+    expect(await appliedDefaultsDrop()).toEqual([{ version: CUSTODY_DEFAULTS_DROP_MIGRATION }]);
     expect(await configsOf(tenant.organizationId)).toEqual([
       {
-        id: "ccfg_0126_production_guard",
-        project_id: productionProjectId,
+        id: "ccfg_0126_production_cleanup_sandbox",
+        project_id: tenant.projectId,
         provider: "privy",
         status: "active",
         updated_at: seededAt,
       },
     ]);
-    expect(await appliedDefaultsDrop()).toEqual([]);
+    const wallets = await client.query<{ id: string; custody_config_id: string }>(
+      "SELECT id, custody_config_id FROM custody_wallets WHERE id = ANY($1) ORDER BY id",
+      [["cwal_0126_production_cleanup_production", "cwal_0126_production_cleanup_sandbox"]]
+    );
+    expect(wallets.rows).toEqual([
+      {
+        id: "cwal_0126_production_cleanup_sandbox",
+        custody_config_id: "ccfg_0126_production_cleanup_sandbox",
+      },
+    ]);
   });
 
   it("fails the migration and leaves it unrecorded when a connection is not bound to a credential scoped to its own project", async () => {
