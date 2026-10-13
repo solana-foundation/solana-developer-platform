@@ -4663,6 +4663,24 @@ describe("Payments routes — recurring", () => {
       );
     });
 
+    // Editing an active schedule signs and broadcasts a replacement subscription,
+    // so a PATCH without a key could broadcast twice on a retry.
+    it("refuses a PATCH without an Idempotency-Key before it signs anything", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const sendsBefore = send.mock.calls.length;
+
+      const response = await baseApp.request(
+        actionPath(activated.id),
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "2" }) },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorCode(response)).toBe("IDEMPOTENCY_KEY_REQUIRED");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
     it("lets a failed and a live attempt share a key, never two live ones", async () => {
       const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       const key = crypto.randomUUID();

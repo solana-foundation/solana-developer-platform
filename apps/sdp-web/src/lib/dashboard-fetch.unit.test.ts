@@ -302,6 +302,28 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // Editing an active schedule signs and broadcasts a replacement subscription.
+  it("keys a recurring edit, and refuses it when storage refuses its key", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const storage = installSessionStorage();
+    const fetchMock = statusFetchMock(200);
+    vi.stubGlobal("fetch", fetchMock);
+    const edit = () =>
+      dashboardRequest(`${PATH}/rp_1`, { method: "PATCH", body: '{"amount":"2"}' });
+
+    await edit();
+    expect(keyOfCall(fetchMock, 0)).toMatch(/^[0-9a-f-]{36}$/);
+
+    storage.refuseWrites = true;
+    const refused = await edit();
+
+    expect(refused.status).toBe(428);
+    expect(await refused.json()).toMatchObject({
+      error: { code: "IDEMPOTENCY_KEY_NOT_PERSISTED" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   // The refusal only drops a key it minted: a reused key belongs to an
   // unanswered attempt that may have written, and its retry still needs it.
   it("keeps an unanswered attempt's key through a storage refusal", async () => {
