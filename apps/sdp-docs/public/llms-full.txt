@@ -449,11 +449,11 @@ A key can carry a list of the operation families and types it may perform on the
 
 | Family | Covers | Operation types |
 | --- | --- | --- |
-| `privacy` | Private operations, by type | `rings_shield`, `rings_transfer_registered`, `rings_transfer_anonymous`, `rings_withdraw`, `rings_merge`, `rings_timelock_create`, `rings_timelock_settle`, `rings_zone_create`, `rings_ring_exit`, `rings_ring_entry` |
 | `payment` | Transfers, transfer batches, and recurring payment creation, updates and collections | `payment_transfer_execute`, `payment_transfer_batch_execute`, `recurring_payment_create`, `recurring_payment_update`, `recurring_payment_collection` |
 | `ramp` | On-ramp and off-ramp quotes | `ramp_onramp_quote`, `ramp_offramp_quote` |
 | `issuance` | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions | `issuance_allowlist_add_execute`, `issuance_allowlist_remove_execute`, `issuance_burn_execute`, `issuance_deploy_execute`, `issuance_force_burn_execute`, `issuance_freeze_execute`, `issuance_metadata_update_execute`, `issuance_mint_execute`, `issuance_pause_execute`, `issuance_seize_execute`, `issuance_unfreeze_execute`, `issuance_unpause_execute`, `issuance_update_authority_execute` |
 | `program` | Program operations, by type | `dvp_fund`, `dvp_settle` |
+| `privacy` | Private operations, by type | `rings_shield`, `rings_transfer_registered`, `rings_transfer_anonymous`, `rings_withdraw`, `rings_merge`, `rings_timelock_create`, `rings_timelock_settle`, `rings_zone_create`, `rings_ring_exit`, `rings_ring_entry` |
 
 Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
 
@@ -3228,7 +3228,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Ramp providers](/docs/payments/ramps-providers) for supported providers.
+Rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, move onchain, and exit back to fiat without stitching together provider-specific integrations. See [Ramp providers](/docs/payments/ramps-providers) for supported providers.
 
 Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements.
 
@@ -3476,12 +3476,12 @@ Configure both credential pairs for any provider you want to expose to test and 
 
 ## Capability matrix
 
-| Provider | Onramp | Offramp | Sandbox | Delivery mode | Best for | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| [MoonPay](/docs/payments/ramps-moonpay) | ✓ | ✓ | ✓ | `hosted` | Fast sandbox iteration; broad payment-method coverage (corridor-dependent). | Separate sandbox and production credentials, chosen per request. |
-| [BVNK](/docs/payments/ramps-bvnk) | ✓ | ✓ | ✓ | `manual_instructions` | Fast sandbox iteration; travel-rule and compliance party metadata. | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
-| [Coinbase](/docs/payments/ramps-coinbase) | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Onramp only, no off-ramp needed. | Rate estimates work in production; order creation is sandbox-only. |
-| [Stripe](/docs/payments/ramps-stripe) | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | Widget/session-embedded onramp UI; onramp only. | No separate sandbox credentials — supply a Stripe test-mode secret key. |
+| Provider | Onramp | Offramp | Sandbox | Delivery mode | Best for |
+| --- | --- | --- | --- | --- | --- |
+| [MoonPay](/docs/payments/ramps-moonpay) | ✓ | ✓ | ✓ | `hosted` | Fast sandbox iteration; broad payment-method coverage (corridor-dependent). |
+| [BVNK](/docs/payments/ramps-bvnk) | ✓ | ✓ | ✓ | `manual_instructions` | Fast sandbox iteration; travel-rule and compliance party metadata. |
+| [Coinbase](/docs/payments/ramps-coinbase) | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Onramp only, no off-ramp needed. |
+| [Stripe](/docs/payments/ramps-stripe) | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | Widget/session-embedded onramp UI; onramp only. |
 
 Each provider's page covers its configuration and limits.
 
@@ -3517,6 +3517,8 @@ Source: https://platform.solana.com/docs/payments/ramps-moonpay
 
 MoonPay is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "moonpay"`.
 
+MoonPay reads separate sandbox and production credentials, chosen per request.
+
 ## Configuration
 
 | Variable | Required | Notes |
@@ -3538,6 +3540,8 @@ Source: https://platform.solana.com/docs/payments/ramps-bvnk
 > Configure BVNK as an SDP ramp provider — credentials, capabilities, and limits.
 
 BVNK is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "bvnk"`.
+
+BVNK uses Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request.
 
 ## Configuration
 
@@ -3565,6 +3569,8 @@ Source: https://platform.solana.com/docs/payments/ramps-coinbase
 
 Coinbase is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "coinbase"`.
 
+Coinbase rate estimates work in production; order creation is sandbox-only.
+
 ## Configuration
 
 | Variable | Required | Notes |
@@ -3584,6 +3590,8 @@ Source: https://platform.solana.com/docs/payments/ramps-stripe
 > Configure Stripe as an SDP ramp provider — credentials, capabilities, and limits.
 
 Stripe is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "stripe"`.
+
+Stripe has no separate sandbox credentials — supply a Stripe test-mode secret key.
 
 ## Configuration
 

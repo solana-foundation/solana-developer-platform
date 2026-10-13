@@ -74,7 +74,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Ramp providers](/docs/payments/ramps-providers) for supported providers.
+Rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, move onchain, and exit back to fiat without stitching together provider-specific integrations. See [Ramp providers](/docs/payments/ramps-providers) for supported providers.
 
 Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements.
 

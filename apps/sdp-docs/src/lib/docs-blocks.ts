@@ -63,7 +63,8 @@ const BLOCKS: Record<string, (surface: PublicSurface) => string> = {
       .join("\n"),
   RampProviderMatrix: (surface) =>
     table(
-      ["Provider", "Onramp", "Offramp", "Sandbox", "Delivery mode", "Best for", "Notes"],
+      // Per-provider notes live on each provider's page; the matrix stays scannable.
+      ["Provider", "Onramp", "Offramp", "Sandbox", "Delivery mode", "Best for"],
       DOCS_RAMP_PROVIDERS.filter((entry) =>
         isGatePublished({ rampProvider: entry.provider }, surface)
       ).map((entry) => [
@@ -73,19 +74,26 @@ const BLOCKS: Record<string, (surface: PublicSurface) => string> = {
         entry.sandbox,
         `\`${entry.deliveryMode}\``,
         entry.bestFor,
-        entry.notes,
       ])
     ),
   AllowedOperationsTable: (surface) =>
     table(
       ["Family", "Covers", "Operation types"],
-      surface.allowedOperations.map(({ family, types }) => [
-        `\`${family}\``,
-        DOCS_OPERATION_FAMILIES[family] ?? family,
-        types.map((type) => `\`${type}\``).join(", "),
-      ])
+      // Families in the catalog's reading order (payment first), then any it does not describe.
+      [...surface.allowedOperations]
+        .sort((left, right) => familyRank(left.family) - familyRank(right.family))
+        .map(({ family, types }) => [
+          `\`${family}\``,
+          DOCS_OPERATION_FAMILIES[family] ?? family,
+          types.map((type) => `\`${type}\``).join(", "),
+        ])
     ),
 };
+
+function familyRank(family: string): number {
+  const rank = Object.keys(DOCS_OPERATION_FAMILIES).indexOf(family);
+  return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+}
 
 function blockName(node: Nodes): string | undefined {
   if (node.type !== "mdxJsxFlowElement" && node.type !== "mdxJsxTextElement") return undefined;
