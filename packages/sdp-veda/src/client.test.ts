@@ -6,9 +6,10 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertNotPortfolioProvider,
   toEarnVaultQueuedWithdrawalRequestPlan,
@@ -80,12 +81,23 @@ vi.mock("./programs", async (importOriginal) => {
   return { ...actual, vedaClusterConfig: () => actual.toClusterConfig("devnet", DEPLOYMENT) };
 });
 
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_veda_client",
+  environment: "sandbox",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://devnet.veda-client.test");
 });
 
-const runOperation: VedaVaultOperationRunner = (_label, operation) => operation(() => undefined);
-const client = new VedaVaultDirectClient(async () => "https://rpc.test.invalid", runOperation);
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+const runOperation: VedaVaultOperationRunner = (_label, operation) =>
+  runInClusterScope(SANDBOX_SCOPE, () => operation(() => undefined));
+const client = new VedaVaultDirectClient(runOperation);
 const sandbox = { env: {}, environment: "sandbox" } as const;
 
 function plan(): VedaInstructionPlan {
@@ -214,11 +226,14 @@ describe("buildVaultDeposit", () => {
     expect(mocks.buildVedaDepositPlan).not.toHaveBeenCalled();
   });
 
-  it("refuses to build when no RPC endpoint is configured for the cluster", async () => {
-    const unconfigured = new VedaVaultDirectClient(async () => "  ", runOperation);
-    await expect(unconfigured.buildVaultDeposit(sandbox, input)).rejects.toMatchObject({
-      code: "VAULT_UNREADABLE",
-    });
+  it("refuses a production context inside a sandbox cluster scope before any chain work", async () => {
+    const unscoped = new VedaVaultDirectClient((_label, operation) => operation(() => undefined));
+
+    await expect(
+      runInClusterScope(SANDBOX_SCOPE, () =>
+        unscoped.buildVaultDeposit({ env: {}, environment: "production" }, input)
+      )
+    ).rejects.toMatchObject({ name: "SdpEarnError", code: "INTERNAL_ERROR" });
     expect(mocks.buildVedaDepositPlan).not.toHaveBeenCalled();
   });
 
@@ -228,7 +243,7 @@ describe("buildVaultDeposit", () => {
 
     expect(mocks.buildVedaDepositPlan).toHaveBeenCalledTimes(1);
     const [runtime, config, built] = mocks.buildVedaDepositPlan.mock.calls[0] as [
-      { cluster: string; rpcUrl: string },
+      { cluster: string },
       { vaultProgramAddress: string },
       { vault: string; owner: string; amount: string; minSharesOut: string },
     ];
@@ -429,10 +444,12 @@ describe("readVaultPositions", () => {
   it("stops dequeuing vaults once the caller's deadline has expired", async () => {
     let elapsed = false;
     const deadlined: VedaVaultOperationRunner = (_label, operation) =>
-      operation(() => {
-        if (elapsed) throw new SdpVedaError("VAULT_UNREADABLE", "deadline elapsed");
-      });
-    const bounded = new VedaVaultDirectClient(async () => "https://rpc.test.invalid", deadlined);
+      runInClusterScope(SANDBOX_SCOPE, () =>
+        operation(() => {
+          if (elapsed) throw new SdpVedaError("VAULT_UNREADABLE", "deadline elapsed");
+        })
+      );
+    const bounded = new VedaVaultDirectClient(deadlined);
     mocks.readVedaPosition.mockImplementation(async () => {
       elapsed = true;
       return position(VAULT_A);

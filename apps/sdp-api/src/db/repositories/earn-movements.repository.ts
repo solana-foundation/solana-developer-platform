@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   EarnExecutionModel,
@@ -411,7 +412,15 @@ export interface EarnMovementsRepository {
    * (`token_amount_settled IS NULL`), oldest attempt first, bounded to rows
    * settled after `settledAfter` (RPC transaction history is finite) and not
    * attempted since `retryBefore`. Stamps `reconciliation_attempted_at` on the
-   * claim so the repair sweep spaces its retries.
+   * claim so the repair sweep spaces its retries. Only the open cluster scope's
+   * environment is claimed.
+   *
+   * @param params - The claim bounds.
+   * @param params.limit - Most rows to claim.
+   * @param params.settledAfter - Oldest settlement still inside RPC history.
+   * @param params.retryBefore - Rows attempted after this wait for a later sweep.
+   * @returns The claimed withdrawals, oldest settlement first.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   claimUnvaluedWithdrawalPayouts(params: {
     limit: number;
@@ -428,7 +437,16 @@ export interface EarnMovementsRepository {
     organizationId: string;
     tokenAmountSettled: string;
   }): Promise<boolean>;
-  /** Bounded, retry-spaced receipt repair, including historical Kamino deposits. */
+  /**
+   * Bounded, retry-spaced receipt repair, including historical Kamino deposits,
+   * for the open cluster scope's environment only.
+   *
+   * @param params - The claim bounds.
+   * @param params.limit - Most rows to claim.
+   * @param params.retryBefore - Rows attempted after this wait for a later sweep.
+   * @returns The claimed finalized Kamino deposits.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   claimUnvaluedKaminoDeposits(params: {
     limit: number;
     retryBefore: string;
@@ -553,6 +571,12 @@ export interface EarnMovementsRepository {
    * Provider-order rows remain in the queue through reversible confirmation.
    * Once `chain_finalized_at` records irreversible finality, another chain read
    * cannot advance them and they leave this queue until provider reconciliation.
+   * Only the open cluster scope's environment is claimed.
+   *
+   * @param limit - Most rows to claim, 1 to 256.
+   * @returns The claimed movements, blockhash-bound work first.
+   * @throws Error when `limit` is out of range.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
   /**
@@ -568,7 +592,11 @@ export interface EarnMovementsRepository {
    * still act on, and the withdrawal split keeps the exit path visible on its
    * own (ADR 0002). Provider-order rows with durable chain-finality evidence
    * are excluded here exactly as they are from the claim — they are
-   * awaiting-provider surface, not chain-reconciliation backlog.
+   * awaiting-provider surface, not chain-reconciliation backlog. Scoped to the
+   * open cluster scope's environment, like the claim.
+   *
+   * @returns The scope environment's backlog counts and oldest ages.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   getUnsettledVaultMovementStats(): Promise<{
     backlog: number;
@@ -1691,6 +1719,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           `WITH candidates AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
+                AND environment = ?
                 AND direction = 'withdrawal'
                 AND status = 'finalized'
                 AND token_amount_settled IS NULL
@@ -1709,7 +1738,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            )
            SELECT * FROM touched ORDER BY settled_at ASC, id ASC`
         )
-        .bind(params.settledAfter, params.retryBefore, params.limit)
+        .bind(
+          currentClusterScope().environment,
+          params.settledAfter,
+          params.retryBefore,
+          params.limit
+        )
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -1737,6 +1771,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           `WITH candidates AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct' AND provider = 'kamino'
+                AND environment = ?
                 AND direction = 'deposit' AND status = 'finalized'
                 AND deposit_receipt_observed_at IS NULL AND signature IS NOT NULL
                 AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
@@ -1748,7 +1783,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM candidates WHERE movement.id = candidates.id RETURNING movement.*
            ) SELECT * FROM touched`
         )
-        .bind(params.retryBefore, params.limit)
+        .bind(currentClusterScope().environment, params.retryBefore, params.limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -2179,11 +2214,13 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // not a lease held for the later RPC work.
       const confirmedQuota = limit > 1 ? Math.max(1, Math.floor(limit / 4)) : 0;
       const blockhashBoundQuota = limit - confirmedQuota;
+      const scopeEnvironment = currentClusterScope().environment;
       const result = await db
         .prepare(
           `WITH blockhash_bound AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
+                AND environment = ?
                 AND status IN ('requested', 'submitted')
                 AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
@@ -2194,6 +2231,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            ), confirmed AS MATERIALIZED (
              SELECT id FROM earn_movements
               WHERE execution_model = 'vault_direct'
+                AND environment = ?
                 AND status = 'confirmed'
                 AND chain_finalized_at IS NULL
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
@@ -2209,6 +2247,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              SELECT movement.id
                FROM earn_movements movement
               WHERE movement.execution_model = 'vault_direct'
+                AND movement.environment = ?
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
                 AND movement.chain_finalized_at IS NULL
                 AND NOT EXISTS (
@@ -2234,7 +2273,14 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            SELECT * FROM touched
            ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
         )
-        .bind(blockhashBoundQuota, confirmedQuota, limit)
+        .bind(
+          scopeEnvironment,
+          blockhashBoundQuota,
+          scopeEnvironment,
+          confirmedQuota,
+          scopeEnvironment,
+          limit
+        )
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -2260,9 +2306,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     AS oldest_withdrawal_created_at
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
+              AND environment = ?
               AND status IN ('requested', 'submitted', 'confirmed')
               AND chain_finalized_at IS NULL`
         )
+        .bind(currentClusterScope().environment)
         .first<{
           backlog: number | string;
           backlog_blockhash_bound: number | string;

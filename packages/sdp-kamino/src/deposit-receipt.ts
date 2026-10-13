@@ -1,10 +1,8 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import { getBase58Encoder, signature } from "@solana/kit";
+import { type SolanaCluster, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { type GetTransactionApi, getBase58Encoder, type Rpc, signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { kaminoClusterConfig } from "./programs";
-import { createKaminoRpc } from "./rpc";
-import type { KaminoRuntime } from "./types";
 
 const DEPOSIT = [242, 35, 198, 137, 82, 225, 242, 182];
 const DEPOSIT_WITH_FLOOR = [74, 127, 128, 80, 4, 221, 193, 91];
@@ -143,7 +141,7 @@ function observeTransfers(instructions: unknown[], accounts: unknown[]) {
  */
 export function parseKaminoDepositReceipt(
   response: unknown,
-  cluster: KaminoRuntime["cluster"],
+  cluster: SolanaCluster,
   input: KaminoDepositReceiptInput
 ): KaminoDepositReceipt | null {
   const receipt = object(response);
@@ -234,17 +232,26 @@ export function parseKaminoDepositReceipt(
   };
 }
 
-/** Finalized-only receipt lookup; callers must verify the runtime's cluster. */
+/**
+ * Read a Kamino deposit's finalized transaction and parse what it moved. Finalized only; the
+ * caller proves `rpc` serves `cluster`, whose kvault program the parse authenticates against.
+ *
+ * @param rpc - A client for `cluster`.
+ * @param cluster - The cluster the deposit landed on; selects the kvault program to match.
+ * @param input - The deposit's signature and the identities it must match.
+ * @returns The receipt, or `null` when the transaction is missing or does not match `input`.
+ */
 export async function readKaminoDepositReceipt(
-  runtime: KaminoRuntime,
+  rpc: Rpc<GetTransactionApi>,
+  cluster: SolanaCluster,
   input: KaminoDepositReceiptInput
 ): Promise<KaminoDepositReceipt | null> {
-  const transaction = await createKaminoRpc(runtime.rpcUrl)
+  const transaction = await rpc
     .getTransaction(signature(input.signature), {
       encoding: "jsonParsed",
       commitment: "finalized",
       maxSupportedTransactionVersion: 0,
     })
     .send();
-  return parseKaminoDepositReceipt(transaction, runtime.cluster, input);
+  return parseKaminoDepositReceipt(transaction, cluster, input);
 }
