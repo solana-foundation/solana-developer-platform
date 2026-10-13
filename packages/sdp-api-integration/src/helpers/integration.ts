@@ -131,10 +131,6 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   }
 
   await db
-    .prepare("DELETE FROM signing_requests")
-    .run()
-    .catch(() => {});
-  await db
     .prepare("DELETE FROM frozen_accounts")
     .run()
     .catch(() => {});

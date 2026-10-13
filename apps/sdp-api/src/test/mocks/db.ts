@@ -38,7 +38,6 @@ const POSTGRES_TEST_TABLES = [
   "custody_connections",
   "provider_credentials",
   "custody_wallets",
-  "signing_requests",
   "custody_configs",
   "payment_recurring_payment_update_events",
   "payment_recurring_payment_update_attempts",
