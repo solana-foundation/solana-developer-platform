@@ -101,8 +101,12 @@ export interface PrivateChannelDepositRepository {
   /** Opportunistic sweep of non-terminal deposits for a project. */
   listNonTerminalByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
   /**
-   * Global sweep of non-terminal deposits, oldest-updated first. Used by the
-   * cron reconciler; `limit` caps the per-tick work.
+   * Sweep of the open cluster scope's environment's non-terminal deposits,
+   * oldest-updated first. Used by the cron reconciler.
+   *
+   * @param limit - Caps the per-tick work.
+   * @returns The environment's non-terminal deposits.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   listNonTerminal(limit: number): Promise<PrivateChannelDepositRow[]>;
   /** Delete guard: an instance can't be deleted while deposits are in flight. */

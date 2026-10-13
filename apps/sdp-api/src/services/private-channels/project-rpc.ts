@@ -1,9 +1,9 @@
 import type { SolanaRpcProbeResult } from "@sdp/private-channels";
-import { createClusterRpc, type SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
-import { getDb } from "@/db";
-import type { Env } from "@/types/env";
+import type { SolanaCluster } from "@sdp/types";
 
 export interface PrivateChannelProjectRpcClient {
   cluster: SolanaCluster;
@@ -16,51 +16,19 @@ export interface PrivateChannelDeploymentProbeInput {
   escrowInstanceAddr: string;
 }
 
-export interface LoadProjectRpcClientInput {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  /** Already known on authenticated requests; jobs resolve it from the project row. */
-  environment?: SdpEnvironment;
-}
-
 /**
- * Load a client on SDP's managed RPC pool for a project's Private Channels work.
+ * The client on SDP's managed RPC pool for the open cluster scope's Private Channels work.
  *
  * The pool's endpoints are execution-only: Private Channels never persists or
  * serializes them on its instance records.
  *
- * @param input - The project to load the client for.
- * @param input.env - Process env carrying the managed RPC pool.
- * @param input.organizationId - Organization that owns the project.
- * @param input.projectId - Project whose environment picks the cluster.
- * @param input.environment - The project's environment when the caller already knows it; otherwise read from the active project row.
- * @returns The project's cluster, an RPC client for that cluster, and a deployment probe bound to both.
- * @throws Error when the project is not active in the organization, or when the deployment has no RPC endpoint for the project's cluster.
+ * @returns The scope's cluster, an RPC client for that cluster, and a deployment probe bound to both.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no RPC endpoint configured.
  */
-export async function loadProjectRpcClient(
-  input: LoadProjectRpcClientInput
-): Promise<PrivateChannelProjectRpcClient> {
-  const db = getDb(input.env);
-  const environment =
-    input.environment ??
-    (
-      await db
-        .prepare(
-          `SELECT environment
-           FROM projects
-          WHERE id = ? AND organization_id = ? AND status = 'active'`
-        )
-        .bind(input.projectId, input.organizationId)
-        .first<{ environment: SdpEnvironment }>()
-    )?.environment;
-
-  if (!environment) {
-    throw new Error(`Active project ${input.projectId} was not found while resolving its RPC`);
-  }
-
-  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
-  const rpc = createClusterRpc(input.env, cluster);
+export function loadProjectRpcClient(): PrivateChannelProjectRpcClient {
+  const { cluster } = currentClusterScope();
+  const rpc = createClusterRpc();
 
   return {
     cluster,

@@ -4,6 +4,7 @@
  * the upstreams internally.
  */
 
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
@@ -19,7 +20,7 @@ export interface RingsIndexingPollDeps {
 }
 
 export function runRingsIndexingPoll(deps: RingsIndexingPollDeps): void {
-  const work = () => pollRingsIndexing(deps.env);
+  const work = () => runPerCluster("poll-rings-indexing", () => pollRingsIndexing(deps.env));
 
   const promise = deps.observability
     ? deps.observability.withMonitor(RINGS_INDEXING_MONITOR, work, {

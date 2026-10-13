@@ -4,11 +4,9 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getInstanceOverview } from "@/services/private-channels";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { AppContext } from "../context";
-import {
-  getPrivateChannelInstanceRepository,
-  loadPrivateChannelProjectRpcClient,
-} from "../context";
+import { getPrivateChannelInstanceRepository } from "../context";
 import { recordInstanceError } from "../helpers";
 
 // GET /instance/overview — active instance snapshot: gateway health + a few
@@ -28,7 +26,7 @@ export async function getPrivateChannelOverview(c: AppContext) {
   }
 
   const instance = mapPrivateChannelInstanceRow(row);
-  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const projectRpc = loadProjectRpcClient();
   const overview = await getInstanceOverview(c.env, instance, projectRpc.rpc);
 
   const health = overview.gateway.health;

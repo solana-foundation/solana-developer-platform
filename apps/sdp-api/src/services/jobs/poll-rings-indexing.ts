@@ -13,7 +13,9 @@
  *  4. In-flight rows, advanced by `executeOperation`, with `indexing` past the
  *     budget failed so nothing sits in limbo.
  *
- * Ships dormant: early-returns unless the feature flag is on.
+ * Ships dormant: early-returns unless the feature flag is on. Runs once per
+ * environment under that environment's cluster scope, sweeping only that
+ * environment's operations; a run on a cluster Rings does not serve returns at once.
  */
 
 import { getDb } from "@/db";
@@ -23,7 +25,11 @@ import {
 } from "@/db/repositories";
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
+import {
+  createHeliusRingsService,
+  type HeliusRingsService,
+  ringsServesScopeCluster,
+} from "@/services/helius-rings";
 import {
   type RingsSignatureOutcome,
   readRingsBlockHeight,
@@ -60,7 +66,6 @@ function resumeIsDestructive(operation: HeliusRingsOperationRow): boolean {
 }
 
 type SignatureStatusReader = (input: {
-  env: Env;
   signature: string;
 }) => Promise<RingsSignatureOutcome | null>;
 
@@ -77,12 +82,11 @@ type SignatureStatusReader = (input: {
  */
 async function chainForbidsFailure(
   operation: HeliusRingsOperationRow,
-  readStatus: SignatureStatusReader,
-  env: Env
+  readStatus: SignatureStatusReader
 ): Promise<boolean> {
   if (operation.outer_tx_signature === null) return false;
 
-  const outcome = await readStatus({ env, signature: operation.outer_tx_signature });
+  const outcome = await readStatus({ signature: operation.outer_tx_signature });
   return outcome === "landed" || outcome === null;
 }
 
@@ -95,7 +99,7 @@ export interface PollRingsIndexingDependencies {
   createService?: ServiceFor;
   now?: () => Date;
   /** Test seam for the expiry pass's view of the chain. */
-  readBlockHeight?: (input: { env: Env }) => Promise<string | null>;
+  readBlockHeight?: () => Promise<string | null>;
   /** Test seam for the lookup that spares a transaction the chain confirms. */
   readSignatureStatus?: SignatureStatusReader;
 }
@@ -108,7 +112,7 @@ export async function pollRingsIndexing(
   env: Env,
   dependencies: PollRingsIndexingDependencies = {}
 ): Promise<void> {
-  if (!isRingsIndexingPollEnabled(env)) {
+  if (!isRingsIndexingPollEnabled(env) || !ringsServesScopeCluster()) {
     return;
   }
 
@@ -124,38 +128,36 @@ export async function pollRingsIndexing(
   const logger = getLogger();
 
   // Both chain reads judge tenant operations — expiry escalation and
-  // manual-reconciliation outcomes — so they must come from the
-  // platform-trusted Helius endpoint (the readers' built-in fallback), never
-  // from a tenant-owned connection. Tenant endpoints serve only the
-  // operations pinned to them.
+  // manual-reconciliation outcomes — so they must come from the scope's
+  // platform-managed RPC pool (the readers' own client), never from a
+  // tenant-owned connection. Tenant endpoints serve only the operations pinned
+  // to them.
   const readSignatureStatus =
     dependencies.readSignatureStatus ??
-    ((input: { env: Env; signature: string }) => readRingsSignatureStatus(input));
-  const blockHeight = await (dependencies.readBlockHeight ?? readRingsBlockHeight)({ env });
+    ((input: { signature: string }) => readRingsSignatureStatus(input));
+  const readBlockHeight = dependencies.readBlockHeight ?? (() => readRingsBlockHeight({}));
+  const blockHeight = await readBlockHeight();
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {
-    await escalateExpiredSubmissions(repository, serviceFor, logger, blockHeight, {
-      env,
-      readSignatureStatus,
-    });
+    await escalateExpiredSubmissions(
+      repository,
+      serviceFor,
+      logger,
+      blockHeight,
+      readSignatureStatus
+    );
     await escalateExpiredSignedFailures(repository, serviceFor, logger, blockHeight);
   }
 
   await completeIndexedFailures(repository, serviceFor, logger);
   const sweepNow = dependencies.now?.() ?? (await readDatabaseNow(env));
-  await advanceInFlight(repository, serviceFor, logger, sweepNow, { env, readSignatureStatus });
+  await advanceInFlight(repository, serviceFor, logger, sweepNow, readSignatureStatus);
 }
 
 async function readDatabaseNow(env: Env): Promise<Date> {
   const row = await getDb(env).queryOne<{ now: string }>("SELECT sdp_iso_now() AS now");
   return new Date(row?.now ?? Date.now());
-}
-
-/** What the two passes that can give up on a signature need to consult the chain. */
-interface ChainCheck {
-  env: Env;
-  readSignatureStatus: SignatureStatusReader;
 }
 
 /**
@@ -177,7 +179,7 @@ async function escalateExpiredSubmissions(
   serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
   logger: Logger,
   blockHeight: string,
-  chain: ChainCheck
+  readSignatureStatus: SignatureStatusReader
 ): Promise<void> {
   const expired = await repository.listExpiredSubmissions({ blockHeight, limit: MAX_PER_RUN });
 
@@ -185,7 +187,7 @@ async function escalateExpiredSubmissions(
     try {
       const settled = await serviceFor(operation).executeOperation(operation.id);
       if (settled.state === "completed") continue;
-      if (await chainForbidsFailure(operation, chain.readSignatureStatus, chain.env)) continue;
+      if (await chainForbidsFailure(operation, readSignatureStatus)) continue;
 
       await repository.failOperation({
         organizationId: operation.organization_id,
@@ -266,7 +268,7 @@ async function advanceInFlight(
   serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
   logger: Logger,
   now: Date,
-  chain: ChainCheck
+  readSignatureStatus: SignatureStatusReader
 ): Promise<void> {
   const inFlight = await repository.listInFlightOperations({
     // `updated_at` and the application clock both have millisecond precision.
@@ -292,7 +294,7 @@ async function advanceInFlight(
       if (settled.state === "completed") continue;
 
       if (operation.state === "indexing" && Date.parse(operation.updated_at) < timeoutCutoff) {
-        if (await chainForbidsFailure(operation, chain.readSignatureStatus, chain.env)) continue;
+        if (await chainForbidsFailure(operation, readSignatureStatus)) continue;
         await failIndexingTimeout(repository, operation);
       }
     } catch (error) {

@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivateChannelTransferContext } from "@sdp/types";
 import type { AppDb } from "@/db";
 import {
@@ -180,11 +181,12 @@ export function createPostgresPrivateChannelDepositRepository(
           // rows sharing an updated_at at the cutoff would otherwise be included
           // or dropped arbitrarily from tick to tick, and one could be starved.
           `SELECT * FROM private_channel_deposits
-             WHERE status IN ('pending', 'submitted', 'confirmed')
+             WHERE project_id IN (SELECT id FROM projects WHERE environment = ?)
+               AND status IN ('pending', 'submitted', 'confirmed')
              ORDER BY updated_at ASC, id ASC
              LIMIT ?`
         )
-        .bind(limit)
+        .bind(currentClusterScope().environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
