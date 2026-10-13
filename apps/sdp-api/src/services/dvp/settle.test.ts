@@ -10,6 +10,7 @@
 
 import assert from "node:assert/strict";
 import { getSettleDvpInstruction } from "@sdp/dvp";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { DVP_CLOSE_REFUSAL } from "@sdp/types";
 import {
   address,
@@ -28,6 +29,7 @@ import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
 import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import type { DvpSettlementWallet } from "./settlement-wallet";
@@ -46,7 +48,6 @@ const getRecentBlockhash = vi.hoisted(() =>
 );
 
 const confirmTransaction = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
 const hasLiveClaim = vi.hoisted(() => vi.fn());
 /**
  * The trade's close lock, as the row holds it. A compare-and-set in one step,
@@ -101,8 +102,8 @@ vi.mock("@/services/sponsorship.service", async () => {
   };
 });
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   confirmTransaction,
   getRecentBlockhash,
   sendTransaction,
@@ -124,7 +125,9 @@ function closeDvpTrade(
   settlement: CloseArgs[3],
   recordAttempt: CloseArgs[4] = async () => {}
 ) {
-  return closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt);
+  return runInClusterScope({ projectId: trade.projectId, environment: "sandbox" }, () =>
+    closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt)
+  );
 }
 
 let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
@@ -162,6 +165,7 @@ function preflightError(): SolanaError {
 }
 
 describe("closeDvpTrade", () => {
+  const rpc = installClusterRpcStub();
   let authority: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let settlement: DvpSettlementWallet;
@@ -169,7 +173,7 @@ describe("closeDvpTrade", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     closeLocks.clear();
-    getBlockHeight.mockResolvedValue(50n);
+    rpc.answer("getBlockHeight", 50);
     hasLiveClaim.mockResolvedValue(false);
     confirmTransaction.mockResolvedValue({ confirmationStatus: "confirmed", err: null, slot: 1n });
     // The settlement window is judged by the cluster clock read with the escrows.

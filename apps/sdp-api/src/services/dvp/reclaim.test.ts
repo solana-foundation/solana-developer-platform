@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { DVP_LEG_REFUSAL, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import {
   address,
@@ -30,6 +31,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import { conflict } from "@/lib/errors";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -76,8 +78,8 @@ vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint,
 }));
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({}),
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
@@ -128,6 +130,12 @@ const RECLAIMER_A = {
 
 const context = { env } as never;
 
+function reclaimInScope(row: DvpTradeRow, reclaimer: Parameters<typeof reclaimDvpTradeLeg>[2]) {
+  return runInClusterScope({ projectId: reclaimer.projectId, environment: "sandbox" }, () =>
+    reclaimDvpTradeLeg(context, row, reclaimer)
+  );
+}
+
 /** The instructions of the one transaction that went out. */
 function sentInstructions() {
   const transaction = getTransactionDecoder().decode(sendTransaction.mock.calls[0][1]);
@@ -143,6 +151,8 @@ function sentInstructions() {
 }
 
 describe("reclaimDvpTradeLeg", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     const sponsor = await createTestSponsor();
@@ -178,7 +188,7 @@ describe("reclaimDvpTradeLeg", () => {
 
   it("drains leg A's escrow into the party's own token account for that mint", async () => {
     const row = trade();
-    const result = await reclaimDvpTradeLeg(context, row, RECLAIMER_A);
+    const result = await reclaimInScope(row, RECLAIMER_A);
 
     expect(result).toMatchObject({ leg: "a", amount: "1000" });
     const [destination] = await findAssociatedTokenPda({
@@ -209,7 +219,7 @@ describe("reclaimDvpTradeLeg", () => {
       userA: address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg"),
     });
 
-    await reclaimDvpTradeLeg(context, other, { ...RECLAIMER_A, side: "b" });
+    await reclaimInScope(other, { ...RECLAIMER_A, side: "b" });
 
     const [, reclaim] = sentInstructions();
     expect(reclaim.accounts[2]).toBe(other.mintB);
@@ -221,7 +231,7 @@ describe("reclaimDvpTradeLeg", () => {
   // the broadcast, and released once the reclaim confirms, which is what lets the
   // leg be funded again without anything reading the escrow as still full.
   it("holds the leg's lock from before the send until the reclaim confirms", async () => {
-    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+    const result = await reclaimInScope(trade(), RECLAIMER_A);
 
     expect(claimForReclaim).toHaveBeenCalledWith(
       expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a", expiryHeight: "100" }),
@@ -237,7 +247,7 @@ describe("reclaimDvpTradeLeg", () => {
   });
 
   it("records the signed reclaim for its idempotency key before broadcasting it", async () => {
-    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+    const result = await reclaimInScope(trade(), RECLAIMER_A);
 
     expect(recordAttempt).toHaveBeenCalledWith({
       signature: result.signature,
@@ -254,7 +264,7 @@ describe("reclaimDvpTradeLeg", () => {
   it("keeps the lock when the reclaim does not confirm in time", async () => {
     confirmTransaction.mockRejectedValue(new Error("confirmation timed out after 15000ms"));
 
-    const result = await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+    const result = await reclaimInScope(trade(), RECLAIMER_A);
 
     expect(result.signature).toEqual(expect.any(String));
     expect(releaseClaim).not.toHaveBeenCalled();
@@ -269,7 +279,7 @@ describe("reclaimDvpTradeLeg", () => {
       err: { InstructionError: [1, { Custom: 1 }] },
     }));
 
-    await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+    await reclaimInScope(trade(), RECLAIMER_A);
 
     expect(releaseClaim).not.toHaveBeenCalled();
   });
@@ -278,7 +288,7 @@ describe("reclaimDvpTradeLeg", () => {
   it("keeps the lock when the send fails ambiguously", async () => {
     sendTransaction.mockRejectedValue(new Error("socket hang up"));
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toThrow();
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toThrow();
     expect(releaseClaim).not.toHaveBeenCalled();
   });
 
@@ -300,13 +310,13 @@ describe("reclaimDvpTradeLeg", () => {
       })
     );
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toThrow();
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toThrow();
     expect(releaseClaim).toHaveBeenCalledTimes(1);
   });
 
   // No expiry gate on chain: a deposit can always come back.
   it("reclaims from an expired trade", async () => {
-    await reclaimDvpTradeLeg(context, trade({ status: "expired" }), RECLAIMER_A);
+    await reclaimInScope(trade({ status: "expired" }), RECLAIMER_A);
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
@@ -319,9 +329,9 @@ describe("reclaimDvpTradeLeg", () => {
     "create_failed",
     "creating",
   ] as const)("refuses a %s trade before reading the chain", async (status) => {
-    await expect(reclaimDvpTradeLeg(context, trade({ status }), RECLAIMER_A)).rejects.toMatchObject(
-      { details: { reason: DVP_LEG_REFUSAL.tradeNotReclaimable } }
-    );
+    await expect(reclaimInScope(trade({ status }), RECLAIMER_A)).rejects.toMatchObject({
+      details: { reason: DVP_LEG_REFUSAL.tradeNotReclaimable },
+    });
     expect(readDvpAccounts).not.toHaveBeenCalled();
   });
 
@@ -329,7 +339,7 @@ describe("reclaimDvpTradeLeg", () => {
   it("refuses, sending nothing, when a funding still holds the leg's lock", async () => {
     listForTrade.mockResolvedValue([claimRow(null)]);
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
     });
     expect(readDvpFundingReceipt).not.toHaveBeenCalled();
@@ -343,7 +353,7 @@ describe("reclaimDvpTradeLeg", () => {
     listForTrade.mockResolvedValue([claimRow(RECEIPT)]);
     readDvpFundingReceipt.mockResolvedValue("pending");
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
     });
     expect(readDvpFundingReceipt).toHaveBeenCalledWith(expect.anything(), {
@@ -360,7 +370,7 @@ describe("reclaimDvpTradeLeg", () => {
       listForTrade.mockResolvedValue([claimRow(RECEIPT)]);
       readDvpFundingReceipt.mockResolvedValue(state);
 
-      await reclaimDvpTradeLeg(context, trade(), RECLAIMER_A);
+      await reclaimInScope(trade(), RECLAIMER_A);
 
       expect(claimForReclaim).toHaveBeenCalledWith(
         expect.objectContaining({ tradeId: "dvp_reclaim_test", side: "a" }),
@@ -374,7 +384,7 @@ describe("reclaimDvpTradeLeg", () => {
   it("refuses when the leg's row changed after it was checked", async () => {
     claimForReclaim.mockResolvedValue(false);
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.legFundingInProgress },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -390,7 +400,7 @@ describe("reclaimDvpTradeLeg", () => {
       clusterUnixTimestamp: 1_800_000_000n,
     });
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.nothingToReclaim },
     });
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
@@ -405,7 +415,7 @@ describe("reclaimDvpTradeLeg", () => {
       clusterUnixTimestamp: 1_800_000_000n,
     });
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.escrowMismatch },
     });
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -418,7 +428,7 @@ describe("reclaimDvpTradeLeg", () => {
       data: { extensions: { __option: "Some", value: [{ __kind: "TransferHook" }] } },
     });
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.transferHookUnsupported },
     });
     expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
@@ -429,7 +439,7 @@ describe("reclaimDvpTradeLeg", () => {
   it("refuses when the custody signer is not the party address", async () => {
     createOrgSignerForCustodyWallet.mockResolvedValue(await generateKeyPairSigner());
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toMatchObject({
       message: expect.stringMatching(/no longer signs as side a's party/),
       details: { reason: DVP_LEG_REFUSAL.signerNotParty },
     });
@@ -445,7 +455,7 @@ describe("reclaimDvpTradeLeg", () => {
     });
     assertTradeNotClosing.mockRejectedValue(closing);
 
-    await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toBe(closing);
+    await expect(reclaimInScope(trade(), RECLAIMER_A)).rejects.toBe(closing);
 
     expect(claimForReclaim.mock.invocationCallOrder[0]).toBeLessThan(
       assertTradeNotClosing.mock.invocationCallOrder[0]
