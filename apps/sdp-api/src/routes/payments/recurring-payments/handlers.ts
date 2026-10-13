@@ -18,8 +18,7 @@ import {
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyFingerprint } from "@/middleware/idempotency";
-import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import { getIdempotencyClaim } from "@/middleware/idempotency";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -92,27 +91,17 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
 }
 
 /**
- * The request's Idempotency-Key and the fingerprint the key step computed for
- * it, recorded on the domain row (migrations 0129, 0130) so a retry past the
- * key's 24 hours is matched by the same request identity; null without a key.
+ * The Idempotency-Key and fingerprint the key step claimed for this request,
+ * recorded on the domain row (migrations 0129, 0130) so a retry past the key's
+ * 24 hours is matched by the same request identity. Every recurring mutation
+ * requires the key, so a handler reached without a claim is a wiring bug.
  */
-function requestIdempotency(c: AppContext): RecurringPaymentIdempotency | null {
-  const key = requestIdempotencyKey(c);
-  if (key === null) return null;
-  const fingerprint = getIdempotencyFingerprint(c);
-  if (fingerprint === undefined) {
-    throw internalError("A keyed recurring payment request reached its handler unfingerprinted");
-  }
-  return { key, fingerprint };
-}
-
-/** As {@link requestIdempotency}, for a route that requires the key. */
 function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
-  const idempotency = requestIdempotency(c);
-  if (idempotency === null) {
+  const claim = getIdempotencyClaim(c);
+  if (claim === undefined) {
     throw internalError("Recurring payment request reached the handler without an Idempotency-Key");
   }
-  return idempotency;
+  return claim;
 }
 
 /**
@@ -131,11 +120,6 @@ export async function findRecurringPaymentCreateReplay(
     recurringPayment: mapRecurringPayment(existing),
   };
   return created(c, response);
-}
-
-/** The request's Idempotency-Key, or null when it sent none (PATCH accepts none). */
-function requestIdempotencyKey(c: AppContext): string | null {
-  return parseIdempotencyKey(c) ?? null;
 }
 
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
@@ -318,7 +302,7 @@ export const updateRecurringPayment = async (
     recurringPayment,
     request: body,
     createdBy: await resolveCreatorUserId(c),
-    idempotency: requestIdempotency(c),
+    idempotency: requiredIdempotency(c),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -350,7 +334,7 @@ export const activateRecurringPayment = async (
         { organizationId: auth.organizationId, projectId },
         { surface: "http", operation: "recurring_payment.activate", subjectId: recurringPayment.id }
       ),
-    idempotencyKey: requestIdempotencyKey(c),
+    idempotencyKey: requiredIdempotency(c).key,
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
@@ -375,7 +359,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
-          idempotencyKey: requestIdempotencyKey(c),
+          idempotencyKey: requiredIdempotency(c).key,
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
@@ -393,7 +377,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
                 subjectId: recurringPayment.id,
               }
             ),
-          idempotencyKey: requestIdempotencyKey(c),
+          idempotencyKey: requiredIdempotency(c).key,
         });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -432,7 +416,7 @@ export const collectRecurringPayment = async (
         { organizationId: auth.organizationId, projectId },
         { surface: "http", operation: "recurring_payment.collect", subjectId: recurringPayment.id }
       ),
-    idempotencyKey: requestIdempotencyKey(c),
+    idempotencyKey: requiredIdempotency(c).key,
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),

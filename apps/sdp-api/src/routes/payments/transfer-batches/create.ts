@@ -10,8 +10,7 @@ import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { markIdempotencyCommitted } from "@/middleware/idempotency";
-import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import { getIdempotencyClaim, markIdempotencyCommitted } from "@/middleware/idempotency";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
@@ -57,12 +56,7 @@ export async function authorizeTransferBatch(
   // Read fresh, never from the cached snapshot, which drops a binding once its
   // wallet is inactive and would refuse the replay of a batch that ran.
   await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
-  return authorizeBatchRequest(
-    c,
-    body,
-    null,
-    parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
-  );
+  return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */
@@ -155,7 +149,7 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(c, body, authorized);
-  const idempotencyKey = parseIdempotencyKey(c) ?? null;
+  const idempotencyKey = getIdempotencyClaim(c)?.key ?? null;
   const idempotencyFingerprint = idempotencyKey
     ? buildBatchRecordFingerprint(c, body, authorized)
     : null;

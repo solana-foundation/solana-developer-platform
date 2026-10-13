@@ -115,7 +115,10 @@ between the provider call and the row is covered only where the provider dedupes
 Privy (`privy-idempotency-key` plus a derived `external_id` it looks up first) and Coinbase CDP
 (`X-Idempotency-Key` plus an account name seeded by the id). Fireblocks, Turnkey, Para, DFNS,
 IBM Digital Asset Haven, Anchorage and Utila get no id from our clients, so that window can still
-leave a second, unreferenced wallet there.
+leave a second, unreferenced wallet there: a crash after the provider created the wallet and before
+the row was written leaves an orphan provider wallet, and the retry creates another. The follow-up
+is an intent row written before the provider call, which the retry finds and completes instead of
+calling the provider again.
 
 **Outcomes.**
 
@@ -132,9 +135,17 @@ leave a second, unreferenced wallet there.
 
 - A request that wrote its domain row has spent its key, whatever it answered: the retry gets the
   same answer, never a different one from the row (a 400 first, then a 200 `status: "failed"`). To
-  try again after fixing the cause, send a new key. Recurring-payment attempts differ on purpose: a
-  failed attempt is left out of their unique index and the schedule returns to its prior state, so a
-  same-key retry runs the action again and its answer is consistent with the row.
+  try again after fixing the cause, send a new key. Recurring-payment attempts differ: their
+  handlers never call `markIdempotencyCommitted`, a failed attempt is left out of their unique
+  index, and the schedule returns to its prior state. What a same-key retry gets depends on how the
+  failure was answered:
+  - a 400, 401, 403, 409 or 429 (`TRANSACTION_FAILED`, `SIGNING_FAILED`, a state conflict) is not
+    stored, so the retry runs the action again;
+  - a 5xx is unlocked (`serverErrors: "rerun"`), so the retry runs the action again;
+  - any other 4xx, such as a 422 `SIGNING_REJECTED` or a 404, is stored like any answer and
+    replayed for 24 hours with `Idempotent-Replayed: true`. Only after the key expires does the same
+    key run the action again, because the failed attempt row no longer answers it. To try sooner,
+    send a new key.
 - `serverErrors` is required: each route states which applies. `rerun` is only for a route whose
   handler writes its own row under a unique key before it moves anything and answers a retry from
   that row; every other route stores the 5xx.
@@ -181,3 +192,19 @@ lives in `@sdp/types`.
   learn it.
 - Modules outside `stable` keep their own key handling until promoted. Their row fingerprints then
   become the backstop.
+- `PATCH /v1/payments/recurring-payments/{id}` requires the key with the other money routes:
+  editing an active schedule signs and broadcasts a replacement subscription.
+
+## Follow-ups
+
+- HOO-2044: recurring activation, lifecycle and update sends save their signature, signed
+  transaction and blockhash window on the attempt before broadcast, so recovery confirms the saved
+  signature instead of signing again.
+- HOO-2045: split `requestGate` into `authorize`, `replayFromRecord` and admission on Earn,
+  issuance and ramps.
+- HOO-2046: stable routes validate path and query params at the route (the param sweep).
+- HOO-2047: payment requests in the public OpenAPI document.
+- HOO-2048: authorization reads wallet bindings fresh in the auth layer after #2262, instead of in
+  each `authorize` function.
+- Custody wallet create: an intent row before the provider call, for providers that do not dedupe
+  on a request id (see "Two layers").

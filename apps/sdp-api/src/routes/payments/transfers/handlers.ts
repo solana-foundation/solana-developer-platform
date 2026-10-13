@@ -53,8 +53,7 @@ import {
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { markIdempotencyCommitted } from "@/middleware/idempotency";
-import { parseIdempotencyKey } from "@/middleware/idempotency-key";
+import { getIdempotencyClaim, markIdempotencyCommitted } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
@@ -339,10 +338,7 @@ export async function authorizeTransfer(
   // Read fresh, never from the cached snapshot, which drops a binding once its
   // wallet is inactive and would refuse the replay of a transfer that ran.
   await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
-  const scope = await resolveScope(
-    c,
-    parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
-  );
+  const scope = await resolveScope(c, body.sourceCustodyWalletId);
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({
     wallets: scope.wallets,
@@ -775,7 +771,7 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
+  const idempotencyKey = getIdempotencyClaim(c)?.key ?? null;
 
   const reusedRampTransfer = rampTransfer !== null;
   const { row: transfer, replayed } = rampTransfer
