@@ -398,7 +398,6 @@ async function prepareCustodyTransaction(
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
-    cluster,
     deadline,
   });
   const expectedAssetIdentity = {
@@ -517,7 +516,6 @@ export async function createCustodyQueuedWithdrawal(
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
-    cluster: earnClusterFor(input.actor.environment),
     deadline,
   });
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {

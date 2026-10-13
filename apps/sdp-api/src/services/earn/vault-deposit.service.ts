@@ -228,7 +228,6 @@ export async function depositIntoVault(
         organizationId: input.organizationId,
         projectId: input.projectId,
         walletId: input.wallet.id,
-        cluster,
         deadline,
       });
   const rentPayer = vaultRentPayer(fee);

@@ -67,6 +67,14 @@ export function getPaymentTransferBatchesRepository(c: AppContext) {
   return createPaymentTransferBatchesRepository(c.env, getRequestTenantScope(c));
 }
 
+/**
+ * The request's sponsorship fee payment on the open cluster scope's cluster.
+ *
+ * @param c - The request context, inside the project middleware's cluster scope.
+ * @returns The sponsorship fee payment for the scope's cluster.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the scope's cluster has no Kora configured.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export function getFeePayment(c: AppContext) {
   return createRequestSponsorshipFeePayment(c);
 }

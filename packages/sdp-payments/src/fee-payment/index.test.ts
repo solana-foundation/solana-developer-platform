@@ -1,118 +1,151 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import {
-  createFeePaymentAdapter,
-  createKoraAdapter,
-  defaultFeePaymentCluster,
-  isFeePaymentConfiguredForCluster,
-  resolveKoraEndpoint,
-} from "./index";
+import { afterEach, describe, it, mock } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
+import { createFeePaymentAdapter, isFeePaymentConfigured, resolveKoraEndpoint } from "./index";
 import type { FeePaymentEnv } from "./port";
 
-/**
- * One API process serves both clusters, and each cluster has its own Kora with
- * its own signer, policy and credentials. These pin the selection rule: the
- * unsuffixed trio serves only the process's `SOLANA_NETWORK` cluster, a
- * `KORA_*_<CLUSTER>` trio serves its cluster explicitly and borrows nothing,
- * and a cluster with neither answers null so callers fall back to wallet-pays.
- */
-describe("resolveKoraEndpoint", () => {
-  const devnetDefault: FeePaymentEnv = {
-    SOLANA_NETWORK: "devnet",
-    KORA_RPC_URL: "https://kora-devnet.example",
-    KORA_API_KEY: "devnet-key",
-    KORA_CLOUD_RUN_AUDIENCE: "https://kora-devnet.example",
-  };
+const DEVNET_KORA_URL = "https://kora-devnet.example";
+const MAINNET_KORA_URL = "https://kora-mainnet.example";
+const DEVNET_KORA_SIGNER = "So11111111111111111111111111111111111111112";
+const MAINNET_KORA_SIGNER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
+const KORA_SIGNER_BY_URL = new Map([
+  [DEVNET_KORA_URL, DEVNET_KORA_SIGNER],
+  [MAINNET_KORA_URL, MAINNET_KORA_SIGNER],
+]);
 
-  it("serves the process default cluster from the unsuffixed trio", () => {
-    assert.equal(defaultFeePaymentCluster(devnetDefault), "devnet");
-    assert.deepEqual(resolveKoraEndpoint(devnetDefault, "devnet"), {
-      rpcUrl: "https://kora-devnet.example",
-      apiKey: "devnet-key",
-      identityTokenAudience: "https://kora-devnet.example",
-    });
+const DEVNET_ONLY: FeePaymentEnv = {
+  KORA_RPC_URL_DEVNET: DEVNET_KORA_URL,
+  KORA_API_KEY_DEVNET: "devnet-key",
+  KORA_CLOUD_RUN_AUDIENCE_DEVNET: DEVNET_KORA_URL,
+};
+
+const BOTH_CLUSTERS: FeePaymentEnv = {
+  ...DEVNET_ONLY,
+  KORA_RPC_URL_MAINNET: MAINNET_KORA_URL,
+};
+
+function inScope<TResult>(environment: SdpEnvironment, operation: () => TResult): TResult {
+  return runInClusterScope({ projectId: null, environment }, operation);
+}
+
+async function answerPayerSigner(input: Parameters<typeof fetch>[0]): Promise<Response> {
+  if (typeof input !== "string") {
+    throw new Error("Expected the Kora client to fetch a string URL");
+  }
+  const signerAddress = KORA_SIGNER_BY_URL.get(input);
+  if (signerAddress === undefined) {
+    throw new Error(`Unexpected fetch to ${input}`);
+  }
+  return Response.json({ jsonrpc: "2.0", id: 1, result: { signer_address: signerAddress } });
+}
+
+describe("resolveKoraEndpoint", () => {
+  it("serves each scope's cluster from its own trio, never borrowing another cluster's key or audience", () => {
+    const env: FeePaymentEnv = {
+      ...DEVNET_ONLY,
+      KORA_RPC_URL_MAINNET: ` ${MAINNET_KORA_URL} `,
+      KORA_API_KEY_MAINNET: "mainnet-key",
+    };
+
     assert.deepEqual(
-      resolveKoraEndpoint(devnetDefault),
-      resolveKoraEndpoint(devnetDefault, "devnet")
+      inScope("sandbox", () => resolveKoraEndpoint(env)),
+      { rpcUrl: DEVNET_KORA_URL, apiKey: "devnet-key", identityTokenAudience: DEVNET_KORA_URL }
+    );
+    assert.deepEqual(
+      inScope("production", () => resolveKoraEndpoint(env)),
+      { rpcUrl: MAINNET_KORA_URL, apiKey: "mainnet-key", identityTokenAudience: undefined }
     );
   });
 
-  it("answers null for the other cluster until it has its own trio", () => {
-    assert.equal(resolveKoraEndpoint(devnetDefault, "mainnet-beta"), null);
-    assert.equal(isFeePaymentConfiguredForCluster(devnetDefault, "mainnet-beta"), false);
-    assert.equal(isFeePaymentConfiguredForCluster(devnetDefault, "devnet"), true);
-  });
-
-  it("serves a per-cluster trio on its own, never borrowing the default's key or audience", () => {
-    const env: FeePaymentEnv = {
-      ...devnetDefault,
-      KORA_RPC_URL_MAINNET: " https://kora-mainnet.example ",
+  it("answers null for a cluster without its own Kora URL, whatever else is configured", () => {
+    const blankMainnet: FeePaymentEnv = {
+      ...DEVNET_ONLY,
+      KORA_RPC_URL_MAINNET: "  ",
       KORA_API_KEY_MAINNET: "mainnet-key",
     };
-    assert.deepEqual(resolveKoraEndpoint(env, "mainnet-beta"), {
-      rpcUrl: "https://kora-mainnet.example",
-      apiKey: "mainnet-key",
-      identityTokenAudience: undefined,
-    });
-    assert.equal(resolveKoraEndpoint(env, "devnet")?.apiKey, "devnet-key");
-  });
 
-  it("lets a per-cluster trio override the default cluster too", () => {
-    const env: FeePaymentEnv = {
-      ...devnetDefault,
-      KORA_RPC_URL_DEVNET: "https://kora-devnet-2.example",
-    };
-    assert.deepEqual(resolveKoraEndpoint(env, "devnet"), {
-      rpcUrl: "https://kora-devnet-2.example",
-      apiKey: undefined,
-      identityTokenAudience: undefined,
-    });
-  });
-
-  it("follows SOLANA_NETWORK for which cluster the unsuffixed trio serves", () => {
-    const env: FeePaymentEnv = {
-      SOLANA_NETWORK: "mainnet-beta",
-      KORA_RPC_URL: "https://kora.example",
-    };
-    assert.equal(resolveKoraEndpoint(env, "mainnet-beta")?.rpcUrl, "https://kora.example");
-    assert.equal(resolveKoraEndpoint(env, "devnet"), null);
-  });
-
-  it("has no built-in default: a deployment reaches a paymaster only by naming it", () => {
-    assert.equal(resolveKoraEndpoint({}, "devnet"), null);
-    assert.equal(resolveKoraEndpoint({ SOLANA_NETWORK: "mainnet-beta" }, "mainnet-beta"), null);
-    assert.equal(isFeePaymentConfiguredForCluster({}, "devnet"), false);
+    assert.equal(
+      inScope("production", () => resolveKoraEndpoint(DEVNET_ONLY)),
+      null
+    );
+    assert.equal(
+      inScope("production", () => resolveKoraEndpoint(blankMainnet)),
+      null
+    );
+    assert.equal(
+      inScope("sandbox", () => resolveKoraEndpoint({})),
+      null
+    );
+    assert.equal(
+      inScope("production", () => isFeePaymentConfigured(DEVNET_ONLY)),
+      false
+    );
+    assert.equal(
+      inScope("sandbox", () => isFeePaymentConfigured(DEVNET_ONLY)),
+      true
+    );
   });
 });
 
 describe("createFeePaymentAdapter", () => {
-  it("fails closed for a cluster with no paymaster", () => {
-    const env: FeePaymentEnv = {
-      SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet.example",
-    };
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it("builds concurrent scopes' adapters against each scope cluster's own Kora", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", answerPayerSigner);
+
+    const [devnetFeePayer, mainnetFeePayer] = await Promise.all([
+      inScope("sandbox", async () => {
+        const adapter = createFeePaymentAdapter(BOTH_CLUSTERS, "sdp:v1:sandbox:test");
+        await delay(5);
+        return adapter.getFeePayer();
+      }),
+      inScope("production", async () => {
+        await delay(1);
+        const adapter = createFeePaymentAdapter(BOTH_CLUSTERS, "sdp:v1:production:test");
+        return adapter.getFeePayer();
+      }),
+    ]);
+
+    assert.equal(devnetFeePayer, DEVNET_KORA_SIGNER);
+    assert.equal(mainnetFeePayer, MAINNET_KORA_SIGNER);
+    assert.deepEqual(fetchMock.mock.calls.map((call) => call.arguments[0]).sort(), [
+      DEVNET_KORA_URL,
+      MAINNET_KORA_URL,
+    ]);
+  });
+
+  it("refuses a scope whose cluster has no Kora", () => {
     assert.throws(
-      () => createKoraAdapter(env, "sdp:v1:test", "mainnet-beta"),
-      /Kora is not configured for mainnet-beta/
-    );
-    assert.throws(
-      () =>
-        createFeePaymentAdapter(
-          { ...env, FEE_PAYMENT_PROVIDER: "native" },
-          "sdp:v1:test",
-          "mainnet-beta"
-        ),
-      /native fee payer serves devnet only/
+      () => inScope("production", () => createFeePaymentAdapter(DEVNET_ONLY, "sdp:v1:test")),
+      {
+        name: "FeePaymentError",
+        code: "PROVIDER_NOT_AVAILABLE",
+        message: "Kora is not configured for mainnet-beta: set KORA_RPC_URL_MAINNET",
+      }
     );
   });
 
-  it("builds a Kora adapter for a cluster that has one", () => {
-    const env: FeePaymentEnv = {
-      SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet.example",
-      KORA_RPC_URL_MAINNET: "https://kora-mainnet.example",
-    };
-    assert.equal(createFeePaymentAdapter(env, "sdp:v1:test", "mainnet-beta").providerId, "kora");
-    assert.equal(createFeePaymentAdapter(env, "sdp:v1:test").providerId, "kora");
+  it("refuses to pick a Kora outside a cluster scope", () => {
+    assert.throws(() => createFeePaymentAdapter(BOTH_CLUSTERS, "sdp:v1:test"), {
+      name: "SdpRpcError",
+      code: "CLUSTER_SCOPE_MISSING",
+    });
+  });
+
+  it("serves every cluster with the native fee payer", () => {
+    const native: FeePaymentEnv = { FEE_PAYMENT_PROVIDER: "native" };
+
+    assert.equal(
+      inScope("production", () => isFeePaymentConfigured(native)),
+      true
+    );
+    assert.equal(
+      inScope("production", () => createFeePaymentAdapter(native, "sdp:v1:test")).providerId,
+      "native"
+    );
   });
 });

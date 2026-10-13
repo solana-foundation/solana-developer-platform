@@ -19,16 +19,17 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { getIntegrationLaneKora } from "./kora-lane";
 
 const {
   app,
   createKVStoreSet,
-  createFeePaymentAdapter,
   createMosaicService,
   createSigningService,
   CustodyConfigStore,
   getDb,
   hashString,
+  KoraAdapter,
   seedTestDatabase,
   TEST_ORG,
   TEST_PROJECT,
@@ -38,7 +39,7 @@ const {
 } = apiTestSupport;
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
-const KORA_CONFIGURED = !!env.KORA_RPC_URL;
+const KORA_CONFIGURED = !!getIntegrationLaneKora().rpcUrl;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 const INTEGRATION_CUSTODY_PROVIDER = getIntegrationCustodyProvider();
 const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
@@ -452,11 +453,16 @@ async function fundAddressViaKoraFeePayer(
   lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl || !env.KORA_RPC_URL) {
+  const laneKora = getIntegrationLaneKora();
+  if (!rpcUrl || !laneKora.rpcUrl) {
     return false;
   }
 
-  const feePayment = createFeePaymentAdapter(env);
+  const feePayment = new KoraAdapter({
+    rpcUrl: laneKora.rpcUrl,
+    apiKey: laneKora.apiKey,
+    identityTokenAudience: laneKora.identityTokenAudience,
+  });
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
   const maxTransferLamports =

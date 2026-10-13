@@ -4,8 +4,9 @@ import {
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
-import { resolveDefaultCluster } from "@sdp/rpc";
-import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -114,31 +115,6 @@ type AdmissionContext = {
   dayBucket: string;
 };
 
-/**
- * The budget network a scope draws from: the scope's cluster when the caller
- * named one (Earn movements execute per cluster), else the process default.
- * A mainnet movement on a devnet-default process must reserve against the
- * mainnet policies and trip the mainnet breaker, not devnet's.
- */
-function resolveNetwork(
-  env: Pick<Env, "SOLANA_NETWORK">,
-  scope: Pick<SponsorshipScope, "cluster">
-): SponsorshipNetwork {
-  return sponsorshipNetworkForCluster(scope.cluster ?? resolveDefaultCluster(env));
-}
-
-/**
- * The RPC that prices the network fee for a scope: the process RPC by default,
- * the cluster's own endpoint when the scope names one. A fee quoted on the
- * wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash
- * answers null anyway. An unconfigured cluster throws here and surfaces as
- * "Sponsorship preflight is unavailable", the same fail-closed answer as a
- * dead RPC.
- */
-function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "cluster">) {
-  return scope.cluster ? createClusterRpc(env, scope.cluster) : createRpc(env);
-}
-
 function encodeBase64(value: Uint8Array): string {
   return getBase64Decoder().decode(value);
 }
@@ -201,6 +177,16 @@ export function sponsorshipProviderConfigFingerprint(
     .digest("hex");
 }
 
+/**
+ * Price a transaction's network fee on one RPC client, pinned when the fee payment is built.
+ *
+ * @param rpc - The cluster RPC the fee is priced on.
+ * @returns A function that prices a transaction's network fee in lamports on `rpc`.
+ */
+function networkFeeOn(rpc: ReturnType<typeof createClusterRpc>) {
+  return (transaction: Uint8Array) => getTransactionNetworkFee(rpc, transaction);
+}
+
 export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
   private readonly network: SponsorshipNetwork;
@@ -209,20 +195,27 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
   private readonly now: () => Date;
 
+  /**
+   * Budget a provider on the open cluster scope's network: reservations, breakers and the
+   * fee-pricing RPC all follow the scope's cluster, the same one the provider signs on.
+   *
+   * @param env - Environment carrying the database and Redis configuration.
+   * @param scope - Who the sponsorship is charged to.
+   * @param provider - The fee payer being budgeted.
+   * @param dependencies - Overrides for the repository, Redis, fee pricing and clock.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   constructor(
-    private readonly env: Env,
+    env: Env,
     private readonly scope: SponsorshipScope,
     private readonly provider: FeePaymentPort,
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
-    this.network = resolveNetwork(env, scope);
+    this.network = sponsorshipNetworkForCluster(currentClusterScope().cluster);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-    this.getNetworkFee =
-      dependencies.getNetworkFee ??
-      ((transaction) =>
-        getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
+    this.getNetworkFee = dependencies.getNetworkFee ?? networkFeeOn(createClusterRpc());
     this.now = dependencies.now ?? (() => new Date());
   }
 

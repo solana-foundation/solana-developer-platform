@@ -161,10 +161,10 @@ export async function createEarnVaultDepositPreview(
     // channel, so a partner's existing blockingIssues handling covers both.
     blockingIssues: capIssue === null ? quote.blockingIssues : [...quote.blockingIssues, capIssue],
     // Sponsorship INTENT, for honest fee copy on the confirm step — the same
-    // flag+cluster gate resolveVaultSponsorship applies at execution. A
+    // flag resolveVaultSponsorship applies at execution. A
     // swap-funded deposit forces wallet-pays regardless; the swap choice lives
     // client-side, so the client applies that override to the copy.
-    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster),
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env),
   });
 }
 
@@ -983,7 +983,7 @@ export async function listEarnVaultPositions(c: AppContext) {
   // position's exit runs on the environment's cluster, so the copy a client
   // shows on the exit step can read this instead of a quote that a provider
   // with no exit floor never produces.
-  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster);
+  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env);
 
   return success(c, {
     balanceReadContext: balanceReadContext
@@ -1240,7 +1240,7 @@ export async function createEarnVaultWithdrawalPreview(
     assetDecimals: quote.assetDecimals,
     blockingIssues: quote.blockingIssues,
     // Same sponsorship intent as the deposit preview; exits have no swap leg.
-    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster),
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env),
   });
 }
 

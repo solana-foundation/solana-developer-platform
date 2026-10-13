@@ -68,9 +68,8 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
  * to a sandbox and a production caller. A mainnet-only provider's row is listed
  * in both and fundable in one — see `hostCluster` in @sdp/types.
  *
- * `feeSponsored` is derived the same way, from the deployment's sponsorship
- * gate: the flag plus the cluster allowlist `resolveVaultSponsorship` reads at
- * execution, answered for the row's own cluster. A row that is not fundable is
+ * `feeSponsored` is derived from the deployment's sponsorship flag, the same
+ * one `resolveVaultSponsorship` reads at execution. A row that is not fundable is
  * never sponsored (there is no movement to sponsor), so the two agree.
  *
  * `depositSlippage` is derived per request too: every production deposit
@@ -118,7 +117,7 @@ export function mapToEarnStrategy(
       : null,
     hostCluster: row.host_cluster,
     fundable,
-    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env, row.host_cluster),
+    feeSponsored: fundable && isEarnVaultSponsorshipEnabled(env),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
