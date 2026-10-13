@@ -343,7 +343,6 @@
     {
       "includes": [
         "**/packages/sdp-rpc/src/**/*.ts",
-        "**/apps/sdp-api/src/job.ts",
         "**/apps/sdp-api/src/routes/earn/handlers/vault-reconciliation.ts",
         "**/apps/sdp-api/src/services/earn/deposit-mint-guard.ts",
         "**/apps/sdp-api/src/services/earn/execution-registry.ts",
@@ -356,11 +355,6 @@
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
         "**/apps/sdp-api/src/services/jobs/track-pending-withdrawals.ts",
-        "**/apps/sdp-api/src/services/payments/recurring-payments/activation.ts",
-        "**/apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
-        "**/apps/sdp-api/src/services/payments/recurring-payments/lifecycle.ts",
-        "**/apps/sdp-api/src/services/payments/recurring-payments/shared.ts",
-        "**/apps/sdp-api/src/services/payments/recurring-payments/update.ts",
         "**/apps/sdp-api/src/services/private-channels/project-rpc.ts",
         "**/apps/sdp-api/src/services/sponsorship-budget.service.ts",
         "**/packages/sdp-api-integration/src/helpers/integration.ts",

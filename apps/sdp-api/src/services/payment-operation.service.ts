@@ -7,7 +7,6 @@ import {
   isWellKnownTokenSymbol,
   type Permission,
   SOL_MINT,
-  type SolanaCluster,
   wellKnownMint,
 } from "@sdp/types";
 import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
@@ -99,18 +98,18 @@ export function isNativePaymentToken(token: string): boolean {
 
 /**
  * Maps native SOL aliases and well-known token symbols (case-insensitive) to
- * the given cluster's mint; anything else passes through as a mint address,
+ * the open cluster scope's mint; anything else passes through as a mint address,
  * byte-exact since base58 is case-sensitive. Native SOL canonicalizes to the
  * wrapped SOL mint so `token` values compare uniformly — dispatch between
  * native and SPL paths goes through {@link isNativePaymentToken}, never string
  * equality against the mint.
  *
  * @param token - A native SOL alias, a well-known token symbol, or a mint address.
- * @param cluster - The cluster whose mint table resolves well-known symbols.
- * @returns The canonical mint address for `token` on `cluster`.
- * @throws AppError (400) when a well-known symbol has no mint on `cluster`.
+ * @returns The canonical mint address for `token` on the scope's cluster.
+ * @throws AppError (400) when a well-known symbol has no mint on the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export function normalizePaymentToken(token: string, cluster: SolanaCluster): string {
+export function normalizePaymentToken(token: string): string {
   if (isNativePaymentToken(token)) {
     return SOL_MINT;
   }
@@ -120,6 +119,7 @@ export function normalizePaymentToken(token: string, cluster: SolanaCluster): st
     return token;
   }
 
+  const { cluster } = currentClusterScope();
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {
     throw badRequest(`${symbol} is not available on ${cluster}`);
@@ -180,7 +180,7 @@ export function resolveOutboundPaymentOperation(input: {
     sourceWallet,
     sourceAddress: assertValidAddress(sourceWallet.publicKey, "source"),
     destinationAddress: assertValidAddress(input.destination, "destination"),
-    token: normalizePaymentToken(input.token, currentClusterScope().cluster),
+    token: normalizePaymentToken(input.token),
     amount,
   };
 }

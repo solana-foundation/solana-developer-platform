@@ -1,5 +1,4 @@
 import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   ListPaymentSubscriptionPlansResponse,
@@ -123,7 +122,7 @@ export const createSubscriptionPlan = async (
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token, currentClusterScope().cluster),
+    token: normalizePaymentToken(body.token),
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),
