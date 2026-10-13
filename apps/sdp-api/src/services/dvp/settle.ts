@@ -7,7 +7,7 @@
 
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import { DVP_CLOSE_REFUSAL } from "@sdp/types";
 import {
   appendTransactionMessageInstructions,
@@ -196,7 +196,7 @@ export async function closeDvpTrade(
       : buildCancelInstruction(trade, atas, signer),
   ];
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -298,9 +298,9 @@ async function closeOutcome(
   action: DvpCloseAction,
   closeSignature: Signature
 ): Promise<boolean> {
-  let confirmation: Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>;
+  let confirmation: Awaited<ReturnType<typeof confirmTransaction>>;
   try {
-    confirmation = await solanaRpc.confirmTransaction(rpc, closeSignature, {
+    confirmation = await confirmTransaction(rpc, closeSignature, {
       timeoutMs: CLOSE_CONFIRM_TIMEOUT_MS,
     });
   } catch (error) {

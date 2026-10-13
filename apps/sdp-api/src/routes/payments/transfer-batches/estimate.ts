@@ -1,4 +1,8 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  accountExists,
+  getMinimumBalanceForRentExemption,
+  getRecentBlockhash,
+} from "@sdp/rpc/solana";
 import type { TransactionMessageBytesBase64 } from "@solana/kit";
 import { compileTransaction, createNoopSigner } from "@solana/kit";
 import { getTokenSize } from "@solana-program/token-2022";
@@ -61,11 +65,11 @@ async function estimateMissingAtaRentLamports(
   }
 
   const [rentLamports, existence] = await Promise.all([
-    solanaRpc.getMinimumBalanceForRentExemption(rpc, getTokenSize()),
+    getMinimumBalanceForRentExemption(rpc, getTokenSize()),
     Promise.all(
       groups.map((group) =>
         group.destinationTokenAccount
-          ? solanaRpc.accountExists(rpc, group.destinationTokenAccount)
+          ? accountExists(rpc, group.destinationTokenAccount)
           : Promise.resolve(true)
       )
     ),
@@ -97,7 +101,7 @@ export async function estimateTransferBatch(
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
   const [feePayer, lifetime] = await Promise.all([
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   const groups = await buildInstructionGroups({
     tokenContext: resolved.tokenContext,

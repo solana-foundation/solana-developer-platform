@@ -1,7 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { getSdpDocsOrigin, SOL_DECIMALS } from "@sdp/types";
@@ -249,7 +249,7 @@ pay.post(
       const feePayment = await getFeePayment();
       const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
         feePayment.getFeePayer(),
-        solanaRpc.getRecentBlockhash(rpc, "confirmed"),
+        getRecentBlockhash(rpc, "confirmed"),
       ]);
 
       let instructions: Instruction[];

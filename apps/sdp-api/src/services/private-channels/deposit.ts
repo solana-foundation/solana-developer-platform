@@ -21,7 +21,7 @@
  * chain-heuristic oracle — reachable once SPC exposes an event stream.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   getDepositInstructionAsync,
@@ -148,7 +148,7 @@ async function broadcastDeposit(input: {
       amount: input.amountBaseUnits,
       recipient: input.recipient,
     }),
-    solanaRpc.getRecentBlockhash(input.projectRpc.rpc, "confirmed"),
+    getRecentBlockhash(input.projectRpc.rpc, "confirmed"),
   ]);
 
   const message = pipe(
@@ -162,7 +162,7 @@ async function broadcastDeposit(input: {
   const signed = await signTransactionMessageWithSigners(message);
   await input.onSigned(getSignatureFromTransaction(signed));
   const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-  return solanaRpc.sendTransaction(input.projectRpc.rpc, signedBytes);
+  return sendTransaction(input.projectRpc.rpc, signedBytes);
 }
 
 /**

@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -172,7 +172,7 @@ export async function createTransferBatch(c: AppContext) {
       resolved.sourceWallet.id
     ),
     feePayment.getFeePayer(),
-    solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),
+    getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
