@@ -295,7 +295,7 @@ SDP executes custody operations by building, signing, and submitting with the co
 ### Idempotency
 Source: https://platform.solana.com/docs/developing-with-sdp/idempotency
 
-> Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, accepted on every other payments, wallets, counterparties and compliance mutation.
+> Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, and accepted on the mutations listed below.
 
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
@@ -371,7 +371,7 @@ Keys are kept for 24 hours after the original request. After that, a same-key re
 
 ## Creating wallets
 
-`POST /v1/wallets` with a key never provisions a second wallet for one operation: a retry returns the wallet an earlier attempt created, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, so try again with a new key.
+With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a retry returns the wallet an earlier attempt recorded, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, so try again with a new key.
 
 ## The dashboard and the Postman collection
 

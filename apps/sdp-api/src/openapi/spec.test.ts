@@ -1,15 +1,8 @@
 import { readFileSync } from "node:fs";
-import {
-  IDEMPOTENCY_REQUIRED_ROUTES,
-  SDP_RAMP_PROVIDER_STAGES,
-  SDP_RELEASE_CHANNELS,
-  type SdpModule,
-} from "@sdp/types";
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { createApp } from "@/app";
 import { declaredIdempotency } from "@/middleware/idempotency";
-import { noopObservability } from "@/runtime/observability";
-import { ownerOf } from "@/test/helpers/route-owners";
+import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
@@ -798,24 +791,14 @@ describe("OpenAPI spec", () => {
  * absent on every other mutating route of a `stable` module.
  */
 describe("OpenAPI Idempotency-Key headers", () => {
-  const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
-  const STABLE_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.stable);
   // Declared routes with no public operation yet; adding one is deliberate.
   const UNDOCUMENTED = ["POST /v1/payments/requests"];
 
   function declaredModes() {
-    const app = createApp({
-      observability: noopObservability,
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
-    });
     const modes = new Map<string, ReturnType<typeof declaredIdempotency>>();
-    for (const route of app.routes) {
-      const method = route.method.toUpperCase();
-      if (!MUTATING_METHODS.has(method)) continue;
-      const owner = ownerOf(route.path);
-      if (owner === undefined || owner === "core" || !STABLE_MODULES.has(owner)) continue;
-      const key = `${method} ${route.path.replace(/:([A-Za-z0-9_]+)/g, "{$1}")}`;
-      const mode = declaredIdempotency(route.handler);
+    for (const step of stableMutatingRouteSteps()) {
+      const key = step.route.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+      const mode = declaredIdempotency(step.handler);
       if (mode !== undefined || !modes.has(key)) modes.set(key, mode ?? modes.get(key));
     }
     return modes;
