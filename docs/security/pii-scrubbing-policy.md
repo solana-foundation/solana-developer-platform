@@ -122,7 +122,7 @@ is not done until it appears here with a test.
 | Audit ledger metadata | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed |
 | Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
-| Ramp provider error messages | `extractProviderErrorMessage` (`packages/sdp-payments/src/ramps/fetch.ts`) |
+| Ramp provider error messages | `providerErrorMessageSchema` (`packages/sdp-payments/src/ramps/fetch.ts`) scrubs the message into `SdpPaymentsError.diagnostics`, which error bodies never carry; `paymentsErrorDiagnostics` (`apps/sdp-api/src/runtime/money-path-events.ts`) scrubs diagnostics again before they are logged |
 | Earn provider error messages and bodies | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
 | Fireblocks request/response tracing | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino) |
 
