@@ -1,5 +1,11 @@
-import { organizationStatusMayStartMoney, type ProjectEnvironment } from "@sdp/types";
+import {
+  MOVEMENTS,
+  type MovementId,
+  organizationStatusMayStartMoney,
+  type ProjectEnvironment,
+} from "@sdp/types";
 import { getDb } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
@@ -47,14 +53,10 @@ export type MoneyAdmissionDecision =
   | { admitted: true }
   | { admitted: false; reason: MoneyAdmissionRefusal };
 
-/** What is asking to start money, for the refusal event. */
+/** What is asking to start money before it signs, for the refusal event. */
 export interface MoneyStartContext {
   surface: "job" | "http";
-  operation:
-    | "recurring_payment.collect"
-    | "recurring_payment.activate"
-    | "recurring_payment.resume"
-    | "pay_request.sponsor";
+  movement: MovementId;
   /** The row the movement belongs to, such as a recurring payment id. */
   subjectId: string;
 }
@@ -97,12 +99,71 @@ export function decideMoneyStart(facts: MoneyAdmissionFacts | null): MoneyAdmiss
   return { admitted: true };
 }
 
+/**
+ * Pure. What the custody signer decides for one movement: an exit always
+ * passes (ADR 0002), and a start is {@link decideMoneyStart}.
+ */
+export function decideMovement(
+  movement: MovementId,
+  facts: MoneyAdmissionFacts | null
+): MoneyAdmissionDecision {
+  return MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(facts);
+}
+
+/** Where a movement was refused, for the `sdp_money_refused` event. */
+export interface MovementRefusalContext {
+  surface: "signer" | "sponsor" | MoneyStartContext["surface"];
+  movement: MovementId;
+  organizationId: string;
+  projectId: string | null;
+  /** The custody wallet or sponsored actor the refusal is about. */
+  subjectId: string;
+}
+
+/**
+ * Throws {@link MoneyMovementRefusedError} (403) for a refused decision, after
+ * emitting one `sdp_money_refused` event. The signing sinks call it at the
+ * moment they are asked to sign.
+ */
+export function assertMovementAdmitted(
+  decision: MoneyAdmissionDecision,
+  context: MovementRefusalContext
+): void {
+  if (decision.admitted) {
+    return;
+  }
+  logMoneyRefused(decision.reason, context);
+  throw new MoneyMovementRefusedError(decision.reason);
+}
+
+/** The one `sdp_money_refused` event shape, whichever surface refused. */
+function logMoneyRefused(reason: MoneyAdmissionRefusal, context: MovementRefusalContext): void {
+  logEvent("warn", {
+    event: "sdp_money_refused",
+    surface: context.surface,
+    movement: context.movement,
+    module: MOVEMENTS[context.movement].module,
+    subject_id: context.subjectId,
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    reason,
+  });
+}
+
 /** One primary-key join, scoped by both ids. */
 export async function readMoneyAdmissionFacts(
   env: Env,
   scope: MoneyAdmissionScope
 ): Promise<MoneyAdmissionFacts | null> {
-  const row = await getDb(env)
+  return readMoneyAdmissionFactsWith(getDb(env), scope);
+}
+
+/** {@link readMoneyAdmissionFacts} on a caller's client (a transaction, a service's own). */
+export async function readMoneyAdmissionFactsWith(
+  db: DatabaseExecutor,
+  scope: MoneyAdmissionScope
+): Promise<MoneyAdmissionFacts | null> {
+  const row = await db
     .prepare(
       `SELECT p.environment, o.status, o.settings
          FROM projects p
@@ -126,17 +187,9 @@ export async function checkMoneyStart(
   scope: MoneyAdmissionScope,
   context: MoneyStartContext
 ): Promise<MoneyAdmissionDecision> {
-  const decision = decideMoneyStart(await readMoneyAdmissionFacts(env, scope));
+  const decision = decideMovement(context.movement, await readMoneyAdmissionFacts(env, scope));
   if (!decision.admitted) {
-    logEvent("warn", {
-      event: "sdp_money_refused",
-      surface: context.surface,
-      operation: context.operation,
-      subject_id: context.subjectId,
-      organization_id: scope.organizationId,
-      project_id: scope.projectId,
-      reason: decision.reason,
-    });
+    logMoneyRefused(decision.reason, { ...context, ...scope });
   }
   return decision;
 }

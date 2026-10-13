@@ -399,14 +399,9 @@ describe("useOnrampWizard — demo mode's Simulate verification", () => {
   });
 });
 
-describe("useOnrampWizard — a first Mural onboarding", () => {
-  it("moves past the memo step while the terms are still to accept", async () => {
-    const termsRequired = {
-      provider: "mural",
-      direction: "onramp",
-      status: "terms_of_service_required",
-      termsOfServiceUrl: "https://app.mural.example/tos",
-    };
+describe("useOnrampWizard: an onboarding with nothing left to collect", () => {
+  it("moves past the memo step while the verification is still in review", async () => {
+    const verifying = { provider: "bvnk", direction: "onramp", status: "customer_verifying" };
     let started = false;
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -415,16 +410,21 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
         return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
       }
       if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
-        // A first Mural onboarding has no fields to collect, so no requirements step is
-        // inserted; the advance from the memo step starts it and answers with the terms.
+        // Nothing is left to collect, so no requirements step is inserted; the advance
+        // from the memo step answers with the verification still in review.
         if (method === "POST") {
           started = true;
         }
         return Promise.resolve(
           Response.json({
             data: started
-              ? termsRequired
-              : { provider: "mural", direction: "onramp", status: "onboarding_not_started" },
+              ? verifying
+              : {
+                  provider: "bvnk",
+                  direction: "onramp",
+                  status: "customer_verification_required",
+                  verificationUrl: "https://bvnk.example/verify",
+                },
           })
         );
       }
@@ -432,15 +432,15 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
     });
 
     const { result } = renderHook(
-      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["mural"] }),
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["bvnk"] }),
       { wrapper }
     );
     await act(async () => {});
-    act(() => result.current.selectProvider("mural"));
+    act(() => result.current.selectProvider("bvnk"));
     act(() => result.current.setField("amount", "100"));
     act(() => result.current.setField("walletId", WALLET.id));
     await waitFor(() => expect(result.current.canProceed).toBe(true));
-    expect(result.current.fields.provider).toBe("mural");
+    expect(result.current.fields.provider).toBe("bvnk");
     expect(result.current.steps.map((step) => step.id)).not.toContain("REQUIREMENTS");
 
     await act(async () => {
@@ -452,7 +452,7 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
     });
 
     expect(result.current.currentStepId).toBe("REVIEW");
-    expect(result.current.onboarding?.status).toBe("terms_of_service_required");
+    expect(result.current.onboarding?.status).toBe("customer_verifying");
     expect(result.current.quoteTransferId).toBeNull();
   });
 });

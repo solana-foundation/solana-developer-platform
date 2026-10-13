@@ -134,7 +134,7 @@ export function createPostgresKycWalletsRepository(db: AppDb): KycWalletsReposit
     },
 
     async setKycStatusByCounterparty(input: SetKycStatusByCounterpartyInput) {
-      // Same idempotency guard as setKycStatus: this is the path a redelivered Mural
+      // Same idempotency guard as setKycStatus: this is the path a redelivered provider
       // webhook takes, so a same-status write must leave the row's timestamps alone.
       await db
         .prepare(

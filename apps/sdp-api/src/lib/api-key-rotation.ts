@@ -1,6 +1,8 @@
+import type { ApiKeyStatus } from "@sdp/types";
+
 export function isRotationDeadlineReached(
   rotationDeadline: string | null | undefined,
-  now = Date.now()
+  now: number
 ): boolean {
   if (!rotationDeadline) {
     return false;
@@ -10,4 +12,41 @@ export function isRotationDeadlineReached(
   // Rotation deadlines are generated internally as ISO timestamps. Fail closed
   // if persisted data is malformed rather than silently keeping the key active.
   return !Number.isFinite(deadline) || deadline <= now;
+}
+
+/** The live `api_keys` columns that decide whether a key may still authenticate. */
+export interface ApiKeyLifecycleColumns {
+  status: ApiKeyStatus;
+  expires_at: string | null;
+  /** Undefined only on a legacy cache entry written before deadlines were enforced. */
+  rotation_deadline: string | null | undefined;
+}
+
+/**
+ * Why a key's live row can no longer authenticate, or null while it can: it
+ * must be `active`, not past its expiry, and not past its rotation grace
+ * period (a rotated key stays `active` in the row and is retired by the
+ * deadline alone). Every live re-check of a key applies this one predicate.
+ */
+export function apiKeyRowRefusal(
+  row: ApiKeyLifecycleColumns,
+  now: number
+): "revoked" | "expired" | null {
+  if (row.status === "expired") {
+    return "expired";
+  }
+  if (row.status !== "active") {
+    return "revoked";
+  }
+  if (row.expires_at !== null) {
+    // Like the rotation deadline below: a malformed expiry fails closed.
+    const expiresAt = Date.parse(row.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt < now) {
+      return "expired";
+    }
+  }
+  if (isRotationDeadlineReached(row.rotation_deadline, now)) {
+    return "expired";
+  }
+  return null;
 }

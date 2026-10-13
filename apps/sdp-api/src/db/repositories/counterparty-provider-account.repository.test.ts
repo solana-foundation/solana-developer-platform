@@ -75,104 +75,43 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     return counterparty;
   }
 
-  it("keeps the customer row distinct from corridor rows", async () => {
-    const counterparty = await seedCounterparty("cpacc_distinct_rows");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:cus_123",
-    });
-    const external = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    });
-
-    expect(customer.id).toMatch(/^counterparty_provider_account_/);
-    expect(customer.fiat_currency).toBeNull();
-    expect(customer.destination_country).toBeNull();
-    expect(customer.payment_rail).toBeNull();
-    expect(customer.kind).toBe("customer_link");
-    expect(external.id).toMatch(/^counterparty_provider_account_/);
-    expect(external.id).not.toBe(customer.id);
-    expect(external).toMatchObject({
-      provider_customer_reference: customer.provider_customer_reference,
-      external_account_reference: null,
-      fiat_currency: "USD",
-      destination_country: "US",
-      payment_rail: "ACH",
-      provider_status: null,
-      kind: "payout_account",
-      status: "active",
-    });
-    expect(
-      await repository.getProviderAccount({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-      })
-    ).toMatchObject({ id: customer.id });
-  });
-
-  it("allows at most one live reservation per corridor and rail", async () => {
-    const counterparty = await seedCounterparty("cpacc_reservation_unique");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:cus_123",
-    });
-    const input = {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    } as const;
-
-    const first = await repository.insertPendingExternalAccount(input);
-    await expect(repository.insertPendingExternalAccount(input)).rejects.toMatchObject({
-      code: "23505",
-    });
-
-    // Archiving the live reservation frees the corridor for a fresh one, and a
-    // COMPLETED account does not block new reservations — only an in-flight one.
-    const archived = await repository.archiveExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: first.id,
-    });
-    expect(archived?.status).toBe("archived");
-    const replacementReservation = await repository.insertPendingExternalAccount(input);
-    const completedReplacement = await repository.completeExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: replacementReservation.id,
-      externalAccountReference: "ExternalAccount:reservation_unique",
-      providerStatus: "ACTIVE",
-    });
-    expect(completedReplacement?.external_account_reference).toBe(
-      "ExternalAccount:reservation_unique"
-    );
-    const afterCompletion = await repository.insertPendingExternalAccount(input);
-    expect(afterCompletion.id).not.toBe(replacementReservation.id);
-  });
+  /**
+   * Inserts a stored Lightspark row as history: nothing writes rows for a
+   * retired provider, so the fixture goes straight to the table.
+   *
+   * @param input - Parent counterparty, row kind, status and payout corridor.
+   * @returns The inserted row id.
+   */
+  async function seedStoredAccount(input: {
+    counterpartyId: string;
+    kind: "customer_link" | "payout_account";
+    status: "active" | "archived";
+    corridor?: { fiatCurrency: string; destinationCountry: string; paymentRail: string };
+  }): Promise<string> {
+    const id = generateCounterpartyProviderAccountId();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO counterparty_provider_accounts (
+           id, organization_id, project_id, counterparty_id, provider,
+           provider_customer_reference, kind, external_account_reference, fiat_currency,
+           destination_country, payment_rail, status, metadata
+         ) VALUES (?, ?, ?, ?, 'lightspark', 'Customer:stored', ?, ?, ?, ?, ?, ?, '{}'::jsonb)`
+      )
+      .bind(
+        id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        input.counterpartyId,
+        input.kind,
+        input.corridor === undefined ? null : `ExternalAccount:${id}`,
+        input.corridor === undefined ? null : input.corridor.fiatCurrency,
+        input.corridor === undefined ? null : input.corridor.destinationCountry,
+        input.corridor === undefined ? null : input.corridor.paymentRail,
+        input.status
+      )
+      .run();
+    return id;
+  }
 
   it("reads and updates provider resource accounts by kind", async () => {
     const counterparty = await seedCounterparty("cpacc_resource_accounts");
@@ -843,169 +782,6 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     });
   });
 
-  it("scopes external account lookup to the parent counterparty", async () => {
-    const counterparty = await seedCounterparty("cpacc_lookup_owner");
-    const otherCounterparty = await seedCounterparty("cpacc_lookup_other");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:cus_lookup",
-    });
-    const external = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    });
-
-    expect(
-      await repository.getExternalAccountById({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: otherCounterparty.id,
-        provider: "lightspark",
-        id: external.id,
-      })
-    ).toBeNull();
-    expect(
-      await repository.getExternalAccountById({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-        id: external.id,
-      })
-    ).toMatchObject({ id: external.id });
-  });
-
-  it("scopes completion, status updates, and archival to all parent ids", async () => {
-    const counterparty = await seedCounterparty("cpacc_scoped_mutations");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:cus_123",
-    });
-    const pending = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    });
-    const wrongScope = {
-      organizationId: TEST_ORG.id,
-      projectId: "prj_other",
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: pending.id,
-    } as const;
-
-    expect(
-      await repository.completeExternalAccount({
-        ...wrongScope,
-        externalAccountReference: "ExternalAccount:acc_123",
-        providerStatus: "PENDING",
-      })
-    ).toBeNull();
-    const completed = await repository.completeExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: pending.id,
-      externalAccountReference: "ExternalAccount:acc_123",
-      providerStatus: "PENDING",
-    });
-    expect(completed).toMatchObject({
-      external_account_reference: "ExternalAccount:acc_123",
-      provider_status: "PENDING",
-    });
-    expect(
-      await repository.updateExternalAccountStatus({ ...wrongScope, providerStatus: "ACTIVE" })
-    ).toBeNull();
-    const active = await repository.updateExternalAccountStatus({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: pending.id,
-      providerStatus: "ACTIVE",
-    });
-    assert(active);
-    expect(active.provider_status).toBe("ACTIVE");
-    expect(await repository.archiveExternalAccount(wrongScope)).toBeNull();
-    const archived = await repository.archiveExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: pending.id,
-    });
-    assert(archived);
-    expect(archived.status).toBe("archived");
-    expect(
-      await repository.listActiveExternalAccounts({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-        fiatCurrency: "USD",
-        destinationCountry: "US",
-      })
-    ).toEqual([]);
-  });
-
-  it("allows a replacement corridor row after archival", async () => {
-    const counterparty = await seedCounterparty("cpacc_replacement");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:cus_123",
-    });
-    const first = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    });
-    await repository.archiveExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: first.id,
-    });
-    const replacement = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-    });
-
-    expect(replacement.id).not.toBe(first.id);
-  });
-
   it("keeps the first claimed residence country on a repeat claim", async () => {
     const counterparty = await seedCounterparty("cpacc_residence_claim");
     const first = await repository.upsertProviderAccount({
@@ -1312,42 +1088,25 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(await repository.markCustomerLinkSessionTimestamp(input)).toBeNull();
   });
 
-  it("lists active and archived external rows with parent and tenant filters", async () => {
+  it("lists a retired provider's stored rows with parent, corridor and tenant filters", async () => {
     const counterparty = await seedCounterparty("cpacc_list_provider_accounts");
     const otherCounterparty = await seedCounterparty("cpacc_list_provider_accounts_other");
-    const customer = await repository.upsertProviderAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+    const customer = await seedStoredAccount({
       counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: "Customer:list_provider_accounts",
+      kind: "customer_link",
+      status: "active",
     });
-    const usd = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+    const usd = await seedStoredAccount({
       counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
+      kind: "payout_account",
+      status: "active",
+      corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
     });
-    const gbp = await repository.insertPendingExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+    const gbp = await seedStoredAccount({
       counterpartyId: counterparty.id,
-      provider: "lightspark",
-      providerCustomerReference: customer.provider_customer_reference,
-      fiatCurrency: "GBP",
-      destinationCountry: "GB",
-      paymentRail: "FPS",
-    });
-    await repository.archiveExternalAccount({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      counterpartyId: counterparty.id,
-      provider: "lightspark",
-      id: gbp.id,
+      kind: "payout_account",
+      status: "archived",
+      corridor: { fiatCurrency: "GBP", destinationCountry: "GB", paymentRail: "FPS" },
     });
 
     expect(
@@ -1357,9 +1116,9 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
       })
     ).toEqual([
-      expect.objectContaining({ id: customer.id, kind: "customer_link" }),
-      usd,
-      expect.objectContaining({ id: gbp.id, status: "archived" }),
+      expect.objectContaining({ id: customer, kind: "customer_link", provider: "lightspark" }),
+      expect.objectContaining({ id: usd, kind: "payout_account", status: "active" }),
+      expect.objectContaining({ id: gbp, status: "archived" }),
     ]);
     expect(
       await repository.listProviderAccounts({
@@ -1369,7 +1128,10 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
         fiatCurrency: "USD",
         destinationCountry: "US",
       })
-    ).toEqual([expect.objectContaining({ id: customer.id, kind: "customer_link" }), usd]);
+    ).toEqual([
+      expect.objectContaining({ id: customer, kind: "customer_link" }),
+      expect.objectContaining({ id: usd }),
+    ]);
     expect(
       await repository.listProviderAccounts({
         organizationId: TEST_ORG.id,

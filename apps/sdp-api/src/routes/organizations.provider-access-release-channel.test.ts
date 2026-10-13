@@ -53,6 +53,6 @@ describe("GET /v1/organizations/:orgId/provider-access release channel", () => {
     expect((await rampsEnabled(app, "beta")).moonpay).toBe(false);
     const onBeta = await rampsEnabled(moonpayInBetaApp, "beta");
     expect(onBeta.moonpay).toBe(true);
-    expect(onBeta.lightspark).toBe(false);
+    expect(onBeta.stripe).toBe(false);
   });
 });

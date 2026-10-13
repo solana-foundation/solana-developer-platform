@@ -702,7 +702,7 @@ describe("OpenAPI spec", () => {
       parameters
         .filter((parameter) => "in" in parameter && parameter.in === "query")
         .map((parameter) => ("name" in parameter ? parameter.name : undefined))
-    ).toContain("destinationCountry");
+    ).toEqual(["provider", "direction", "assetRail", "fiatCurrency", "destinationCustodyWalletId"]);
     expect(requirementsPath.responses["200"]).toMatchSnapshot();
   });
 

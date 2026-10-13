@@ -19,6 +19,11 @@
       "import": "./src/errors.ts",
       "default": "./src/errors.ts"
     },
+    "./factory": {
+      "types": "./src/factory.ts",
+      "import": "./src/factory.ts",
+      "default": "./src/factory.ts"
+    },
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts",
@@ -38,6 +43,11 @@
       "types": "./src/read-context.ts",
       "import": "./src/read-context.ts",
       "default": "./src/read-context.ts"
+    },
+    "./scope": {
+      "types": "./src/scope.ts",
+      "import": "./src/scope.ts",
+      "default": "./src/scope.ts"
     }
   },
   "scripts": {

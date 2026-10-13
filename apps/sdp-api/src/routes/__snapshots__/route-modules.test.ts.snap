@@ -258,7 +258,6 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "ramps GET /v1/payments/ramps/onramp/currency",
   "ramps POST /v1/counterparties/:counterpartyId/requirements",
   "ramps POST /v1/payments/ramps/coinbase/events",
-  "ramps POST /v1/payments/ramps/moneygram/events",
   "ramps POST /v1/payments/ramps/offramp/estimate",
   "ramps POST /v1/payments/ramps/offramp/quote",
   "ramps POST /v1/payments/ramps/onramp/estimate",

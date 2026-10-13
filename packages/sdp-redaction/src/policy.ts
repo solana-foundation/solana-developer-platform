@@ -103,7 +103,7 @@ const PII_KEYS = new Set([
   // (it collides with Solana addresses), so a postal address is defused one
   // component at a time instead — which means every spelling a provider uses
   // for the street line has to be here by name. `address1`/`physicalAddress`
-  // are Mural's (`MuralPhysicalAddress` in the Mural client),
+  // are a retired ramp provider's, kept so its logged history still scrubs,
   // `addressLine1`/`addressLine2` are BVNK's (`BvnkRuleEntityAddress`), and
   // `line1`/`line2` are SDP's own `CounterpartyAddress`.
   //

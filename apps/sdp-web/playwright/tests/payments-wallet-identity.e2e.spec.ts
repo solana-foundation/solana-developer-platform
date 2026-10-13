@@ -68,14 +68,14 @@ test.describe
       for (const wallet of [walletA, walletB]) {
         const card = page.locator(`[data-wallet-card="${wallet.id}"]`);
         await expect(card).toBeVisible({ timeout: 15_000 });
-        await expect(card.getByRole("link", { name: "Manage", exact: true })).toHaveAttribute(
+        await expect(card.getByRole("link", { name: /^(Open .+|Manage)$/ })).toHaveAttribute(
           "href",
           projectHref(projectId, `/dashboard/wallets/${wallet.id}`)
         );
       }
       await page
         .locator(`[data-wallet-card="${walletB.id}"]`)
-        .getByRole("link", { name: "Manage", exact: true })
+        .getByRole("link", { name: /^(Open .+|Manage)$/ })
         .click();
       await expect(page).toHaveURL(projectHref(projectId, `/dashboard/wallets/${walletB.id}`));
       await expect(
@@ -112,7 +112,11 @@ test.describe
         await expect(
           page.getByRole("heading", { name: "Wallet Identity A", exact: true })
         ).toBeVisible();
-        const total = page.getByText("Total balance", { exact: true }).locator("..");
+        const total = page.locator("section").filter({
+          has: page.getByText(/^(Total balance|Balance)$/),
+          hasNot: page.locator("section"),
+        });
+        await expect(total).toHaveCount(1);
         await expect(total.getByText("—", { exact: true })).toBeVisible({ timeout: TIMEOUT });
         await expect(total.getByText(/unavailable/i)).toBeVisible();
         await expect(total.getByText("$0.00", { exact: true })).toHaveCount(0);
@@ -122,7 +126,11 @@ test.describe
         await setWalletIdentityRpcMode("zero");
       }
       await page.reload();
-      const total = page.getByText("Total balance", { exact: true }).locator("..");
+      const total = page.locator("section").filter({
+        has: page.getByText(/^(Total balance|Balance)$/),
+        hasNot: page.locator("section"),
+      });
+      await expect(total).toHaveCount(1);
       await expect(total.getByText("$0.00", { exact: true })).toBeVisible({ timeout: TIMEOUT });
       await expect(total.getByText(/unavailable/i)).toHaveCount(0);
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
@@ -152,7 +160,7 @@ test.describe
       const card = page.locator(`[data-wallet-card="${otherWallet.id}"]`);
       await expect(card).toBeVisible({ timeout: TIMEOUT });
       await expect(page.locator(`[data-wallet-card="${walletA.id}"]`)).toHaveCount(0);
-      await card.getByRole("link", { name: "Manage", exact: true }).click();
+      await card.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
       await expect(page).toHaveURL(
         projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`)
       );
@@ -177,21 +185,46 @@ test.describe
       );
       expect(walletBalances.custodyWalletId).toBe(otherWallet.id);
       expect(walletBalances.walletId).toBe(otherWallet.walletId);
+      const newDesignWallets =
+        process.env.SDP_FLAG_NEW_DESIGN === "true" &&
+        process.env.SDP_FLAG_NEW_DESIGN_WALLETS === "true";
+      const bookmarkParams = new URLSearchParams({ label: "Wallet & Treasury" });
+      bookmarkParams.append("filter", "a");
+      bookmarkParams.append("filter", "b");
+      if (newDesignWallets) bookmarkParams.set("tab", "settings");
+      const bookmarkedQuery = `?${bookmarkParams}`;
       await gotoProjectPage(
         page,
         otherProjectId,
-        `/dashboard/wallets/${encodeURIComponent(otherWallet.walletId)}`
+        `/dashboard/wallets/${encodeURIComponent(otherWallet.walletId)}${bookmarkedQuery}`
       );
-      await expect(page).toHaveURL(
-        projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`)
-      );
+      const canonicalPath = projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`);
+      const expectCanonicalBookmark = async () => {
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === canonicalPath &&
+            url.searchParams.get("label") === "Wallet & Treasury" &&
+            url.searchParams.get("tab") === (newDesignWallets ? "settings" : null)
+        );
+        const url = new URL(page.url());
+        expect(url.searchParams.getAll("label")).toEqual(["Wallet & Treasury"]);
+        expect(url.searchParams.getAll("tab")).toEqual(newDesignWallets ? ["settings"] : []);
+        expect(url.searchParams.getAll("filter")).toEqual(["a", "b"]);
+        expect(url.searchParams.size).toBe(newDesignWallets ? 4 : 3);
+        expect(url.hash).toBe("");
+        if (newDesignWallets) {
+          await expect(page.getByRole("tab", { name: "Settings", exact: true })).toHaveAttribute(
+            "aria-selected",
+            "true"
+          );
+        }
+      };
+      await expectCanonicalBookmark();
       await expect(
         page.getByRole("heading", { name: "Wallet Identity Other Project", exact: true })
       ).toBeVisible();
       await page.reload();
-      await expect(page).toHaveURL(
-        projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.id}`)
-      );
+      await expectCanonicalBookmark();
     });
 
     test("keeps untouched main UI compatible with the additive API during web rollback", async ({
@@ -213,7 +246,7 @@ test.describe
       const card = page.locator(`[data-wallet-card="${otherWallet.walletId}"]`);
       await expect(card).toBeVisible({ timeout: TIMEOUT });
       await expect(card.getByText("$0.00", { exact: true })).toBeVisible({ timeout: TIMEOUT });
-      await card.getByRole("link", { name: "Manage", exact: true }).click();
+      await card.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
       await expect(page).toHaveURL(
         `${oldWebUrl}${projectHref(otherProjectId, `/dashboard/wallets/${otherWallet.walletId}`)}`
       );

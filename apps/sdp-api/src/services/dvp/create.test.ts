@@ -774,6 +774,7 @@ describe("createDvpTrade", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       actor: { type: "wallet", id: "cwlt_settlement" },
+      movement: "dvp.create",
     });
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {

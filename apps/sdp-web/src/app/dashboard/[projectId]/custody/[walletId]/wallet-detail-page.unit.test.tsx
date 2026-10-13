@@ -79,7 +79,10 @@ import WalletDetailPage, {
 } from "./wallet-detail-page";
 
 function renderPage() {
-  return WalletDetailPage({ params: Promise.resolve({ walletId: "wallet_record" }) });
+  return WalletDetailPage({
+    params: Promise.resolve({ walletId: "wallet_record" }),
+    searchParams: Promise.resolve({}),
+  });
 }
 
 let walletOverrides: Record<string, unknown> = {};
@@ -221,10 +224,34 @@ async function defaultApiResponse(path: string): Promise<Response> {
 }
 
 describe("WalletDetailPage critical path", () => {
+  it("preserves a bookmarked tab and repeated query values when canonicalizing", async () => {
+    mockRequest.mockImplementation(async () => walletMetadataResponse());
+    await expect(
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({
+          tab: "settings",
+          filter: ["a", "b"],
+          label: "Wallet & Treasury",
+          empty: "",
+          absent: undefined,
+        }),
+      })
+    ).rejects.toThrow(
+      `/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record?tab=settings&filter=a&filter=b&label=Wallet+%26+Treasury&empty=`
+    );
+    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/payments/"))).toBe(
+      false
+    );
+  });
+
   it("redirects a legacy bookmark before requesting Payments balances", async () => {
     mockRequest.mockImplementation(async () => walletMetadataResponse());
     await expect(
-      WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) })
+      WalletDetailPage({
+        params: Promise.resolve({ walletId: "wallet%2Fone" }),
+        searchParams: Promise.resolve({}),
+      })
     ).rejects.toThrow(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`);
     expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/payments/"))).toBe(
       false

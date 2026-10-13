@@ -47,6 +47,7 @@ import type {
   SponsorshipFeePayment,
   SponsorshipScope,
 } from "./sponsorship.service";
+import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
 
 const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -552,7 +553,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const actor = continuation?.actor ?? this.scope.actor;
     const provider = this.accountingProvider(actor);
     const context = await this.prepareAdmission(transaction, actor, provider);
-    const durableReservation = continuation?.reservation ?? (await this.readReservation(context));
+    const [durableReservation, admissionFacts] = await Promise.all([
+      continuation?.reservation ?? this.readReservation(context),
+      readSponsorshipAdmissionFacts(this.env, this.scope),
+    ]);
     if (
       continuation?.reservation &&
       (continuation.reservation.id !== context.id ||
@@ -565,6 +569,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     }
     const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
+    if (!durableReplay) assertSponsorshipAdmitted(this.scope, admissionFacts);
     const attempt =
       durableReservation?.status === "released"
         ? durableReservation.attempt + 1

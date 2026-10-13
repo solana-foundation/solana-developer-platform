@@ -66,6 +66,41 @@ describe("dashboard headers with NEW DESIGN off", () => {
     expect(config.title).toBe("DashboardPrivateChannels.instance.title");
   });
 
+  it("gives the Wallets routes the previous design's headers", () => {
+    const newConfig = (pathname: string) =>
+      getDashboardPageConfig(
+        pathname,
+        t,
+        false,
+        false,
+        UNIFIED_TRANSACTION_MODULES,
+        true,
+        true,
+        true
+      );
+
+    expect(legacyConfig("/dashboard/wallets").headerAction).toBeUndefined();
+    expect(legacyConfig("/dashboard/wallets").contentWidthClass).toBe("max-w-none");
+    expect(newConfig("/dashboard/wallets").headerAction?.label).toBe(
+      "Shared.dashboardShell.createAWallet"
+    );
+
+    expect(legacyConfig("/dashboard/wallets/setup").backAction?.label).toBe(
+      "Shared.dashboardShell.backToWallets"
+    );
+    expect(newConfig("/dashboard/wallets/setup").hideTitle).toBe(true);
+
+    const legacyWallet = legacyConfig("/dashboard/wallets/wlt_1");
+    expect(legacyWallet.title).toBe("Shared.dashboardShell.wallets");
+    expect(legacyWallet.headerTabs).toBeUndefined();
+    expect(legacyWallet.headerAction).toBeUndefined();
+    expect(newConfig("/dashboard/wallets/wlt_1").headerTabs?.tabs.map((tab) => tab.id)).toEqual([
+      "overview",
+      "activity",
+      "settings",
+    ]);
+  });
+
   it("leaves other routes as they are", () => {
     expect(legacyConfig("/dashboard/api-keys")).toEqual(
       getDashboardPageConfig(

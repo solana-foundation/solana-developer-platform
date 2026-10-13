@@ -25,6 +25,19 @@ export function getTokenAccessControlMode(token: TokenAccessControlShape): Token
   return "disabled";
 }
 
+/**
+ * The movement a control-list change serves (HOO-1955): a control (exit) when
+ * it takes access away (allowlist removal, blocklist addition), otherwise a
+ * start like any other grant.
+ */
+export function controlListMovement(
+  token: TokenAccessControlShape,
+  change: "add" | "remove"
+): "issuance.authority" | "issuance.control" {
+  const blocklist = getTokenAccessControlMode(token) === "blocklist";
+  return blocklist === (change === "add") ? "issuance.control" : "issuance.authority";
+}
+
 export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | undefined {
   const mode = getTokenAccessControlMode(token);
   return mode === "disabled" ? undefined : mode;

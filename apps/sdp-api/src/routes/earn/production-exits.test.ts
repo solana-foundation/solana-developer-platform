@@ -18,6 +18,11 @@ const EARN_ENTRY_ROUTES = [
   "POST /v1/earn/external-wallet/deposits",
   "POST /v1/earn/programs",
   "PUT /v1/earn/programs/:programId",
+  // Cancelling a queued withdrawal puts the shares back, so it is a start
+  // (`earn.queued_withdraw_cancel`), refused here before any provider call.
+  "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+  "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
+  "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel",
 ];
 
 function earnRoutes(): Array<{ method: string; path: string }> {

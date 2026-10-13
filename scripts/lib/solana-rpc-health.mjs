@@ -1,40 +1,20 @@
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
+/**
+ * Devnet's genesis hash, mirroring `GENESIS_HASH_BY_CLUSTER.devnet` in `@sdp/types`: these
+ * scripts run as plain Node and cannot import the TypeScript source.
+ */
+// biome-ignore lint/security/noSecrets: Solana devnet's public genesis hash
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
 const PROVIDERS = [
-  {
-    id: "alchemy",
-    urlKey: "SOLANA_RPC_ALCHEMY_URL",
-    apiKey: "SOLANA_RPC_ALCHEMY_API_KEY",
-  },
-  {
-    id: "quicknode",
-    urlKey: "SOLANA_RPC_QUICKNODE_URL",
-    apiKey: "SOLANA_RPC_QUICKNODE_API_KEY",
-  },
-  {
-    id: "triton",
-    urlKey: "SOLANA_RPC_TRITON_URL",
-    apiKey: "SOLANA_RPC_TRITON_API_KEY",
-  },
-  {
-    id: "default",
-    urlKey: "SOLANA_RPC_URL",
-  },
-  {
-    id: "helius",
-    urlKey: "SOLANA_RPC_HELIUS_URL",
-    apiKey: "SOLANA_RPC_HELIUS_API_KEY",
-  },
-  {
-    id: "validationcloud",
-    urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL",
-    apiKey: "SOLANA_RPC_VALIDATIONCLOUD_API_KEY",
-  },
-  {
-    id: "nodit",
-    urlKey: "SOLANA_RPC_NODIT_URL",
-    apiKey: "SOLANA_RPC_NODIT_API_KEY",
-  },
+  { id: "alchemy", urlKey: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL" },
+  { id: "quicknode", urlKey: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL" },
+  { id: "triton", urlKey: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL" },
+  { id: "default", urlKey: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL" },
+  { id: "helius", urlKey: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL" },
+  { id: "validationcloud", urlKey: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL" },
+  { id: "nodit", urlKey: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL" },
 ];
 
 export async function selectHealthySolanaRpcUrl(env, options = {}) {
@@ -60,29 +40,27 @@ export async function selectHealthySolanaRpcUrl(env, options = {}) {
   throw new Error(`No healthy Solana RPC URL found. Checked: ${failures.join("; ")}`);
 }
 
+export function useSolanaRpcCandidateAsDefault(env, selected) {
+  for (const provider of PROVIDERS) {
+    delete env[provider.urlKey];
+  }
+  env.SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL = selected.url;
+}
+
 export function getSolanaRpcCandidates(env) {
   const seen = new Set();
   const preferred = env.SOLANA_RPC_CI_PREFERRED_PROVIDER;
   const providers = orderProviders(preferred);
 
   return providers.flatMap((provider) => {
-    const rawUrl = env[provider.urlKey];
-    if (!rawUrl) {
-      return [];
-    }
-
-    const url = applyApiKeyTemplate(rawUrl, provider.apiKey ? env[provider.apiKey] : undefined);
-    if (seen.has(url)) {
+    const url = env[provider.urlKey];
+    if (!url || seen.has(url)) {
       return [];
     }
 
     seen.add(url);
     return [{ ...provider, url }];
   });
-}
-
-export function solanaRpcKeys() {
-  return PROVIDERS.map((provider) => provider.urlKey);
 }
 
 export async function solanaJsonRpc(rpcUrl, method, params = [], options = {}) {
@@ -130,6 +108,11 @@ function orderProviders(preferred) {
 }
 
 async function assertSolanaRpcHealthy(rpcUrl, options) {
+  const genesisHash = await solanaJsonRpc(rpcUrl, "getGenesisHash", [], options);
+  if (genesisHash !== DEVNET_GENESIS_HASH) {
+    throw new Error("serves a cluster other than devnet");
+  }
+
   const payload = await solanaJsonRpc(
     rpcUrl,
     GET_LATEST_BLOCKHASH_METHOD,
@@ -140,18 +123,6 @@ async function assertSolanaRpcHealthy(rpcUrl, options) {
   if (!payload?.value?.blockhash) {
     throw new Error("missing latest blockhash");
   }
-}
-
-function applyApiKeyTemplate(url, apiKey) {
-  if (!apiKey) {
-    return url;
-  }
-
-  if (url.includes("{API_KEY}")) {
-    return url.replaceAll("{API_KEY}", encodeURIComponent(apiKey));
-  }
-
-  return url;
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {

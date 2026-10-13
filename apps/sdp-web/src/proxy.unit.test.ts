@@ -136,9 +136,7 @@ describe("rejectCrossSiteWrite", () => {
         ?.status
     ).toBe(403);
     expect(
-      rejectCrossSiteWrite(
-        write("/api/vendor/moneygram/sdk/v1", { origin: "https://attacker.example" })
-      )
+      rejectCrossSiteWrite(write("/api/workspace-status", { origin: "https://attacker.example" }))
     ).toBeNull();
   });
 });

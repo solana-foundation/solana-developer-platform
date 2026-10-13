@@ -41,6 +41,13 @@ import type { Env } from "@/types/env";
 
 const projectMocks = { getProject: vi.fn() };
 
+const readMoneyAdmissionFacts = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  readMoneyAdmissionFacts,
+}));
+
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
@@ -73,6 +80,11 @@ function otherTransaction(): Uint8Array {
 
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "active",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
     vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
       providerId: "kora",
       getFeePayer: vi.fn(),
@@ -107,6 +119,7 @@ describe("sponsorship identity boundary", () => {
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -121,6 +134,7 @@ describe("sponsorship identity boundary", () => {
   it("selects the paymaster by the scope's cluster when a flow names one", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "production",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -161,6 +175,7 @@ describe("sponsorship identity boundary", () => {
       environment: "sandbox" as const,
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
+      movement: "payments.transfer" as const,
       actor: { type: "wallet" as const, id: "provider_recipient" },
     };
     const legacy = createSponsorshipFeePayment(testEnv, scope);
@@ -242,6 +257,7 @@ describe("sponsorship identity boundary", () => {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
         projectId: "project_1",
+        movement: "payments.transfer",
         actor: { type: "wallet", id: "cwlt_recipient" },
         continuity: {
           deploymentMode: "self_hosted",
@@ -259,6 +275,59 @@ describe("sponsorship identity boundary", () => {
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 
+  it.each(["sign", "send", "owned"] as const)(
+    "refuses self-hosted continuity %s after organization revocation",
+    async (operation) => {
+      await seedTestDatabase(testEnv);
+      readMoneyAdmissionFacts.mockResolvedValue({
+        organizationStatus: "deleted",
+        projectEnvironment: "sandbox",
+        rawSettings: null,
+      });
+      const provider: FeePaymentPort = {
+        providerId: "kora",
+        getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
+        signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
+        signAndSend: vi.fn(),
+      };
+      vi.mocked(createFeePaymentAdapter).mockReturnValue(provider);
+      const feePayment = createSponsorshipFeePayment(
+        { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
+        {
+          movement: "payments.transfer",
+          environment: "sandbox",
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "wallet", id: "cwlt_recipient" },
+          continuity: {
+            deploymentMode: "self_hosted",
+            legacyActor: { type: "wallet", id: "provider_recipient" },
+            exactActor: { type: "wallet", id: "cwlt_recipient" },
+            admission: "continue_only",
+            persistAccountingIdentity: vi.fn(),
+          },
+        }
+      );
+
+      const result = {
+        sign: () => feePayment.signAsFeePayer(buildTransaction()),
+        send: () => feePayment.signAndSend(buildTransaction()),
+        owned: () =>
+          feePayment.prepareOwnedSubmission(buildTransaction(), {
+            persistSigned: vi.fn(),
+            markStarted: vi.fn(),
+            hasStarted: vi.fn(),
+          }),
+      }[operation]();
+      await expect(result).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        reason: "organization_inactive",
+      });
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(provider.signAndSend).not.toHaveBeenCalled();
+    }
+  );
+
   it("preserves self-hosted quota identity without fabricating managed accounting", async () => {
     await seedTestDatabase(testEnv);
     const provider: FeePaymentPort = {
@@ -275,6 +344,7 @@ describe("sponsorship identity boundary", () => {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
         projectId: "project_1",
+        movement: "payments.transfer",
         actor: { type: "wallet", id: "cwlt_recipient" },
         continuity: {
           deploymentMode: "self_hosted",
@@ -318,6 +388,7 @@ describe("sponsorship identity boundary", () => {
             environment: "sandbox",
             organizationId: "org_test_sponsorship",
             projectId: "project_1",
+            movement: "payments.transfer",
             actor: { type: "wallet", id: "cwlt_recipient" },
             continuity: {
               deploymentMode,
@@ -361,6 +432,7 @@ describe("sponsorship identity boundary", () => {
       environment: "sandbox" as const,
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
+      movement: "payments.transfer" as const,
       actor: { type: "wallet" as const, id: "cwlt_recipient" },
       continuity: {
         deploymentMode: "managed" as const,
@@ -404,6 +476,7 @@ describe("sponsorship identity boundary", () => {
           environment: "sandbox",
           organizationId: "org_test_sponsorship",
           projectId: "project_1",
+          movement: "payments.transfer",
           actor: { type: "wallet", id: "foreign_wallet" },
           continuity: {
             deploymentMode: "self_hosted",
@@ -427,12 +500,28 @@ describe("sponsorship identity boundary", () => {
     };
     vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
     return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
       actor: { type: "user", id: "usr_test_sponsorship" },
     });
   }
+  it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "deleted",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
+    const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
+    const feePayment = selfHostedFeePayment(signAsFeePayer);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "organization_inactive",
+    });
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
     const feePayment = selfHostedFeePayment(async (transaction) => transaction);
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
@@ -474,6 +563,7 @@ describe("sponsorship identity boundary", () => {
       hasStarted: vi.fn(),
     };
     const feePayment = createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -560,6 +650,7 @@ describe("sponsorship identity boundary", () => {
     });
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     await createProjectSponsorshipFeePayment(env, {
+      movement: "recurring.collect",
       organizationId: "org_stored",
       projectId: "project_stored",
       actor: { type: "wallet", id: "wallet_stored" },
@@ -579,6 +670,7 @@ describe("sponsorship identity boundary", () => {
     });
     await expect(
       createProjectSponsorshipFeePayment(testEnv, {
+        movement: "recurring.collect",
         organizationId: "org_claimed",
         projectId: "project_stored",
         actor: { type: "wallet", id: "wallet_stored" },

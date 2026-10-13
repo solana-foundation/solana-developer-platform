@@ -7,7 +7,7 @@ import {
 } from "@sdp/custody/dfns";
 import { describe, expect, it } from "vitest";
 import { KeychainIbmHavenAdapter, type SigningConfigRecord } from "@/services/adapters";
-import { createAdapterFromEncryptedConfig } from "@/services/domain/signing.service";
+import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
 

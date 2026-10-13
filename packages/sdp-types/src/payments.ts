@@ -1,6 +1,5 @@
 import type { Address } from "@solana/addresses";
 import { z } from "zod";
-import type { CountryCode } from "./countries";
 import type {
   CustodyProvider,
   CustodyWalletAggregate,
@@ -9,7 +8,7 @@ import type {
 } from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
-import type { RampProviderId } from "./provider-access";
+import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
@@ -231,12 +230,6 @@ export const PAYMENT_TRANSFER_STATUS_TONE = {
   expired: "neutral",
 } as const satisfies Record<PaymentTransferStatus, PaymentTransferStatusTone>;
 
-export interface LightsparkGridAmount {
-  amount: number;
-  currencyCode: string;
-  decimals: number;
-}
-
 /** MoonPay transaction economics, captured verbatim from a terminal webhook. */
 export interface MoonpayRampSettlement {
   provider: "moonpay";
@@ -253,18 +246,6 @@ export interface MoonpayRampSettlement {
   areFeesIncluded: boolean;
   usdRate: number;
   cryptoTransactionId?: string;
-  failureReason?: string;
-}
-
-/** Lightspark (Grid) outgoing-payment economics, captured verbatim from a terminal webhook. */
-export interface LightsparkRampSettlement {
-  provider: "lightspark";
-  status: "COMPLETED" | "FAILED" | "EXPIRED" | "REFUND_FAILED";
-  sentAmount: LightsparkGridAmount;
-  receivedAmount: LightsparkGridAmount;
-  exchangeRate: number;
-  fees: number;
-  settledAt?: string;
   failureReason?: string;
 }
 
@@ -370,7 +351,6 @@ export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSett
 
 export type RampTransferSettlement =
   | MoonpayRampSettlement
-  | LightsparkRampSettlement
   | CoinbaseRampSettlement
   | BvnkRampSettlement
   | BvnkOfframpChannelSettlement;
@@ -381,20 +361,6 @@ export interface RampCryptoDeposit {
   destinationAddress: string;
   /** Crypto amount the provider expects, in display units. */
   amount: string;
-}
-
-export interface MoneygramTransferDetails {
-  /** MoneyGram's profile id for the counterparty, the same reference stored on its `customer_link` provider account. */
-  customerId?: string;
-  transactionId?: string;
-  /** MoneyGram-side transaction id; the correlation key for MoneyGram status webhooks. */
-  mgiTransactionId?: string;
-  referenceNumber?: string;
-  payoutAmount?: number;
-  payoutStatus?: string;
-  cryptoTransferId?: string;
-  solanaTxSignature?: string;
-  lastWidgetError?: string;
 }
 
 export interface PaymentTransferSummary {
@@ -413,7 +379,8 @@ export interface PaymentTransferSummary {
   amount?: string;
   memo?: string;
   rampsMemo: Record<string, string>;
-  provider?: RampProviderId;
+  /** A retired provider's transfers still read, as stored. */
+  provider?: PersistedRampProviderId;
   counterpartyId?: string;
   counterpartyDisplayName?: string;
   providerReference?: string;
@@ -422,7 +389,6 @@ export interface PaymentTransferSummary {
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
-  moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1127,38 +1093,6 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export interface LightsparkProviderPaymentRampInstruction {
-  provider: "lightspark";
-  accountOrWalletInfo: {
-    accountType: string;
-    accountNumber?: string;
-    routingNumber?: string;
-    paymentRails?: string[];
-    reference?: string;
-    bankName?: string;
-    address?: Address;
-    assetType?: CryptoAssetSymbol;
-  };
-
-  instructionsNotes?: string;
-  isPlatformAccount?: boolean;
-}
-
-export type LightsparkCryptoDepositPaymentRampInstruction =
-  LightsparkProviderPaymentRampInstruction &
-    CryptoDepositPaymentRampInstruction & {
-      provider: "lightspark";
-      accountOrWalletInfo: LightsparkProviderPaymentRampInstruction["accountOrWalletInfo"] & {
-        accountType: "SOLANA_WALLET";
-        address: Address;
-        assetType: CryptoAssetSymbol;
-      };
-    };
-
-export type LightsparkPaymentRampInstruction =
-  | LightsparkProviderPaymentRampInstruction
-  | LightsparkCryptoDepositPaymentRampInstruction;
-
 export type BvnkOnboardingStatus =
   | "verification_required"
   | "verifying"
@@ -1211,25 +1145,7 @@ export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampIn
 
 export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
 
-export const MURAL_SANDBOX_PAYIN_CURRENCIES = ["USD", "MXN", "BRL", "ARS"] as const;
-export type MuralSandboxPayinCurrency = (typeof MURAL_SANDBOX_PAYIN_CURRENCIES)[number];
-
-/** Narrows a fiat currency to the corridors Mural's sandbox payin simulation supports. */
-export function isMuralSandboxPayinCurrency(value: string): value is MuralSandboxPayinCurrency {
-  return (MURAL_SANDBOX_PAYIN_CURRENCIES as readonly string[]).includes(value);
-}
-
-export interface MuralPaymentRampInstruction {
-  provider: "mural";
-  fiatCurrency: string;
-  payinRails: string[];
-  bankDetails: Record<string, string>;
-}
-
-export type PaymentRampInstruction =
-  | LightsparkPaymentRampInstruction
-  | BvnkPaymentRampInstruction
-  | MuralPaymentRampInstruction;
+export type PaymentRampInstruction = BvnkPaymentRampInstruction;
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -1327,31 +1243,12 @@ interface PaymentOfframpQuoteRequestBase {
   rampsMemo?: Record<string, string>;
 }
 
-/**
- * Off-ramp quote request. Lightspark payouts are corridor-addressed: the
- * fiat currency and destination country select the payout external account,
- * so both are required on that arm.
- */
-export type PaymentOfframpQuoteRequest =
-  | (PaymentOfframpQuoteRequestBase & {
-      provider: "lightspark";
-      fiatCurrency: RampFiatCurrency;
-      destinationCountry: CountryCode;
-      providerAccountId?: string;
-    })
-  | (PaymentOfframpQuoteRequestBase & {
-      provider: Exclude<RampProviderId, "lightspark">;
-      fiatCurrency?: RampFiatCurrency;
-    });
+export type PaymentOfframpQuoteRequest = PaymentOfframpQuoteRequestBase & {
+  provider: RampProviderId;
+  fiatCurrency?: RampFiatCurrency;
+};
 
 export type PaymentRampQuoteDeliveryMode = "manual_instructions" | "hosted" | "session_widget";
-
-export interface PaymentRampQuoteCurrency {
-  code: string;
-  decimals: number;
-  name?: string;
-  symbol?: string;
-}
 
 interface BasePaymentRampQuote {
   id: string;
@@ -1362,34 +1259,10 @@ interface BasePaymentRampQuote {
 
 export type PaymentRampQuote =
   | (BasePaymentRampQuote & {
-      provider: "lightspark";
-      deliveryMode: "manual_instructions";
-      /** Bank/wallet funding instructions to send the fiat to. */
-      paymentInstructions?: LightsparkPaymentRampInstruction[];
-      /** Units of destination crypto per unit of source fiat. */
-      exchangeRate?: number;
-      /** Total sending amount in the fiat currency's smallest unit, including provider fees. */
-      totalSendingAmount?: number;
-      sendingCurrency: PaymentRampQuoteCurrency;
-      /** Final crypto amount received in its smallest unit. */
-      totalReceivingAmount?: number;
-      receivingCurrency: PaymentRampQuoteCurrency;
-      /** Fees included in the sending amount, denominated in the fiat currency's smallest unit. */
-      feesIncluded?: number;
-      feeCurrency: PaymentRampQuoteCurrency;
-      /** ISO timestamp after which the locked rate is no longer valid. */
-      expiresAt?: string;
-    })
-  | (BasePaymentRampQuote & {
       provider: "bvnk";
       deliveryMode: "manual_instructions";
       /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
       paymentInstructions: BvnkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampQuote & {
-      provider: "mural";
-      deliveryMode: "manual_instructions";
-      paymentInstructions: MuralPaymentRampInstruction[];
     })
   | (BasePaymentRampQuote & {
       provider: "moonpay" | "bvnk";
@@ -1410,16 +1283,6 @@ export type PaymentRampQuote =
       fees: CoinbaseRampFee[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moneygram";
-      deliveryMode: "session_widget";
-      /** Short-lived (1h) widget session JWT minted from the MoneyGram session API. */
-      sessionToken: string;
-      sessionId: string;
-      widgetUrl: string;
-      /** ISO timestamp when the widget session expires (decoded from the session JWT). */
-      expiresAt?: string;
-    })
-  | (BasePaymentRampQuote & {
       provider: "stripe";
       deliveryMode: "session_widget";
       clientSecret: string;
@@ -1428,7 +1291,7 @@ export type PaymentRampQuote =
       redirectUrl?: string;
     });
 
-export const RAMP_EVENT_PROVIDERS = ["moneygram", "coinbase"] as const;
+export const RAMP_EVENT_PROVIDERS = ["coinbase"] as const;
 export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 
 /**
@@ -1440,38 +1303,3 @@ export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 export type CoinbaseRampEvent =
   | { kind: "committed"; orderId: string }
   | { kind: "errored"; orderId: string; reason: string };
-
-export type MoneygramRampEvent =
-  | {
-      kind: "transaction_created";
-      sessionId: string;
-      transactionId: string;
-      mgiTransactionId?: string;
-    }
-  | { kind: "deposit_address"; sessionId: string }
-  | { kind: "signed"; sessionId: string; cryptoTransferId: string }
-  | {
-      kind: "onramp_completed";
-      sessionId: string;
-      transactionId: string;
-      status: string;
-      amount: number;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "completed";
-      sessionId: string;
-      cryptoTransferId: string;
-      transactionId: string;
-      payoutAmount: number;
-      payoutStatus: string;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "errored";
-      sessionId: string;
-      reason: string;
-      cryptoTransferId?: string;
-      transactionId?: string;
-    }
-  | { kind: "closed"; sessionId: string };

@@ -49,6 +49,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 ## Implementation guidance
 
+- Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
 - Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys, plus Clerk tokens without organization context, return 401.
@@ -58,6 +59,11 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
+  `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
+  wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter
+  or fee payer yourself (`pnpm check:value-movement` enforces it). Marking a movement `exit` is a
+  security-reviewed change.
 - **RPC is a budget (hard rule).** Every provider read, quote and build makes the fewest RPC calls
   that still read every value-bearing input live: no per-call client construction or re-validation,
   no account fetched twice in one operation, static facts cached with a TTL that never stores a

@@ -1,4 +1,4 @@
-import { SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import { type RampProviderId, SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -52,7 +52,7 @@ describe("Payments routes — list transfers", () => {
     memo?: string | null;
     type?: "transfer" | "transfer_batch" | "onramp" | "offramp";
     direction?: "inbound" | "outbound";
-    provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
+    provider?: RampProviderId;
     providerReference?: string | null;
     createdAt?: string;
   }): Promise<void> {
