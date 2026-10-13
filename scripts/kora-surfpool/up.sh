@@ -278,7 +278,8 @@ write_cluster_pool_env() {
 }
 
 # A Kora binds to one cluster, so the local Kora is the lane cluster's KORA_RPC_URL_<CLUSTER> and
-# the other cluster's URL is blanked, like the pool vars above.
+# the other cluster's whole Kora trio is blanked, like the pool vars above, so a key or audience
+# Doppler supplies for it cannot reach the run.
 write_cluster_kora_env() {
   local lane_suffix cluster_suffix
   lane_suffix="$(surfpool_lane_suffix)"
@@ -287,6 +288,8 @@ write_cluster_kora_env() {
       echo "KORA_RPC_URL_${cluster_suffix}=$(shell_quote "${KORA_LANE_RPC_URL}")"
     else
       echo "KORA_RPC_URL_${cluster_suffix}="
+      echo "KORA_API_KEY_${cluster_suffix}="
+      echo "KORA_CLOUD_RUN_AUDIENCE_${cluster_suffix}="
     fi
   done
 }
