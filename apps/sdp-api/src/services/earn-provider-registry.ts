@@ -3,7 +3,7 @@ import {
   isEarnProviderId,
   providerNotConfigured,
 } from "@sdp/earn";
-import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
+import type { EarnVaultProvider } from "@sdp/earn/types";
 import {
   assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
   HastraVaultDirectClient,
@@ -17,34 +17,16 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo";
-import type { EarnProviderId, SolanaCluster } from "@sdp/types";
+import type { EarnProviderId } from "@sdp/types";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
 } from "@sdp/veda";
 import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import type { Env } from "@/types/env";
-import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
-
-/**
- * Resolve the request's cluster-specific RPC and prove its genesis before the
- * singleton provider performs any chain work. The runtime context is
- * request-scoped, so one API process can safely serve both SDP environments.
- */
-async function resolveProvenRpcUrl(
-  ctx: EarnRuntimeContext,
-  cluster: SolanaCluster
-): Promise<string> {
-  // The API constructs this runtime from `Env`; the shared provider contract
-  // deliberately narrows it to a dependency-free string record.
-  const env = ctx.env as unknown as Env;
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
-  return rpcUrl;
-}
 
 /** One fresh deadline per operation, since these clients are process singletons. */
 function runVaultOperation<T>(
@@ -57,7 +39,7 @@ function runVaultOperation<T>(
 
 const kamino = new KaminoVaultDirectClient(runVaultOperation);
 assertNotPortfolioProvider(kamino);
-const jupiterLend = new JupiterLendVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
+const jupiterLend = new JupiterLendVaultDirectClient(runVaultOperation);
 assertJupiterLendNotPortfolioProvider(jupiterLend);
 
 const veda = new VedaVaultDirectClient(runVaultOperation);
@@ -67,12 +49,12 @@ assertWisdomTreeNotPortfolioProvider(wisdomtree);
 
 // The swap port is resolved per request from the runtime context (the API
 // constructs `ctx.env` from `Env`), because these are process singletons and
-// the Jupiter credential is request-environment state, same as the RPC URL.
-const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
+// the Jupiter credential is request-environment state.
+const ondo = new OndoVaultDirectClient(runVaultOperation, (ctx) =>
   createOndoSwapPort(ctx.env as unknown as Env)
 );
 assertOndoNotPortfolioProvider(ondo);
-const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
+const hastra = new HastraVaultDirectClient(runVaultOperation, (ctx) =>
   createHastraSwapPort(ctx.env as unknown as Env)
 );
 assertHastraNotPortfolioProvider(hastra);

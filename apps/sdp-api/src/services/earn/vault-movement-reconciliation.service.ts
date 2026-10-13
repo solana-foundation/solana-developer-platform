@@ -1,9 +1,9 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino";
+import { createClusterBoundedRpc, createClusterRpc } from "@sdp/rpc/factory";
 import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
-  createRpc,
   getSignatureStatuses,
   getTransaction,
   type SignatureStatusInfo,
@@ -29,9 +29,6 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
@@ -131,11 +128,8 @@ async function observeEarnVaultMovement(
   }
 
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const cluster = earnClusterFor(movement.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
-
-  await assertClusterEndpoint(env, cluster, rpcUrl);
+  const { cluster } = currentClusterScope();
+  const rpc = createClusterBoundedRpc({ timeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
   const [status] = await getSignatureStatuses(rpc, [movement.signature as Signature], {
     searchTransactionHistory: true,
     retryDelaysMs: [],
@@ -146,7 +140,6 @@ async function observeEarnVaultMovement(
   // shared transition function leave an unknown signature for the durable job.
   await reconcileMovement(env, ledger, movement, status ?? null, {
     cluster,
-    rpcUrl,
     rpc,
     currentBlockHeight: null,
   });
@@ -232,12 +225,11 @@ async function reconcileEnvironment(
   rows: EarnMovementRow[]
 ): Promise<EarnVaultReconciliationStats> {
   const stats = emptyStats(rows.length);
-  const cluster = earnClusterFor(environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl });
+  const { cluster } = currentClusterScope();
+  let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
+    rpc = createClusterRpc();
     statuses = await getSignatureStatuses(
       rpc,
       rows.map((row) => row.signature as Signature),
@@ -297,7 +289,6 @@ async function reconcileEnvironment(
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
       const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
         cluster,
-        rpcUrl,
         rpc,
         currentBlockHeight,
       });
@@ -320,7 +311,6 @@ async function reconcileEnvironment(
 
 interface ChainObservation {
   cluster: SolanaCluster;
-  rpcUrl: string;
   rpc: SolanaRpc;
   currentBlockHeight: bigint | null;
 }
@@ -412,11 +402,9 @@ async function reconcileMovement(
   }
   if (chain.currentBlockHeight === null) return "unchanged";
 
-  await broadcastVaultTransaction(env, {
-    cluster: chain.cluster,
+  await broadcastVaultTransaction({
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(signedTransaction, "base64")),
-    rpcUrl: chain.rpcUrl,
   });
   await markSubmitted(ledger, movement);
   return "resubmitted";
@@ -643,18 +631,13 @@ export async function repairUnvaluedKaminoDeposits(
   });
   const stats = { claimed: movements.length, repaired: 0, unobserved: 0, errors: 0 };
   if (movements.length === 0) return stats;
-  const { environment } = currentClusterScope();
-  const cluster = earnClusterFor(environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl });
+  const { environment, cluster } = currentClusterScope();
+  let rpc: SolanaRpc;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
+    rpc = createClusterRpc();
   } catch (error) {
     stats.errors += movements.length;
-    getLogger().error(
-      { error, environment },
-      "earn Kamino deposit repair: cluster verification failed"
-    );
+    getLogger().error({ error, environment }, "earn Kamino deposit repair: no cluster RPC");
     return stats;
   }
   for (const movement of movements) {
@@ -757,7 +740,7 @@ async function closePositionIfEmpty(
       (candidate) =>
         candidate.providerReference === vault &&
         candidate.owner === owner &&
-        candidate.cluster === earnClusterFor(movement.environment) &&
+        candidate.cluster === currentClusterScope().cluster &&
         candidate.tokenMint === position.token_mint &&
         candidate.shareMint === position.share_mint
     );
@@ -828,9 +811,7 @@ export async function repairUnvaluedWithdrawalPayouts(
     errors: 0,
   };
   if (movements.length === 0) return stats;
-  const rpc = createRpc(env, {
-    rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(currentClusterScope().environment)),
-  });
+  const rpc = createClusterRpc();
   for (const movement of movements) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.

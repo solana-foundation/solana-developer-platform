@@ -1,29 +1,19 @@
 // biome-ignore-all lint/security/noSecrets: public Solana mint and authority addresses, verified against chain; not secrets.
 import { SOLANA_CLUSTERS, SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
+import {
+  installClusterRpcResponder,
+  type JsonRpcResult,
+  runInJobClusterScope,
+} from "@/test/helpers/cluster-rpc";
 
 const mocks = vi.hoisted(() => ({
   logEvent: vi.fn(),
-  getAccountInfo: vi.fn(),
-  resolveClusterRpcUrl: vi.fn(() => "https://rpc.test"),
-  assertClusterEndpoint: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent: mocks.logEvent,
-}));
-
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: vi.fn(() => ({
-    getAccountInfo: (...args: unknown[]) => ({ send: () => mocks.getAccountInfo(...args) }),
-  })),
-}));
-
-vi.mock("@/services/earn/execution-registry", () => ({
-  resolveClusterRpcUrl: mocks.resolveClusterRpcUrl,
-  assertClusterEndpoint: mocks.assertClusterEndpoint,
 }));
 
 const {
@@ -35,7 +25,6 @@ const {
   token2022DepositMints,
 } = await import("./deposit-mint-guard");
 
-const env = { DATABASE_URL: "postgres://unit" } as Env;
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const PYUSD_MAINNET = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 const PAXOS = "2apBGMsS6ti9RyF5TwQTDswXBWskiJP2LD4cUEDqYJjk";
@@ -48,7 +37,7 @@ function mintAccount(overrides: {
   delegate?: string | null;
   dropHook?: boolean;
 }) {
-  const extensions: unknown[] = [
+  const extensions: JsonRpcResult[] = [
     { extension: "mintCloseAuthority", state: { closeAuthority: null } },
     { extension: "permanentDelegate", state: { delegate: overrides.delegate ?? PAXOS } },
     { extension: "tokenMetadata", state: { name: "PayPal USD", symbol: "PYUSD" } },
@@ -71,8 +60,6 @@ function mintAccount(overrides: {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.resolveClusterRpcUrl.mockReturnValue("https://rpc.test");
-  mocks.assertClusterEndpoint.mockResolvedValue(undefined);
 });
 
 describe("pins", () => {
@@ -153,25 +140,43 @@ describe("detectMintDrift", () => {
 });
 
 describe("guardDepositMints", () => {
+  const stub = installClusterRpcResponder();
+  const HOOK_PROGRAM = "Hook111111111111111111111111111111111111111";
+
+  function guardMainnet(): Promise<number> {
+    return runInJobClusterScope("production", guardDepositMints);
+  }
+
+  function mintReads() {
+    return stub.calls.filter((call) => call.method === "getAccountInfo");
+  }
+
   it("emits nothing when every mainnet mint matches its pin", async () => {
-    mocks.getAccountInfo.mockResolvedValue({ value: mintAccount({}) });
+    stub.answer("getAccountInfo", { context: { slot: 1 }, value: mintAccount({}) });
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardMainnet()).resolves.toBe(0);
 
-    expect(mocks.getAccountInfo).toHaveBeenCalledTimes(
-      token2022DepositMints("mainnet-beta").length
+    expect(mintReads()).toEqual(
+      token2022DepositMints("mainnet-beta").map(() => ({
+        cluster: "mainnet-beta",
+        method: "getAccountInfo",
+      }))
     );
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });
 
   it("emits one drift event per changed field, naming cluster, symbol and mint", async () => {
-    mocks.getAccountInfo.mockImplementation(async (mint: string) =>
-      String(mint) === PYUSD_MAINNET
-        ? { value: mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" }) }
-        : { value: mintAccount({}) }
-    );
+    stub.respond("getAccountInfo", (request) => ({
+      result: {
+        context: { slot: 1 },
+        value:
+          request.params[0] === PYUSD_MAINNET
+            ? mintAccount({ hookProgram: HOOK_PROGRAM })
+            : mintAccount({}),
+      },
+    }));
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(1);
+    await expect(guardMainnet()).resolves.toBe(1);
 
     expect(mocks.logEvent).toHaveBeenCalledTimes(1);
     expect(mocks.logEvent).toHaveBeenCalledWith("error", {
@@ -181,29 +186,29 @@ describe("guardDepositMints", () => {
       mint: PYUSD_MAINNET,
       field: "transfer_hook_program",
       expected: null,
-      actual: "Hook111111111111111111111111111111111111111",
+      actual: HOOK_PROGRAM,
     });
   });
 
-  it("skips quietly when this deployment has no proven RPC for the cluster", async () => {
-    mocks.resolveClusterRpcUrl.mockReturnValue("");
-    mocks.assertClusterEndpoint.mockRejectedValue(
-      new Error("No Solana RPC endpoint is configured")
-    );
+  it("skips quietly when this deployment has no RPC for the cluster", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardMainnet()).resolves.toBe(0);
 
-    expect(mocks.getAccountInfo).not.toHaveBeenCalled();
+    expect(stub.calls).toEqual([]);
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });
 
   it("treats a failed or unparseable read as a warning, never as drift", async () => {
-    mocks.getAccountInfo
-      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
-      .mockResolvedValueOnce({ value: null });
+    stub.respond("getAccountInfo", (request) =>
+      request.params[0] === PYUSD_MAINNET
+        ? { error: { code: -32603, message: "Internal error" } }
+        : { result: { context: { slot: 1 }, value: null } }
+    );
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardMainnet()).resolves.toBe(0);
 
+    expect(mintReads()).toHaveLength(token2022DepositMints("mainnet-beta").length);
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });
 });

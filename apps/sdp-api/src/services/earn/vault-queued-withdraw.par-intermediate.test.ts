@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
@@ -19,7 +20,6 @@ const readConfirmedBlockHeight = vi.hoisted(() => vi.fn());
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultParRedemptionClient: () => ({ quoteParRedemption, buildParRedemptionRequest }),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 vi.mock("./vault-execution.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./vault-execution.service")>()),
@@ -45,14 +45,32 @@ vi.mock("./vault-intent-execution.service", async (importOriginal) => ({
   readConfirmedBlockHeight,
 }));
 
-const {
-  buildExternalQueuedWithdrawalRequest,
-  createCustodyQueuedWithdrawal,
-  submitExternalQueuedWithdrawalAction,
-} = await import("./vault-queued-withdraw.service");
+const queuedWithdraw = await import("./vault-queued-withdraw.service");
 
 const ORG = "org_par_intermediate";
 const PROJECT = "prj_par_intermediate";
+
+function inSandbox<TResult>(work: () => TResult): TResult {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, work);
+}
+
+function buildExternalQueuedWithdrawalRequest(
+  ...args: Parameters<typeof queuedWithdraw.buildExternalQueuedWithdrawalRequest>
+): ReturnType<typeof queuedWithdraw.buildExternalQueuedWithdrawalRequest> {
+  return inSandbox(() => queuedWithdraw.buildExternalQueuedWithdrawalRequest(...args));
+}
+
+function createCustodyQueuedWithdrawal(
+  ...args: Parameters<typeof queuedWithdraw.createCustodyQueuedWithdrawal>
+): ReturnType<typeof queuedWithdraw.createCustodyQueuedWithdrawal> {
+  return inSandbox(() => queuedWithdraw.createCustodyQueuedWithdrawal(...args));
+}
+
+function submitExternalQueuedWithdrawalAction(
+  ...args: Parameters<typeof queuedWithdraw.submitExternalQueuedWithdrawalAction>
+): ReturnType<typeof queuedWithdraw.submitExternalQueuedWithdrawalAction> {
+  return inSandbox(() => queuedWithdraw.submitExternalQueuedWithdrawalAction(...args));
+}
 const USER = "usr_par_intermediate";
 const WALLET_ROW_ID = "cwlt_par_intermediate";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";

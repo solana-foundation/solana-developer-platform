@@ -1,15 +1,9 @@
-import { createHash } from "node:crypto";
 import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { addDecimalAmounts } from "@sdp/payments/decimal";
-import { resolveClusterRpcUrls } from "@sdp/rpc";
 import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { isDecimalString } from "@sdp/solana/amount";
-import {
-  type EarnVaultPositionIntermediate,
-  isEarnVaultHoldingEmpty,
-  type SolanaCluster,
-} from "@sdp/types";
+import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types";
 import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
@@ -70,18 +64,6 @@ function sharedVaultPositionRead(
   };
   void entry.read.then(clear, clear);
   return entry.read;
-}
-
-/**
- * The RPC endpoints a read for `cluster` would use, in failover order, as a
- * hash: reads through different endpoints never share, and the key never
- * holds a URL (providers carry API keys in them).
- */
-function rpcEndpointIdentity(env: AppContext["env"], cluster: SolanaCluster): string {
-  return createHash("sha256")
-    .update(JSON.stringify(resolveClusterRpcUrls(env, cluster)))
-    .digest("hex")
-    .slice(0, 16);
 }
 
 /** A persisted vault claim with the live-read owner resolved. */
@@ -203,7 +185,7 @@ export async function hydrateVaultPositions(
           const snapshots = await sharedVaultPositionRead(
             JSON.stringify([
               runtime.environment,
-              rpcEndpointIdentity(c.env, cluster),
+              cluster,
               provider,
               owner,
               [...providerReferences].sort(),

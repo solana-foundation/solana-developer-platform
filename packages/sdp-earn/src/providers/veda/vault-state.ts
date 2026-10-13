@@ -288,21 +288,18 @@ function accountData(account: RpcAccount | RpcProgramAccount["account"]): Uint8A
  * on that list failing to decode is a fact about the deployment, not noise.
  */
 export async function readVedaVaults(
-  rpcUrl: string,
   cluster: SolanaCluster,
   deployment: VedaDeployment
 ): Promise<VedaVault[]> {
   const addresses = deployment.vaultStateAddresses;
   if (addresses.length === 0) return [];
 
-  await assertRpcServesCluster("veda", rpcUrl, cluster);
+  assertRpcServesCluster("veda", cluster);
 
-  const response = await solanaRpcCall<{ value?: RpcAccount[] }>(
-    "veda",
-    rpcUrl,
-    "getMultipleAccounts",
-    [addresses, { encoding: "base64" }]
-  );
+  const response = await solanaRpcCall<{ value?: RpcAccount[] }>("veda", "getMultipleAccounts", [
+    addresses,
+    { encoding: "base64" },
+  ]);
   const accounts = response?.value;
   if (!Array.isArray(accounts) || accounts.length !== addresses.length) {
     throw internalError(
@@ -332,18 +329,17 @@ export async function readVedaVaults(
   // integrators'. Filtering server-side by vault id keeps this read proportional
   // to SDP's own shelf and never materializes anyone else's configuration.
   const assetsByVault = await Promise.all(
-    vaults.map((vault) => readVedaVaultAssets(rpcUrl, deployment, vault.vaultId))
+    vaults.map((vault) => readVedaVaultAssets(deployment, vault.vaultId))
   );
 
   return vaults.map((vault, index) => ({ vault, assets: assetsByVault[index] ?? [] }));
 }
 
 async function readVedaVaultAssets(
-  rpcUrl: string,
   deployment: VedaDeployment,
   vaultId: bigint
 ): Promise<VedaAssetAccount[]> {
-  const accounts = await solanaRpcCall<RpcProgramAccount[]>("veda", rpcUrl, "getProgramAccounts", [
+  const accounts = await solanaRpcCall<RpcProgramAccount[]>("veda", "getProgramAccounts", [
     deployment.vaultProgramAddress,
     {
       encoding: "base64",

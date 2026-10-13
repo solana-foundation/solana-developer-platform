@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -36,12 +37,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
-import {
-  earnClusterFor,
-  resolveClusterRpcUrl,
-  resolveVaultDirectClient,
-  resolveVaultWithdrawClient,
-} from "./execution-registry";
+import { resolveVaultDirectClient, resolveVaultWithdrawClient } from "./execution-registry";
 import {
   bufferedComputeUnitLimit,
   fetchJupiterSwapLeg,
@@ -288,8 +284,7 @@ export async function buildExternalWalletDepositTransaction(
   if (!client) {
     throw notImplemented(input.provider, "direct vault deposits");
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  const { cluster } = currentClusterScope();
   // Minted BEFORE the build because the memo binds it into the instructions:
   // it is the transaction's on-chain identity, the way the custody flow binds
   // the caller's idempotency key. The submit's key cannot serve here — it does
@@ -392,13 +387,11 @@ export async function buildExternalWalletDepositTransaction(
       // instruction. Without it, a high-CU route under the 1.4M ceiling would
       // die on Solana's per-instruction default budget despite being valid.
       if (swapLeg) {
-        plan = await pinProbedComputeUnitLimit(env, {
-          cluster,
+        plan = await pinProbedComputeUnitLimit({
           deadline,
           expectedAssetIdentity,
           plan,
           ownerAddress: input.ownerAddress,
-          rpcUrl,
           fee,
           probeLabel: "external-wallet deposit: compute-unit probe simulation failed",
           refusalNoun: "Vault deposit",
@@ -413,13 +406,11 @@ export async function buildExternalWalletDepositTransaction(
       // On a swap-funded build the swap leg executes inside this simulation, so
       // "the owner holds enough of the SOURCE token" is checked by the chain
       // itself rather than re-derived here.
-      const simulation = await simulateVaultPlan(env, {
-        cluster,
+      const simulation = await simulateVaultPlan({
         deadline,
         expectedAssetIdentity,
         plan,
         owner: address(input.ownerAddress),
-        rpcUrl,
         fee,
       });
       if (!simulation.ok) {
@@ -431,7 +422,6 @@ export async function buildExternalWalletDepositTransaction(
       }
 
       const unsigned = compileUnsignedVaultTransaction({
-        cluster,
         deadline,
         expectedAssetIdentity,
         plan,
@@ -490,10 +480,8 @@ export async function buildExternalWalletDepositTransaction(
     // partner's blockhash window. The baseline fails closed alongside the
     // advisory insert; an anonymous build skips the read entirely.
     const [swapTransaction, baseline] = await Promise.all([
-      compileStandaloneSwapTransaction(env, {
-        cluster,
+      compileStandaloneSwapTransaction({
         deadline,
-        rpcUrl,
         ownerAddress: input.ownerAddress,
         sourceTokenMint,
         depositTokenMint: input.tokenMint,
@@ -505,7 +493,7 @@ export async function buildExternalWalletDepositTransaction(
       }),
       hasTenant
         ? deadline.run("Reading the split-swap baseline balance", () =>
-            readOwnerMintBalance(env, input.environment, input.ownerAddress, input.tokenMint)
+            readOwnerMintBalance(input.ownerAddress, input.tokenMint)
           )
         : Promise.resolve(null),
     ]);
@@ -606,28 +594,32 @@ export async function buildExternalWalletDepositTransaction(
  * buffered observed consumption as its limit. Shared by the composed
  * swap-funded build and the standalone split swap — one copy of the sizing
  * rule, one copy of its refusal shape.
+ *
+ * @param input - The plan to size and how to word its refusal.
+ * @param input.deadline - The build's shared budget.
+ * @param input.expectedAssetIdentity - The identity the plan must match.
+ * @param input.plan - The plan to probe.
+ * @param input.ownerAddress - The owner the plan moves funds for.
+ * @param input.fee - The build's resolved fee mode.
+ * @param input.probeLabel - The log line for a failed probe.
+ * @param input.refusalNoun - The refusal's subject, e.g. "Vault deposit".
+ * @returns The plan with its compute-unit limit pinned.
+ * @throws AppError 400 when the probe simulation fails.
  */
-async function pinProbedComputeUnitLimit(
-  env: Env,
-  input: {
-    cluster: ReturnType<typeof earnClusterFor>;
-    deadline: ReturnType<typeof createVaultDeadline>;
-    expectedAssetIdentity: { depositTokenMint: string; shareMint: string };
-    plan: EarnVaultTransactionPlan;
-    ownerAddress: string;
-    rpcUrl: string;
-    fee: VaultFeeMode;
-    probeLabel: string;
-    refusalNoun: string;
-  }
-): Promise<EarnVaultTransactionPlan> {
-  const probe = await simulateVaultPlan(env, {
-    cluster: input.cluster,
+async function pinProbedComputeUnitLimit(input: {
+  deadline: ReturnType<typeof createVaultDeadline>;
+  expectedAssetIdentity: { depositTokenMint: string; shareMint: string };
+  plan: EarnVaultTransactionPlan;
+  ownerAddress: string;
+  fee: VaultFeeMode;
+  probeLabel: string;
+  refusalNoun: string;
+}): Promise<EarnVaultTransactionPlan> {
+  const probe = await simulateVaultPlan({
     deadline: input.deadline,
     expectedAssetIdentity: input.expectedAssetIdentity,
     plan: withComputeUnitLimit(input.plan, MAX_COMPUTE_UNIT_LIMIT),
     owner: address(input.ownerAddress),
-    rpcUrl: input.rpcUrl,
     fee: input.fee,
   });
   if (!probe.ok) {
@@ -645,52 +637,54 @@ async function pinProbedComputeUnitLimit(
  * split flow. It rides the same simulate-then-compile seam as every vault
  * transaction with the same resolved fee-payer funds check and size assertion,
  * with an asset identity that states the swap's own mints (source in, deposit
- * token out) since there is no vault leg to testify to.
+ * token out) since there is no vault leg to testify to. The plan targets the
+ * open cluster scope's cluster.
+ *
+ * @param input - The swap leg and the build's shared facts.
+ * @param input.deadline - The build's shared budget.
+ * @param input.ownerAddress - The owner who signs and broadcasts the swap.
+ * @param input.sourceTokenMint - The mint the swap spends.
+ * @param input.depositTokenMint - The mint the swap produces.
+ * @param input.swapLeg - The quoted swap instructions and lookup tables.
+ * @param input.fee - The build's resolved fee mode.
+ * @returns The unsigned swap transaction.
+ * @throws AppError 400 when a simulation of the swap fails.
  */
-async function compileStandaloneSwapTransaction(
-  env: Env,
-  input: {
-    cluster: ReturnType<typeof earnClusterFor>;
-    deadline: ReturnType<typeof createVaultDeadline>;
-    rpcUrl: string;
-    ownerAddress: string;
-    sourceTokenMint: string;
-    depositTokenMint: string;
-    swapLeg: JupiterSwapLeg;
-    /** The build's resolved fee mode — the split swap keeps the same payer. */
-    fee: VaultFeeMode;
-  }
-): Promise<UnsignedVaultTransaction> {
+async function compileStandaloneSwapTransaction(input: {
+  deadline: ReturnType<typeof createVaultDeadline>;
+  ownerAddress: string;
+  sourceTokenMint: string;
+  depositTokenMint: string;
+  swapLeg: JupiterSwapLeg;
+  /** The build's resolved fee mode — the split swap keeps the same payer. */
+  fee: VaultFeeMode;
+}): Promise<UnsignedVaultTransaction> {
   const assetIdentity = {
     depositTokenMint: input.sourceTokenMint,
     shareMint: input.depositTokenMint,
   };
   const bare: EarnVaultTransactionPlan = {
-    cluster: input.cluster,
+    cluster: currentClusterScope().cluster,
     instructions: input.swapLeg.instructions,
     lookupTables: input.swapLeg.lookupTableAddresses,
     assetIdentity,
   };
   // Same locally derived compute-unit limit as the composed path: probe at
   // the maximum, then pin the buffered consumption.
-  const plan = await pinProbedComputeUnitLimit(env, {
-    cluster: input.cluster,
+  const plan = await pinProbedComputeUnitLimit({
     deadline: input.deadline,
     expectedAssetIdentity: assetIdentity,
     plan: bare,
     ownerAddress: input.ownerAddress,
-    rpcUrl: input.rpcUrl,
     fee: input.fee,
     probeLabel: "external-wallet deposit: standalone swap probe simulation failed",
     refusalNoun: "Swap",
   });
-  const simulation = await simulateVaultPlan(env, {
-    cluster: input.cluster,
+  const simulation = await simulateVaultPlan({
     deadline: input.deadline,
     expectedAssetIdentity: assetIdentity,
     plan,
     owner: address(input.ownerAddress),
-    rpcUrl: input.rpcUrl,
     fee: input.fee,
   });
   if (!simulation.ok) {
@@ -701,7 +695,6 @@ async function compileStandaloneSwapTransaction(
     throwSimulationRefusal("Swap simulation failed", simulation);
   }
   return compileUnsignedVaultTransaction({
-    cluster: input.cluster,
     deadline: input.deadline,
     expectedAssetIdentity: assetIdentity,
     plan,
@@ -746,8 +739,7 @@ export async function buildExternalWalletWithdrawalTransaction(
   if (!client) {
     throw notImplemented(input.provider, "vault withdrawals");
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  const { cluster } = currentClusterScope();
   const transactionId = generateEarnExternalWalletTransactionId();
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
@@ -810,13 +802,11 @@ export async function buildExternalWalletWithdrawalTransaction(
   requireAcceptedWithdrawalPlan(plan, input);
 
   const simulateAndCompile = async () => {
-    const simulation = await simulateVaultPlan(env, {
-      cluster,
+    const simulation = await simulateVaultPlan({
       deadline,
       expectedAssetIdentity,
       plan,
       owner: address(input.ownerAddress),
-      rpcUrl,
       fee,
     });
     if (!simulation.ok) {
@@ -828,7 +818,6 @@ export async function buildExternalWalletWithdrawalTransaction(
     }
 
     return compileUnsignedVaultTransaction({
-      cluster,
       deadline,
       expectedAssetIdentity,
       plan,
@@ -1125,14 +1114,10 @@ async function broadcastSubmitResult(
   signed: VerifiedSignedExternalWalletTransaction,
   operation: string
 ): Promise<ExternalWalletSubmitResult> {
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const movement = await broadcastRecordedVaultMovement(env, {
     operation,
     organizationId: input.organizationId,
-    cluster,
     deadline: createVaultDeadline(),
-    rpcUrl,
     bytes: signed.bytes,
     signature: signed.signature,
     movement: result.movement,

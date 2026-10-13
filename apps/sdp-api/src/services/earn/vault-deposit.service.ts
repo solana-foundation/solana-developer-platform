@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
@@ -16,11 +17,7 @@ import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/li
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
-import {
-  earnClusterFor,
-  resolveClusterRpcUrl,
-  resolveVaultDirectClient,
-} from "./execution-registry";
+import { resolveVaultDirectClient } from "./execution-registry";
 import {
   bufferedComputeUnitLimit,
   fetchJupiterSwapLeg,
@@ -196,8 +193,7 @@ export async function depositIntoVault(
   if (!client) {
     throw notImplemented(input.provider, "direct vault deposits");
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  const { cluster } = currentClusterScope();
   const runtime: EarnRuntimeContext = {
     env,
     environment: input.environment,
@@ -299,13 +295,11 @@ export async function depositIntoVault(
     // plan before signing. Wallet-pays is already forced above, so the probe
     // asks the same question signing will.
     if (swapLeg) {
-      const probe = await simulateVaultPlan(env, {
-        cluster,
+      const probe = await simulateVaultPlan({
         deadline,
         expectedAssetIdentity,
         plan: withComputeUnitLimit(plan, MAX_COMPUTE_UNIT_LIMIT),
         owner: address(input.wallet.publicKey),
-        rpcUrl,
         fee,
       });
       if (!probe.ok) {
@@ -329,11 +323,9 @@ export async function depositIntoVault(
       walletId: input.wallet.id,
       walletPublicKey: input.wallet.publicKey,
       signerMismatchMessage: "Resolved signing wallet does not match the deposit wallet",
-      cluster,
       deadline,
       expectedAssetIdentity,
       plan,
-      rpcUrl,
       fee,
       persist: (db, signed) =>
         createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({

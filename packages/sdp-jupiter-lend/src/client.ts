@@ -9,6 +9,7 @@ import {
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
 import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
+import { assertRuntimeMatchesScope } from "@sdp/earn/runtime-scope";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -160,13 +161,10 @@ export class JupiterLendVaultDirectClient
     EarnVaultDepositQuoteProvider,
     EarnVaultWithdrawQuoteProvider
 {
-  constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: JupiterLendVaultOperationRunner
-  ) {
+  /**
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
+   */
+  constructor(private readonly runOperation: JupiterLendVaultOperationRunner) {
     super();
   }
 
@@ -180,6 +178,7 @@ export class JupiterLendVaultDirectClient
     operation: (connection: Connection, assertActive: () => void) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
+      assertRuntimeMatchesScope(ctx, "Jupiter Lend");
       const cluster: SolanaCluster = ctx.environment === "production" ? "mainnet-beta" : "devnet";
       if (cluster !== "mainnet-beta") {
         throw new SdpJupiterLendError(
@@ -187,9 +186,7 @@ export class JupiterLendVaultDirectClient
           "Jupiter Lend Earn is available on mainnet-beta only"
         );
       }
-      const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-      assertActive();
-      return operation(jupiterLendConnection(rpcUrl), assertActive);
+      return operation(jupiterLendConnection(), assertActive);
     });
   }
 

@@ -168,7 +168,7 @@ export class VedaEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listVaultStrategies(ctx.env.SOLANA_RPC_URL ?? "", cluster, deployment);
+    return this._listVaultStrategies(cluster, deployment);
   }
 
   /**
@@ -180,11 +180,10 @@ export class VedaEarnClient extends StubEarnClient {
    * they do. Same shape as Kamino's `_listDevnetStrategies`.
    */
   async _listVaultStrategies(
-    rpcUrl: string,
     cluster: SolanaCluster,
     deployment: VedaDeployment
   ): Promise<ProviderStrategySnapshot[]> {
-    const entries = await readVedaVaults(rpcUrl, cluster, deployment);
+    const entries = await readVedaVaults(cluster, deployment);
 
     const snapshots: ProviderStrategySnapshot[] = [];
     for (const entry of entries) {
