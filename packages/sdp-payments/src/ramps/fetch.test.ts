@@ -167,7 +167,7 @@ describe("providerFetchJson failures", () => {
 describe("providerFetchJson response schema", () => {
   const quoteSchema = z.object({ quoteCurrencyAmount: z.number() });
 
-  function respondOk(body: unknown): void {
+  function respondOk(body: Record<string, unknown>): void {
     globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 200 });
   }
 

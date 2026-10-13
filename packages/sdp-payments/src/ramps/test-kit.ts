@@ -27,7 +27,7 @@ export interface RecordedExchange {
 
 /** A request an adapter made while a kit was replaying. */
 export interface ReplayedRequest {
-  method: string;
+  method: RecordedExchange["method"];
   url: string;
   headers: Headers;
 }
@@ -139,7 +139,7 @@ export function replayExchanges(exchanges: readonly RecordedExchange[]): Replay 
       return new Response("unrecorded request", { status: 599 });
     }
     replay.requests.push({
-      method: request.method,
+      method: exchange.method,
       url: request.url,
       headers: new Headers(init?.headers),
     });

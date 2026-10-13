@@ -102,7 +102,7 @@ function assertEstimateContract(
   estimate: PaymentRampEstimate,
   provider: RampProviderId,
   direction: RampDirection,
-  input: { assetRail: string; fiatCurrency: string }
+  input: Pick<PaymentRampEstimate, "assetRail" | "fiatCurrency">
 ): void {
   assert.equal(estimate.provider, provider);
   assert.equal(estimate.direction, direction);
