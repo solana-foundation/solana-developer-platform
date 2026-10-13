@@ -13,7 +13,14 @@ import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
   | { ok: true; data: T; status: number }
-  | { ok: false; error: string; status: number | null; body: unknown };
+  | {
+      ok: false;
+      error: string;
+      status: number | null;
+      body: unknown;
+      /** sdp-api marked the answer `Idempotent-Replayed`: a stored answer to an earlier attempt. */
+      replayed?: boolean;
+    };
 
 export interface DashboardFetchOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -384,7 +391,13 @@ export async function dashboardFetch<T = unknown>(
       errorBody = json;
       message = readApiErrorMessage(json) ?? message;
     } catch {}
-    return { ok: false, error: message, status: response.status, body: errorBody };
+    return {
+      ok: false,
+      error: message,
+      status: response.status,
+      body: errorBody,
+      replayed: response.headers.get("Idempotent-Replayed") === "true",
+    };
   }
 
   try {
