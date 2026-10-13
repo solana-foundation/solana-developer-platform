@@ -43,7 +43,7 @@ import {
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
-import { address, type Signature } from "@solana/kit";
+import { address, assertIsSignature, type Signature } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   createPrivateChannelInstanceRepository,
@@ -112,13 +112,17 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   // gateway shares one batched getSignatureStatuses call per tick instead of
   // paying one RPC round trip per row. Buckets stay well under the RPC's
   // 256-signature cap because MAX_PER_RUN bounds the whole tick.
-  const buckets = new Map<string, { rpc: SolanaRpc; withdrawals: PrivateChannelWithdrawalRow[] }>();
+  const buckets = new Map<
+    string,
+    { rpc: SolanaRpc; withdrawals: PrivateChannelWithdrawalRow[]; signatures: Signature[] }
+  >();
 
   const reconcileSubmitted = (
     withdrawal: PrivateChannelWithdrawalRow,
     instance: PrivateChannelInstanceRow
   ): Promise<void> => {
-    if (!withdrawal.signature) {
+    const storedSignature = withdrawal.signature;
+    if (!storedSignature) {
       return failIfStale(
         env,
         repo,
@@ -127,12 +131,14 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
         "Withdrawal was submitted without a signature."
       );
     }
+    assertIsSignature(storedSignature);
     let bucket = buckets.get(instance.gateway_url);
     if (!bucket) {
-      bucket = { rpc: gatewayRpcFor(instance), withdrawals: [] };
+      bucket = { rpc: gatewayRpcFor(instance), withdrawals: [], signatures: [] };
       buckets.set(instance.gateway_url, bucket);
     }
     bucket.withdrawals.push(withdrawal);
+    bucket.signatures.push(storedSignature);
     return Promise.resolve();
   };
 
@@ -174,11 +180,9 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
         // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without
         // it an executed burn reads null and is failed, which invites the caller to
         // burn the same balance twice.
-        statuses = await getSignatureStatuses(
-          bucket.rpc,
-          bucket.withdrawals.map((withdrawal) => withdrawal.signature as Signature),
-          { searchTransactionHistory: true }
-        );
+        statuses = await getSignatureStatuses(bucket.rpc, bucket.signatures, {
+          searchTransactionHistory: true,
+        });
       } catch (err) {
         getLogger().error(
           {
