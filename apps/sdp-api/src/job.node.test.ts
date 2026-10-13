@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
@@ -22,6 +22,7 @@ import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import {
   describeCronFailure,
@@ -30,7 +31,6 @@ import {
   runCronJob,
 } from "./job";
 
-vi.mock("@sdp/rpc/solana", () => ({ createRpc: vi.fn() }));
 vi.mock("@/services/jobs/egress-warmup", () => ({ waitForEgress: vi.fn() }));
 
 vi.mock("@/cron/earn-catalogue-sync", () => ({
@@ -198,11 +198,6 @@ function deferred<T>() {
 describe("runCronJob", () => {
   beforeEach(() => {
     vi.spyOn(process, "uptime").mockReturnValue(0);
-    vi.mocked(solanaRpc.createRpc)
-      .mockReset()
-      .mockImplementation(() => {
-        throw new Error("No RPC endpoint");
-      });
     vi.mocked(waitForEgress).mockReset();
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
     vi.mocked(trackPendingTransfers)
@@ -242,24 +237,64 @@ describe("runCronJob", () => {
     vi.useRealTimers();
   });
 
-  it("gives cleanup only the managed budget left after process startup and egress warmup", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-    await vi.advanceTimersByTimeAsync(10_000);
-    vi.mocked(process.uptime).mockReturnValue(20);
-    vi.mocked(solanaRpc.createRpc).mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
-    vi.mocked(waitForEgress).mockImplementationOnce(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-      return { ready: true, elapsedMs: 30_000, attempts: 6 };
+  describe("egress warmup", () => {
+    const rpc = installClusterRpcStub();
+
+    it("gives cleanup only the managed budget left after process startup and egress warmup", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+      await vi.advanceTimersByTimeAsync(10_000);
+      vi.mocked(process.uptime).mockReturnValue(20);
+      vi.mocked(waitForEgress)
+        .mockImplementationOnce(async () => {
+          await vi.advanceTimersByTimeAsync(30_000);
+          return { outcome: "ready", elapsedMs: 30_000, attempts: 6 };
+        })
+        .mockResolvedValueOnce({ outcome: "ready", elapsedMs: 30_000, attempts: 6 });
+      await runCronJob();
+      expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Object),
+        { deadlineMs: 90_000 }
+      );
+      expect(performance.now()).toBe(40_000);
+      expect(waitForEgress).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+      expect(waitForEgress).toHaveBeenCalledWith(
+        expect.objectContaining({ deadlineMs: 120_000, intervalMs: 5_000 })
+      );
     });
-    await runCronJob();
-    expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledExactlyOnceWith(
-      expect.any(Object),
-      { deadlineMs: 90_000 }
-    );
-    expect(performance.now()).toBe(40_000);
-    expect(waitForEgress).toHaveBeenCalledWith(
-      expect.objectContaining({ deadlineMs: 120_000, intervalMs: 5_000 })
-    );
+
+    it("skips the warmup on a cluster with no pool configured and still runs the ticks", async () => {
+      vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
+      rpc.answer("getBlockHeight", 1);
+      vi.mocked(waitForEgress).mockImplementation(async ({ probe }) => {
+        await probe();
+        return { outcome: "ready", elapsedMs: 0, attempts: 1 };
+      });
+
+      await runCronJob();
+
+      expect(waitForEgress).toHaveBeenCalledOnce();
+      expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getBlockHeight" });
+      expect(rpc.calls.filter((call) => call.cluster === "mainnet-beta")).toEqual([]);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+      expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    });
+
+    it("stops the other cluster's wait once the first cluster proves egress", async () => {
+      vi.mocked(waitForEgress).mockImplementation(async ({ stopSignal }) => {
+        if (currentClusterScope().environment === "sandbox") {
+          return { outcome: "ready", elapsedMs: 0, attempts: 1 };
+        }
+        await vi.waitFor(() => {
+          expect(stopSignal.aborted).toBe(true);
+        });
+        return { outcome: "stopped", elapsedMs: 0, attempts: 1 };
+      });
+
+      await runCronJob();
+
+      expect(waitForEgress).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    });
   });
 
   it("passes an exhausted cleanup budget without skipping money ticks or renewing the allowance", async () => {
@@ -271,7 +306,7 @@ describe("runCronJob", () => {
       { deadlineMs: -10_000 }
     );
     expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-    expect(collectDueRecurringPayments).toHaveBeenCalledOnce();
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledOnce();
   });
 
@@ -404,7 +439,8 @@ describe("runCronJob", () => {
     });
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
-    expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env, expect.any(Date));
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(collectDueRecurringPayments).toHaveBeenCalledWith(env, expect.any(Date));
     // The rings poll gates itself on the flag plus the http adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
@@ -449,7 +485,7 @@ describe("runCronJob", () => {
 
     transfers.resolve(undefined);
     await expect(running).rejects.toThrow("credential cleanup down");
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -463,7 +499,7 @@ describe("runCronJob", () => {
     const completion = expect(runCronJob()).rejects.toThrow("credential cleanup down");
     try {
       await vi.waitFor(() => {
-        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
@@ -511,7 +547,7 @@ describe("runCronJob", () => {
   });
 
   it("fails the job on a recurring-collection error but still releases pools", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 
@@ -524,7 +560,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("ramp inbox down");
 
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
@@ -622,7 +658,7 @@ describe("runCronJob", () => {
   });
 
   it("emits an error-status sdp_cron_run event when a tick fails", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 

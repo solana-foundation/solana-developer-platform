@@ -4,7 +4,9 @@ import {
   getRecurringPaymentOperationStaleBefore,
   nextRecurringPaymentCollectionDueAt,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -450,15 +452,13 @@ async function settleActiveActivationAttempt(input: {
 }
 
 async function fetchConfirmedActivationPlan(input: {
-  env: Env;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   planPda: Address;
   planCreationSignature: Signature;
   createdPlanThisRun: boolean;
 }) {
   if (input.createdPlanThisRun) {
     await confirmSubscriptionSignature(
-      input.env,
       input.planCreationSignature,
       "Recurring payment activation failed on-chain"
     );
@@ -475,7 +475,6 @@ async function fetchConfirmedActivationPlan(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     input.planCreationSignature,
     "Recurring payment activation failed on-chain"
   );
@@ -485,15 +484,13 @@ async function fetchConfirmedActivationPlan(input: {
 }
 
 async function fetchConfirmedSubscriptionDelegation(input: {
-  env: Env;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   subscriptionPda: Address;
   authorizationSignature: Signature;
   authorizedThisRun: boolean;
 }) {
   if (input.authorizedThisRun) {
     await confirmSubscriptionSignature(
-      input.env,
       input.authorizationSignature,
       "Recurring payment activation failed on-chain"
     );
@@ -512,7 +509,6 @@ async function fetchConfirmedSubscriptionDelegation(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     input.authorizationSignature,
     "Recurring payment activation failed on-chain"
   );
@@ -527,7 +523,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -582,11 +578,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     metadata: { authorizationSetupSignature: initSignature },
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  await confirmSubscriptionSignature(initSignature, "Recurring payment activation failed on-chain");
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -626,7 +618,7 @@ export async function activateRecurringPayment(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   const nowIso = new Date().toISOString();
 
   assertActivationPreconditions({ ...input, nowIso });
@@ -807,7 +799,6 @@ export async function activateRecurringPayment(input: {
     }
 
     const onChainPlan = await fetchConfirmedActivationPlan({
-      env: input.env,
       rpc,
       planPda,
       planCreationSignature,
@@ -891,6 +882,7 @@ export async function activateRecurringPayment(input: {
       const feePayment = await createProjectSponsorshipFeePayment(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
+        cluster: currentClusterScope().cluster,
         actor: { type: "wallet", id: input.sourceWallet.walletId },
       });
       const feePayer = await feePayment.getFeePayer();
@@ -965,7 +957,6 @@ export async function activateRecurringPayment(input: {
 
     currentStage = "finalize";
     const onChainSubscription = await fetchConfirmedSubscriptionDelegation({
-      env: input.env,
       rpc,
       subscriptionPda,
       authorizationSignature,

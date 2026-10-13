@@ -1,6 +1,5 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
@@ -176,7 +175,7 @@ export async function resolveBatchRequest(
   assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
-  const token = normalizePaymentToken(input.token, currentClusterScope().cluster);
+  const token = normalizePaymentToken(input.token);
   const rpc = createClusterRpc();
   const tokenContext = await resolveTokenContext(rpc, token, sourceAddress);
   const recipients = await resolveRecipients({

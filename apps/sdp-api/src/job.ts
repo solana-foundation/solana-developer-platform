@@ -1,5 +1,8 @@
 import { pathToFileURL } from "node:url";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 
 import { parse as parseCron, validate as validateCron } from "node-cron";
 import { runPerCluster } from "@/cron/cluster-runs";
@@ -52,6 +55,55 @@ import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
 const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
+
+const EGRESS_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * Wait until the open cluster scope's managed pool answers one probe, another cluster proves
+ * egress first (`egressProven` aborts), or the warmup deadline passes, logging which happened;
+ * either way the reconciliation ticks run afterwards. Egress is process-wide, so the first cluster
+ * to answer ends every cluster's wait. A cluster with no pool configured has nothing to probe.
+ *
+ * @param egressProven - Aborted by the first cluster whose probe succeeds.
+ * @returns Resolves once the probe succeeded, egress was proven elsewhere, the deadline passed,
+ *   or the cluster has no pool.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+async function warmEgressOnScopeCluster(egressProven: AbortController): Promise<void> {
+  const { environment, cluster } = currentClusterScope();
+  let probeRpc: SolanaRpc;
+  try {
+    probeRpc = createClusterRpc();
+  } catch (error) {
+    if (error instanceof SdpRpcError && error.code === "RPC_NOT_CONFIGURED") return;
+    throw error;
+  }
+  const egress = await waitForEgress({
+    probe: () =>
+      probeRpc
+        .getBlockHeight({ commitment: "confirmed" })
+        .send({ abortSignal: AbortSignal.timeout(EGRESS_PROBE_TIMEOUT_MS) }),
+    deadlineMs: 120_000,
+    intervalMs: 5_000,
+    stopSignal: egressProven.signal,
+  });
+  if (egress.outcome === "ready") {
+    egressProven.abort();
+  }
+  if (egress.outcome !== "deadline") {
+    getLogger().info(
+      { environment, cluster, elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+      egress.outcome === "ready"
+        ? "reconciliation job: egress ready"
+        : "reconciliation job: egress proven by another cluster"
+    );
+  } else {
+    getLogger().error(
+      { environment, cluster, elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
+      "reconciliation job: egress warmup deadline reached, running ticks anyway"
+    );
+  }
+}
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
@@ -137,31 +189,8 @@ export async function runCronJob(): Promise<void> {
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
 
-  let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
-  try {
-    probeRpc = solanaRpc.createRpc(env, { requestTimeoutMs: 5_000 });
-  } catch {
-    // No RPC endpoint configured (some self-hosted setups): nothing to probe.
-  }
-  if (probeRpc) {
-    const rpc = probeRpc;
-    const egress = await waitForEgress({
-      probe: () => rpc.getBlockHeight({ commitment: "confirmed" }).send(),
-      deadlineMs: 120_000,
-      intervalMs: 5_000,
-    });
-    if (egress.ready) {
-      getLogger().info(
-        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
-        "reconciliation job: egress ready"
-      );
-    } else {
-      getLogger().error(
-        { elapsed_ms: egress.elapsedMs, attempts: egress.attempts },
-        "reconciliation job: egress warmup deadline reached, running ticks anyway"
-      );
-    }
-  }
+  const egressProven = new AbortController();
+  await runPerCluster("egress-warmup", () => warmEgressOnScopeCluster(egressProven));
 
   const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const earnEnabled = isEarnEnabled(env);
@@ -213,7 +242,9 @@ export async function runCronJob(): Promise<void> {
         await collect(monitored(RAMP_TRANSFERS_MONITOR, () => reconcileRampTransfers(env)));
         await collect(
           monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () =>
-            collectDueRecurringPayments(env, new Date())
+            runPerCluster("collect-recurring-payments", async () => {
+              await collectDueRecurringPayments(env, new Date());
+            })
           )
         );
         if (privateChannelsEnabled) {

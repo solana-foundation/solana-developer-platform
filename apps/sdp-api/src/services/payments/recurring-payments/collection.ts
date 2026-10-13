@@ -4,8 +4,9 @@ import {
   nextRecurringPaymentCollectionDueAt,
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import type { ParsedInstruction } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -296,11 +297,10 @@ function createRecurringCollectionSignedSubmissionStore(input: {
 }
 
 async function resolveDestinationTokenAccount(input: {
-  env: Env;
   destinationAddress: string;
   token: string;
 }): Promise<Address> {
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
   const mint = assertValidAddress(input.token, "token");
   const tokenProgram = await resolveMintTokenProgram(rpc, mint);
@@ -339,7 +339,7 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
 }
 
 async function matchesRecurringTransferInstruction(input: {
-  rpc: ReturnType<typeof solanaRpc.createRpc>;
+  rpc: SolanaRpc;
   instruction: Instruction;
   amountBaseUnits: bigint;
   sourceAddress: string;
@@ -403,7 +403,6 @@ async function matchesRecurringTransferInstruction(input: {
 }
 
 async function verifyRecurringPaymentCollection(input: {
-  env: Env;
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   attempt: PaymentSubscriptionCollectionAttemptRow;
@@ -482,14 +481,14 @@ async function verifyRecurringPaymentCollection(input: {
   const subscriptionAuthorityAddress = input.subscription.subscription_authority_address;
   const subscriberTokenAccount = input.subscription.subscriber_token_account;
 
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   const mint = assertValidAddress(input.recurringPayment.token, "token");
   const [tokenProgram, decimals] = await Promise.all([
     resolveMintTokenProgram(rpc, mint),
     resolveMintDecimals(rpc, mint),
   ]);
   const amountBaseUnits = parseDecimalAmount(input.recurringPayment.amount, decimals);
-  const confirmedTransaction = await solanaRpc.getTransaction(rpc, input.signature);
+  const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
       "Recurring payment collection is confirmed but not yet indexed; retry shortly"
@@ -1283,7 +1282,6 @@ async function recoverRecurringPaymentCollection(input: {
 
   try {
     await confirmSubscriptionSignature(
-      input.env,
       recoveredSignature,
       "Recurring payment collection failed on-chain"
     );
@@ -1324,12 +1322,10 @@ async function recoverRecurringPaymentCollection(input: {
           "destinationTokenAccount"
         )
       : await resolveDestinationTokenAccount({
-          env: input.env,
           destinationAddress: currentRecurringPayment.destination_address,
           token: currentRecurringPayment.token,
         });
     const proof = await verifyRecurringPaymentCollection({
-      env: input.env,
       recurringPayment: currentRecurringPayment,
       subscription: currentSubscription,
       attempt: recoveredAttempt,
@@ -1634,7 +1630,7 @@ export async function collectRecurringPayment(input: {
       transfer,
     });
 
-    const rpc = solanaRpc.createRpc(input.env);
+    const rpc = createClusterRpc();
     const sourceOwner = assertValidAddress(input.recurringPayment.source_address, "sourceAddress");
     const destinationOwner = assertValidAddress(
       input.recurringPayment.destination_address,
@@ -1691,6 +1687,7 @@ export async function collectRecurringPayment(input: {
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
+      cluster: currentClusterScope().cluster,
       actor: { type: "wallet", id: input.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();
@@ -1775,13 +1772,8 @@ export async function collectRecurringPayment(input: {
     attempt = submitted.attempt;
     transfer = submitted.transfer;
 
-    await confirmSubscriptionSignature(
-      input.env,
-      signature,
-      "Recurring payment collection failed on-chain"
-    );
+    await confirmSubscriptionSignature(signature, "Recurring payment collection failed on-chain");
     const proof = await verifyRecurringPaymentCollection({
-      env: input.env,
       recurringPayment: recurringPaymentWithDestination,
       subscription,
       attempt,

@@ -413,18 +413,62 @@ export interface StalePaymentRecurringPaymentUpdateRow {
 }
 
 export interface PaymentRecurringPaymentsRepository {
+  /**
+   * Lists recurring payments stuck in a cron-recoverable lifecycle status whose project is in
+   * the open cluster scope's environment, oldest update first.
+   *
+   * @param params - The staleness cutoff and the page size.
+   * @param params.staleBefore - Only rows last updated at or before this ISO timestamp.
+   * @param params.limit - The maximum number of rows.
+   * @returns The stale lifecycle rows.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   listStaleLifecyclePayments(params: {
     staleBefore: string;
     limit: number;
   }): Promise<PaymentRecurringPaymentRow[]>;
+  /**
+   * Lists recurring payments stuck in `updating` whose project is in the open cluster scope's
+   * environment, newest update first, each carrying that environment's stale count and oldest
+   * stale update.
+   *
+   * @param params - The staleness cutoff and the page size.
+   * @param params.staleBefore - Only rows last updated at or before this ISO timestamp.
+   * @param params.limit - The maximum number of rows.
+   * @returns The stale update rows.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   listStaleUpdatePayments(params: {
     staleBefore: string;
     limit: number;
   }): Promise<StalePaymentRecurringPaymentUpdateRow[]>;
+  /**
+   * Lists recurring payments whose current-cycle collection attempt submitted a transfer and
+   * needs recovery (stale `processing`, or `confirmed` on an active row), restricted to projects
+   * in the open cluster scope's environment, oldest attempt update first.
+   *
+   * @param params - The staleness cutoff and the page size.
+   * @param params.staleBefore - Only `processing` attempts last updated at or before this ISO timestamp.
+   * @param params.limit - The maximum number of rows.
+   * @returns The recoverable collection rows.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   listRecoverableCollectionPayments(params: {
     staleBefore: string;
     limit: number;
   }): Promise<RecoverableCollectionRecurringPaymentRow[]>;
+  /**
+   * Lists active recurring payments due for collection whose project is in the open cluster
+   * scope's environment, skipping cycles with a blocking attempt or a failure inside the retry
+   * window, earliest due first.
+   *
+   * @param params - The due and retry cutoffs and the page size.
+   * @param params.dueBefore - Only cycles due at or before this ISO timestamp.
+   * @param params.retryBefore - A failed attempt updated after this ISO timestamp blocks its cycle.
+   * @param params.limit - The maximum number of rows.
+   * @returns The collectible rows.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   listDueCollectionPayments(params: {
     dueBefore: string;
     retryBefore: string;
