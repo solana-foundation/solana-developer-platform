@@ -11,6 +11,11 @@ import {
 } from "@sdp/types/veda-programs";
 import { toBase58 } from "../../solana-rpc";
 import { isStrategyWithinDeclaredSupport } from "../../support";
+import {
+  isolateCataloguePool,
+  pointCataloguePool,
+  runInCatalogueScope,
+} from "../../test/cluster-pool";
 import type { ProviderStrategySnapshot } from "../../types";
 import { VedaEarnClient } from "./client";
 import {
@@ -200,11 +205,17 @@ function stubRpc(stub: RpcStub) {
   return calls;
 }
 
-const RPC_URL = "https://rpc.test.invalid";
+const WRONG_GENESIS_DEVNET_URL = "https://devnet-wrong-genesis.veda-catalogue.test";
+
+isolateCataloguePool();
 
 afterEach(() => {
   mock.restoreAll();
 });
+
+function listSandboxVaults(deployment: VedaDeployment): Promise<ProviderStrategySnapshot[]> {
+  return runInCatalogueScope("sandbox", () => client._listVaultStrategies("devnet", deployment));
+}
 
 function snapshot(overrides: Partial<ProviderStrategySnapshot>): ProviderStrategySnapshot {
   return {
@@ -374,12 +385,9 @@ describe("VedaEarnClient.listStrategies", () => {
     // Sandbox (devnet) is deployed now, so only production still exercises the
     // no-deployment guard; devnet's read path is covered by the
     // `_listVaultStrategies` cases below, against stubbed RPC.
-    await assert.rejects(
-      client.listStrategies({ env: { SOLANA_RPC_URL: RPC_URL }, environment: "production" }),
-      {
-        code: "PROVIDER_NOT_CONFIGURED",
-      }
-    );
+    await assert.rejects(client.listStrategies({ env: {}, environment: "production" }), {
+      code: "PROVIDER_NOT_CONFIGURED",
+    });
   });
 
   it("maps a vault to a snapshot", async () => {
@@ -388,7 +396,7 @@ describe("VedaEarnClient.listStrategies", () => {
       assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET) }],
     });
 
-    const snapshots = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const snapshots = await listSandboxVaults(DEPLOYMENT);
 
     assert.deepEqual(snapshots, [
       {
@@ -410,7 +418,7 @@ describe("VedaEarnClient.listStrategies", () => {
       accounts: [encodeBoringVault()],
       assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET) }],
     });
-    const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const [only] = await listSandboxVaults(DEPLOYMENT);
     assert.equal(only?.currentApy, undefined);
   });
 
@@ -419,7 +427,7 @@ describe("VedaEarnClient.listStrategies", () => {
       accounts: [encodeBoringVault()],
       assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET) }],
     });
-    const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const [only] = await listSandboxVaults(DEPLOYMENT);
     assert.equal(only?.riskMetadata?.curator, undefined);
   });
 
@@ -428,7 +436,7 @@ describe("VedaEarnClient.listStrategies", () => {
       accounts: [encodeBoringVault({ baseAsset: UNKNOWN_MINT, vaultId: 12n })],
       assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET, { vaultId: 12n }) }],
     });
-    const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const [only] = await listSandboxVaults(DEPLOYMENT);
     assert.equal(only?.name, "Veda vault #12");
   });
 
@@ -450,7 +458,7 @@ describe("VedaEarnClient.listStrategies", () => {
       ],
     });
 
-    const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+    const [only] = await listSandboxVaults(DEPLOYMENT);
     assert.deepEqual(only?.depositMints, [USDC_DEVNET]);
   });
 
@@ -468,7 +476,7 @@ describe("VedaEarnClient.listStrategies", () => {
       assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_MAINNET) }],
     });
 
-    assert.deepEqual(await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT), []);
+    assert.deepEqual(await listSandboxVaults(DEPLOYMENT), []);
   });
 
   it("omits a vault with no deposit asset SDP fronts", async () => {
@@ -476,7 +484,7 @@ describe("VedaEarnClient.listStrategies", () => {
       accounts: [encodeBoringVault()],
       assets: [{ pubkey: "asset-1", data: encodeAssetData(SOL_MINT) }],
     });
-    assert.deepEqual(await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT), []);
+    assert.deepEqual(await listSandboxVaults(DEPLOYMENT), []);
   });
 
   describe("liquidity", () => {
@@ -485,21 +493,21 @@ describe("VedaEarnClient.listStrategies", () => {
 
     it("is instant only when redemption is permissionless and shares are unlocked", async () => {
       withAssets(encodeBoringVault());
-      const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+      const [only] = await listSandboxVaults(DEPLOYMENT);
       assert.equal(only?.liquidityTerm, "instant");
       assert.equal(only?.redemptionDelayDays, undefined);
     });
 
     it("is delayed when a named authority must sign the redemption", async () => {
       withAssets(encodeBoringVault({ withdrawAuthority: NAMED_AUTHORITY }));
-      const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+      const [only] = await listSandboxVaults(DEPLOYMENT);
       assert.equal(only?.liquidityTerm, "delayed");
     });
 
     it("is delayed with a day count, rounded up, when shares are locked", async () => {
       // 36 hours: a day and a half, which is two days before a holder can exit.
       withAssets(encodeBoringVault({ lockDurationSeconds: 129_600n }));
-      const [only] = await client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT);
+      const [only] = await listSandboxVaults(DEPLOYMENT);
       assert.equal(only?.liquidityTerm, "delayed");
       assert.equal(only?.redemptionDelayDays, 2);
     });
@@ -512,15 +520,17 @@ describe("VedaEarnClient.listStrategies", () => {
      * must throw rather than return a short shelf.
      */
     it("throws when the RPC serves a different cluster", async () => {
+      pointCataloguePool("devnet", WRONG_GENESIS_DEVNET_URL);
       stubRpc({ genesis: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] });
-      await assert.rejects(client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT), {
-        code: "PROVIDER_NOT_CONFIGURED",
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), {
+        code: "PROVIDER_UNAVAILABLE",
       });
     });
 
     it("proves the cluster BEFORE reading any account", async () => {
+      pointCataloguePool("devnet", WRONG_GENESIS_DEVNET_URL);
       const calls = stubRpc({ genesis: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] });
-      await assert.rejects(client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT));
+      await assert.rejects(listSandboxVaults(DEPLOYMENT));
       assert.deepEqual(
         calls.map((call) => call.method),
         ["getGenesisHash"]
@@ -529,28 +539,19 @@ describe("VedaEarnClient.listStrategies", () => {
 
     it("throws when a configured vault account does not exist", async () => {
       stubRpc({ accounts: [null] });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /does not exist/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /does not exist/);
     });
 
     it("throws when a configured vault does not decode", async () => {
       const corrupted = encodeBoringVault();
       corrupted[0] = 0;
       stubRpc({ accounts: [corrupted] });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /layout has changed/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /layout has changed/);
     });
 
     it("throws when the account read returns a short list", async () => {
       stubRpc({ accounts: [] });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /configured vaults/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /configured vaults/);
     });
 
     /**
@@ -559,10 +560,7 @@ describe("VedaEarnClient.listStrategies", () => {
      */
     it("throws on a JSON-RPC error body", async () => {
       stubRpc({ errorOn: "getMultipleAccounts", accounts: [encodeBoringVault()] });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /node behind/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /node behind/);
     });
 
     it("throws when an asset entry arrives without account data", async () => {
@@ -571,32 +569,38 @@ describe("VedaEarnClient.listStrategies", () => {
         assets: [{ pubkey: "asset-1", data: encodeAssetData(USDC_DEVNET) }],
         stripAssetData: true,
       });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /returned no account data/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /returned no account data/);
     });
 
     it("throws when an asset account does not decode", async () => {
       const corrupted = encodeAssetData(USDC_DEVNET);
       corrupted[0] = 0;
       stubRpc({ accounts: [encodeBoringVault()], assets: [{ pubkey: "a", data: corrupted }] });
-      await assert.rejects(
-        client._listVaultStrategies(RPC_URL, "devnet", DEPLOYMENT),
-        /did not decode/
-      );
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), /did not decode/);
     });
 
-    it("needs an RPC URL", async () => {
-      await assert.rejects(client._listVaultStrategies("", "devnet", DEPLOYMENT), {
+    it("skips as PROVIDER_NOT_CONFIGURED when the cluster has no endpoint", async () => {
+      pointCataloguePool("devnet", null);
+      const calls = stubRpc({});
+      await assert.rejects(listSandboxVaults(DEPLOYMENT), {
         code: "PROVIDER_NOT_CONFIGURED",
       });
+      assert.deepEqual(calls, []);
+    });
+
+    it("refuses a devnet read inside a production scope before any request", async () => {
+      const calls = stubRpc({});
+      await assert.rejects(
+        runInCatalogueScope("production", () => client._listVaultStrategies("devnet", DEPLOYMENT)),
+        { code: "INTERNAL_ERROR" }
+      );
+      assert.deepEqual(calls, []);
     });
   });
 
   it("reads no accounts at all when the deployment lists no vaults", async () => {
     const calls = stubRpc({});
-    const snapshots = await client._listVaultStrategies(RPC_URL, "devnet", {
+    const snapshots = await listSandboxVaults({
       ...DEPLOYMENT,
       vaultStateAddresses: [],
     });

@@ -1,5 +1,6 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import { OndoVaultDirectClient } from "@sdp/ondo";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
@@ -7,6 +8,7 @@ import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
+import { CLUSTER_RPC_URLS, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import {
@@ -783,6 +785,8 @@ describe("composed Ondo compute budget", () => {
 });
 
 describe("Ondo through the production swap port", () => {
+  const stub = installClusterRpcStub();
+
   async function buildOndo(direction: "deposit" | "withdrawal", substituteDestination = false) {
     const usdy = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint;
     if (!usdy) throw new Error("Ondo deployment required");
@@ -798,8 +802,11 @@ describe("Ondo through the production swap port", () => {
       tokenAccount(inputMint),
       tokenAccount(outputMint),
     ]);
-    fetchMock.mockImplementation(async (url: string) => {
-      if (url === "https://rpc.mock.invalid") return okResponse({ result: { value: [] } });
+    const clusterFetch = globalThis.fetch;
+    stub.answer("getTokenAccountsByOwner", { context: { slot: 1 }, value: [] });
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url === CLUSTER_RPC_URLS["mainnet-beta"]) return clusterFetch(url, init);
       const parsed = new URL(url);
       const quote = {
         inputMint,
@@ -838,15 +845,18 @@ describe("Ondo through the production swap port", () => {
       );
     });
     const client = new OndoVaultDirectClient(
-      async () => "https://rpc.mock.invalid",
       (_label, operation) => operation(() => {}),
       () => createOndoSwapPort(swapEnv())
     );
     const ctx = { env: {}, environment: "production" as const };
     const common = { owner: OWNER, providerReference: usdy };
-    return direction === "deposit"
-      ? client.buildVaultDeposit(ctx, { ...common, amount: "25", minSharesOut: "24.5" })
-      : client.buildVaultWithdrawal(ctx, { ...common, shares: "25", minAmountOut: "24.5" });
+    return runInClusterScope(
+      { projectId: "proj_jupiter_swap_ondo", environment: "production" },
+      () =>
+        direction === "deposit"
+          ? client.buildVaultDeposit(ctx, { ...common, amount: "25", minSharesOut: "24.5" })
+          : client.buildVaultWithdrawal(ctx, { ...common, shares: "25", minAmountOut: "24.5" })
+    );
   }
 
   it.each(["deposit", "withdrawal"] as const)(

@@ -6,7 +6,12 @@ import {
   isDecimalString,
   scaleDecimalAmountByBps,
 } from "@sdp/solana/amount";
-import type { EarnProviderId, SdpEnvironment, SolanaCluster } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type EarnProviderId,
+  type SdpEnvironment,
+  type SolanaCluster,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor, getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -21,7 +26,6 @@ import {
 } from "@/routes/earn/handlers/curation";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
-import { earnClusterFor } from "./execution-registry";
 
 /**
  * ADR 0004, layer 1: SDP-wide exposure per vault, checked at deposit admission.
@@ -340,7 +344,7 @@ export async function assessVaultExposure(input: {
   const { environment, strategy, amount, stage } = input;
   const enforced = isEarnVolumeCapsEnforced(input.env);
   const cap = resolveVaultExposureCap(
-    earnClusterFor(environment),
+    CLUSTER_BY_SDP_ENVIRONMENT[environment],
     strategy.provider,
     strategy.provider_reference
   );

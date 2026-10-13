@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import * as rpcCore from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { withTransientRpcRetry } from "@sdp/rpc";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getRecentBlockhash, type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
 import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
@@ -30,8 +32,6 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import type { Env } from "@/types/env";
-import { assertClusterEndpoint } from "./execution-registry";
 import type { VaultDeadline } from "./vault-deadline";
 import { describeVaultSimulationError } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
@@ -112,9 +112,11 @@ export function appendVaultRequestMemo(
   };
 }
 
+/**
+ * The workflow facts every vault execution stage shares. The cluster is not one of them: every
+ * stage reads it from the open cluster scope, the same scope its door client serves.
+ */
 export interface VaultExecutionScope {
-  /** Cluster derived from the authenticated SDP project environment. */
-  cluster: SolanaCluster;
   /** One absolute budget shared by every stage in this vault workflow. */
   deadline: VaultDeadline;
 }
@@ -128,7 +130,6 @@ export interface SignVaultPlanInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /** The custody wallet signer — the vault `user`, and the only real signer. */
   owner: TransactionSigner;
-  rpcUrl: string;
   fee: VaultFeeMode;
   /** Successful simulation preparation reused to sign the exact same plan. */
   prepared?: PreparedVaultPlanExecution;
@@ -178,15 +179,6 @@ function assertExpectedPlan(
   }
 }
 
-async function verifyVaultRpc(
-  env: Env,
-  input: Pick<VaultExecutionScope, "cluster" | "deadline"> & { rpcUrl: string }
-): Promise<void> {
-  await input.deadline.run(`Verifying the ${input.cluster} RPC endpoint`, () =>
-    assertClusterEndpoint(env, input.cluster, input.rpcUrl)
-  );
-}
-
 /**
  * Resolve a plan's declared lookup tables to their address lists.
  *
@@ -196,15 +188,20 @@ async function verifyVaultRpc(
  * exceed the packet limit — or worse, compile a different message than the one
  * simulated. A fetch failure is therefore a retryable error, never a silent
  * fallback.
+ *
+ * @param rpc - The open cluster scope's door client.
+ * @param input - The workflow deadline and the plan whose tables to resolve.
+ * @param input.deadline - The workflow's shared budget.
+ * @param input.plan - The plan declaring the lookup tables.
+ * @returns Each declared table's address list, keyed by table address.
  */
 async function resolveLookupTables(
-  env: Env,
-  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; rpcUrl: string }
+  rpc: SolanaRpc,
+  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan }
 ): Promise<AddressesByLookupTableAddress> {
   if (input.plan.lookupTables.length === 0) return {};
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
   return input.deadline.run("Fetching the vault lookup tables", () =>
-    rpcCore.withTransientRpcRetry(() =>
+    withTransientRpcRetry(() =>
       fetchAddressesForLookupTables(
         input.plan.lookupTables.map((table) => address(table)),
         rpc
@@ -282,24 +279,33 @@ function assertVaultTransactionFits(
   throw new VaultTransactionTooLargeError(bytes.length, extraSigner);
 }
 
-/** Sign exactly one complete vault transaction without broadcasting it. */
-export async function signVaultPlan(
-  env: Env,
-  input: SignVaultPlanInput
-): Promise<SignedVaultTransaction> {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+/**
+ * Sign exactly one complete vault transaction without broadcasting it, on the open cluster
+ * scope's cluster.
+ *
+ * @param input - The plan, its signer and fee mode, and the workflow's shared facts.
+ * @param input.plan - The provider's unsigned plan.
+ * @param input.owner - The custody wallet signer.
+ * @param input.fee - Who pays, resolved before the plan was built.
+ * @param input.prepared - The simulation's preparation to sign from, when there was one.
+ * @param input.deadline - The workflow's shared budget.
+ * @param input.expectedAssetIdentity - The catalogue identity the plan must match.
+ * @returns The signed wire bytes, their signature and their last valid block height.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+export async function signVaultPlan(input: SignVaultPlanInput): Promise<SignedVaultTransaction> {
+  assertExpectedPlan(input.plan, currentClusterScope().cluster, input.expectedAssetIdentity);
   const instructions = planInstructions(input.plan).map(toKitInstruction);
   let prepared = input.prepared;
   if (prepared && prepared.plan !== input.plan) {
     throw new Error("Vault execution preparation belongs to a different plan");
   }
   if (!prepared) {
-    await verifyVaultRpc(env, input);
-    const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+    const rpc = createClusterRpc();
     const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-      resolveLookupTables(env, input),
+      resolveLookupTables(rpc, input),
       input.deadline.run("Fetching the vault transaction blockhash", () =>
-        solanaRpc.getRecentBlockhash(rpc, "confirmed")
+        getRecentBlockhash(rpc, "confirmed")
       ),
     ]);
     prepared = { plan: input.plan, lookupTables, blockhash, lastValidBlockHeight };
@@ -416,7 +422,7 @@ export interface UnsignedVaultTransaction {
 export function compileUnsignedVaultTransaction(
   input: CompileUnsignedVaultTransactionInput
 ): UnsignedVaultTransaction {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  assertExpectedPlan(input.plan, currentClusterScope().cluster, input.expectedAssetIdentity);
   if (input.prepared.plan !== input.plan) {
     throw new Error("Vault execution preparation belongs to a different plan");
   }
@@ -462,15 +468,19 @@ export function compileUnsignedVaultTransaction(
  * the response been lost. The caller must treat a throw as UNKNOWN and leave
  * the ledger row reconcilable against its recorded signature, never mark it
  * failed.
+ *
+ * @param input - The signed bytes and the workflow's shared budget.
+ * @param input.bytes - The signed wire transaction.
+ * @param input.deadline - The workflow's shared budget.
+ * @returns Resolves once the open cluster scope's door accepted the send.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function broadcastVaultTransaction(
-  env: Env,
-  input: VaultExecutionScope & { bytes: Uint8Array; rpcUrl: string }
+  input: VaultExecutionScope & { bytes: Uint8Array }
 ): Promise<void> {
-  await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = createClusterRpc();
   await input.deadline.run("Broadcasting the vault transaction", () =>
-    solanaRpc.sendTransaction(rpc, input.bytes)
+    sendTransaction(rpc, input.bytes)
   );
 }
 
@@ -490,13 +500,19 @@ function planInstructions(plan: EarnVaultTransactionPlan) {
  * set or a changed vault config surfaces here as a readable program error
  * instead of a landed, failed transaction the customer still paid for.
  *
+ * @param input - The plan, its owner and fee mode, and the workflow's shared facts.
+ * @param input.plan - The provider's unsigned plan.
+ * @param input.owner - The wallet the plan moves funds for.
+ * @param input.fee - The fee mode signing will use.
+ * @param input.deadline - The workflow's shared budget.
+ * @param input.expectedAssetIdentity - The catalogue identity the plan must match.
+ * @returns The preparation to sign or compile from, or the simulation's refusal.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function simulateVaultPlan(
-  env: Env,
   input: VaultPlanExecutionScope & {
     plan: EarnVaultTransactionPlan;
     owner: Address;
-    rpcUrl: string;
     /**
      * The SAME fee mode signing will use. Simulation enforces that the fee
      * payer can cover the fee, so simulating as the owner while signing as a
@@ -528,7 +544,7 @@ export async function simulateVaultPlan(
       logs: readonly string[];
     }
 > {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  assertExpectedPlan(input.plan, currentClusterScope().cluster, input.expectedAssetIdentity);
   let instructions: EarnVaultTransactionPlan["instructions"];
   try {
     instructions = planInstructions(input.plan);
@@ -541,15 +557,14 @@ export async function simulateVaultPlan(
     };
   }
 
-  await verifyVaultRpc(env, input);
-  const rpc = solanaRpc.createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = createClusterRpc();
   // Lookup-table transport failures are infrastructure failures, not a
   // program simulation verdict. Let them reject so callers preserve their
   // idempotency key and return a retryable 5xx instead of a caller-fault 400.
   const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-    resolveLookupTables(env, input),
+    resolveLookupTables(rpc, input),
     input.deadline.run("Fetching the vault simulation blockhash", () =>
-      solanaRpc.getRecentBlockhash(rpc, "confirmed")
+      getRecentBlockhash(rpc, "confirmed")
     ),
   ]);
   // The owner stays a writable signer through the plan's own instruction

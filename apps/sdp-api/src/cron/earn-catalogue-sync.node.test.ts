@@ -4,8 +4,10 @@ import type {
   EarnVaultProvider,
   ProviderStrategySnapshot,
 } from "@sdp/earn/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Observability } from "@/runtime/observability";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import {
   EARN_CATALOGUE_SYNC_CRON,
@@ -834,6 +836,38 @@ describe("runEarnCatalogueSyncIfDue", () => {
       );
       expect(mocks.upsertStrategy).not.toHaveBeenCalledWith(
         expect.objectContaining({ providerReference: "rogue-mainnet" })
+      );
+    });
+  });
+
+  describe("cluster scopes", () => {
+    const rpc = installClusterRpcStub();
+
+    it("reads each environment's catalogue inside that environment's cluster scope and writes both lanes", async () => {
+      rpc.answer("getSlot", 1);
+      installProviders({
+        kamino: makeProvider("kamino", async (ctx: EarnRuntimeContext) => {
+          await createClusterRpc().getSlot().send();
+          return ctx.environment === "production"
+            ? [makeSnapshot("mainnet-vault", "mainnet-beta")]
+            : [makeSnapshot("devnet-vault", "devnet")];
+        }),
+      });
+
+      expect(await runEarnCatalogueSyncIfDue(env)).toBe("synced");
+
+      expect(rpc.calls.filter((call) => call.method === "getSlot")).toEqual([
+        { cluster: "mainnet-beta", method: "getSlot" },
+        { cluster: "devnet", method: "getSlot" },
+      ]);
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({ providerReference: "mainnet-vault", environment: "production" })
+      );
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({ providerReference: "devnet-vault", environment: "sandbox" })
+      );
+      expect(mocks.upsertStrategy).toHaveBeenCalledWith(
+        expect.objectContaining({ providerReference: "mainnet-vault", environment: "sandbox" })
       );
     });
   });

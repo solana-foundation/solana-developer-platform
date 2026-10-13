@@ -38,6 +38,7 @@ import type {
   EarnRuntimeContext,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import { createEarnRepository, type EarnRepository } from "@/db/repositories";
 import type { BackgroundRunner } from "@/runtime/background";
@@ -46,7 +47,6 @@ import type { Observability } from "@/runtime/observability";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { reportFigureAnomalies } from "@/services/earn/catalogue-anomaly";
 import { guardDepositMints } from "@/services/earn/deposit-mint-guard";
-import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 export const EARN_METRICS_REFRESH_MONITOR = "sdp-api-refresh-earn-metrics";
@@ -147,9 +147,11 @@ export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
   // is the point: Kora co-signs PYUSD and USDG movements under
   // `transfer_hook_policy = "allow_all"`, so a hook program appearing on either
   // mint should reach a human within minutes, not at the next hourly sync. A
-  // handful of account reads per cluster; report-only, never throws.
+  // handful of account reads per cluster; report-only. This pass walks both
+  // clusters, so it opens each environment's scope here, one at a time and
+  // never nested, around the guard's chain reads only.
   for (const environment of REFRESHED_ENVIRONMENTS) {
-    await guardDepositMints(env, earnClusterFor(environment));
+    await runInClusterScope({ projectId: null, environment }, () => guardDepositMints());
   }
 }
 

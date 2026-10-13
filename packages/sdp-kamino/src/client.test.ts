@@ -286,15 +286,10 @@ describe("KaminoVaultDirectClient capabilities", () => {
           value: position(runtime, vault, input.owner, vault === providerReferences[1] ? "0" : "1"),
         }))
     );
-    const processEnv = {
-      SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
-      UNRELATED: "preserved",
-    };
-
     const positions = await client.readVaultPositions(
       {
         environment: "sandbox",
-        env: processEnv,
+        env: {},
       },
       {
         owner,

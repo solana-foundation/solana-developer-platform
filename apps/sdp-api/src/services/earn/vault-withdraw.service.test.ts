@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
@@ -18,7 +19,6 @@ const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultWithdrawClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 vi.mock("./vault-execution.service", async (importOriginal) => ({
@@ -39,10 +39,18 @@ vi.mock("./vault-sponsorship", async (importOriginal) => ({
   resolveVaultSponsorship,
 }));
 
-const { withdrawFromVault } = await import("./vault-withdraw.service");
+const vaultWithdraw = await import("./vault-withdraw.service");
 
 const ORG = "org_vault_withdraw";
 const PROJECT = "prj_vault_withdraw";
+
+function withdrawFromVault(
+  ...args: Parameters<typeof vaultWithdraw.withdrawFromVault>
+): ReturnType<typeof vaultWithdraw.withdrawFromVault> {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    vaultWithdraw.withdrawFromVault(...args)
+  );
+}
 const USER = "usr_vault_withdraw";
 const WALLET_ROW_ID = "cwlt_vault_withdraw";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -146,7 +154,7 @@ beforeEach(async () => {
 describe("withdrawFromVault", () => {
   it("records three back-to-back same-amount withdraws as separate intents", async () => {
     const memos: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       memos.push(
         Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
       );
@@ -265,7 +273,7 @@ describe("withdrawFromVault", () => {
   });
 
   it("stamps the idempotency memo onto the one transaction", async () => {
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       const memo = Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString(
         "utf8"
       );

@@ -1,10 +1,14 @@
 import type { EarnVaultInstruction } from "@sdp/earn/types";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { SolanaCluster } from "@sdp/types";
 
-/** Chain runtime for one operation: a genesis-proven endpoint and its cluster. */
+/** Chain runtime for one operation: its cluster and the door clients that reach it. */
 export interface OndoRuntime {
   cluster: SolanaCluster;
-  rpcUrl: string;
+  /** Builds: every request bounded at the transport. */
+  rpc: SolanaRpc;
+  /** Position reads only, never a build: concurrent identical reads go out once. */
+  readRpc: SolanaRpc;
 }
 
 /**
@@ -16,8 +20,8 @@ export interface OndoRuntime {
  * authorize wholesale (`services/earn/jupiter-swap.service.ts`). Injecting
  * that boundary as a port keeps it single-owner — this package must never
  * re-implement instruction admission — and keeps this package free of both
- * chain SDKs and Jupiter credentials, the same way `resolveProvenRpcUrl` keeps
- * genesis proof an API concern. Unit tests stub the port; the smoke test
+ * chain SDKs and Jupiter credentials, the same way the door (`@sdp/rpc/factory`)
+ * keeps genesis proof out of it. Unit tests stub the port; the smoke test
  * provides a live one.
  */
 export interface OndoSwapPort {

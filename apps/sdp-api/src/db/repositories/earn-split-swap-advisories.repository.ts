@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import type { AppDb } from "@/db";
 
@@ -85,7 +86,21 @@ export interface EarnSplitSwapAdvisoriesRepository {
    * head of the queue (the fairness cursor `claimUnsettledVaultMovements`
    * uses). A cursor, not a lease: nothing else is excluded by it.
    */
+  /**
+   * Claim open advisories in the open cluster scope's environment, least recently checked first.
+   *
+   * @param limit - Most advisories to claim, 1 to 256.
+   * @returns The claimed advisories, stamped `last_checked_at`.
+   * @throws Error when `limit` is out of range.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   claimOpenForDetection(limit: number): Promise<EarnSplitSwapAdvisoryRow[]>;
+  /**
+   * Count the open cluster scope's environment's unresolved advisories.
+   *
+   * @returns The open backlog.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   */
   countOpen(): Promise<number>;
   /** Stamp what a visit observed without resolving. */
   recordObservation(params: {
@@ -204,7 +219,8 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
         .prepare(
           `WITH visited AS (
              SELECT id FROM earn_split_swap_advisories
-              WHERE resolved_at IS NULL
+              WHERE environment = ?
+                AND resolved_at IS NULL
               ORDER BY COALESCE(last_checked_at, created_at) ASC, created_at ASC, id ASC
               LIMIT ?
               FOR UPDATE SKIP LOCKED
@@ -217,7 +233,7 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
            )
            SELECT * FROM touched ORDER BY created_at ASC, id ASC`
         )
-        .bind(limit)
+        .bind(currentClusterScope().environment, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapRow);
     },
@@ -225,8 +241,9 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
     async countOpen() {
       const row = await db
         .prepare(
-          "SELECT COUNT(*) AS open FROM earn_split_swap_advisories WHERE resolved_at IS NULL"
+          "SELECT COUNT(*) AS open FROM earn_split_swap_advisories WHERE environment = ? AND resolved_at IS NULL"
         )
+        .bind(currentClusterScope().environment)
         .first<{ open: number | string }>();
       return Number(row?.open ?? 0);
     },

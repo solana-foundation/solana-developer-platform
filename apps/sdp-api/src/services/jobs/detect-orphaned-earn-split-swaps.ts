@@ -1,6 +1,6 @@
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -9,11 +9,6 @@ import {
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -46,7 +41,7 @@ import type { Env } from "@/types/env";
  *    credit that arrived in the meantime is not this swap's output. One
  *    movement discharges at most one advisory (UNIQUE resolving_movement_id),
  *    so a reused owner wallet cannot close several with one deposit.
- * 4. Otherwise the owner's deposit-token balance is read on the environment's
+ * 4. Otherwise the owner's deposit-token balance is read on the scope's
  *    cluster with the same call the build's baseline used, and the balance is
  *    the ground truth. The swap enforces `minOut` on chain, so a landed swap
  *    raised the balance by at least the floor. While that rise is still there:
@@ -101,6 +96,18 @@ export interface EarnSplitSwapDetectionStats {
   blockHeightReadFailures: number;
 }
 
+/**
+ * One detection tick for the open cluster scope's environment: claim its open advisories, read
+ * the cluster's block height once, and judge each advisory in order. Runs once per cluster
+ * inside `runPerCluster`.
+ *
+ * @param env - The process env.
+ * @param options - Test seams.
+ * @param options.now - The clock the judgement reads.
+ * @returns Resolves once every claimed advisory was judged.
+ * @throws Error when any chain read failed, after the tick event is logged.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export async function detectOrphanedEarnSplitSwaps(
   env: Env,
   options: { now?: () => number } = {}
@@ -124,46 +131,36 @@ export async function detectOrphanedEarnSplitSwaps(
     blockHeightReadFailures: 0,
   };
 
-  // One block height per environment, read once for the whole batch so every
-  // advisory in a tick is judged against the same moment on its own cluster.
-  const byEnvironment = new Map<SdpEnvironment, EarnSplitSwapAdvisoryRow[]>();
-  for (const advisory of batch) {
-    const rows = byEnvironment.get(advisory.environment);
-    if (rows) rows.push(advisory);
-    else byEnvironment.set(advisory.environment, [advisory]);
-  }
-
-  for (const [environment, rows] of byEnvironment) {
-    let blockHeight: bigint | null = null;
+  // One block height, read once for the whole batch so every advisory in a
+  // tick is judged against the same moment on the scope's cluster.
+  const { environment } = currentClusterScope();
+  let blockHeight: bigint | null = null;
+  if (batch.length > 0) {
     try {
-      const cluster = earnClusterFor(environment);
-      const rpcUrl = resolveClusterRpcUrl(env, cluster);
-      await assertClusterEndpoint(env, cluster, rpcUrl);
-      blockHeight = await createRpc(env, { rpcUrl })
-        .getBlockHeight({ commitment: "confirmed" })
-        .send();
+      blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
     } catch (error) {
       logEvent("error", {
         event: "sdp_api_earn_split_swap_block_height_read_failed",
         environment,
-        rows: rows.length,
+        rows: batch.length,
         ...describeError(error),
         error_message: errorMessage(error),
       });
       stats.blockHeightReadFailures += 1;
     }
+  }
 
-    for (const advisory of rows) {
-      // Sequential on purpose: one filtered RPC read per judged advisory.
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
-      await judgeAdvisory(env, advisories, ledger, advisory, blockHeight, now(), stats);
-    }
+  for (const advisory of batch) {
+    // Sequential on purpose: one filtered RPC read per judged advisory.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
+    await judgeAdvisory(advisories, ledger, advisory, blockHeight, now(), stats);
   }
 
   const openBacklog = await advisories.countOpen();
   const failures = stats.balanceReadFailures + stats.blockHeightReadFailures;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_split_swap_detection_tick",
+    environment,
     checked: stats.checked,
     deposit_observed: stats.depositObserved,
     follow_up_pending: stats.followUpPending,
@@ -188,7 +185,6 @@ export async function detectOrphanedEarnSplitSwaps(
 }
 
 async function judgeAdvisory(
-  env: Env,
   advisories: ReturnType<typeof createPostgresEarnSplitSwapAdvisoriesRepository>,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   advisory: EarnSplitSwapAdvisoryRow,
@@ -257,12 +253,7 @@ async function judgeAdvisory(
   // 4. The balance is the ground truth: judge it against the build-time baseline.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
-    balance = await readOwnerMintBalance(
-      env,
-      advisory.environment,
-      advisory.owner_address,
-      advisory.deposit_token_mint
-    );
+    balance = await readOwnerMintBalance(advisory.owner_address, advisory.deposit_token_mint);
   } catch (error) {
     stats.balanceReadFailures += 1;
     logEvent("error", {
