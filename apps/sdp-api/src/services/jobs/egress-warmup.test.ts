@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { describe, expect, it } from "vitest";
 import { waitForEgress } from "./egress-warmup";
 
@@ -85,5 +86,23 @@ describe("waitForEgress", () => {
     expect(calls).toBe(1);
     expect(result).toEqual({ outcome: "stopped", elapsedMs: expect.any(Number), attempts: 1 });
     expect(result.elapsedMs).toBeLessThan(1_000);
+  });
+
+  it("leaves no abort listeners on the stop signal after retrying to ready", async () => {
+    const stop = new AbortController();
+    let calls = 0;
+
+    const result = await waitForEgress({
+      probe: async () => {
+        calls += 1;
+        if (calls < 5) throw new TypeError("fetch failed");
+      },
+      deadlineMs: 10_000,
+      intervalMs: 1,
+      stopSignal: stop.signal,
+    });
+
+    expect(result).toEqual({ outcome: "ready", elapsedMs: expect.any(Number), attempts: 5 });
+    expect(getEventListeners(stop.signal, "abort")).toHaveLength(0);
   });
 });
