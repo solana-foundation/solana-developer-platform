@@ -59,12 +59,11 @@ import { createVaultRpcFailover } from "./vault-rpc-failover";
  */
 
 /**
- * The RPC endpoint used to build instructions for `cluster`: per-cluster by
- * construction, because one API process serves BOTH (a sandbox project is
- * devnet, a production project is mainnet-beta). The rule lives in @sdp/rpc so
- * the sponsorship budget's network-fee read resolves the SAME endpoint without
- * importing this module's chain SDKs; `assertClusterEndpoint` below still makes
- * every selected URL prove which chain it serves before work begins.
+ * The legacy per-cluster endpoint URL, kept only for the callers that cannot use the door yet:
+ * the providers that dial a URL (Jupiter Lend, Hastra) and the background passes that run
+ * outside a cluster scope (deposit-mint guard, split-swap detection). `assertClusterEndpoint`
+ * below makes every selected URL prove which chain it serves before work begins. Everything
+ * else reads through `@sdp/rpc/factory`.
  */
 export { resolveClusterRpcUrl };
 
@@ -165,8 +164,27 @@ export function resetClusterEndpointProofs(): void {
   clusterProofs.clear();
 }
 
+/**
+ * The cluster an SDP environment's projects run on, for the background passes that walk both
+ * environments outside a cluster scope (catalogue sync, metrics refresh, split-swap detection).
+ *
+ * @param environment - The environment being processed.
+ * @returns Its cluster.
+ */
 export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {
   return CLUSTER_BY_SDP_ENVIRONMENT[environment];
+}
+
+/**
+ * The operation runner for providers that read the chain through the door: one workflow
+ * deadline and no endpoint retry, because the door's pool already fails over per request.
+ *
+ * @param deadline - The workflow's shared budget.
+ * @returns The runner handed to the provider client.
+ */
+function runOnDeadline(deadline: VaultDeadline) {
+  return <T>(label: string, operation: (assertActive: () => void) => Promise<T>): Promise<T> =>
+    deadline.run(label, () => operation(() => deadline.assertActive(label)));
 }
 
 /**
@@ -181,9 +199,11 @@ export function resolveEarnExecutionClient(
   deadline: VaultDeadline
 ): EarnVaultProvider | null {
   // Construction stays synchronous and I/O-free for every branch. The clients
-  // await this resolver only when a chain method is invoked, so an idempotent
-  // replay can return from durable state during an RPC outage.
-  const { resolve: provenRpcUrl, run: runOperation } = createVaultRpcFailover(
+  // reach the chain only when a chain method is invoked, so an idempotent
+  // replay can return from durable state during an RPC outage. Jupiter Lend
+  // and Hastra still dial endpoint URLs, so they keep the proven-URL failover.
+  const runOperation = runOnDeadline(deadline);
+  const { resolve: provenRpcUrl, run: runUrlOperation } = createVaultRpcFailover(
     env,
     deadline,
     assertClusterEndpoint
@@ -195,7 +215,7 @@ export function resolveEarnExecutionClient(
     return instrumentVendorPort("kamino", client);
   }
   if (provider === "jupiter_lend") {
-    const client = new JupiterLendVaultDirectClient(provenRpcUrl, runOperation);
+    const client = new JupiterLendVaultDirectClient(provenRpcUrl, runUrlOperation);
     assertJupiterLendNotPortfolioProvider(client);
     return instrumentVendorPort("jupiter_lend", client);
   }
@@ -205,14 +225,12 @@ export function resolveEarnExecutionClient(
     return instrumentVendorPort("veda", client);
   }
   if (provider === "ondo") {
-    const client = new OndoVaultDirectClient(provenRpcUrl, runOperation, () =>
-      createOndoSwapPort(env)
-    );
+    const client = new OndoVaultDirectClient(runOperation, () => createOndoSwapPort(env));
     assertOndoNotPortfolioProvider(client);
     return instrumentVendorPort("ondo", client);
   }
   if (provider === "hastra") {
-    const client = new HastraVaultDirectClient(provenRpcUrl, runOperation, () =>
+    const client = new HastraVaultDirectClient(provenRpcUrl, runUrlOperation, () =>
       createHastraSwapPort(env)
     );
     assertHastraNotPortfolioProvider(client);

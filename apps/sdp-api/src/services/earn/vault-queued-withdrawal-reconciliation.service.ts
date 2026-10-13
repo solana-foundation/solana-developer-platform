@@ -6,13 +6,9 @@ import type {
   EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawProvider,
 } from "@sdp/earn";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import {
-  createRpc,
-  getSignatureStatuses,
-  type SignatureStatusInfo,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
+import { getSignatureStatuses, type SignatureStatusInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
@@ -25,8 +21,6 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import {
-  earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "@/services/earn/execution-registry";
@@ -142,12 +136,9 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
 export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const { environment } = currentClusterScope();
-  const rpcUrl = resolveClusterRpcUrl(env, earnClusterFor(environment));
   await ledger.cleanupExpiredReservations();
   try {
-    const height = await createRpc(env, { rpcUrl })
-      .getBlockHeight({ commitment: "confirmed" })
-      .send();
+    const height = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
     await ledger.cleanupExpiredExternalBuilds({ currentBlockHeight: height.toString() });
   } catch (error) {
     getLogger().warn(
@@ -158,8 +149,13 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   const actions = await ledger.claimUnsettledActions(ACTION_BATCH_SIZE);
   const stats = emptyStats(actions.length, 0);
   if (actions.length > 0) {
-    const rpc = createRpc(env, { rpcUrl });
-    await reconcileActionBatch(env, ledger, actions, { rpc, rpcUrl, environment }, stats);
+    await reconcileActionBatch(
+      env,
+      ledger,
+      actions,
+      { rpc: createClusterRpc(), environment },
+      stats
+    );
   }
 
   stats.requestsClaimed = await visitOpenRequestsJustInTime(
@@ -236,7 +232,6 @@ export async function visitOpenRequestsJustInTime(
  * @param actions - The claimed actions, all in `chain.environment`.
  * @param chain - The scope cluster's client and identity.
  * @param chain.rpc - The client for the scope's cluster.
- * @param chain.rpcUrl - The endpoint behind `chain.rpc`, for rebroadcast.
  * @param chain.environment - The scope's environment, for logs.
  * @param stats - The tick's counters, updated in place.
  * @returns Resolves once every action was attempted.
@@ -245,10 +240,10 @@ async function reconcileActionBatch(
   env: Env,
   ledger: QueueLedger,
   actions: readonly EarnVaultWithdrawalRequestActionRow[],
-  chain: { rpc: SolanaRpc; rpcUrl: string; environment: SdpEnvironment },
+  chain: { rpc: SolanaRpc; environment: SdpEnvironment },
   stats: QueueReconciliationStats
 ): Promise<void> {
-  const { rpc, rpcUrl, environment } = chain;
+  const { rpc, environment } = chain;
   let statuses: Array<SignatureStatusInfo | null>;
   try {
     statuses = await getSignatureStatuses(
@@ -287,7 +282,6 @@ async function reconcileActionBatch(
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
       const outcome = await reconcileAction(env, ledger, actionRow, statuses[index] ?? null, {
         rpc: rpc as unknown as RawHistoryRpc,
-        rpcUrl,
         currentHeight,
       });
       if (outcome === "advanced") stats.actionsAdvanced += 1;
@@ -303,12 +297,26 @@ async function reconcileActionBatch(
   }
 }
 
+/**
+ * Project one request/cancel action's signature status onto the ledger, rebroadcasting its
+ * recorded bytes through the scope's door while its blockhash is still live.
+ *
+ * @param env - The process env.
+ * @param ledger - The queue ledger.
+ * @param actionRow - The claimed action.
+ * @param status - Its signature status, or null when the RPC knows no such signature.
+ * @param chain - The scope cluster's history client and block height.
+ * @param chain.rpc - The history client for the scope's cluster.
+ * @param chain.currentHeight - The confirmed block height, or null when it was unreadable.
+ * @returns What happened to the action.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, on rebroadcast.
+ */
 export async function reconcileAction(
   env: Env,
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   status: SignatureStatusInfo | null,
-  chain: { rpc: RawHistoryRpc; rpcUrl: string; currentHeight: bigint | null }
+  chain: { rpc: RawHistoryRpc; currentHeight: bigint | null }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
   if (status?.err) {
     // A rejection on an unrooted fork cannot release the durable PDA claim.
@@ -379,11 +387,9 @@ export async function reconcileAction(
   }
   if (chain.currentHeight === null) return "unchanged";
 
-  await broadcastVaultTransaction(env, {
-    cluster: earnClusterFor(actionRow.environment),
+  await broadcastVaultTransaction({
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(actionRow.signed_transaction, "base64")),
-    rpcUrl: chain.rpcUrl,
   });
   await ledger.advanceAction({
     actionId: actionRow.id,
@@ -964,9 +970,7 @@ async function reconcileRequest(
       : "advanced";
   }
 
-  const rpc = createRpc(env, {
-    rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(request.environment)),
-  }) as unknown as RawHistoryRpc;
+  const rpc = createClusterRpc() as unknown as RawHistoryRpc;
   const closing = await findClosingEvent(env, rpc, request, client);
   if (closing === null) {
     await ledger.advanceRequest({
@@ -1027,9 +1031,7 @@ export async function reconcileParRequest(
     return request.status === toStatus ? "unchanged" : "advanced";
   }
 
-  const rpc = createRpc(env, {
-    rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(request.environment)),
-  }) as unknown as RawHistoryRpc;
+  const rpc = createClusterRpc() as unknown as RawHistoryRpc;
   const closing = await findClosingParEvent(env, rpc, request, client);
   if (closing === null) {
     await ledger.advanceRequest({

@@ -17,8 +17,9 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
-import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
-import { deriveAssociatedTokenAddress, isAddress } from "@sdp/solana/address";
+import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import { assertValidAddress, deriveAssociatedTokenAddress, isAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
@@ -168,15 +169,14 @@ export class OndoVaultDirectClient
 {
   /**
    * Injected seams, same construction shape as the Kamino/Veda clients: the
-   * API resolves and genesis-proves the per-request RPC endpoint, bounds every
-   * operation with its vault deadline, and supplies the admitted swap builder
-   * (see `OndoSwapPort`). Nothing here reads `ctx.env` directly.
+   * API bounds every operation with its vault deadline and supplies the
+   * admitted swap builder (see `OndoSwapPort`). Nothing here reads `ctx.env`
+   * directly; chain reads go through the door for the open cluster scope.
+   *
+   * @param runOperation - The API's execution guard; it bounds each operation and owns retries.
+   * @param resolveSwapPort - The API's admitted swap builder for the request.
    */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
     private readonly runOperation: OndoVaultOperationRunner,
     /**
      * Resolved per request like the RPC endpoint: the port's implementation
@@ -188,25 +188,36 @@ export class OndoVaultDirectClient
     super();
   }
 
-  private async runtime(ctx: EarnRuntimeContext): Promise<{
+  /**
+   * The operation's runtime: the request's cluster, its Ondo deployment, and the door clients for
+   * the open cluster scope, built here inside the scope so nothing below reads it. The deployment
+   * is resolved first: an unconfigured deployment is a fact about SDP, and reporting it should not
+   * depend on an RPC being configured. The door proves each endpoint's genesis before its first
+   * request.
+   *
+   * @param ctx - The request's runtime context.
+   * @returns The runtime and the cluster's Ondo configuration.
+   * @throws SdpOndoError when Ondo has no deployment on the cluster.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+   * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+   */
+  private runtime(ctx: EarnRuntimeContext): {
     runtime: OndoRuntime;
     config: OndoClusterConfig;
-  }> {
+  } {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
-    // Resolved BEFORE the endpoint: an unconfigured deployment is a fact about
-    // SDP, and reporting it should not depend on an RPC being reachable.
     const config = ondoClusterConfig(cluster);
-    const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
-    if (!rpcUrl.trim()) {
-      throw new SdpOndoError(
-        "POSITION_UNREADABLE",
-        `No Solana RPC endpoint configured for ${cluster}; Ondo cannot build or read.`
-      );
-    }
-    return { runtime: { cluster, rpcUrl }, config };
+    return {
+      runtime: {
+        cluster,
+        rpc: createClusterBoundedRpc({ timeoutMs: RPC_READ_TIMEOUT_MS }),
+        readRpc: createClusterReadRpc({ timeoutMs: RPC_READ_TIMEOUT_MS }),
+      },
+      config,
+    };
   }
 
-  /** Every chain capability enters through this proof-then-deadline boundary. */
+  /** Every chain capability enters through this runtime-then-deadline boundary. */
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
@@ -217,7 +228,7 @@ export class OndoVaultDirectClient
     ) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
-      const { runtime, config } = await this.runtime(ctx);
+      const { runtime, config } = this.runtime(ctx);
       assertActive();
       return operation(runtime, config, assertActive);
     });
@@ -540,7 +551,7 @@ export class OndoVaultDirectClient
         for (const reference of references) {
           assertActive();
           this.assertKnownReference(config, reference);
-          const accounts = await this.tokenAccounts(runtime, input.owner, reference);
+          const accounts = await this.tokenAccounts(runtime.readRpc, input.owner, reference);
           const associatedAddress = await deriveAssociatedTokenAddress(
             input.owner,
             reference,
@@ -601,54 +612,38 @@ export class OndoVaultDirectClient
     owner: string,
     mint: string
   ): Promise<boolean> {
-    const accounts = await this.tokenAccounts(runtime, owner, mint);
+    const accounts = await this.tokenAccounts(runtime.rpc, owner, mint);
     const associatedAddress = await deriveAssociatedTokenAddress(owner, mint, TOKEN_PROGRAM_ID);
     return accounts.some((account) => account.address === associatedAddress);
   }
 
+  /**
+   * Every token account `owner` holds for `mint`, each checked against the request before it
+   * counts toward a position.
+   *
+   * @param rpc - The runtime's build or read client.
+   * @param owner - The holder's address.
+   * @param mint - The token's mint.
+   * @returns The accounts, with their atoms and whether the issuer froze them.
+   * @throws SdpOndoError `POSITION_UNREADABLE` when the read fails or any account is out of shape.
+   */
   private async tokenAccounts(
-    runtime: OndoRuntime,
+    rpc: SolanaRpc,
     owner: string,
     mint: string
   ): Promise<OndoTokenAccount[]> {
-    let response: Response;
+    let values: readonly unknown[];
     try {
-      response = await contextAwareRpcFetch(runtime.rpcUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getTokenAccountsByOwner",
-          params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
-        }),
-        signal: AbortSignal.timeout(RPC_READ_TIMEOUT_MS),
-      });
+      const response = await rpc
+        .getTokenAccountsByOwner(
+          assertValidAddress(owner, "owner"),
+          { mint: assertValidAddress(mint, "mint") },
+          { encoding: "jsonParsed", commitment: "confirmed" }
+        )
+        .send();
+      values = response.value;
     } catch (cause) {
       throw new SdpOndoError("POSITION_UNREADABLE", "The Solana RPC read failed", { cause });
-    }
-    if (!response.ok) {
-      throw new SdpOndoError(
-        "POSITION_UNREADABLE",
-        `The Solana RPC answered HTTP ${response.status} reading token accounts`
-      );
-    }
-    let body: Record<string, unknown> | undefined;
-    try {
-      body = record(await response.json());
-    } catch (cause) {
-      throw new SdpOndoError(
-        "POSITION_UNREADABLE",
-        "The Solana RPC returned unreadable token accounts",
-        { cause }
-      );
-    }
-    const values = record(body?.result)?.value;
-    if (body?.error || !Array.isArray(values)) {
-      throw new SdpOndoError(
-        "POSITION_UNREADABLE",
-        "The Solana RPC returned an error reading token accounts"
-      );
     }
     const seen = new Set<string>();
     return values.map((value: unknown) => {

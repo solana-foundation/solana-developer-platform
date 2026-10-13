@@ -1,15 +1,19 @@
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { notFound, providerUnavailable } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import { assertClusterEndpoint, earnClusterFor, resolveClusterRpcUrl } from "./execution-registry";
 
 /** How long a finalized signature's status is reused before it is read again. */
 export const FINALIZED_SIGNATURE_STATUS_TTL_MS = 600_000;
 const FINALIZED_SIGNATURE_STATUS_CAPACITY = 1_024;
+
+/** Interactive budget for the signature-status read that gates a balance page. */
+const SIGNATURE_STATUS_READ_TIMEOUT_MS = 3_000;
 
 /**
  * A finalized signature's slot and error never change, so polls that keep
@@ -87,18 +91,15 @@ export async function resolveVaultBalanceReadContext(
       throw providerUnavailable("Earn balance confirmation is unavailable");
     movements.push(movement);
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
+  const { cluster } = currentClusterScope();
   const keys = movements.map((movement) => `${cluster}\n${movement.signature}`);
   const statuses: Array<SignatureStatusInfo | null | undefined> = keys.map(finalizedStatus);
   const unread = movements.flatMap((movement, index) =>
     statuses[index] ? [] : [{ index, signature: movement.signature as Signature }]
   );
   if (unread.length > 0) {
-    const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: 3_000 });
     const read = await getSignatureStatuses(
-      rpc,
+      createClusterBoundedRpc({ timeoutMs: SIGNATURE_STATUS_READ_TIMEOUT_MS }),
       unread.map(({ signature }) => signature),
       { searchTransactionHistory: true, retryDelaysMs: [] }
     );

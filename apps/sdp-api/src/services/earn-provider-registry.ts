@@ -31,8 +31,10 @@ import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
  * Resolve the request's cluster-specific RPC and prove its genesis before the
- * singleton provider performs any chain work. The runtime context is
- * request-scoped, so one API process can safely serve both SDP environments.
+ * singleton provider performs any chain work, for the providers that still dial
+ * an endpoint URL (Jupiter Lend, Hastra); the rest read through the door. The
+ * runtime context is request-scoped, so one API process can safely serve both
+ * SDP environments.
  */
 async function resolveProvenRpcUrl(
   ctx: EarnRuntimeContext,
@@ -68,7 +70,7 @@ assertWisdomTreeNotPortfolioProvider(wisdomtree);
 // The swap port is resolved per request from the runtime context (the API
 // constructs `ctx.env` from `Env`), because these are process singletons and
 // the Jupiter credential is request-environment state, same as the RPC URL.
-const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
+const ondo = new OndoVaultDirectClient(runVaultOperation, (ctx) =>
   createOndoSwapPort(ctx.env as unknown as Env)
 );
 assertOndoNotPortfolioProvider(ondo);
