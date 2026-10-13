@@ -586,7 +586,11 @@ export class CustodyRuntimeTargets {
       // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
       if (isCustodyWalletIdempotencyViolation(error)) {
         // Another attempt under this key recorded the same Privy wallet (Privy
-        // dedupes on the request id); the route answers from that row.
+        // dedupes on the request id); the route answers from that row. This
+        // attempt's intent is resolved, not left open for reconciliation.
+        await audit.completeCritical(params.auditContext, intent, {
+          metadata: { result: "replayed", reason: "request_already_recorded" },
+        });
         throw error;
       }
       this.logWalletOrphanRisk(target, "persistence_failed", intent.id, providerWalletId);
