@@ -512,9 +512,9 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
 });
 
 describe("fetchTransferBatchRecipients", () => {
-  it("marks a missing successful batch detail unavailable", async () => {
+  it("keeps the previous empty fallback for missing batch recipients", async () => {
     const request = vi.fn().mockResolvedValue(Response.json({}));
-    expect(await fetchTransferBatchRecipients(request, "batch-a")).toMatchObject({ ok: false });
+    expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({ ok: true, data: [] });
   });
 
   it.each(["wallet-a", null])(
@@ -533,14 +533,26 @@ describe("fetchTransferBatchRecipients", () => {
   );
 
   it.each([
-    { batch: { id: "batch-b", sourceCustodyWalletId: "wallet-a" }, recipients: [] },
-    { batch: { id: "batch-a" }, recipients: [] },
-    { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" } },
-    { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" }, recipients: {} },
-  ])("refuses mismatched or incomplete batch detail %j", async (data) => {
-    const request = vi.fn().mockResolvedValue(Response.json({ data }));
-    expect(await fetchTransferBatchRecipients(request, "batch-a")).toMatchObject({ ok: false });
-  });
+    {
+      data: { batch: { id: "batch-b", sourceCustodyWalletId: "wallet-a" }, recipients: [] },
+      expected: [],
+    },
+    { data: { batch: { id: "batch-a" }, recipients: [] }, expected: [] },
+    { data: { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" } }, expected: [] },
+    {
+      data: { recipients: [{ id: "recipient-a", status: "pending" }] },
+      expected: [{ id: "recipient-a", status: "pending" }],
+    },
+  ])(
+    "keeps the previous recipients parsing without batch identity validation: %j",
+    async ({ data, expected }) => {
+      const request = vi.fn().mockResolvedValue(Response.json({ data }));
+      expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({
+        ok: true,
+        data: expected,
+      });
+    }
+  );
 });
 
 describe("fetchTransferBatches", () => {
@@ -554,23 +566,41 @@ describe("fetchTransferBatches", () => {
     expect(await fetchTransferBatches(request, 5)).toEqual({ ok: true, data: batches });
   });
 
-  it.each([{}, { data: [{}] }, { data: [{ id: "batch-a" }] }])(
-    "reports incomplete batch identity as unavailable: %j",
-    async (body) => {
-      const request = vi.fn().mockResolvedValue(Response.json(body));
+  it.each([
+    { body: {}, expected: [] },
+    { body: { data: [{}] }, expected: [] },
+    { body: { data: [{ id: "batch-a" }] }, expected: [{ id: "batch-a" }] },
+    {
+      body: { data: [{ id: "batch-a", sourceProviderWalletId: "retained provider reference" }] },
+      expected: [{ id: "batch-a", sourceProviderWalletId: "retained provider reference" }],
+    },
+  ])("keeps the previous batch list fallback and filtering: %j", async ({ body, expected }) => {
+    const request = vi.fn().mockResolvedValue(Response.json(body));
 
-      expect(await fetchTransferBatches(request, 5)).toMatchObject({ ok: false });
-    }
-  );
+    expect(await fetchTransferBatches(request, 5)).toEqual({ ok: true, data: expected });
+  });
 });
 
 describe("fetchPaymentTransfers", () => {
-  it.each([{}, { data: [{}] }, { data: [{ id: "", custodyWalletId: null, rampsMemo: {} }] }])(
-    "reports incomplete transfer history as unavailable rather than empty: %j",
-    async (body) => {
+  it.each([
+    { body: {}, expected: [] },
+    { body: { data: [{}] }, expected: [] },
+    {
+      body: {
+        data: [{ id: "", custodyWalletId: null, providerWalletId: "wallet-a", rampsMemo: {} }],
+      },
+      expected: [{ id: "", custodyWalletId: null }],
+    },
+    {
+      body: { data: [{}, { id: "transfer-a", custodyWalletId: "wallet-a", rampsMemo: {} }] },
+      expected: [{ id: "transfer-a", custodyWalletId: "wallet-a" }],
+    },
+  ])(
+    "keeps the previous transfer history fallback and filtering: %j",
+    async ({ body, expected }) => {
       const request = vi.fn().mockResolvedValue(Response.json(body));
 
-      expect(await fetchPaymentTransfers(request)).toMatchObject({ ok: false });
+      expect(await fetchPaymentTransfers(request)).toMatchObject({ ok: true, data: expected });
     }
   );
 

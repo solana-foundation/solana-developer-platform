@@ -45,17 +45,10 @@ export const paymentsWalletsResponseSchema = z.object({
   data: z.object({ wallets: z.array(paymentsWalletSchema) }),
 });
 
-export const paymentTransferRequiredFieldsSchema = z.object({
-  id: z.string().min(1),
+const paymentTransferRequiredFieldsSchema = z.object({
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
   providerWalletId: z.string().min(1).regex(/^\S+$/).optional(),
   rampsMemo: z.record(z.string(), z.string()),
-});
-
-export const paymentTransferBatchIdentitySchema = z.object({
-  id: paymentTransferRequiredFieldsSchema.shape.id,
-  sourceCustodyWalletId: paymentTransferRequiredFieldsSchema.shape.custodyWalletId,
-  sourceProviderWalletId: paymentTransferRequiredFieldsSchema.shape.providerWalletId,
 });
 
 export interface FetchResult<T> {
@@ -247,10 +240,9 @@ export async function fetchPaymentTransfers(
       data?: Array<Partial<PaymentTransferSummary>>;
     };
 
-    if (!json?.data || !z.array(paymentTransferRequiredFieldsSchema).safeParse(json.data).success) {
-      throw new Error("Malformed transfer response: required fields are missing or invalid");
-    }
-    const transfers = json.data.map(normalizePaymentTransfer);
+    const transfers = (json?.data ?? [])
+      .filter((transfer) => typeof transfer.id === "string")
+      .map(normalizePaymentTransfer);
 
     return { ok: true, data: transfers };
   } catch (error) {
@@ -282,10 +274,7 @@ export async function fetchTransferBatches(
       };
     }
     const json = (await response.json()) as { data?: PaymentTransferBatch[] };
-    if (!json?.data || !z.array(paymentTransferBatchIdentitySchema).safeParse(json.data).success) {
-      throw new Error("Malformed batch response: required identity is missing or invalid");
-    }
-    return { ok: true, data: json.data };
+    return { ok: true, data: (json.data ?? []).filter((batch) => typeof batch.id === "string") };
   } catch (error) {
     return { ok: false, ...(error instanceof Error ? { error: error.message } : {}) };
   }
@@ -312,20 +301,9 @@ export async function fetchTransferBatchRecipients(
       };
     }
     const json = (await response.json()) as {
-      data?: { batch?: PaymentTransferBatch; recipients?: PaymentTransferRecipient[] };
+      data?: { recipients?: PaymentTransferRecipient[] };
     };
-    const data = json?.data;
-    if (
-      !data ||
-      !Array.isArray(data.recipients) ||
-      !paymentTransferBatchIdentitySchema.safeParse(data.batch).success ||
-      data.batch?.id !== batchId
-    ) {
-      throw new Error(
-        "Malformed batch detail: required identity or recipients are missing or invalid"
-      );
-    }
-    return { ok: true, data: data.recipients };
+    return { ok: true, data: json.data?.recipients ?? [] };
   } catch (error) {
     return { ok: false, ...(error instanceof Error ? { error: error.message } : {}) };
   }

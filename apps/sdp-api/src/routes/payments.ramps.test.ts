@@ -3479,6 +3479,49 @@ describe("Payments routes — ramps", () => {
       fetchSpy.mockRestore();
     });
 
+    it("replays the same exact session with retained direction metadata", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_retained_direction" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+        moneygramSessionResponse({
+          sessionId: "mg_sess_retained_direction",
+          expSeconds: Math.floor(Date.now() / 1000) + 3600,
+          widgetUrl: MONEYGRAM_WIDGET_URL,
+        })
+      );
+      try {
+        const created = await createMoneygramOnrampQuote(counterpartyId, "25");
+        expect(created.status).toBe(200);
+        const initial: { data: { transferId: string } } = await created.json();
+        await getDb(env)
+          .prepare("UPDATE payment_transfers SET direction = 'outbound' WHERE id = ?")
+          .bind(initial.data.transferId)
+          .run();
+
+        const replayed = await createMoneygramOnrampQuote(counterpartyId, "25");
+        expect(replayed.status).toBe(200);
+        expect(await replayed.json()).toMatchObject({
+          data: { transferId: initial.data.transferId },
+        });
+        const detail = await app.request(
+          `/v1/payments/transfers/${initial.data.transferId}`,
+          { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+        expect(detail.status).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          data: {
+            transfer: {
+              custodyWalletId: TEST_CUSTODY_WALLET_ID,
+              type: "onramp",
+              direction: "outbound",
+            },
+          },
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it.each([
       ["custody_wallet_id", TEST_CONNECTION_CUSTODY_WALLET_ID],
       ["custody_wallet_id", null],
@@ -3489,7 +3532,6 @@ describe("Payments routes — ramps", () => {
       ["fiat_amount", "26"],
       ["fiat_currency", "MXN"],
       ["type", "offramp"],
-      ["direction", "outbound"],
     ] as const)("refuses session replay with changed %s evidence (%s)", async (field, value) => {
       const counterpartyId = await seedCounterparty({ externalId: "moneygram_exact_conflict" });
       await seedActiveConnectionWallet({

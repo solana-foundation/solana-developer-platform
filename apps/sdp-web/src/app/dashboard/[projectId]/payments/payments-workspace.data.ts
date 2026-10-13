@@ -29,7 +29,6 @@ import type {
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -43,13 +42,7 @@ import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
 } from "./payment-api-errors";
-import {
-  paymentTransferBatchIdentitySchema,
-  paymentTransferRequiredFieldsSchema,
-} from "./payments-page.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
-
-const paymentTransferIdentitySchema = paymentTransferRequiredFieldsSchema.omit({ rampsMemo: true });
 
 export type { PaymentRampInstruction } from "@sdp/types";
 export { getPaymentApiError as getApiError } from "./payment-api-errors";
@@ -306,7 +299,7 @@ export async function fetchTransfers(
     );
   }
 
-  if (!body.data || !z.array(paymentTransferIdentitySchema).safeParse(body.data).success) {
+  if (!body.data) {
     throw new Error(t("DashboardPayments.workspace.transferListMissing"));
   }
 
@@ -340,10 +333,7 @@ export async function fetchTransferById(
       )
     );
   }
-  if (
-    !body.data?.transfer ||
-    !paymentTransferIdentitySchema.safeParse(body.data.transfer).success
-  ) {
+  if (!body.data?.transfer) {
     throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
   }
   return body.data.transfer;
@@ -507,7 +497,6 @@ export async function createTransfer(
   const envelope = body as TransferEnvelope | null;
   if (
     !envelope?.data?.transfer ||
-    !paymentTransferIdentitySchema.safeParse(envelope.data.transfer).success ||
     envelope.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
   ) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
@@ -630,10 +619,8 @@ export async function createTransferBatch(
   if (
     !body.data?.batch ||
     !body.data.recipients ||
-    !body.data.transfers ||
-    !paymentTransferBatchIdentitySchema.safeParse(body.data.batch).success ||
+    !Array.isArray(body.data.transfers) ||
     body.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||
-    !z.array(paymentTransferIdentitySchema).safeParse(body.data.transfers).success ||
     body.data.transfers.some((transfer) => transfer.custodyWalletId !== input.sourceCustodyWalletId)
   ) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
