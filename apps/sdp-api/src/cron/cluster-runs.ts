@@ -16,8 +16,10 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
  */
 export async function runPerCluster(job: string, work: () => Promise<void>): Promise<void> {
   const outcomes = await Promise.allSettled(
-    SDP_ENVIRONMENTS.map((environment) =>
-      runInClusterScope({ projectId: null, environment }, work).catch((error: unknown) => {
+    SDP_ENVIRONMENTS.map(async (environment) => {
+      try {
+        await runInClusterScope({ projectId: null, environment }, work);
+      } catch (error) {
         logEvent("error", {
           event: "sdp_api_cluster_job_run_failed",
           job,
@@ -25,8 +27,8 @@ export async function runPerCluster(job: string, work: () => Promise<void>): Pro
           ...describeError(error),
         });
         throw error;
-      })
-    )
+      }
+    })
   );
   const failures = outcomes.flatMap((outcome) =>
     outcome.status === "rejected" ? [outcome.reason] : []
