@@ -242,7 +242,8 @@
         "**/packages/**/*.test.ts",
         "**/packages/**/*.spec.ts",
         "**/packages/**/test/**/*.ts",
-        "**/apps/sdp-api/src/middleware/project-context.ts"
+        "**/apps/sdp-api/src/middleware/project-context.ts",
+        "**/apps/sdp-api/src/routes/pay.ts"
       ],
       "linter": {
         "rules": {
