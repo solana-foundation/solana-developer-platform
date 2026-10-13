@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SdpVedaError } from "@sdp/veda";
 import type { Blockhash } from "@solana/kit";
 import {
@@ -15,6 +16,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -36,18 +38,6 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
-const getSignatureStatuses = vi.hoisted(() => vi.fn());
-
-// RPC boundary for the expiry gate and the audit's independently finalized
-// transaction. Transaction construction, signatures and persistence stay real.
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({
-    getBlockHeight: () => ({ send: getBlockHeight }),
-    getSignatureStatuses: () => ({ send: getSignatureStatuses }),
-  }),
-}));
 
 // `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
 // what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
@@ -62,7 +52,6 @@ vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
 
 // `appendVaultRequestMemo` and `compileUnsignedVaultTransaction` stay REAL:
@@ -75,12 +64,7 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   broadcastVaultTransaction,
 }));
 
-const {
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
-} = await import("./vault-external-wallet.service");
+const externalWallet = await import("./vault-external-wallet.service");
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
@@ -105,6 +89,44 @@ const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const BLOCKHASH = "11111111111111111111111111111111" as Blockhash;
 
 const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+
+const rpc = installClusterRpcResponder();
+
+function blockHeightReads() {
+  return rpc.calls.filter((call) => call.method === "getBlockHeight");
+}
+
+function buildExternalWalletDepositTransaction(
+  ...args: Parameters<typeof externalWallet.buildExternalWalletDepositTransaction>
+): ReturnType<typeof externalWallet.buildExternalWalletDepositTransaction> {
+  return runInClusterScope({ projectId: null, environment: args[1].environment }, () =>
+    externalWallet.buildExternalWalletDepositTransaction(...args)
+  );
+}
+
+function buildExternalWalletWithdrawalTransaction(
+  ...args: Parameters<typeof externalWallet.buildExternalWalletWithdrawalTransaction>
+): ReturnType<typeof externalWallet.buildExternalWalletWithdrawalTransaction> {
+  return runInClusterScope({ projectId: null, environment: args[1].environment }, () =>
+    externalWallet.buildExternalWalletWithdrawalTransaction(...args)
+  );
+}
+
+function submitExternalWalletDeposit(
+  ...args: Parameters<typeof externalWallet.submitExternalWalletDeposit>
+): ReturnType<typeof externalWallet.submitExternalWalletDeposit> {
+  return runInClusterScope({ projectId: args[1].projectId, environment: args[1].environment }, () =>
+    externalWallet.submitExternalWalletDeposit(...args)
+  );
+}
+
+function submitExternalWalletWithdrawal(
+  ...args: Parameters<typeof externalWallet.submitExternalWalletWithdrawal>
+): ReturnType<typeof externalWallet.submitExternalWalletWithdrawal> {
+  return runInClusterScope({ projectId: args[1].projectId, environment: args[1].environment }, () =>
+    externalWallet.submitExternalWalletWithdrawal(...args)
+  );
+}
 
 let ownerKeyPair: CryptoKeyPair;
 let ownerAddress: string;
@@ -335,7 +357,7 @@ beforeEach(async () => {
   resolveVaultWithdrawClient.mockReturnValue({ buildVaultWithdrawal });
   buildVaultDeposit.mockResolvedValue(depositPlan());
   buildVaultWithdrawal.mockResolvedValue(withdrawalPlan());
-  simulateVaultPlan.mockImplementation(async (_env, input) => ({
+  simulateVaultPlan.mockImplementation(async (input) => ({
     ok: true,
     prepared: {
       plan: input.plan,
@@ -345,9 +367,7 @@ beforeEach(async () => {
     },
   }));
   broadcastVaultTransaction.mockResolvedValue(undefined);
-  // Well inside the stubbed build window (lastValidBlockHeight 361).
-  getBlockHeight.mockResolvedValue(100n);
-  getSignatureStatuses.mockResolvedValue({ context: { slot: 100n }, value: [null] });
+  rpc.answer("getBlockHeight", 100);
 });
 
 describe("buildExternalWalletDepositTransaction", () => {
@@ -376,7 +396,6 @@ describe("buildExternalWalletDepositTransaction", () => {
 
     // Simulated with the owner paying its own fee — the shape it will sign.
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     // The provider build was NOT asked to name a separate rent payer.
@@ -390,7 +409,6 @@ describe("buildExternalWalletDepositTransaction", () => {
     expect(result.built.owner_address).toBe(ownerAddress);
     expect(result.built.fee_payer).toBeNull();
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     const row = await getDb(env)
@@ -495,7 +513,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
   it("prepends the swap, sizes the deposit to the floor, and pins a probed CU limit", async () => {
     fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
     buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
-    simulateVaultPlan.mockImplementation(async (_env, input) => ({
+    simulateVaultPlan.mockImplementation(async (input) => ({
       ok: true,
       prepared: {
         plan: input.plan,
@@ -536,7 +554,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // final plan under the buffered consumption — Jupiter's /build carries no
     // CU limit, so it is derived locally (see jupiter-swap.service.ts).
     expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
-    const probe = simulateVaultPlan.mock.calls[0]?.[1]?.plan;
+    const probe = simulateVaultPlan.mock.calls[0]?.[0]?.plan;
     const probeCu = Buffer.from(probe.instructions[0].data, "base64");
     expect(probe.instructions[0].programAddress).toBe(
       "ComputeBudget111111111111111111111111111111"
@@ -545,7 +563,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
 
     // Final (compiled) plan order: locally built CU limit — buffered 15% over
     // the probe's consumption — then swap leg, provider deposit, memo last.
-    const simulated = simulateVaultPlan.mock.calls[1]?.[1]?.plan;
+    const simulated = simulateVaultPlan.mock.calls[1]?.[0]?.plan;
     const finalCu = Buffer.from(simulated.instructions[0].data, "base64");
     expect(finalCu.readUInt8(0)).toBe(2);
     expect(finalCu.readUInt32LE(1)).toBe(460_001);
@@ -612,7 +630,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // One re-route for compactness before giving up on atomicity.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
-    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([, input]) =>
+    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([input]) =>
       input.plan.instructions.some((instruction: { data: string }) =>
         /^sdp:e:ed:[A-Za-z0-9_-]{22}$/.test(
           Buffer.from(instruction.data, "base64").toString("utf8")
@@ -652,7 +670,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(String(advisory?.swap_last_valid_block_height)).toBe(
       result.swapTransaction.lastValidBlockHeight
     );
-    expect(readOwnerMintBalance).toHaveBeenCalledWith(env, "sandbox", ownerAddress, TOKEN_MINT);
+    expect(readOwnerMintBalance).toHaveBeenCalledWith(ownerAddress, TOKEN_MINT);
   });
 
   it("splits when the composed probe is oversized before RPC simulation", async () => {
@@ -668,7 +686,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
     buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
-    simulateVaultPlan.mockImplementation(async (_env, input) => {
+    simulateVaultPlan.mockImplementation(async (input) => {
       const hasProviderDeposit = input.plan.instructions.some(
         (instruction: { data: string }) =>
           Buffer.from(instruction.data, "base64").toString("utf8") === "provider-instruction"
@@ -806,7 +824,7 @@ describe("submitExternalWalletDeposit", () => {
 
     // The signed bytes that were broadcast are the recorded outbox bytes.
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
-    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][1].bytes).toString("base64")).toBe(
+    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][0].bytes).toString("base64")).toBe(
       result.movement.signed_transaction
     );
 
@@ -987,7 +1005,7 @@ describe("submitExternalWalletDeposit", () => {
   it("records an expired signed build and leaves broadcast refusal reconcilable", async () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
-    getBlockHeight.mockResolvedValue(362n);
+    rpc.answer("getBlockHeight", 362);
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
 
     const result = await submitDeposit(built, signed, crypto.randomUUID());
@@ -1013,13 +1031,13 @@ describe("submitExternalWalletDeposit", () => {
     const requestId = crypto.randomUUID();
     const first = await submitDeposit(built, signed, requestId);
 
-    getBlockHeight.mockResolvedValue(10_000n);
+    rpc.answer("getBlockHeight", 10_000);
     const replay = await submitDeposit(built, signed, requestId);
 
     expect(replay.replayed).toBe(true);
     expect(replay.movement.id).toBe(first.movement.id);
     // A replay is a durable read; no chain call decides it.
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(blockHeightReads()).toEqual([]);
   });
 
   it("audit: retains a signed deposit that finalized before its first expired-build submit", async () => {
@@ -1028,13 +1046,7 @@ describe("submitExternalWalletDeposit", () => {
     const signature = getSignatureFromTransaction(
       getTransactionDecoder().decode(Uint8Array.from(Buffer.from(signed, "base64")))
     );
-    getBlockHeight.mockResolvedValue(362n);
-    // The owner broadcast these bytes independently while the build was valid.
-    // This RPC boundary represents that transaction's later finalized receipt.
-    getSignatureStatuses.mockResolvedValue({
-      context: { slot: 400n },
-      value: [{ slot: 350n, confirmations: null, err: null, confirmationStatus: "finalized" }],
-    });
+    rpc.answer("getBlockHeight", 362);
 
     await submitDeposit(built, signed, crypto.randomUUID()).catch(() => undefined);
 
@@ -1048,7 +1060,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("does not refuse when the block height cannot be read", async () => {
-    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
+    rpc.respond("getBlockHeight", () => ({ error: { code: -32603, message: "rpc unreachable" } }));
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1060,7 +1072,7 @@ describe("submitExternalWalletDeposit", () => {
 
   it("leaves an expired-blockhash refusal reconcilable after an external broadcast", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValueOnce(361n);
+    rpc.answer("getBlockHeight", 361);
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1148,7 +1160,6 @@ describe("partner fee payer (caller-provided)", () => {
     // The funds check ran against the partner wallet, and the provider was
     // asked to charge account rent to the same identity.
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({
         fee: { kind: "caller-provided", feePayer: partnerAddress },
       })
@@ -1160,7 +1171,7 @@ describe("partner fee payer (caller-provided)", () => {
   });
 
   it("retries an oversized partner-paid plan with a compact request binding", async () => {
-    simulateVaultPlan.mockImplementation(async (_env, input) => {
+    simulateVaultPlan.mockImplementation(async (input) => {
       const memo = Buffer.from(input.plan.instructions.at(-1)?.data ?? "", "base64").toString(
         "utf8"
       );
@@ -1207,7 +1218,6 @@ describe("partner fee payer (caller-provided)", () => {
     );
     expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ fee: { kind: "wallet-pays" } })
     );
   });
@@ -1305,7 +1315,6 @@ describe("external-wallet withdrawals", () => {
     expect(built.position_id).toBeNull();
     expect(built.fee_payer).toBeNull();
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     const row = await getDb(env)
@@ -1407,7 +1416,7 @@ describe("external-wallet withdrawals", () => {
   it("retains an expired signed exit when broadcast cannot establish execution", async () => {
     const positionId = await seedExternalWalletPosition();
     const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
-    getBlockHeight.mockResolvedValue(362n);
+    rpc.answer("getBlockHeight", 362);
 
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
     const result = await submitExternalWalletWithdrawal(env, {

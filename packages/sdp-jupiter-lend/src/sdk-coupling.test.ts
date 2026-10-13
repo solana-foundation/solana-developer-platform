@@ -5,6 +5,8 @@ import {
   getOrCreateATAInstruction,
   getWithdrawContext,
 } from "@jup-ag/lend/earn";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type AccountInfo,
@@ -41,6 +43,10 @@ const others = [
   new PublicKey("11111111111111111111111111111115"),
 ];
 const runtime = { environment: "production" as const, env: {} };
+const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_jupiter_lend_coupling",
+  environment: "production",
+};
 
 const pda = (seeds: Buffer[], program: PublicKey) =>
   PublicKey.findProgramAddressSync(seeds, program)[0];
@@ -202,6 +208,7 @@ beforeEach(() => {
   catalogueRequests = 0;
   inject = undefined;
   vi.spyOn(Date, "now").mockReturnValue(FIXED_MS);
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", RPC);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -223,6 +230,13 @@ beforeEach(() => {
         method: string;
         params: unknown[];
       };
+      if (method === "getGenesisHash") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "1",
+          result: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+        });
+      }
       requests.push({ method, params });
       return (
         inject?.(method, params) ??
@@ -234,6 +248,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -251,9 +266,8 @@ const failAccountRead = (address: PublicKey) => (method: string, params: unknown
     : undefined;
 
 const client = () =>
-  new JupiterLendVaultDirectClient(
-    async () => RPC,
-    async (_label, operation) => operation(() => undefined)
+  new JupiterLendVaultDirectClient(async (_label, operation) =>
+    runInClusterScope(PRODUCTION_SCOPE, () => operation(() => undefined))
   );
 
 const details = (value: Awaited<ReturnType<typeof getLendingTokenDetails>>) =>
@@ -363,7 +377,7 @@ describe("@jup-ag/lend coupling", () => {
     requests = [];
     const shimmed = await getLendingTokenDetails({
       lendingToken: JLUSDT,
-      connection: jupiterLendConnection(RPC),
+      connection: runInClusterScope(PRODUCTION_SCOPE, jupiterLendConnection),
       market: "main",
     });
     expect(details(shimmed)).toEqual(details(scanned));

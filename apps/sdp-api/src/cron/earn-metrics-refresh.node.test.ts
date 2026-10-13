@@ -4,6 +4,7 @@ import type {
   EarnVaultProvider,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import {
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   updateStrategyMetricsBatch: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
-  guardDepositMints: vi.fn(async (_env: unknown, _cluster: string) => 0),
+  guardDepositMints: vi.fn(async () => 0),
 }));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
@@ -162,16 +163,14 @@ describe("refreshEarnStrategyMetrics", () => {
       order.push("metrics");
       return [metrics("vault-a", "0.051")];
     });
-    mocks.guardDepositMints.mockImplementation(async (_env: unknown, cluster: string) => {
-      order.push(`guard:${cluster}`);
+    mocks.guardDepositMints.mockImplementation(async () => {
+      order.push(`guard:${currentClusterScope().cluster}`);
       return 0;
     });
 
     await refreshEarnStrategyMetrics(env);
 
     expect(mocks.guardDepositMints).toHaveBeenCalledTimes(2);
-    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "devnet");
-    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "mainnet-beta");
     expect(order).toEqual(["metrics", "metrics", "guard:devnet", "guard:mainnet-beta"]);
   });
 

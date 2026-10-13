@@ -448,7 +448,8 @@ describe("runCronJob", () => {
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
     // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
-    expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledExactlyOnceWith(env);
+    expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledWith(env);
     expect(vi.mocked(reconcileEarnVaultMovements).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(detectOrphanedEarnSplitSwaps).mock.invocationCallOrder[0]
     );
@@ -506,7 +507,7 @@ describe("runCronJob", () => {
         expect(pollRingsIndexing).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-        expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
+        expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(retireOrphanedSecrets).toHaveBeenCalledTimes(1);
         expect(runEarnMetricsRefreshTick).toHaveBeenCalledTimes(1);
         expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(1);
@@ -824,7 +825,7 @@ describe("runCronJob", () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
     vi.mocked(reconcileSponsorshipBudgets).mockRejectedValueOnce(new Error("sponsorship down"));
     vi.mocked(trackPendingDeposits).mockRejectedValueOnce(new Error("deposits down"));
-    vi.mocked(detectOrphanedEarnSplitSwaps).mockRejectedValue(new Error("split swaps down"));
+    vi.mocked(detectOrphanedEarnSplitSwaps).mockRejectedValueOnce(new Error("split swaps down"));
 
     await expect(runCronJob()).rejects.toMatchObject({
       message: "reconciliation job had multiple tick failures",

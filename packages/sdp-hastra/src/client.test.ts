@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
-import { wellKnownMint } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,12 @@ const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
+const MAINNET_RPC_URL = "https://mainnet.hastra-client.test";
+const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_hastra_client",
+  environment: "production",
+};
+const BEYOND_SAFE_INTEGER = "9007199254740993";
 /** The chain slot every stubbed account read reports. */
 const STUB_SLOT = 1_000;
 
@@ -271,6 +278,9 @@ function stubRpc(
     vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
       const context = { slot: STUB_SLOT };
+      if (body.method === "getGenesisHash") {
+        return Response.json({ result: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] });
+      }
       if (body.method === "getMultipleAccounts") {
         const addresses = body.params[0] as string[];
         return Response.json({
@@ -354,7 +364,26 @@ function rpcCalls(): { method: string; params: unknown[] }[] {
     .mocked(globalThis.fetch)
     .mock.calls.map(
       ([, init]) => JSON.parse(String(init?.body)) as { method: string; params: unknown[] }
-    );
+    )
+    .filter((call) => call.method !== "getGenesisHash");
+}
+
+function answerRawResult(method: string, resultJson: string): void {
+  const stub = vi.mocked(globalThis.fetch);
+  const healthy = stub.getMockImplementation();
+  if (!healthy) throw new Error("test premise: stubRpc installs the stub first");
+  stub.mockImplementation(async (url, init) =>
+    String(init?.body).includes(`"method":"${method}"`)
+      ? new Response(`{"result":${resultJson}}`)
+      : healthy(url, init)
+  );
+}
+
+function rawRequestBodies(method: string): string[] {
+  return vi
+    .mocked(globalThis.fetch)
+    .mock.calls.map(([, init]) => String(init?.body))
+    .filter((body) => body.includes(`"method":"${method}"`));
 }
 
 function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapLeg {
@@ -374,14 +403,13 @@ function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapL
   };
 }
 
-function makeClient(port: Partial<HastraSwapPort> = {}, rpcUrl = "https://rpc.test") {
+function makeClient(port: Partial<HastraSwapPort> = {}) {
   const swapPort: HastraSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "125", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => swapLeg("120", "125")),
   };
   return new HastraVaultDirectClient(
-    async () => rpcUrl,
-    (_label, operation) => operation(() => {}),
+    (_label, operation) => runInClusterScope(PRODUCTION_SCOPE, () => operation(() => {})),
     () => swapPort
   );
 }
@@ -394,9 +422,13 @@ function event(name: string, fields: Buffer[]): string {
   return `Program data: ${Buffer.concat([disc("event", name), ...fields]).toString("base64")}`;
 }
 
-beforeEach(() => resetHastraReadCaches());
+beforeEach(() => {
+  resetHastraReadCaches();
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", MAINNET_RPC_URL);
+});
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -754,6 +786,35 @@ describe("Hastra par redemption", () => {
     await expect(client.buildParRedemptionRequest(CTX, input)).resolves.toMatchObject({
       expectedRequest: { shares: "1600", intermediateAmount: "2000" },
     });
+  });
+
+  it("carries a request-history slot beyond the safe integer range into the block read exactly", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
+    });
+    const closingBlockHeight = 1_000;
+    stubRpc(fixture.accounts, {
+      latestSlot: 900,
+      closingBlockHeight,
+      currentBlockHeight: closingBlockHeight + HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS + 1,
+    });
+    answerRawResult(
+      "getSignaturesForAddress",
+      `[{"signature":"prior","slot":${BEYOND_SAFE_INTEGER},"err":null}]`
+    );
+
+    await expect(
+      makeClient().buildParRedemptionRequest(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        owner: OWNER,
+        shares: "1600",
+      })
+    ).resolves.toMatchObject({ expectedRequest: { shares: "1600", intermediateAmount: "2000" } });
+    expect(rawRequestBodies("getBlock")).toEqual([
+      expect.stringContaining(`"params":[${BEYOND_SAFE_INTEGER},`),
+    ]);
   });
 
   it("does not reuse a request while its confirmed close is still awaiting finality", async () => {
@@ -1645,7 +1706,7 @@ describe("Hastra RPC budget", () => {
     const requestAddress = withOpenRequest(fixture);
     const outage = {
       code: "PROGRAM_MISMATCH",
-      message: "The Solana RPC answered HTTP 429 while reading Hastra accounts.",
+      message: "The Solana RPC failed while reading Hastra accounts.",
     };
     stubRpc(fixture.accounts);
     await makeClient().getParRedemptionOptions(CTX, reference);
@@ -1675,7 +1736,7 @@ describe("Hastra RPC budget", () => {
     const free = withPrime(fixtureState());
     const failure = (code: string, read = "Hastra accounts") => ({
       code,
-      message: `The Solana RPC answered HTTP 429 while reading ${read}.`,
+      message: `The Solana RPC failed while reading ${read}.`,
     });
     const client = makeClient();
     const cases: [
@@ -1763,7 +1824,7 @@ describe("Hastra RPC budget", () => {
     }
   });
 
-  it("keeps a rent minimum ten minutes per endpoint and never keeps a failure", async () => {
+  it("keeps a rent minimum ten minutes per cluster and never keeps a failure", async () => {
     const fixture = withPrime(fixtureState());
     const rentRequests = () =>
       rpcCalls().filter((call) => call.method === "getMinimumBalanceForRentExemption").length;
@@ -1771,7 +1832,7 @@ describe("Hastra RPC budget", () => {
     rateLimit((method) => method === "getMinimumBalanceForRentExemption");
     await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
       code: "PROGRAM_MISMATCH",
-      message: "The Solana RPC answered HTTP 429 while reading classic token-account rent.",
+      message: "The Solana RPC failed while reading classic token-account rent.",
     });
 
     stubRpc(fixture.accounts);
@@ -1780,13 +1841,19 @@ describe("Hastra RPC budget", () => {
     expect(rentRequests()).toBe(1);
 
     stubRpc(fixture.accounts);
-    await makeClient({}, "https://other-rpc.test").buildVaultWithdrawal(CTX, dexExit);
-    expect(rentRequests()).toBe(1);
-
-    stubRpc(fixture.accounts);
     vi.spyOn(Date, "now").mockReturnValue(Date.now() + 600_000);
     await makeClient().buildVaultWithdrawal(CTX, dexExit);
     expect(rentRequests()).toBe(1);
+  });
+
+  it("refuses a rent minimum beyond the safe integer range", async () => {
+    stubRpc(withPrime(fixtureState()).accounts);
+    answerRawResult("getMinimumBalanceForRentExemption", BEYOND_SAFE_INTEGER);
+
+    await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
+      code: "PROGRAM_MISMATCH",
+      message: "The Solana RPC returned an invalid classic token-account rent.",
+    });
   });
 
   it("surfaces a rent failure only where the build uses the rent", async () => {
@@ -1800,7 +1867,7 @@ describe("Hastra RPC budget", () => {
     rateLimit((method) => method === "getMinimumBalanceForRentExemption");
     await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
       code: "PROGRAM_MISMATCH",
-      message: "The Solana RPC answered HTTP 429 while reading classic token-account rent.",
+      message: "The Solana RPC failed while reading classic token-account rent.",
     });
 
     stubRpc(withPrime(fixtureState()).accounts);
@@ -1809,7 +1876,7 @@ describe("Hastra RPC budget", () => {
       makeClient().buildParRedemptionRequest(CTX, sharesParRequest)
     ).rejects.toMatchObject({
       code: "PROGRAM_MISMATCH",
-      message: "The Solana RPC answered HTTP 429 while reading redemption-request rent.",
+      message: "The Solana RPC failed while reading redemption-request rent.",
     });
 
     // Once known, a rent outage no longer reaches the build.

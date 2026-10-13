@@ -4,6 +4,11 @@ import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS, ondoDeployment } from "@sdp/types/ondo-programs";
 import { SdpEarnError } from "../../errors";
 import { isStrategyWithinDeclaredSupport } from "../../support";
+import {
+  isolateCataloguePool,
+  pointCataloguePool,
+  runInCatalogueScope,
+} from "../../test/cluster-pool";
 import { ONDO_USDY_DECIMALS, OndoEarnClient } from "./client";
 import { ONDO_ASSETS_API_URL } from "./usdy-rate";
 
@@ -91,37 +96,12 @@ function stubRpc(
   });
 }
 
-/**
- * A process whose default endpoint serves DEVNET (every non-production
- * deployment), with a second endpoint that serves mainnet: genesis is answered
- * by URL, and the mint read only ever succeeds on the mainnet one.
- */
-function stubTwoClusterRpc(urls: { devnet: string; mainnet: string }) {
-  mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
-    if (String(url) === ONDO_ASSETS_API_URL) return answerAssets({});
-    const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
-    const onMainnet = String(url) === urls.mainnet;
-    if (body.method === "getGenesisHash") {
-      return Response.json({
-        jsonrpc: "2.0",
-        id: 1,
-        result: GENESIS_HASH_BY_CLUSTER[onMainnet ? "mainnet-beta" : "devnet"],
-      });
-    }
-    if (body.method === "getAccountInfo") {
-      return Response.json({
-        jsonrpc: "2.0",
-        id: 1,
-        result: {
-          value: onMainnet
-            ? { owner: SPL_TOKEN_PROGRAM, data: [mintAccountData(ONDO_USDY_DECIMALS), "base64"] }
-            : null,
-        },
-      });
-    }
-    throw new Error(`unexpected RPC method ${body.method}`);
-  });
-}
+const WRONG_GENESIS_MAINNET_URL = "https://mainnet-wrong-genesis.ondo-catalogue.test";
+
+const listProductionUsdy = () =>
+  runInCatalogueScope("production", () => client._listUsdyStrategy("mainnet-beta", MAINNET));
+
+isolateCataloguePool();
 
 afterEach(() => {
   mock.restoreAll();
@@ -142,32 +122,9 @@ describe("OndoEarnClient.listStrategies", () => {
     );
   });
 
-  /**
-   * The production pass runs in EVERY deployment (it feeds the sandbox mirror),
-   * and in a devnet deployment the process endpoint serves the wrong chain. The
-   * per-cluster override is what lets that pass succeed; without it the genesis
-   * proof refuses the default rather than reading devnet as if it were mainnet.
-   */
-  it("reads mainnet through SOLANA_MAINNET_RPC_URL when the process endpoint serves devnet", async () => {
-    const urls = { devnet: "https://devnet.rpc.test", mainnet: "https://mainnet.rpc.test" };
-    stubTwoClusterRpc(urls);
-
-    const snapshots = await client.listStrategies({
-      env: { SOLANA_RPC_URL: urls.devnet, SOLANA_MAINNET_RPC_URL: urls.mainnet },
-      environment: "production",
-    });
-    assert.equal(snapshots.length, 1);
-    assert.equal(snapshots[0]?.hostCluster, "mainnet-beta");
-
-    await assert.rejects(
-      client.listStrategies({ env: { SOLANA_RPC_URL: urls.devnet }, environment: "production" }),
-      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
-    );
-  });
-
   it("maps the USDY instrument into one rwa strategy row", async () => {
     stubRpc({});
-    const snapshots = await client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET);
+    const snapshots = await listProductionUsdy();
 
     assert.equal(snapshots.length, 1);
     const snapshot = snapshots[0];
@@ -196,23 +153,24 @@ describe("OndoEarnClient.listStrategies", () => {
   it("fails the pass when the issuer API is unreachable (rows keep their last figures)", async () => {
     stubRpc({}, GENESIS_HASH_BY_CLUSTER["mainnet-beta"], { status: 502 });
     await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      listProductionUsdy(),
       (error: unknown) => error instanceof SdpEarnError && error.code !== "PROVIDER_NOT_CONFIGURED"
     );
   });
 
   it("refuses an endpoint that serves the wrong chain", async () => {
+    pointCataloguePool("mainnet-beta", WRONG_GENESIS_MAINNET_URL);
     stubRpc({}, GENESIS_HASH_BY_CLUSTER.devnet);
     await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
-      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
+      listProductionUsdy(),
+      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_UNAVAILABLE"
     );
   });
 
   it("fails the pass when the mint account is missing (never an empty shelf)", async () => {
     stubRpc({ missing: true });
     await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      listProductionUsdy(),
       (error: unknown) => error instanceof SdpEarnError && error.code === "INTERNAL_ERROR"
     );
   });
@@ -220,7 +178,7 @@ describe("OndoEarnClient.listStrategies", () => {
   it("fails the pass when the account is not an SPL token mint", async () => {
     stubRpc({ owner: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" });
     await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      listProductionUsdy(),
       (error: unknown) => error instanceof SdpEarnError && error.code === "INTERNAL_ERROR"
     );
   });
@@ -229,16 +187,13 @@ describe("OndoEarnClient.listStrategies", () => {
     const data = Buffer.from(mintAccountData(ONDO_USDY_DECIMALS), "base64");
     data[45] = 0;
     stubRpc({ data: data.toString("base64") });
-    await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
-      SdpEarnError
-    );
+    await assert.rejects(listProductionUsdy(), SdpEarnError);
   });
 
   it("fails the pass when the mint's decimals drift from what SDP expects", async () => {
     stubRpc({ data: mintAccountData(9) });
     await assert.rejects(
-      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      listProductionUsdy(),
       (error: unknown) => error instanceof SdpEarnError && error.code === "INTERNAL_ERROR"
     );
   });

@@ -1,4 +1,5 @@
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
@@ -16,7 +17,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OndoVaultDirectClient } from "./client";
 import type { OndoSwapPort } from "./types";
 
@@ -139,11 +140,22 @@ const litePort: OndoSwapPort = {
 };
 
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
+const SMOKE_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_ondo_smoke",
+  environment: "production",
+};
 
 describe.skipIf(!RPC_URL || !SIGNER_HEX)("Ondo plans against a surfpool mainnet fork", () => {
+  beforeEach(() => {
+    vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", RPC_URL);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   const client = new OndoVaultDirectClient(
-    async () => RPC_URL ?? "",
-    (_label, operation) => operation(() => {}),
+    (_label, operation) => runInClusterScope(SMOKE_SCOPE, () => operation(() => {})),
     () => litePort
   );
 

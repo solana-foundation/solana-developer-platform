@@ -1,4 +1,5 @@
 import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
   type AccountInfo,
@@ -33,6 +34,10 @@ const shareMint = new PublicKey(JUPITER_LEND_USDT.shareMint);
 const assetMint = new PublicKey(JUPITER_LEND_USDT.assetMint);
 const shareAta = new PublicKey("11111111111111111111111111111114");
 const runtime = { environment: "production" as const, env: {} };
+const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_jupiter_lend_client",
+  environment: "production",
+};
 const ownerShareAta = PublicKey.findProgramAddressSync(
   [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), shareMint.toBuffer()],
   ATA_PROGRAM
@@ -86,14 +91,14 @@ function instruction(programId: PublicKey, payer = owner) {
 }
 
 function client() {
-  return new JupiterLendVaultDirectClient(
-    vi.fn().mockResolvedValue("http://rpc.example.invalid"),
-    async (_label, operation) => operation(() => undefined)
+  return new JupiterLendVaultDirectClient(async (_label, operation) =>
+    runInClusterScope(PRODUCTION_SCOPE, () => operation(() => undefined))
   );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://mainnet.jupiter-lend-client.test");
   mockJupiterLiquidity();
   vi.spyOn(Connection.prototype, "getAccountInfo").mockResolvedValue(shareAccount(4_500_000n));
   vi.spyOn(Connection.prototype, "getTokenAccountBalance");
@@ -143,6 +148,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
