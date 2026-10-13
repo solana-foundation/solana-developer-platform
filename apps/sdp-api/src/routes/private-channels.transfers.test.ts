@@ -7,7 +7,6 @@ import { createPrivateChannelTransferRepository } from "@/db/repositories";
 import app from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -652,7 +651,7 @@ describe("Private Channels — transfer access and routes", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

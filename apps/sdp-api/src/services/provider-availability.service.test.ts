@@ -16,7 +16,6 @@ import {
   assertCustodySetupAdmitted,
   assertEarnProviderConfigured,
   CustodySetupRefusedError,
-  custodyProviderNotInReleaseChannel,
   getProjectProviderAvailability,
   getProviderAvailability,
   parseClerkOrganizationTierMetadata,
@@ -951,7 +950,7 @@ describe("provider-availability.service", () => {
       ).rejects.toMatchObject({
         code: "FORBIDDEN",
         statusCode: 403,
-        message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       });
     });
@@ -1022,7 +1021,7 @@ describe("provider-availability.service", () => {
         error: {
           code: "FORBIDDEN",
           statusCode: 403,
-          message: custodyProviderNotInReleaseChannel("turnkey", "byok").message,
+          message: expect.stringContaining("turnkey"),
           details: { reason: "custody_provider_not_in_release_channel" },
         },
       });

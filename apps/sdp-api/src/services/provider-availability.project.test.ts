@@ -4,7 +4,6 @@ import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import {
   assertProjectProviderAdmitted,
-  custodyProviderNotInReleaseChannel,
   type ProjectProviderRequest,
 } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -267,7 +266,7 @@ describe("assertProjectProviderAdmitted", () => {
       admit(projects.production, deploymentEnv({}), MANAGED_PRIVY)
     ).rejects.toMatchObject(
       refusal(
-        custodyProviderNotInReleaseChannel("privy", "managed").message,
+        "The privy custody provider is not available in this release channel for managed custody.",
         "custody_provider_not_in_release_channel"
       )
     );
@@ -314,7 +313,7 @@ describe("assertProjectProviderAdmitted", () => {
       })
     ).rejects.toMatchObject(
       refusal(
-        custodyProviderNotInReleaseChannel("turnkey", "byok").message,
+        "The turnkey custody provider is not available in this release channel for byok custody.",
         "custody_provider_not_in_release_channel"
       )
     );

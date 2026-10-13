@@ -6,7 +6,6 @@ import {
   createPrivyAdapterFromCredential,
   type PrivyCredentialAdapterInput,
 } from "@/services/domain/signing/provider-adapter-factory";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import type { Env } from "@/types/env";
 
@@ -81,7 +80,11 @@ describe("custody adapter factories and the release channel", () => {
         encrypt: vi.fn<CustodyCipher["encrypt"]>(),
         decrypt,
       })
-    ).rejects.toEqual(custodyProviderNotInReleaseChannel("fireblocks", "managed"));
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: expect.stringContaining("fireblocks"),
+      details: { reason: "custody_provider_not_in_release_channel" },
+    });
     expect(decrypt).not.toHaveBeenCalled();
   });
 
@@ -102,9 +105,18 @@ describe("custody adapter factories and the release channel", () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
     const read = vi.fn();
 
-    expect(() =>
-      createPrivyAdapterFromCredential(createEnv(), createObservedCredential(read))
-    ).toThrow(custodyProviderNotInReleaseChannel("privy", "byok"));
+    let refused: unknown;
+    try {
+      createPrivyAdapterFromCredential(createEnv(), createObservedCredential(read));
+      expect.unreachable("expected the out-of-channel credential to be refused");
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({
+      code: "FORBIDDEN",
+      message: expect.stringContaining("privy"),
+      details: { reason: "custody_provider_not_in_release_channel" },
+    });
     expect(read).not.toHaveBeenCalled();
   });
 

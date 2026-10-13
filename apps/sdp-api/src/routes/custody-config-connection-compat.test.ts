@@ -3,7 +3,6 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -119,7 +118,7 @@ describe("custody Config beside a BYOK Connection", () => {
     expect(await publicKey.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

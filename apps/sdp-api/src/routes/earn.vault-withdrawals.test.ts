@@ -15,7 +15,6 @@ import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
   activateTestCustodyConnection,
@@ -422,7 +421,7 @@ describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

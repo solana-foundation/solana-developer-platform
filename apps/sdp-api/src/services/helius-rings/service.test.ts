@@ -1056,11 +1056,22 @@ describe("HeliusRingsService", () => {
 
     it("resends the persisted bytes when resumed in submitted", async () => {
       const sent: string[] = [];
+      // Each build varies the blockhash, so a rebuild on resume would sign
+      // different bytes than the first pass persisted and the equality below
+      // would catch it. The persisted bytes are the only thing that can pass.
+      const builds: Blockhash[] = [];
       const svc = () =>
         liveishService({
           gateway: new InMemoryRingsGateway({
             indexingDelayMs: 60 * 60 * 1000,
-            buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+            buildUnsignedTx: () => {
+              const blockhash =
+                builds.length === 0
+                  ? ("5DjPMLBWWLbNw3TRUEbCwPFvpXqhkdVv2VUb3RJhZmpJ" as Blockhash)
+                  : (getBase58Decoder().decode(new Uint8Array(32).fill(53)) as Blockhash);
+              builds.push(blockhash);
+              return unsignedShieldTransaction(1_000_000n, blockhash);
+            },
           }),
           submitOuterTransaction: async ({ signedTxBase64 }) => {
             sent.push(signedTxBase64);
@@ -1083,9 +1094,11 @@ describe("HeliusRingsService", () => {
 
       // The same bytes, not a rebuild. A duplicate of a landed transaction is
       // rejected by the chain; a rebuild could select other notes and settle
-      // twice.
+      // twice. The varied blockhash above is what makes this equality able to
+      // tell those apart.
       const expected = (await signWalletTransaction(unsignedShieldTransaction(1_000_000n)))
         .signedTxBase64;
+      expect(builds).toHaveLength(1);
       expect(sent).toEqual([expected, expected]);
     });
 

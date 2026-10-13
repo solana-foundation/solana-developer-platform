@@ -3,7 +3,6 @@ import type { CachedApiKey, CustodyMode } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -78,11 +77,11 @@ async function initializeProvider(body: { provider: "para" }): Promise<Response>
   );
 }
 
-function channelRefusalBody(provider: "para" | "privy", mode: CustodyMode) {
+function channelRefusalBody(provider: "para" | "privy", _mode: CustodyMode) {
   return {
     error: {
       code: "FORBIDDEN",
-      message: custodyProviderNotInReleaseChannel(provider, mode).message,
+      message: expect.stringContaining(provider),
       details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },

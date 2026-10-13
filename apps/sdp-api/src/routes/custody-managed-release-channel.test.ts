@@ -2,7 +2,6 @@ import type { CachedApiKey, CustodyProvider } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -163,7 +162,7 @@ function channelRefusalBody(provider: CustodyProvider) {
   return {
     error: {
       code: "FORBIDDEN",
-      message: custodyProviderNotInReleaseChannel(provider, "managed").message,
+      message: expect.stringContaining(provider),
       details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },

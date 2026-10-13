@@ -15,7 +15,6 @@ import {
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
   activateTestCustodyConnection,
@@ -730,7 +729,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       expect(await response.json()).toEqual({
         error: {
           code: "FORBIDDEN",
-          message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+          message: expect.stringContaining("privy"),
           details: { reason: "custody_provider_not_in_release_channel" },
         },
         meta: { requestId: expect.any(String) },

@@ -10,7 +10,6 @@ import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -358,7 +357,7 @@ describe("Custody wallet scope routes", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },
@@ -1499,7 +1498,7 @@ describe("Custody wallet scope routes", () => {
     const channelRefusal = {
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

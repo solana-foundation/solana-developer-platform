@@ -22,7 +22,6 @@ import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
@@ -301,7 +300,7 @@ describe("createDvpTrade", () => {
     return {
       code: "FORBIDDEN",
       statusCode: 403,
-      message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+      message: expect.stringContaining("privy"),
       details: { reason: "custody_provider_not_in_release_channel" },
     };
   }

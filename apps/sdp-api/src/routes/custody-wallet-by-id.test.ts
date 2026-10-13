@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
@@ -246,7 +245,7 @@ describe("Custody wallet by ID route", () => {
     expect(await response.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        message: expect.stringContaining("privy"),
         details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },

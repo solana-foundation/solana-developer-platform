@@ -22,7 +22,6 @@ import * as credentialSecretStore from "@/services/credential-secret-store";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -1179,11 +1178,11 @@ describe("CustodyRuntimeTargets", () => {
   );
 });
 
-function channelRefusal(mode: CustodyMode) {
+function channelRefusal(_mode: CustodyMode) {
   return {
     code: "FORBIDDEN",
     statusCode: 403,
-    message: custodyProviderNotInReleaseChannel("privy", mode).message,
+    message: expect.stringContaining("privy"),
     details: { reason: "custody_provider_not_in_release_channel" },
   };
 }

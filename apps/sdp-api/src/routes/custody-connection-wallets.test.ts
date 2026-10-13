@@ -8,7 +8,6 @@ import app from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
   insertTestStoredProviderCredential,
@@ -136,11 +135,11 @@ async function seedFixture(): Promise<void> {
   });
 }
 
-function channelRefusalBody(mode: CustodyMode) {
+function channelRefusalBody(_mode: CustodyMode) {
   return {
     error: {
       code: "FORBIDDEN",
-      message: custodyProviderNotInReleaseChannel("privy", mode).message,
+      message: expect.stringContaining("privy"),
       details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },

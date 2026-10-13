@@ -10,7 +10,6 @@ import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.servic
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
-import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
@@ -394,7 +393,7 @@ describe("provisionApiKeyWallet", () => {
         expect(await response.json()).toEqual({
           error: {
             code: "FORBIDDEN",
-            message: custodyProviderNotInReleaseChannel("privy", outOfChannelMode).message,
+            message: expect.stringContaining("privy"),
             details: { reason: "custody_provider_not_in_release_channel" },
           },
           meta: { requestId: expect.any(String) },
