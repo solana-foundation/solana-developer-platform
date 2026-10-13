@@ -1,4 +1,5 @@
 import { NativeAdapter } from "@sdp/payments/fee-payment/native";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,
@@ -20,6 +21,7 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 
 const base58 = getBase58Codec();
@@ -76,11 +78,12 @@ async function buildSourceSignedTransfer(feePayer: Address): Promise<{
 }
 
 describe("NativeAdapter", () => {
+  const clusterRpc = installClusterRpcStub();
+
   // The test suite shares one module registry across files (isolate: false),
   // so a top-level `vi.mock("@sdp/rpc/solana")` doesn't reliably intercept once
   // another test file has already imported the real module.
   beforeEach(() => {
-    vi.spyOn(solanaRpc, "createRpc").mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     vi.spyOn(solanaRpc, "sendTransaction").mockResolvedValue("1".repeat(64) as Signature);
   });
 
@@ -126,7 +129,9 @@ describe("NativeAdapter", () => {
     const expectedSignature = "5".repeat(64) as Signature;
     vi.mocked(solanaRpc.sendTransaction).mockResolvedValue(expectedSignature);
 
-    const signature = await adapter.signAndSend(txBytes);
+    const signature = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      adapter.signAndSend(txBytes)
+    );
 
     expect(signature).toBe(expectedSignature);
     expect(solanaRpc.sendTransaction).toHaveBeenCalledTimes(1);
@@ -153,9 +158,32 @@ describe("NativeAdapter", () => {
 
     vi.mocked(solanaRpc.sendTransaction).mockRejectedValue(new Error("blockhash not found"));
 
-    await expect(adapter.signAndSend(txBytes)).rejects.toMatchObject({
+    await expect(
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        adapter.signAndSend(txBytes)
+      )
+    ).rejects.toMatchObject({
       name: "FeePaymentError",
       code: "SUBMISSION_FAILED",
     });
+  });
+
+  it("submits through the open cluster scope's RPC with the same fee-payer key", async () => {
+    vi.mocked(solanaRpc.sendTransaction).mockRestore();
+    const feePayer = await makeFeePayerSecret(7);
+    const adapter = new NativeAdapter({ FEE_PAYER_PRIVATE_KEY: feePayer.secret });
+    const { txBytes } = await buildSourceSignedTransfer(feePayer.address);
+    const expectedSignature = "5".repeat(64);
+    clusterRpc.answer("sendTransaction", expectedSignature);
+
+    const signature = await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      adapter.signAndSend(txBytes)
+    );
+
+    expect(signature).toBe(expectedSignature);
+    const submittedClusters = clusterRpc.calls
+      .filter((call) => call.method === "sendTransaction")
+      .map((call) => call.cluster);
+    expect(submittedClusters).toEqual(["mainnet-beta"]);
   });
 });

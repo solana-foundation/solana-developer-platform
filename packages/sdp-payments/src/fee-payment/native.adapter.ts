@@ -9,7 +9,8 @@
  */
 
 import { isTransientRpcError } from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { type SolanaRpc, sendTransaction } from "@sdp/rpc/solana";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
@@ -38,7 +39,8 @@ const MAX_SUBMIT_RETRIES = 3;
  *
  * This adapter requires:
  * 1. A funded keypair (FEE_PAYER_PRIVATE_KEY or CUSTODY_PRIVATE_KEY env var)
- * 2. Direct RPC access for transaction submission (from the standard Solana config)
+ * 2. The open cluster scope, whose managed RPC pool submits the transaction. One fee-payer key
+ *    serves every cluster.
  */
 export class NativeAdapter implements FeePaymentPort {
   readonly providerId = "native";
@@ -70,13 +72,17 @@ export class NativeAdapter implements FeePaymentPort {
   }
 
   /**
-   * Sign a transaction as fee payer and submit it over direct RPC.
-   * This is the primary method for non-relayed transaction submission.
+   * Sign a transaction as fee payer and submit it through the open cluster scope's RPC client.
+   *
+   * @param transaction - Serialized transaction, already signed by its source.
+   * @returns The submitted transaction's signature.
+   * @throws FeePaymentError `SIGNING_FAILED` or `SUBMISSION_FAILED` when signing or sending fails.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   async signAndSend(transaction: Uint8Array): Promise<Signature> {
     const signedTransaction = await this.signTransactionAsFeePayer(transaction);
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signedTransaction));
-    return this.submitWithRetry(solanaRpc.createRpc(this.env), signedBytes);
+    return this.submitWithRetry(createClusterRpc(), signedBytes);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -105,12 +111,12 @@ export class NativeAdapter implements FeePaymentPort {
    * non-retryable error, or exhausts MAX_SUBMIT_RETRIES.
    */
   private async submitWithRetry(
-    rpc: ReturnType<typeof solanaRpc.createRpc>,
+    rpc: SolanaRpc,
     signedBytes: Uint8Array,
     attempt: number = 1
   ): Promise<Signature> {
     try {
-      return await solanaRpc.sendTransaction(rpc, signedBytes);
+      return await sendTransaction(rpc, signedBytes);
     } catch (error) {
       if (attempt >= MAX_SUBMIT_RETRIES || !isTransientRpcError(error)) {
         throw wrapError(error, "Failed to submit transaction", "SUBMISSION_FAILED");

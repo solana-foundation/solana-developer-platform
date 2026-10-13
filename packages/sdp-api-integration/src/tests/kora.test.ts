@@ -8,12 +8,13 @@
  *   pnpm kora:up && pnpm --filter @sdp/api-integration test
  *
  * Override URL for CI:
- *   KORA_RPC_URL=http://kora:8080 pnpm --filter @sdp/api-integration test
+ *   KORA_RPC_URL_DEVNET=http://kora:8080 pnpm --filter @sdp/api-integration test
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { requireIntegrationLaneKora } from "../helpers/kora-lane";
 
 const { KoraAdapter, KoraClient } = apiTestSupport;
 
@@ -22,17 +23,17 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
   let client: InstanceType<typeof KoraClient>;
 
   beforeAll(() => {
-    const koraUrl = env.KORA_RPC_URL ?? "http://localhost:8080";
+    const laneKora = requireIntegrationLaneKora();
 
     adapter = new KoraAdapter({
-      rpcUrl: koraUrl,
-      apiKey: env.KORA_API_KEY,
+      rpcUrl: laneKora.rpcUrl,
+      apiKey: laneKora.apiKey,
       timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30000,
     });
 
     client = new KoraClient({
-      rpcUrl: koraUrl,
-      apiKey: env.KORA_API_KEY,
+      rpcUrl: laneKora.rpcUrl,
+      apiKey: laneKora.apiKey,
     });
   });
 

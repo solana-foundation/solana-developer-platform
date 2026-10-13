@@ -11,7 +11,6 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
@@ -139,7 +138,6 @@ export async function reclaimDvpTradeLeg(
     organizationId: params.organizationId,
     projectId: params.projectId,
     actor: { type: "wallet", id: params.custodyWalletId },
-    cluster: currentClusterScope().cluster,
   });
   const sponsor = await feePayment.getFeePayer();
 
