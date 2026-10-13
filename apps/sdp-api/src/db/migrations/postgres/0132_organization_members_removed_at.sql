@@ -15,9 +15,10 @@ UPDATE organization_members
    SET removed_at = sdp_iso_now()
  WHERE status <> 'active' AND removed_at IS NULL;
 
--- The Clerk membership a row was last admitted through, when admission read it
--- live from Clerk (the webhooks); NULL for a join from a session claim. A Clerk
--- membership deletion applies only to the membership it names, or to a row
--- with none recorded, so a late deletion of an old membership cannot remove a
--- member Clerk has since re-added.
+-- The Clerk membership a row stands for: the live one admission last read from
+-- Clerk (the webhooks), or the one whose deletion removed it; NULL when only a
+-- session claim was ever seen. A Clerk deletion applies only to the membership
+-- recorded here, and a removed member returns through Clerk only on a different
+-- membership, so out-of-order or replayed membership events cannot remove a
+-- re-added member or restore a removed one.
 ALTER TABLE organization_members ADD COLUMN IF NOT EXISTS clerk_membership_id TEXT;
