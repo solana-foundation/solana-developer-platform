@@ -8,6 +8,7 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
  * during graceful shutdown.
  */
 
+import { runPerCluster } from "@/cron/cluster-runs";
 import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileBvnkOnrampPayouts } from "@/services/jobs/reconcile-bvnk-onramp-payouts";
@@ -27,8 +28,8 @@ export interface PendingTransfersReconciliationDeps {
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
   const work = async () => {
     await Promise.all([
-      trackPendingTransfers(deps.env),
-      reconcileSponsorshipBudgets(deps.env),
+      runPerCluster("track-pending-transfers", () => trackPendingTransfers(deps.env)),
+      runPerCluster("reconcile-sponsorship-budgets", () => reconcileSponsorshipBudgets(deps.env)),
       reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES),
     ]);
   };

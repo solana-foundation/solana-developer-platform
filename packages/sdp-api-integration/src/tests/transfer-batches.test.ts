@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
 import { type Commitment, generateKeyPairSigner, type Signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -11,9 +12,16 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
+  TEST_PROJECT,
 } from "../helpers/integration";
 
 const { trackPendingTransfers } = apiTestSupport;
+
+function trackTestProjectTransfers(): Promise<void> {
+  return runInClusterScope({ projectId: null, environment: TEST_PROJECT.environment }, () =>
+    trackPendingTransfers(env)
+  );
+}
 
 type CounterpartyApiResponse = {
   data: { counterparty: { id: string } };
@@ -183,7 +191,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     expect(new Set(signatures).size).toBe(2);
 
     await waitForSignatureCommitment(signatures, "confirmed", 60_000);
-    await trackPendingTransfers(env);
+    await trackTestProjectTransfers();
 
     const detailRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
     expect(detailRes.status).toBe(200);
@@ -202,7 +210,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
     }
 
     await waitForSignatureCommitment(signatures, "finalized", 120_000);
-    await trackPendingTransfers(env);
+    await trackTestProjectTransfers();
 
     const finalizedRes = await request(`/v1/payments/transfer-batches/${created.data.batch.id}`);
     expect(finalizedRes.status).toBe(200);

@@ -1,6 +1,12 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
-import * as solanaRpc from "@sdp/rpc/solana";
-import { SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import {
+  isBlockhashValid as readBlockhashValidity,
+  getTransaction as readTransaction,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
+import type { SolanaCluster } from "@sdp/types";
 import { assertIsBlockhash, assertIsSignature, type Blockhash, type Signature } from "@solana/kit";
 import { getDb } from "@/db";
 import {
@@ -64,9 +70,7 @@ type ReconciliationOutcome =
 export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
   budgetRedis?: ReconciliationRedis;
-  getTransaction?: (
-    signature: Signature
-  ) => Promise<Awaited<ReturnType<typeof solanaRpc.getTransaction>>>;
+  getTransaction?: (signature: Signature) => Promise<Awaited<ReturnType<typeof readTransaction>>>;
   isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
   getProviderConfiguration?: (cluster: SolanaCluster) => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
@@ -74,10 +78,10 @@ export interface SponsorshipReconciliationDependencies {
 }
 
 /**
- * Reconcile every network, every tick. One process can sponsor on both
- * clusters (Earn movements pick the paymaster by cluster), and each network has
- * its own reservations, policies, breaker and Kora, so each gets its own pass
- * against its own RPC and its own provider configuration.
+ * Reconcile the open cluster scope's network. The job runner runs this once per
+ * cluster, each in its own scope: every network has its own reservations,
+ * policies, breaker and Kora, so each pass reads its own RPC and its own
+ * provider configuration.
  *
  * A network is never skipped for lacking a paymaster NOW: reservations outlive
  * configuration. If a cluster's Kora is unwired after transactions reserved
@@ -86,48 +90,32 @@ export interface SponsorshipReconciliationDependencies {
  * configuration, and reports that as a failed pass (tripping the breaker after
  * the usual consecutive failures) rather than leaving budget locked in
  * silence. A network with nothing outstanding costs one candidates query.
+ *
+ * @param env - Runtime environment for the repository, Redis and provider configuration.
+ * @param dependencies - Test seams for the repository, Redis, chain reads and clock.
+ * @returns Resolves when the pass has settled what it could.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function reconcileSponsorshipBudgets(
   env: Env,
   dependencies: SponsorshipReconciliationDependencies = {}
 ): Promise<void> {
-  const failures: unknown[] = [];
-  for (const cluster of SOLANA_CLUSTERS) {
-    try {
-      await reconcileSponsorshipNetwork(env, cluster, dependencies);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) {
-    throw new AggregateError(
-      failures,
-      "Sponsorship reconciliation failed on more than one network"
-    );
-  }
-}
-
-async function reconcileSponsorshipNetwork(
-  env: Env,
-  cluster: SolanaCluster,
-  dependencies: SponsorshipReconciliationDependencies
-): Promise<void> {
+  const { cluster } = currentClusterScope();
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
   const budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
   // Built on first use, not up front: a network with nothing outstanding must
   // finish its pass without needing an RPC endpoint at all.
-  let rpc: solanaRpc.SolanaRpc | null = null;
+  let rpc: SolanaRpc | null = null;
   const clusterRpc = () => {
-    rpc ??= solanaRpc.createClusterRpc(env, cluster);
+    rpc ??= createClusterRpc();
     return rpc;
   };
   const getTransaction =
     dependencies.getTransaction ??
-    ((signature: Signature) => solanaRpc.getTransaction(clusterRpc(), signature));
+    ((signature: Signature) => readTransaction(clusterRpc(), signature));
   const isBlockhashValid =
     dependencies.isBlockhashValid ??
-    ((blockhash: Blockhash) => solanaRpc.isBlockhashValid(clusterRpc(), blockhash));
+    ((blockhash: Blockhash) => readBlockhashValidity(clusterRpc(), blockhash));
   const now = dependencies.now?.() ?? new Date();
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));

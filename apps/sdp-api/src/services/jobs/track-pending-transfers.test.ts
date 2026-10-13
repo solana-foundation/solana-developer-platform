@@ -1,6 +1,8 @@
-import type { SdpEnvironment } from "@sdp/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
 import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runPerCluster } from "@/cron/cluster-runs";
 import { getDb } from "@/db";
 import { createSystemPaymentsRepository } from "@/db/repositories";
 import { rootLogger } from "@/runtime/logger";
@@ -142,6 +144,16 @@ function failHistoryReads(request: ClusterRpcRequest): ClusterRpcReply {
     : signatureStatusesReply(read.signatures.map(() => null));
 }
 
+function trackSandboxTransfers(): Promise<void> {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    trackPendingTransfers(env)
+  );
+}
+
+function trackEveryClusterTransfers(): Promise<void> {
+  return runPerCluster("track-pending-transfers", () => trackPendingTransfers(env));
+}
+
 describe("trackPendingTransfers", () => {
   const rpc = installClusterRpcResponder();
 
@@ -149,6 +161,16 @@ describe("trackPendingTransfers", () => {
     return rpc.requests
       .filter((request) => request.method === "getSignatureStatuses")
       .map(signatureStatusesRead);
+  }
+
+  function signaturesReadOn(cluster: SolanaCluster): string[] {
+    return [
+      ...new Set(
+        statusReads()
+          .filter((read) => read.cluster === cluster)
+          .flatMap((read) => read.signatures)
+      ),
+    ];
   }
 
   function blockHeightReads(): number {
@@ -172,7 +194,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(6),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_stuck_processing");
       expect(updated?.status).toBe("failed");
@@ -188,7 +210,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_recent_processing");
       expect(unchanged?.status).toBe("processing");
@@ -212,7 +234,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_confirmed");
       expect(updated?.status).toBe("confirmed");
@@ -238,7 +260,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_finalized");
       expect(updated?.status).toBe("finalized");
@@ -262,7 +284,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_errored");
       expect(updated?.status).toBe("failed");
@@ -279,7 +301,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(10),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
@@ -305,7 +327,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(10),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_legacy_in_history");
       expect(updated?.status).toBe("finalized");
@@ -357,7 +379,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(10),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const finalized = await getTransfer("xfr_legacy_batch_finalized");
       expect(finalized?.status).toBe("finalized");
@@ -385,7 +407,7 @@ describe("trackPendingTransfers", () => {
           updatedAt: staleAt,
         });
 
-        await trackPendingTransfers(env);
+        await trackSandboxTransfers();
 
         const kept = await getTransfer("xfr_legacy_history_down");
         expect(kept?.status).toBe("processing");
@@ -422,7 +444,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_blockheight_transient");
       expect(failed?.status).toBe("failed");
@@ -442,7 +464,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_unstarted_outbox_expired");
       expect(failed?.status).toBe("failed");
@@ -467,7 +489,7 @@ describe("trackPendingTransfers", () => {
           updatedAt: staleAt,
         });
 
-        await trackPendingTransfers(env);
+        await trackSandboxTransfers();
 
         const unresolved = await getTransfer("xfr_started_outbox_not_found");
         expect(unresolved?.status).toBe("processing");
@@ -514,7 +536,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: staleAt,
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_started_outbox_archive_unavailable");
       expect(unresolved?.status).toBe("processing");
@@ -536,7 +558,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: staleAt,
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_started_outbox_height_unavailable");
       expect(unresolved?.status).toBe("processing");
@@ -594,7 +616,7 @@ describe("trackPendingTransfers", () => {
         });
       }
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       await expect(getTransfer("xfr_archive_a_confirmed")).resolves.toMatchObject({
         status: "confirmed",
@@ -632,7 +654,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: staleAt,
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_batch_verdict_write_failed");
       expect(unresolved?.status).toBe("processing");
@@ -653,7 +675,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(10),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_started_outbox_not_expired");
       expect(unchanged?.status).toBe("processing");
@@ -669,7 +691,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_processing_recent_not_found");
       expect(unchanged?.status).toBe("processing");
@@ -694,7 +716,7 @@ describe("trackPendingTransfers", () => {
           updatedAt,
         });
 
-        await trackPendingTransfers(env);
+        await trackSandboxTransfers();
 
         const unchanged = await getTransfer("xfr_processing_only_processed");
         expect(unchanged?.status).toBe("processing");
@@ -728,7 +750,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(7),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const [confirmed, stuck] = await Promise.all([
         getTransfer("xfr_batch_processing_confirmed"),
@@ -750,12 +772,12 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       expect(statusReads()).toEqual([]);
     });
 
-    it("reads each project's processing transfers on its environment's cluster in one tick", async () => {
+    it("reads each environment's processing transfers only in its own cluster run", async () => {
       rpc.respondSignatureStatuses((_signature, read) =>
         read.cluster === "mainnet-beta"
           ? { slot: 501, confirmations: 1, confirmationStatus: "confirmed", err: null }
@@ -777,7 +799,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackEveryClusterTransfers();
 
       expect(statusReads()).toContainEqual({
         cluster: "mainnet-beta",
@@ -789,6 +811,8 @@ describe("trackPendingTransfers", () => {
         signatures: [TEST_SIG_2],
         searchTransactionHistory: false,
       });
+      expect(signaturesReadOn("mainnet-beta")).toEqual([TEST_SIG_1]);
+      expect(signaturesReadOn("devnet")).toEqual([TEST_SIG_2]);
       await expect(getTransfer("xfr_production_processing")).resolves.toMatchObject({
         status: "confirmed",
         slot: 501,
@@ -832,7 +856,7 @@ describe("trackPendingTransfers", () => {
         updatedAt,
       });
 
-      await trackPendingTransfers(env);
+      await trackEveryClusterTransfers();
 
       await expect(getTransfer("xfr_production_read_failed")).resolves.toMatchObject({
         status: "processing",
@@ -863,7 +887,7 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_confirmed_finalizing");
       expect(updated?.status).toBe("finalized");
@@ -886,7 +910,7 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(10),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const rotated = await getTransfer("xfr_confirmed_no_status");
       expect(rotated?.status).toBe("confirmed");
@@ -903,7 +927,7 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(25 * 60),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       expect(statusReads()).toEqual([]);
       const unchanged = await getTransfer("xfr_confirmed_aged_out");
@@ -922,7 +946,7 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const rotated = await getTransfer("xfr_confirmed_rpc_failed");
       expect(rotated?.status).toBe("confirmed");
@@ -935,7 +959,7 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const upgraded = await getTransfer("xfr_confirmed_rpc_failed");
       expect(upgraded?.status).toBe("finalized");
@@ -959,13 +983,13 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_confirmed_errored");
       expect(unchanged?.status).toBe("confirmed");
     });
 
-    it("polls each project's confirmed transfers for finality on its environment's cluster", async () => {
+    it("polls each environment's confirmed transfers for finality only in its own cluster run", async () => {
       rpc.respondSignatureStatuses((_signature, read) =>
         read.cluster === "mainnet-beta"
           ? { slot: 601, confirmations: null, confirmationStatus: "finalized", err: null }
@@ -989,7 +1013,7 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackEveryClusterTransfers();
 
       expect(statusReads()).toContainEqual({
         cluster: "mainnet-beta",
@@ -1001,6 +1025,8 @@ describe("trackPendingTransfers", () => {
         signatures: [TEST_SIG_2],
         searchTransactionHistory: true,
       });
+      expect(signaturesReadOn("mainnet-beta")).toEqual([TEST_SIG_1]);
+      expect(signaturesReadOn("devnet")).toEqual([TEST_SIG_2]);
       await expect(getTransfer("xfr_production_confirmed")).resolves.toMatchObject({
         status: "finalized",
         slot: 601,
@@ -1029,7 +1055,7 @@ describe("trackPendingTransfers", () => {
         updatedAt: minutesAgo(1),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const confirmed = await getTransfer("xfr_regression_confirmed_at");
       expect(confirmed?.status).toBe("confirmed");
@@ -1043,7 +1069,7 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
 
       const finalized = await getTransfer("xfr_regression_confirmed_at");
       expect(finalized?.status).toBe("finalized");
@@ -1067,10 +1093,10 @@ describe("trackPendingTransfers", () => {
         confirmedAt: minutesAgo(2),
       });
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
       const first = await getTransfer("xfr_regression_double_fire");
 
-      await trackPendingTransfers(env);
+      await trackSandboxTransfers();
       const second = await getTransfer("xfr_regression_double_fire");
 
       expect(first?.status).toBe("finalized");
