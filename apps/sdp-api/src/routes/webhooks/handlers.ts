@@ -6,6 +6,7 @@ import type {
   UserJSON,
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -416,7 +417,30 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     .run();
 }
 
-export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
+/**
+ * Verifies, persists, and acknowledges one ramp provider webhook, then applies it in the
+ * background. Everything runs inside a cluster scope with no project, opened from the
+ * environment the webhook URL names: the project is only known once the event matches a row,
+ * and the background apply inherits the same scope.
+ *
+ * @param c - The webhook request context.
+ * @param environment - The environment the webhook URL path names.
+ * @returns The acknowledgement response.
+ * @throws AppError when the provider, signature, or payload is rejected.
+ */
+export const handleRampProviderWebhook = (c: AppContext, environment: SdpEnvironment) =>
+  runInClusterScope({ projectId: null, environment }, () =>
+    receiveRampProviderWebhook(c, environment)
+  );
+
+/**
+ * The scoped body of {@link handleRampProviderWebhook}.
+ *
+ * @param c - The webhook request context.
+ * @param environment - The environment the webhook URL path names; the open scope's environment.
+ * @returns The acknowledgement response.
+ */
+async function receiveRampProviderWebhook(c: AppContext, environment: SdpEnvironment) {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
   const processor: WebhookProcessor<unknown, unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
@@ -464,7 +488,7 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
     provider: processor.provider,
     environment,
   });
-};
+}
 
 export const handleClerkWebhook = async (c: AppContext) => {
   const secret = c.env.CLERK_WEBHOOK_SECRET;

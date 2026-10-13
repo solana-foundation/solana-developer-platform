@@ -1,3 +1,5 @@
+import type { MoonpaySettlementEvent } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
@@ -13,6 +15,12 @@ const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
 
 describe("MoonpayWebhookProcessor.process", () => {
   const processor = new MoonpayWebhookProcessor();
+
+  function processInSandbox(event: MoonpaySettlementEvent) {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      processor.process(env, event)
+    );
+  }
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -83,9 +91,9 @@ describe("MoonpayWebhookProcessor.process", () => {
       transferId: TRANSFER_ID,
     } as const;
 
-    await processor.process(env, "sandbox", event);
-    await processor.process(env, "sandbox", event);
-    await processor.process(env, "sandbox", {
+    await processInSandbox(event);
+    await processInSandbox(event);
+    await processInSandbox({
       ...event,
       reference: "different-moonpay-transaction",
     });

@@ -38,10 +38,8 @@ describe("runPendingTransfersReconciliation", () => {
     expect(trackPendingTransfers).toHaveBeenCalledWith(env);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledWith(env);
-    expect(reconcileBvnkOnrampPayouts).toHaveBeenCalledExactlyOnceWith(
-      env,
-      SDP_RAMP_PROVIDER_STAGES
-    );
+    expect(reconcileBvnkOnrampPayouts).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(reconcileBvnkOnrampPayouts).toHaveBeenCalledWith(env, SDP_RAMP_PROVIDER_STAGES);
     expect(replayRampWebhookEvents).not.toHaveBeenCalled();
   });
 });

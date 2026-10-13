@@ -12,7 +12,7 @@ import {
   bvnkTerminalObservationsEqual,
   readStoredBvnkSettlement,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
-import type { SdpEnvironment } from "@sdp/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { BvnkOnrampTransfersRepository } from "@/db/repositories/bvnk-onramp-transfers.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { internalError } from "@/lib/errors";
@@ -20,7 +20,6 @@ import { getLogger } from "@/runtime/logger";
 
 export interface RecordBvnkPayoutCreationInput {
   repo: BvnkOnrampTransfersRepository;
-  environment: SdpEnvironment;
   transfer: PaymentTransferRow;
   claimedAt: string;
   summary: BvnkOnrampPayoutSummary;
@@ -28,7 +27,6 @@ export interface RecordBvnkPayoutCreationInput {
 
 export interface ApplyTerminalBvnkPayoutObservationInput {
   repo: BvnkOnrampTransfersRepository;
-  environment: SdpEnvironment;
   transfer: PaymentTransferRow;
   observation: BvnkPayoutObservation;
   failError: string;
@@ -37,12 +35,18 @@ export interface ApplyTerminalBvnkPayoutObservationInput {
 
 /**
  * Records a payout the reconciler created or adopted: the receipt url is
- * validated against the project environment, the summary is checked against
- * the stored pay-in and claim intent, then the payout id and the PROCESSING
- * settlement land in ONE first-write-wins UPDATE.
+ * validated against the open cluster scope's environment, the summary is
+ * checked against the stored pay-in and claim intent, then the payout id and
+ * the PROCESSING settlement land in ONE first-write-wins UPDATE.
  *
- * @param input - Repository, environment, current transfer row, held claim timestamp, and the provider summary.
+ * @param input - Repository, current transfer row, held claim timestamp, and the provider summary.
+ * @param input.repo - The BVNK on-ramp transfers repository.
+ * @param input.transfer - The claimed transfer row.
+ * @param input.claimedAt - The claim timestamp the caller holds.
+ * @param input.summary - The provider's payout summary.
+ * @returns Resolves once the payout id and settlement are recorded.
  * @throws internalError when the summary or receipt url conflicts with the stored intent.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
  */
 export async function recordBvnkPayoutCreation(
   input: RecordBvnkPayoutCreationInput
@@ -62,7 +66,7 @@ export async function recordBvnkPayoutCreation(
       `BVNK payout create response for ${input.transfer.id} lacks the receipt url.`
     );
   }
-  if (!isValidBvnkReceiptUrl(receiptUrl, input.environment, input.summary.uuid)) {
+  if (!isValidBvnkReceiptUrl(receiptUrl, currentClusterScope().environment, input.summary.uuid)) {
     throw internalError(
       `BVNK payout create response for ${input.transfer.id} carries an untrusted receipt url.`
     );
@@ -88,7 +92,7 @@ export async function recordBvnkPayoutCreation(
     transferId: input.transfer.id,
     payoutId: input.summary.uuid,
     claimedAt: input.claimedAt,
-    environment: input.environment,
+    environment: currentClusterScope().environment,
     settlement: buildProcessingSettlement(payin.id, input.summary, receiptUrl),
   });
 }
@@ -102,7 +106,15 @@ export async function recordBvnkPayoutCreation(
  * through the caller's error translation (TerminalRampWebhookError for
  * webhooks, internalError for polls).
  *
- * @param input - Repository, environment, transfer row, observation, the failed status to store, and the error translation.
+ * @param input - Repository, transfer row, observation, the failed status to store, and the error translation.
+ * @param input.repo - The BVNK on-ramp transfers repository.
+ * @param input.transfer - The transfer row the observation targets.
+ * @param input.observation - The terminal payout observation.
+ * @param input.failError - The error stored on a failed payout.
+ * @param input.terminalError - Translates a non-retryable conflict into the caller's error.
+ * @returns Resolves once the observation is applied or acknowledged as an identical replay.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open; the lost-CAS
+ * re-read is scoped to its environment.
  */
 export async function applyTerminalBvnkPayoutObservation(
   input: ApplyTerminalBvnkPayoutObservationInput
@@ -179,11 +191,7 @@ export async function applyTerminalBvnkPayoutObservation(
     );
     return;
   }
-  const stored = await storedBvnkTerminalObservation(
-    input.repo,
-    input.transfer.id,
-    input.environment
-  );
+  const stored = await storedBvnkTerminalObservation(input.repo, input.transfer.id);
   if (stored === null) {
     throw input.terminalError("stray payout: transfer vanished");
   }
@@ -205,16 +213,14 @@ export async function applyTerminalBvnkPayoutObservation(
  * reads null.
  *
  * @param repo - The BVNK on-ramp transfers repository for the re-read.
- * @param transferId - The transfer whose terminal CAS was lost.
- * @param environment - The project environment of the transfer.
+ * @param transferId - The transfer whose terminal CAS was lost; re-read in the open cluster scope's environment.
  * @returns The stored terminal observation, or null when the row is not terminal.
  */
 async function storedBvnkTerminalObservation(
   repo: BvnkOnrampTransfersRepository,
-  transferId: string,
-  environment: SdpEnvironment
+  transferId: string
 ): Promise<BvnkPayoutObservation | null> {
-  const row = await repo.getById({ transferId, environment });
+  const row = await repo.getById({ transferId, environment: currentClusterScope().environment });
   if (row === null) {
     return null;
   }

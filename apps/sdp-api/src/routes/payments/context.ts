@@ -16,9 +16,29 @@ import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
+/**
+ * The ramp runtime for a request, under the cluster scope the project middleware opened.
+ *
+ * @param c - The request context whose bindings carry the provider credentials.
+ * @returns The ramp runtime for the scope's environment.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
 export function rampRuntime(c: AppContext): RampRuntimeContext {
+  return rampRuntimeForScope(c.env);
+}
+
+/**
+ * The ramp runtime for the open cluster scope: provider credentials and hosts follow the scope's
+ * environment. Shared by requests, ramp webhooks, and ramp jobs, each of which runs under a scope
+ * its entry point opened.
+ *
+ * @param env - Process environment carrying the provider credentials.
+ * @returns The ramp runtime for the scope's environment.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
+ */
+export function rampRuntimeForScope(env: Env): RampRuntimeContext {
   return {
-    env: c.env as unknown as Record<string, string | undefined>,
+    env: env as unknown as Record<string, string | undefined>,
     mode: currentClusterScope().environment,
   };
 }

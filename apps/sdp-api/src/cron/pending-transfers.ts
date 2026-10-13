@@ -30,7 +30,9 @@ export function runPendingTransfersReconciliation(deps: PendingTransfersReconcil
     await Promise.all([
       runPerCluster("track-pending-transfers", () => trackPendingTransfers(deps.env)),
       runPerCluster("reconcile-sponsorship-budgets", () => reconcileSponsorshipBudgets(deps.env)),
-      reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES),
+      runPerCluster("reconcile-bvnk-onramp-payouts", async () => {
+        await reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES);
+      }),
     ]);
   };
 
