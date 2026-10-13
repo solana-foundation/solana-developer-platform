@@ -75,7 +75,7 @@ export async function getWalletBalances(c: AppContext) {
   }
   const lamports = solBalanceResult.value;
   const splBalances = splBalancesResult.value;
-  const labeledBalances = await attachTokenSymbolsToBalances(c.env, [
+  const labeledBalances = await attachTokenSymbolsToBalances([
     {
       token: "SOL",
       mint: tokenAccounts.SOL_MINT,

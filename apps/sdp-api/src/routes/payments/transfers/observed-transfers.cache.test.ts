@@ -1,7 +1,9 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { type SdpEnvironment, SOL_MINT } from "@sdp/types";
 import type { Signature } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { env } from "@/test/helpers/env";
+import { beforeEach, describe, expect, it } from "vitest";
+import { installClusterRpcRawAnswers } from "@/test/helpers/cluster-rpc";
 import {
   buildObservedTransfersForSignatures,
   clearObservedTransferCaches,
@@ -17,10 +19,7 @@ const context = {
   walletIdsByAddress: new Map([[WALLET_ADDRESS, "wal_cache_test"]]),
 };
 
-function signatureEntry(
-  index: number,
-  confirmationStatus: "confirmed" | "finalized" = "finalized"
-) {
+function signatureEntry(index: number, confirmationStatus: "confirmed" | "finalized") {
   return {
     signature: `sig_${index}` as unknown as Signature,
     slot: BigInt(index),
@@ -30,9 +29,7 @@ function signatureEntry(
   };
 }
 
-function parsedSolTransfer(lamports: string) {
-  // Mirrors a real getTransaction response: there is no finality field on the
-  // body, so caching decisions must come from the signature history instead.
+function parsedSolTransfer(lamports: string | number) {
   return {
     slot: 42,
     blockTime: 1700000000,
@@ -62,157 +59,192 @@ function parsedSolTransfer(lamports: string) {
   };
 }
 
-function jsonRpcResponse(payload: unknown) {
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+function buildInScope(
+  environment: SdpEnvironment,
+  signatures: Parameters<typeof buildObservedTransfersForSignatures>[0]
+) {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    buildObservedTransfersForSignatures(signatures, context)
+  );
+}
+
+function buildOnDevnet(signatures: Parameters<typeof buildObservedTransfersForSignatures>[0]) {
+  return buildInScope("sandbox", signatures);
 }
 
 describe("observed-transfers parsed-transaction cache", () => {
+  const rpc = installClusterRpcRawAnswers();
+
+  function getTransactionCalls() {
+    return rpc.calls.filter((call) => call.method === "getTransaction");
+  }
+
   beforeEach(() => {
     clearObservedTransferCaches();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("serves repeat reads of immutable transaction bodies from cache", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
-    const signatures = [signatureEntry(0), signatureEntry(1), signatureEntry(2)];
-    const first = await buildObservedTransfersForSignatures(env, signatures, context);
-    const second = await buildObservedTransfersForSignatures(env, signatures, context);
+    const signatures = [
+      signatureEntry(0, "finalized"),
+      signatureEntry(1, "finalized"),
+      signatureEntry(2, "finalized"),
+    ];
+    const first = await buildOnDevnet(signatures);
+    const second = await buildOnDevnet(signatures);
 
-    expect(fetchCount).toBe(3);
+    expect(getTransactionCalls()).toHaveLength(3);
     expect(first).toHaveLength(3);
     expect(second).toEqual(first);
   });
 
   it("uses fresh signature-history slot and blockTime instead of cached RPC metadata", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      // Body was confirmed in slot 42 at blockTime 1700000000.
-      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
-    // First read: the signature history reports the transaction landing in
-    // slot 777 at blockTime 1800000000, so those fresh values must win over
-    // the cached body's fork-sensitive copy.
-    const [first] = await buildObservedTransfersForSignatures(
-      env,
-      [
-        {
-          signature: "sig_0" as unknown as Signature,
-          slot: 777n,
-          blockTime: 1800000000n,
-          err: null,
-          confirmationStatus: "finalized",
-        },
-      ],
-      context
-    );
+    const [first] = await buildOnDevnet([
+      {
+        signature: "sig_0" as unknown as Signature,
+        slot: 777n,
+        blockTime: 1800000000n,
+        err: null,
+        confirmationStatus: "finalized",
+      },
+    ]);
 
     expect(first?.slot).toBe(777);
     expect(first?.block_time).toBe(new Date(1800000000 * 1_000).toISOString());
 
-    // Second read: the body is served from cache (no extra fetch), but a new
-    // history entry reflecting a fork re-landing the signature in a different
-    // slot must still take effect.
-    const [second] = await buildObservedTransfersForSignatures(
-      env,
-      [
-        {
-          signature: "sig_0" as unknown as Signature,
-          slot: 778n,
-          blockTime: 1800000100n,
-          err: null,
-          confirmationStatus: "finalized",
-        },
-      ],
-      context
-    );
+    const [second] = await buildOnDevnet([
+      {
+        signature: "sig_0" as unknown as Signature,
+        slot: 778n,
+        blockTime: 1800000100n,
+        err: null,
+        confirmationStatus: "finalized",
+      },
+    ]);
 
-    expect(fetchCount).toBe(1);
+    expect(getTransactionCalls()).toHaveLength(1);
     expect(second?.slot).toBe(778);
     expect(second?.block_time).toBe(new Date(1800000100 * 1_000).toISOString());
   });
 
   it("coalesces concurrent fetches for the same signature", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
-    const signatures = [signatureEntry(0)];
+    const signatures = [signatureEntry(0, "finalized")];
     const [first, second] = await Promise.all([
-      buildObservedTransfersForSignatures(env, signatures, context),
-      buildObservedTransfersForSignatures(env, signatures, context),
+      buildOnDevnet(signatures),
+      buildOnDevnet(signatures),
     ]);
 
-    expect(fetchCount).toBe(1);
+    expect(getTransactionCalls()).toHaveLength(1);
     expect(first).toEqual(second);
     expect(first).toHaveLength(1);
   });
 
-  it("does not cache confirmed-but-not-finalized results until the history reports finality", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      // Same signature observed twice on different fork branches before it
-      // roots: first with 1000 lamports, then re-landed with 2000. A cached
-      // body would serve the stale amount forever.
-      return jsonRpcResponse({
-        result: parsedSolTransfer(fetchCount === 1 ? "1000" : "2000"),
-      });
-    });
+  it("fetches the same signature's body separately per cluster, cached and in flight", async () => {
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
-    const signatures = [signatureEntry(0)];
+    await buildInScope("sandbox", [signatureEntry(0, "finalized")]);
+    await buildInScope("production", [signatureEntry(0, "finalized")]);
+    await Promise.all([
+      buildInScope("sandbox", [signatureEntry(1, "finalized")]),
+      buildInScope("production", [signatureEntry(1, "finalized")]),
+    ]);
 
-    // While the fresh history still reports "confirmed", every read refetches
-    // and sees whatever branch the confirmed ledger currently reports.
-    const first = await buildObservedTransfersForSignatures(
-      env,
-      [signatureEntry(0, "confirmed")],
-      context
+    const clusters = getTransactionCalls().map((call) => call.cluster);
+    expect(clusters.slice(0, 2)).toEqual(["devnet", "mainnet-beta"]);
+    expect(clusters.slice(2).sort()).toEqual(["devnet", "mainnet-beta"]);
+
+    await buildInScope("sandbox", [signatureEntry(0, "finalized")]);
+    await buildInScope("production", [signatureEntry(1, "finalized")]);
+
+    expect(getTransactionCalls()).toHaveLength(4);
+  });
+
+  it("turns a system transfer whose lamports kit decodes as a bigint into the SOL row", async () => {
+    rpc.answer("getTransaction", parsedSolTransfer(1_500_000_000));
+
+    const timestamp = new Date(1700000000 * 1_000).toISOString();
+
+    expect(await buildOnDevnet([signatureEntry(7, "finalized")])).toEqual([
+      {
+        id: "xfr_observed_wal_cache_test_sig_7",
+        organization_id: "org_cache_test",
+        project_id: null,
+        wallet_id: "wal_cache_test",
+        custody_wallet_id: null,
+        counterparty_id: null,
+        source_address: PAYER,
+        destination_address: WALLET_ADDRESS,
+        token: SOL_MINT,
+        amount: formatDecimalAmount(1_500_000_000n, 9),
+        memo: null,
+        type: "transfer",
+        kind: "deposit",
+        direction: "inbound",
+        status: "confirmed",
+        provider: null,
+        provider_reference: null,
+        delivery_mode: null,
+        fiat_currency: null,
+        fiat_amount: null,
+        ramps_memo: {},
+        provider_data: {},
+        signature: "sig_7",
+        serialized_tx: null,
+        signed_transaction: null,
+        last_valid_block_height: null,
+        submission_started_at: null,
+        slot: 7,
+        block_time: timestamp,
+        fee: 5000,
+        error: null,
+        initiated_by_key_id: null,
+        idempotency_key: null,
+        idempotency_fingerprint: null,
+        confirmed_at: null,
+        finalization_last_polled_at: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ]);
+  });
+
+  it("reports system transfer lamports above 2^53 exactly", async () => {
+    rpc.answerRawJson(
+      "getTransaction",
+      JSON.stringify(parsedSolTransfer(0)).replace('"lamports":0', '"lamports":9007199254740993')
     );
-    const confirmedEntry = [{ ...signatureEntry(0, "confirmed") }];
-    const second = await buildObservedTransfersForSignatures(env, confirmedEntry, context);
-    expect(fetchCount).toBe(2);
+
+    expect(await buildOnDevnet([signatureEntry(8, "finalized")])).toMatchObject([
+      { token: SOL_MINT, amount: "9007199.254740993" },
+    ]);
+  });
+
+  it("does not cache confirmed-but-not-finalized results until the history reports finality", async () => {
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
+    const first = await buildOnDevnet([signatureEntry(0, "confirmed")]);
+    rpc.answer("getTransaction", parsedSolTransfer("2000"));
+    const second = await buildOnDevnet([signatureEntry(0, "confirmed")]);
+    expect(getTransactionCalls()).toHaveLength(2);
     expect(first[0]?.amount).toBe(formatDecimalAmount(1000n, 9));
     expect(second[0]?.amount).toBe(formatDecimalAmount(2000n, 9));
 
-    // Once the fresh history reports "finalized", the body is immutable: it
-    // is fetched once more, then cached.
-    const third = await buildObservedTransfersForSignatures(
-      env,
-      [signatureEntry(0, "finalized")],
-      context
-    );
-    expect(fetchCount).toBe(3);
+    const third = await buildOnDevnet([signatureEntry(0, "finalized")]);
+    expect(getTransactionCalls()).toHaveLength(3);
     expect(third).toHaveLength(1);
 
-    const fourth = await buildObservedTransfersForSignatures(env, signatures, context);
-    expect(fetchCount).toBe(3);
+    const fourth = await buildOnDevnet([signatureEntry(0, "finalized")]);
+    expect(getTransactionCalls()).toHaveLength(3);
     expect(fourth).toEqual(third);
   });
 
   it("never caches when the history entry carries no confirmation status", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      return jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
-    // Finality is unknown — treat as not finalized and refetch every read.
     const signatures = [
       {
         signature: "sig_0" as unknown as Signature,
@@ -221,75 +253,52 @@ describe("observed-transfers parsed-transaction cache", () => {
         err: null,
       },
     ];
-    const first = await buildObservedTransfersForSignatures(env, signatures, context);
-    const second = await buildObservedTransfersForSignatures(env, signatures, context);
+    const first = await buildOnDevnet(signatures);
+    const second = await buildOnDevnet(signatures);
 
-    expect(fetchCount).toBe(2);
+    expect(getTransactionCalls()).toHaveLength(2);
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
   });
 
   it("does not cache null results so a just-submitted transfer appears as soon as the chain indexes it", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      return fetchCount === 1
-        ? jsonRpcResponse({ result: null })
-        : jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    const signatures = [signatureEntry(0, "finalized")];
+    rpc.answer("getTransaction", null);
+    const beforeIndexed = await buildOnDevnet(signatures);
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
+    const afterIndexed = await buildOnDevnet(signatures);
 
-    const signatures = [signatureEntry(0)];
-    const beforeIndexed = await buildObservedTransfersForSignatures(env, signatures, context);
-    const afterIndexed = await buildObservedTransfersForSignatures(env, signatures, context);
-
-    expect(fetchCount).toBe(2);
+    expect(getTransactionCalls()).toHaveLength(2);
     expect(beforeIndexed).toEqual([]);
     expect(afterIndexed).toHaveLength(1);
     expect(afterIndexed[0]?.status).toBe("confirmed");
   });
 
   it("does not cache RPC failures so the next read retries", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      return fetchCount === 1
-        ? jsonRpcResponse({ error: { message: "upstream boom" } })
-        : jsonRpcResponse({ result: parsedSolTransfer("1000") });
-    });
+    const signatures = [signatureEntry(0, "finalized")];
+    const first = await buildOnDevnet(signatures);
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
+    const second = await buildOnDevnet(signatures);
 
-    const signatures = [signatureEntry(0)];
-    const first = await buildObservedTransfersForSignatures(env, signatures, context);
-    const second = await buildObservedTransfersForSignatures(env, signatures, context);
-
-    expect(fetchCount).toBe(2);
+    expect(getTransactionCalls()).toHaveLength(2);
     expect(first).toEqual([]);
     expect(second).toHaveLength(1);
   });
 
   it("evicts the oldest entry once the cache exceeds its cap", async () => {
-    let fetchCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      fetchCount += 1;
-      return jsonRpcResponse({ result: { slot: 1 } });
-    });
+    rpc.answer("getTransaction", parsedSolTransfer("1000"));
 
     const allSignatures = Array.from(
       { length: PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 1 },
-      (_, index) => signatureEntry(index)
+      (_, index) => signatureEntry(index, "finalized")
     );
-    await buildObservedTransfersForSignatures(env, allSignatures, context);
-    expect(fetchCount).toBe(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 1);
+    await buildOnDevnet(allSignatures);
+    expect(getTransactionCalls()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 1);
 
-    // The first signature was evicted to make room for the last one, so it is
-    // fetched again; the newest entry is still cached.
-    await buildObservedTransfersForSignatures(env, [signatureEntry(0)], context);
-    expect(fetchCount).toBe(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
+    await buildOnDevnet([signatureEntry(0, "finalized")]);
+    expect(getTransactionCalls()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
 
-    await buildObservedTransfersForSignatures(
-      env,
-      [signatureEntry(PARSED_TRANSACTION_CACHE_MAX_ENTRIES)],
-      context
-    );
-    expect(fetchCount).toBe(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
+    await buildOnDevnet([signatureEntry(PARSED_TRANSACTION_CACHE_MAX_ENTRIES, "finalized")]);
+    expect(getTransactionCalls()).toHaveLength(PARSED_TRANSACTION_CACHE_MAX_ENTRIES + 2);
   });
 });
