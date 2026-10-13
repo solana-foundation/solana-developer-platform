@@ -74,7 +74,7 @@ async function seed(): Promise<void> {
          user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
          decimals_a, decimals_b, amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status
+         escrow_a, escrow_b, status, environment
        ) VALUES (?, ?, ?, 'BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po',
          '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
          'AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC', 'C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk',
@@ -83,7 +83,7 @@ async function seed(): Promise<void> {
          6, 6, '1000', '2000', '1900000000',
          'AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC', 'C8gNHiN7huZr5g6foxuPZqPh2kbQHiGQUDkhcnL7CFzk',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU', '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         'funded')
+         'funded', 'sandbox')
        ON CONFLICT (id) DO NOTHING`
     )
     .bind(TRADE_ID, ORG, PROJECT)
