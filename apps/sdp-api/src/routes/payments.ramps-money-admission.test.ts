@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { getDb } from "@/db";
 import app from "@/index";
 import * as moneyAdmission from "@/lib/money-admission";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
@@ -90,8 +91,8 @@ function refuseNextMoneyStart() {
 
 async function expectMoneyStartRefused(response: Response): Promise<void> {
   expect(response.status).toBe(403);
-  const body = (await response.json()) as Record<string, unknown>;
-  expect(body.error).toEqual({
+  const body: unknown = await response.json();
+  expect(errorResponseSchema.parse(body).error).toEqual({
     code: "FORBIDDEN",
     message: "Organization is not active",
     details: { reason: "organization_inactive" },
