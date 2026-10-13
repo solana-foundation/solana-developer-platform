@@ -100,31 +100,17 @@ describe("sponsorship identity boundary", () => {
   });
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(env, {
-      environment: "sandbox",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "user", id: "usr_test_sponsorship" },
-    });
-    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
-      "sdp:v1:sandbox:org_test_sponsorship:project:project_1:user:usr_test_sponsorship",
-      undefined
+    runInClusterScope({ projectId: "project_1", environment: "sandbox" }, () =>
+      createSponsorshipFeePayment(env, {
+        environment: "sandbox",
+        organizationId: "org_test_sponsorship",
+        projectId: "project_1",
+        actor: { type: "user", id: "usr_test_sponsorship" },
+      })
     );
-  });
-  it("selects the paymaster by the scope's cluster when a flow names one", () => {
-    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(env, {
-      environment: "production",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "mainnet-beta",
-    });
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:production:org_test_sponsorship:project:project_1:wallet:cwlt_1",
-      "mainnet-beta"
+      "sdp:v1:sandbox:org_test_sponsorship:project:project_1:user:usr_test_sponsorship"
     );
   });
   function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
@@ -230,13 +216,12 @@ describe("sponsorship identity boundary", () => {
       "sdp:v1:production:org_trusted:project:project_trusted:api_key:key_trusted"
     );
   });
-  it("sponsors a Production request on the open cluster scope's mainnet-beta", async () => {
+  it("takes a Production request's environment from the open cluster scope", async () => {
     const app = productionApiKeyApp();
     app.get("/probe", (c) => c.json(resolveAuthenticatedSponsorshipScope(c)));
     const response = await app.request("/probe", {}, testEnv);
     expect(await response.json()).toEqual({
       environment: "production",
-      cluster: "mainnet-beta",
       organizationId: "org_trusted",
       projectId: "project_trusted",
       actor: { type: "api_key", id: "key_trusted" },
@@ -282,16 +267,35 @@ describe("sponsorship identity boundary", () => {
       status: "active",
     });
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    await createProjectSponsorshipFeePayment(env, {
-      organizationId: "org_stored",
-      projectId: "project_stored",
-      actor: { type: "wallet", id: "wallet_stored" },
-    });
+    await runInClusterScope({ projectId: "project_stored", environment: "production" }, () =>
+      createProjectSponsorshipFeePayment(env, {
+        organizationId: "org_stored",
+        projectId: "project_stored",
+        actor: { type: "wallet", id: "wallet_stored" },
+      })
+    );
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
-      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
-      undefined
+      "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored"
     );
+  });
+  it("refuses a Production project's sponsorship inside a sandbox scope before building a Kora adapter", async () => {
+    projectMocks.getProject.mockResolvedValue({
+      id: "project_stored",
+      organizationId: "org_stored",
+      environment: "production",
+      status: "active",
+    });
+    await expect(
+      runInClusterScope({ projectId: "project_stored", environment: "sandbox" }, () =>
+        createProjectSponsorshipFeePayment(testEnv, {
+          organizationId: "org_stored",
+          projectId: "project_stored",
+          actor: { type: "wallet", id: "wallet_stored" },
+        })
+      )
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
   });
   it("rejects a persisted project that does not belong to the claimed organization", async () => {
     projectMocks.getProject.mockResolvedValue({

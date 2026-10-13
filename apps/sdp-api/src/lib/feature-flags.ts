@@ -1,5 +1,4 @@
 import type { CustodyProvider } from "@sdp/custody";
-import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
 import {
   type CustodyMode,
   isModuleInReleaseChannel,
@@ -9,7 +8,6 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
   type SdpRampProviderStages,
-  type SolanaCluster,
 } from "@sdp/types";
 import { isCustodyProviderInReleaseChannel } from "@sdp/types/release-channels";
 import type { Env } from "@/types/env";
@@ -175,36 +173,22 @@ export function isEarnHastraDexExitConfigured(
 }
 
 /**
- * Whether Kora sponsors an Earn vault movement on `cluster`: both the network
- * fee and the share-ATA rent a first deposit needs.
+ * Whether SDP sponsors Earn vault movements: both the network fee and the share-ATA rent a first
+ * deposit needs. Flag off answers wallet-pays everywhere. Flag on means every movement is
+ * sponsored, and a movement on a cluster with no Kora is refused with 503 at fee-payer
+ * construction (`resolveVaultSponsorship`), never silently downgraded to wallet-pays.
  *
- * TAKES THE CLUSTER, and that is the whole point rather than an extra
- * parameter. One API process serves both clusters at once (a sandbox project is
- * devnet, a production project is mainnet-beta), deposits are environment-gated
- * but WITHDRAWALS DELIBERATELY ARE NOT (ADR 0002 forbids money-out inheriting a
- * money-in gate), and both directions share one fee decision. A single
- * deployment-global boolean would therefore flip mainnet withdrawals to
- * sponsored at the instant devnet deposits were enabled, against a paymaster
- * that may not exist for that cluster: a 5xx on a customer's exit path, which
- * is the one failure ADR 0002 rules out.
+ * Operator constraint: the flag is deployment-global and withdrawals are not environment-gated
+ * (ADR 0002), so turning it on before EVERY cluster has its Kora (`KORA_RPC_URL_DEVNET` and
+ * `KORA_RPC_URL_MAINNET`) refuses withdrawals on the unwired cluster.
  *
- * Which clusters are sponsored is CONFIGURATION, not a list in code: the flag
- * must be on AND the deployment must have a fee payer for the cluster
- * (`isFeePaymentConfiguredForCluster`: `KORA_RPC_URL` for the process network,
- * `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET` for the other). Opening
- * mainnet is therefore wiring the mainnet Kora into the deployment, after its
- * `fee_payer_policy` is opened and `sbp_mainnet_global` is enabled (PRO-1738);
- * closing it is removing that wiring, with no code change either way.
- *
- * Fail-closed on both axes: an unconfigured flag and an unconfigured cluster
- * each answer false, and callers fall back to the wallet paying its own way.
+ * @param env - Environment carrying the flag.
+ * @returns True when the flag is on.
  */
 export function isEarnVaultSponsorshipEnabled(
-  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED"> & FeePaymentEnv,
-  cluster: SolanaCluster
+  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
 ): boolean {
-  if (!isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED)) return false;
-  return isFeePaymentConfiguredForCluster(env, cluster);
+  return isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED);
 }
 
 /**
@@ -214,9 +198,9 @@ export function isEarnVaultSponsorshipEnabled(
  * admission and emits `sdp_api_earn_volume_cap_evaluated` with `would_block`,
  * but nothing is refused and no preview reports a blocking issue. Defaults
  * are set from that shadow data, then this flips. Deliberately a plain
- * truthy flag with no cluster narrowing, unlike sponsorship: a cap is a
- * platform posture, not a per-cluster capability, and the caps themselves
- * are already keyed by cluster in `handlers/curation.ts`.
+ * truthy flag with no cluster narrowing: a cap is a platform posture, not a
+ * per-cluster capability, and the caps themselves are already keyed by
+ * cluster in `handlers/curation.ts`.
  *
  * Fail-closed reads of the cap INPUTS do not consult this: an exposure read
  * that throws refuses the deposit in shadow mode too (ADR 0004, "fail closed

@@ -284,7 +284,6 @@ export async function sendSubscriptionInstructions(input: {
   const feePayment = await createProjectSponsorshipFeePayment(input.env, {
     organizationId: input.organizationId,
     projectId: input.projectId,
-    cluster: currentClusterScope().cluster,
     actor: { type: "wallet", id: input.sourceWallet.walletId },
   });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());

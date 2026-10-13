@@ -610,7 +610,7 @@ class AuthorizedKoraClient implements KoraClientTransport {
 function createCloudRunIdentityTokenProvider(audience: string): () => Promise<string> {
   const normalizedAudience = audience.trim();
   if (!normalizedAudience) {
-    throw new Error("KORA_CLOUD_RUN_AUDIENCE cannot be empty");
+    throw new Error("KORA_CLOUD_RUN_AUDIENCE_<CLUSTER> cannot be empty");
   }
 
   let cachedToken: string | undefined;
@@ -649,7 +649,9 @@ function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): vo
     destination = new URL(rpcUrl);
     trustedAudience = new URL(audience);
   } catch {
-    throw new Error("KORA_RPC_URL and KORA_CLOUD_RUN_AUDIENCE must be valid URLs");
+    throw new Error(
+      "KORA_RPC_URL_<CLUSTER> and KORA_CLOUD_RUN_AUDIENCE_<CLUSTER> must be valid URLs"
+    );
   }
 
   const hasCredentials =
@@ -663,7 +665,9 @@ function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): vo
     destination.origin !== trustedAudience.origin ||
     hasCredentials
   ) {
-    throw new Error("KORA_RPC_URL must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE origin");
+    throw new Error(
+      "KORA_RPC_URL_<CLUSTER> must use HTTPS and match the KORA_CLOUD_RUN_AUDIENCE_<CLUSTER> origin"
+    );
   }
 }
 

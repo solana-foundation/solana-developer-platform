@@ -224,11 +224,8 @@ export interface Env extends ManagedRpcEnv {
 
   // Kora (gasless) configuration
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
-  KORA_RPC_URL?: string;
-  KORA_API_KEY?: string;
-  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
-  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
+  /** Per-cluster Kora endpoints; the cluster scope picks the trio (see @sdp/payments `resolveKoraEndpoint`). */
   KORA_RPC_URL_DEVNET?: string;
   KORA_API_KEY_DEVNET?: string;
   KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
@@ -323,9 +320,9 @@ export interface Env extends ManagedRpcEnv {
   // the parties can only unwind. It cannot be either party or an executable
   // account. Where it ultimately lives is still an open decision (PRO-1796).
   DVP_SETTLEMENT_AUTHORITY?: string;
-  // Whether Kora pays fees AND share-ATA rent for Earn vault movements.
-  // Narrowed to devnet by `isEarnVaultSponsorshipEnabled`, never global: one
-  // process serves both clusters and withdrawals are not environment-gated.
+  // Whether Kora pays fees AND share-ATA rent for Earn vault movements, on
+  // every cluster at once: with it on, a cluster whose Kora is not configured
+  // refuses sponsored movements (503), so wire every cluster's Kora first.
   EARN_VAULT_FEE_SPONSORSHIP_ENABLED?: string;
   // Whether the Earn volume caps (ADR 0004) refuse deposits. Unset or false is
   // shadow mode: evaluate and emit `sdp_api_earn_volume_cap_evaluated`, refuse

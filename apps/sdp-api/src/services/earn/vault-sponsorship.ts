@@ -1,5 +1,4 @@
 import type { FeePaymentPort } from "@sdp/payments/fee-payment";
-import type { SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -56,32 +55,42 @@ export interface ResolveVaultSponsorshipInput {
   projectId: string;
   /** Custody wallet id, used as the sponsorship quota actor. */
   walletId: string;
-  /** Cluster the movement executes on, NOT the process's default network. */
-  cluster: SolanaCluster;
   deadline: VaultDeadline;
 }
 
 /**
- * Decide who pays, and resolve the sponsor when that is SDP.
+ * Decide who pays on the open cluster scope's cluster, and resolve the sponsor when that is SDP.
  *
  * CALL THIS AFTER the idempotency replay short-circuit, never before. A replay
  * is a pure durable read that must keep answering during a paymaster or RPC
  * outage; resolving sponsorship first would make a already-signed movement
  * un-returnable exactly when a caller is retrying.
  *
- * Fail-closed by construction: an unset flag, or a cluster with no paymaster
- * configured, answers `wallet-pays`, so turning sponsorship off (or on, per
- * cluster) is a configuration change and never a code change. Provider
+ * An unset flag answers `wallet-pays`. A set flag sponsors every movement: a
+ * cluster with no Kora configured is refused with 503, never downgraded to
+ * `wallet-pays`, so the operator wires every cluster's Kora before turning the
+ * flag on (see `isEarnVaultSponsorshipEnabled`). Provider
  * construction goes through the shared sponsorship boundary rather than a raw
  * adapter, so managed deployments keep the budget reservation and the Kora
  * usage identity that boundary owns; bypassing it would spend the fee payer's
  * lamports without any budget seeing it.
+ *
+ * @param env - Environment carrying the sponsorship flag and fee-payment configuration.
+ * @param input - The movement's owner and deadline.
+ * @param input.organizationId - The organization that owns the project.
+ * @param input.projectId - The project the sponsorship is charged to.
+ * @param input.walletId - Custody wallet id, used as the sponsorship quota actor.
+ * @param input.deadline - The movement's deadline, bounding the fee-payer lookup.
+ * @returns The fee mode for the movement.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` (503) when the flag is on and the scope's
+ *   cluster has no Kora configured.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope when the flag is on.
  */
 export async function resolveVaultSponsorship(
   env: Env,
   input: ResolveVaultSponsorshipInput
 ): Promise<VaultFeeMode> {
-  if (!isEarnVaultSponsorshipEnabled(env, input.cluster)) {
+  if (!isEarnVaultSponsorshipEnabled(env)) {
     return { kind: "wallet-pays" };
   }
 
@@ -89,7 +98,6 @@ export async function resolveVaultSponsorship(
     organizationId: input.organizationId,
     projectId: input.projectId,
     actor: { type: "wallet", id: input.walletId },
-    cluster: input.cluster,
   });
   const sponsor = await input.deadline.run("Resolving the sponsored fee payer", () =>
     feePayment.getFeePayer()

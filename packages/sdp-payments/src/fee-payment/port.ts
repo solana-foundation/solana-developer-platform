@@ -10,7 +10,6 @@
  * - NativeAdapter: Direct SOL fee payment (fallback/testing)
  */
 
-import type { RpcEnv } from "@sdp/rpc";
 import type { Address, Signature } from "@solana/kit";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -22,17 +21,12 @@ import type { Address, Signature } from "@solana/kit";
  * doppler-injected `Env` satisfies this shape; the package never reads
  * `process.env` directly.
  */
-export interface FeePaymentEnv extends RpcEnv {
+export interface FeePaymentEnv {
   FEE_PAYMENT_PROVIDER?: "kora" | "native";
-  /** The Kora serving the process's default cluster (`SOLANA_NETWORK`). */
-  KORA_RPC_URL?: string;
-  KORA_API_KEY?: string;
-  KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
   /**
-   * Per-cluster Kora endpoints, for a process that sponsors on BOTH clusters.
-   * Each trio is self-contained: a cluster with its own URL uses its own key and
-   * audience, never the default trio's. See `resolveKoraEndpoint`.
+   * Per-cluster Kora endpoints. A Kora instance binds to one cluster, so the cluster scope picks
+   * the trio and each trio is self-contained. See `resolveKoraEndpoint`.
    *
    * The cluster is a SUFFIX on purpose. `KORA_DEVNET_RPC_URL` and
    * `KORA_MAINNET_RPC_URL` already exist in Doppler and mean something else:

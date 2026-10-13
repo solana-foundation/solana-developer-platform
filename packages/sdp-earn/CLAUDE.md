@@ -81,7 +81,7 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   project; an `?environment=` naming another environment answers 409.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
-  `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
+  `KORA_RPC_URL_DEVNET` at it. `infra/kora/kora.toml` already carries the Kamino program
   ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
   `allow_create_account = true`, so the harness needs no edit (deployed devnet
   Kora carries the same allowlist and token set since sdp-infra#64 and
