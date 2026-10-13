@@ -96,12 +96,11 @@ function toApiActionErrorMessage(
 /**
  * Connects the provider the form names and provisions its first wallet.
  *
- * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `network`, `accountPolicy`.
+ * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `accountPolicy`.
  */
 async function initializeCustodyWallet(formData: FormData): Promise<void> {
   const provider = requireCustodyProvider(formData);
   const walletLabel = getOptionalString(formData, "walletLabel");
-  const network = getOptionalString(formData, "network");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
 
   const payload: Record<string, unknown> = {
@@ -109,13 +108,8 @@ async function initializeCustodyWallet(formData: FormData): Promise<void> {
     walletLabel,
   };
 
-  if (provider !== "fireblocks") {
-    if (network) {
-      payload.network = network;
-    }
-    if (accountPolicy) {
-      payload.accountPolicy = accountPolicy;
-    }
+  if (provider !== "fireblocks" && accountPolicy) {
+    payload.accountPolicy = accountPolicy;
   }
 
   const client = await createSdpApiClient();
