@@ -11,7 +11,7 @@ import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, internalError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
@@ -256,6 +256,8 @@ export function createAuthenticatedSponsorshipFeePayment(c: AppContext): Sponsor
  * @param input.actor - The server-derived actor the Kora quota is keyed by.
  * @returns The sponsorship fee payment for the scope's cluster.
  * @throws AppError `FORBIDDEN` when the project is missing, inactive, or another organization's.
+ * @throws AppError `INTERNAL_ERROR` when the project's environment is not the scope's: the scope's
+ * Kora and budget would otherwise sponsor another environment's work.
  * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the scope's cluster has no Kora configured.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
@@ -270,6 +272,11 @@ export async function createProjectSponsorshipFeePayment(
   const project = await new ProjectService(getDb(env)).getProject(input.projectId);
   if (!project || project.organizationId !== input.organizationId || project.status !== "active") {
     throw new AppError("FORBIDDEN", "Sponsorship project is not active or accessible");
+  }
+  if (project.environment !== currentClusterScope().environment) {
+    throw internalError(
+      `Sponsorship for a ${project.environment} project opened in a ${currentClusterScope().environment} cluster scope`
+    );
   }
 
   return createSponsorshipFeePayment(env, {
