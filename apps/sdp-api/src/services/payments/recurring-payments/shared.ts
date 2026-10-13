@@ -1,6 +1,6 @@
-import { getSolanaConfig } from "@sdp/rpc";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { type PreparedPaymentSubscriptionTransaction, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
@@ -58,7 +58,16 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
 
 /**
  * Resolves a recurring-payment token to its mint, allowing only well-known USD
- * stablecoins on the configured cluster or active tokens issued in the project.
+ * stablecoins on the open cluster scope's cluster or active tokens issued in the project.
+ *
+ * @param token - A well-known token symbol or a mint address.
+ * @param organizationId - The organization owning the project.
+ * @param projectId - The project whose issued tokens are accepted.
+ * @param env - The worker environment the token repository reads through.
+ * @returns The accepted mint address.
+ * @throws AppError (400) when the token is native SOL, a non-USD or off-cluster well-known
+ * token, or a mint not actively issued in the project.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function assertRecurringPaymentTokenMint(
   token: string,
@@ -70,8 +79,8 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const cluster = getSolanaConfig(env).network;
-  const mint = assertValidAddress(normalizePaymentToken(token, cluster), "token");
+  const { cluster } = currentClusterScope();
+  const mint = assertValidAddress(normalizePaymentToken(token), "token");
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
     if (wellKnown.isUsdStable && wellKnown.clusters.includes(cluster)) {
@@ -149,7 +158,7 @@ export async function buildPreparedSubscriptionTransaction(
   requiredSigners: Address[]
 ): Promise<PreparedPaymentSubscriptionTransaction> {
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -230,6 +239,23 @@ export function assertRecurringPaymentSourceWallet(
   }
 }
 
+/**
+ * Signs subscription instructions with the source wallet and submits them through the project's
+ * sponsorship fee payer, on the open cluster scope's cluster.
+ *
+ * @param input - The submission inputs.
+ * @param input.env - The worker environment.
+ * @param input.organizationId - The organization owning the project.
+ * @param input.projectId - The project whose sponsorship pays the fee.
+ * @param input.sourceWallet - The custody wallet that signs the instructions.
+ * @param input.sourceSigner - A signer already resolved for `sourceWallet`; resolved from custody when absent.
+ * @param input.instructions - Instructions appended to the transaction in order.
+ * @param input.feePayer - Fee payer overriding the sponsorship fee payer's address.
+ * @param input.submissionStore - Durable store for the signed submission; without it the fee payer signs and sends directly.
+ * @returns The submitted transaction's signature.
+ * @throws AppError (400) when the resolved signer does not match the source wallet.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export async function sendSubscriptionInstructions(input: {
   env: Env;
   organizationId: string;
@@ -253,11 +279,12 @@ export async function sendSubscriptionInstructions(input: {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
-  const rpc = solanaRpc.createRpc(input.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const rpc = createClusterRpc();
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const feePayment = await createProjectSponsorshipFeePayment(input.env, {
     organizationId: input.organizationId,
     projectId: input.projectId,
+    cluster: currentClusterScope().cluster,
     actor: { type: "wallet", id: input.sourceWallet.walletId },
   });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
@@ -281,13 +308,21 @@ export async function sendSubscriptionInstructions(input: {
     : feePayment.signAndSend(txBytes);
 }
 
+/**
+ * Waits for a subscription transaction to reach `confirmed` on the open cluster scope's cluster.
+ *
+ * @param signature - The submitted transaction's signature.
+ * @param message - The error message when the transaction landed with an error.
+ * @returns Resolves once the transaction is confirmed without error.
+ * @throws AppError (transaction failed) when the confirmed transaction carries an error.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export async function confirmSubscriptionSignature(
-  env: Env,
   signature: Signature,
   message: string
 ): Promise<void> {
-  const rpc = solanaRpc.createRpc(env);
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+  const rpc = createClusterRpc();
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 

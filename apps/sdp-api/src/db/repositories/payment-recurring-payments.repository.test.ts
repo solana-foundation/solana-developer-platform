@@ -1,3 +1,9 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import {
+  type PaymentRecurringPaymentStatus,
+  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+  type SdpEnvironment,
+} from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -11,6 +17,7 @@ import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-pay
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_recurring_payments_repo_test";
+const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
 const TEST_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_test";
 const TEST_SIBLING_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_sibling";
 const TEST_PROVIDER_WALLET_ID = "wallet_recurring_payments_repo_test";
@@ -75,12 +82,12 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
   });
 
-  async function seedCounterpartyAccount() {
+  async function seedCounterpartyAccount(projectId: string) {
     const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
     const counterpartyAccountsRepo = createPostgresCounterpartyAccountsRepository(getDb(env));
     const counterparty = await counterpartiesRepo.createCounterparty({
       organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+      projectId,
       externalId: null,
       entityType: "individual",
       displayName: "Acme Recipient",
@@ -93,7 +100,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
 
     const account = await counterpartyAccountsRepo.createCounterpartyAccount({
       organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+      projectId,
       counterpartyId: counterparty.id,
       accountKind: "crypto_wallet",
       label: "Acme Solana",
@@ -107,7 +114,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   }
 
   it("persists exact source identities and authorizes Provider IDs only for legacy rows", async () => {
-    const { account, counterparty } = await seedCounterpartyAccount();
+    const { account, counterparty } = await seedCounterpartyAccount(TEST_PROJECT_ID);
     const createdAt = "2026-06-29T12:00:00.000Z";
     const create = (id: string, sourceCustodyWalletId: string) =>
       repo.createRecurringPayment({
@@ -216,7 +223,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   });
 
   it("guards pending updates with the expected updated_at value", async () => {
-    const { account, counterparty } = await seedCounterpartyAccount();
+    const { account, counterparty } = await seedCounterpartyAccount(TEST_PROJECT_ID);
     const createdAt = "2026-06-29T12:00:00.000Z";
     const created = await repo.createRecurringPayment({
       id: "recpay_repo_guard",
@@ -268,7 +275,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   });
 
   it("does not activate a canceled recurring payment with a stale activation writer", async () => {
-    const { account, counterparty } = await seedCounterpartyAccount();
+    const { account, counterparty } = await seedCounterpartyAccount(TEST_PROJECT_ID);
     const createdAt = "2026-06-29T12:00:00.000Z";
     const created = await repo.createRecurringPayment({
       id: "recpay_repo_stale_activation",
@@ -321,5 +328,77 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         walletAuthorization: null,
       })
     ).toEqual(before);
+  });
+
+  it("lists stale lifecycle and update rows only for the open scope's environment", async () => {
+    const staleAt = "2026-06-29T12:00:00.000Z";
+    const seedStaleRecurringPayment = async (
+      id: string,
+      projectId: string,
+      status: PaymentRecurringPaymentStatus
+    ) => {
+      const { account, counterparty } = await seedCounterpartyAccount(projectId);
+      await repo.createRecurringPayment({
+        id,
+        organizationId: TEST_ORG.id,
+        projectId,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_PROVIDER_WALLET_ID,
+        sourceAddress: TEST_SOURCE_ADDRESS,
+        counterpartyId: counterparty.id,
+        counterpartyAccountId: account.id,
+        destinationAddress: "Destination111111111111111111111111111111",
+        token: "USDC",
+        amount: "10.00",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        createdBy: TEST_USER.id,
+        createdAt: staleAt,
+        updatedAt: staleAt,
+      });
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(status, staleAt, id)
+        .run();
+    };
+    const lifecycleStatus = RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON[0];
+    await seedStaleRecurringPayment(
+      "recpay_repo_sandbox_lifecycle",
+      TEST_PROJECT_ID,
+      lifecycleStatus
+    );
+    await seedStaleRecurringPayment(
+      "recpay_repo_production_lifecycle",
+      TEST_PRODUCTION_PROJECT_ID,
+      lifecycleStatus
+    );
+    await seedStaleRecurringPayment("recpay_repo_sandbox_update", TEST_PROJECT_ID, "updating");
+    await seedStaleRecurringPayment(
+      "recpay_repo_production_update",
+      TEST_PRODUCTION_PROJECT_ID,
+      "updating"
+    );
+    const staleRowsIn = (environment: SdpEnvironment) =>
+      runInClusterScope({ projectId: null, environment }, async () => ({
+        lifecycle: (
+          await repo.listStaleLifecyclePayments({
+            staleBefore: "2026-06-29T12:30:00.000Z",
+            limit: 10,
+          })
+        ).map((row) => row.id),
+        update: (
+          await repo.listStaleUpdatePayments({ staleBefore: "2026-06-29T12:30:00.000Z", limit: 10 })
+        ).map((row) => ({ id: row.id, staleCount: row.stale_count })),
+      }));
+
+    expect(await staleRowsIn("sandbox")).toEqual({
+      lifecycle: ["recpay_repo_sandbox_lifecycle"],
+      update: [{ id: "recpay_repo_sandbox_update", staleCount: 1 }],
+    });
+    expect(await staleRowsIn("production")).toEqual({
+      lifecycle: ["recpay_repo_production_lifecycle"],
+      update: [{ id: "recpay_repo_production_update", staleCount: 1 }],
+    });
   });
 });
