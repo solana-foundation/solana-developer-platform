@@ -286,7 +286,8 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       .locator("article")
       .filter({ hasText: drillDownWallet.publicKey })
       .first();
-    await walletCard.getByRole("link", { name: "Manage" }).click();
+    // The card's link says "Open <wallet>" with new-design-wallets on and "Manage" with it off.
+    await walletCard.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`${projectHref(fixture.project.id, "/dashboard/wallets")}/.`),
