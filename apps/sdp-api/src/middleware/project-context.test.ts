@@ -29,7 +29,7 @@ function buildApp() {
   app.get("/probe", (c) =>
     c.json({
       projectId: c.get("projectId"),
-      projectEnvironment: c.get("projectEnvironment"),
+      environment: currentClusterScope().environment,
     })
   );
   app.get("/scope", (c) => c.json(currentClusterScope()));
@@ -97,7 +97,7 @@ describe("projectContextMiddleware", () => {
       env
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ projectId: TEST_PROJECT.id, projectEnvironment: "sandbox" });
+    expect(await res.json()).toEqual({ projectId: TEST_PROJECT.id, environment: "sandbox" });
   });
 
   it("requires the project header even when a query parameter is supplied", async () => {
@@ -134,7 +134,7 @@ describe("projectContextMiddleware", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       projectId: TEST_CACHED_API_KEY.projectId,
-      projectEnvironment: TEST_CACHED_API_KEY.environment,
+      environment: TEST_CACHED_API_KEY.environment,
     });
   });
 
@@ -289,7 +289,7 @@ describe("projectContextMiddleware", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         projectId: PRODUCTION_PROJECT_ID,
-        projectEnvironment: "production",
+        environment: "production",
       });
     });
 
