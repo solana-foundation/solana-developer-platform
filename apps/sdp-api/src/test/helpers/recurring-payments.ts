@@ -15,7 +15,6 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  mockRecurringActivationRpc,
   seedCounterparty,
   TEST_CUSTODY_WALLET_ID,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -46,7 +45,6 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    mockRecurringActivationRpc({});
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));

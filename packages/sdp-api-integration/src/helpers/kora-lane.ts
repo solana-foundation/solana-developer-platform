@@ -44,13 +44,71 @@ export function getIntegrationLaneRpc(): SolanaRpc | null {
   }
 }
 
-/** How long one lane faucet request may take, failover hops included. */
-const LANE_AIRDROP_TIMEOUT_MS = 30_000;
+/**
+ * The env key pattern of the lane cluster's managed pool, for a missing-config message.
+ *
+ * @returns E.g. `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL`.
+ */
+export function laneRpcPoolEnvKeyPattern(): string {
+  const clusterSuffix = getIntegrationLaneCluster() === "devnet" ? "DEVNET" : "MAINNET";
+  return `SOLANA_RPC_<PROVIDER>_${clusterSuffix}_API_KEY_URL`;
+}
 
 /**
- * Request a faucet airdrop on the lane cluster through the door's managed pool. Sent as JSON-RPC
- * over `createClusterJsonRpcFetch` because kit types `requestAirdrop` only on test-cluster
- * clients, and the door's client type spans both clusters.
+ * The lane cluster's managed-pool client for a suite that only runs once the lane is configured.
+ *
+ * @returns The lane client.
+ * @throws Error when the lane cluster has no managed pool endpoint configured.
+ */
+export function requireIntegrationLaneRpc(): SolanaRpc {
+  const laneRpc = getIntegrationLaneRpc();
+  if (laneRpc === null) {
+    throw new Error(`${laneRpcPoolEnvKeyPattern()} is required for this suite`);
+  }
+  return laneRpc;
+}
+
+/** How long one raw lane JSON-RPC call may take, failover hops included. */
+const LANE_JSON_RPC_TIMEOUT_MS = 30_000;
+
+/**
+ * Send one JSON-RPC call to the lane cluster through the door's managed pool, over
+ * `createClusterJsonRpcFetch`, for methods the door's client does not type: `requestAirdrop`
+ * (kit types it only on test-cluster clients) and Surfpool's `surfnet_*` cheatcodes.
+ *
+ * @param method - The JSON-RPC method.
+ * @param params - The positional params.
+ * @returns The response's `result`.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the lane cluster has no managed pool endpoint.
+ * @throws Error when the endpoint answers with a JSON-RPC error.
+ */
+export async function sendIntegrationLaneJsonRpc(
+  method: string,
+  params: readonly unknown[]
+): Promise<unknown> {
+  const environment = SDP_ENVIRONMENT_BY_CLUSTER[getIntegrationLaneCluster()];
+  const laneJsonRpcFetch = runInClusterScope({ projectId: null, environment }, () =>
+    createClusterJsonRpcFetch({ timeoutMs: LANE_JSON_RPC_TIMEOUT_MS })
+  );
+  const response = await laneJsonRpcFetch("", {
+    method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const payload: unknown = await response.json();
+  if (typeof payload !== "object" || payload === null) {
+    throw new Error(`${method} answered with a non-object JSON-RPC response`);
+  }
+  if ("error" in payload) {
+    throw new Error(`${method} failed: ${JSON.stringify(payload.error)}`);
+  }
+  if (!("result" in payload)) {
+    throw new Error(`${method} answered without a result`);
+  }
+  return payload.result;
+}
+
+/**
+ * Request a faucet airdrop on the lane cluster through the door's managed pool.
  *
  * @param walletAddress - The airdrop destination.
  * @param lamports - The amount to request.
@@ -62,23 +120,7 @@ export async function requestIntegrationLaneAirdrop(
   walletAddress: string,
   lamports: number
 ): Promise<void> {
-  const environment = SDP_ENVIRONMENT_BY_CLUSTER[getIntegrationLaneCluster()];
-  const laneJsonRpcFetch = runInClusterScope({ projectId: null, environment }, () =>
-    createClusterJsonRpcFetch({ timeoutMs: LANE_AIRDROP_TIMEOUT_MS })
-  );
-  const response = await laneJsonRpcFetch("", {
-    method: "POST",
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "requestAirdrop",
-      params: [walletAddress, lamports],
-    }),
-  });
-  const payload: unknown = await response.json();
-  if (typeof payload === "object" && payload !== null && "error" in payload) {
-    throw new Error(`requestAirdrop failed: ${JSON.stringify(payload.error)}`);
-  }
+  await sendIntegrationLaneJsonRpc("requestAirdrop", [walletAddress, lamports]);
 }
 
 /**

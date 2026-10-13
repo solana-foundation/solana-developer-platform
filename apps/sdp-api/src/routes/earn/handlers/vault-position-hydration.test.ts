@@ -1,11 +1,13 @@
 import type { EarnVaultPositionInput, EarnVaultPositionSnapshot } from "@sdp/earn/types";
-import { readFloor, withRpcReadContext } from "@sdp/rpc/read-context";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { readFloor } from "@sdp/rpc/read-context";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, getAccountInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
-import type { Address, RpcTransport } from "@solana/kit";
+import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createVaultDeadline, VaultDeadline } from "@/services/earn/vault-deadline";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { AppContext } from "../context";
 import {
   closeEmptyHydratedPositions,
@@ -167,6 +169,7 @@ describe("describeHydrationFailure", () => {
 });
 
 describe("hydrateVaultPositions shares identical provider reads in flight", () => {
+  const rpc = installClusterRpcStub();
   const OTHER_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
   const TOKEN = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
   const SHARE = "So11111111111111111111111111111111111111112";
@@ -415,15 +418,13 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
   ])(
     "shares one minimum-slot scope whose verdict holds for every caller: bank %s",
     async (bank, value) => {
-      const requests: unknown[] = [];
-      const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
-        requests.push(request.payload);
-        return { jsonrpc: "2.0", id: 1, result: { context: { slot: bank }, value: null } } as T;
-      };
-      const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+      rpc.answer("getAccountInfo", { context: { slot: bank }, value: null });
       mocks.readVaultPositions.mockImplementation(
         async (_ctx: unknown, input: EarnVaultPositionInput) => {
-          await getAccountInfo(rpc, input.owner as Address);
+          await getAccountInfo(
+            createClusterBoundedRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+            address(input.owner)
+          );
           return input.providerReferences.map((providerReference) => ({
             providerReference,
             owner: input.owner,
@@ -446,7 +447,7 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
         hydrateIn("sandbox", context({}), positions, options),
       ]);
 
-      expect(requests).toHaveLength(1);
+      expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toHaveLength(1);
       for (const live of results) expect(live.get("p1")).toEqual(value);
     }
   );

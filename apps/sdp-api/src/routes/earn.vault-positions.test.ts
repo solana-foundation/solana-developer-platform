@@ -1,8 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
-import { withRpcReadContext } from "@sdp/rpc/read-context";
-import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, getAccountInfo } from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
-import type { Address, RpcTransport } from "@solana/kit";
+import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -12,7 +12,7 @@ import {
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -229,7 +229,7 @@ afterEach(() => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
-  installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
     "does not constrain an unrelated %s position after a Kamino deposit",
@@ -241,19 +241,15 @@ describe("GET /v1/earn/vault-positions", () => {
       ]);
       const originalRead = readVaultPositions.getMockImplementation();
       if (!originalRead) throw new Error("Missing provider fixture");
+      rpc.respond("getAccountInfo", (request) => ({
+        result: { context: { slot: request.params[0] === PUBLIC_KEY_A ? 101 : 100 }, value: null },
+      }));
       readVaultPositions.mockImplementation(async (context, input) => {
         const affectedRead = input.providerReferences.includes("affected");
-        const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
-          const payload = request.payload as { params: [string, { minContextSlot?: number }] };
-          expect(payload.params[1].minContextSlot).toBe(affectedRead ? 101 : undefined);
-          return {
-            jsonrpc: "2.0",
-            id: 1,
-            result: { context: { slot: affectedRead ? 101 : 100 }, value: null },
-          } as T;
-        };
-        const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
-        await getAccountInfo(rpc, input.owner as Address);
+        await getAccountInfo(
+          createClusterBoundedRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+          address(affectedRead ? PUBLIC_KEY_A : PUBLIC_KEY_B)
+        );
         return originalRead(context, input);
       });
       const response = await getPositions(`?afterMovementIds=${affected.movement.id}`);
@@ -268,6 +264,19 @@ describe("GET /v1/earn/vault-positions", () => {
         ])
       );
       expect(readVaultPositions).toHaveBeenCalledTimes(2);
+      expect(rpc.requests.filter((request) => request.method === "getAccountInfo")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            params: [PUBLIC_KEY_A, expect.objectContaining({ minContextSlot: 101 })],
+          }),
+          expect.objectContaining({
+            params: [
+              PUBLIC_KEY_B,
+              expect.not.objectContaining({ minContextSlot: expect.anything() }),
+            ],
+          }),
+        ])
+      );
     }
   );
 
@@ -280,14 +289,12 @@ describe("GET /v1/earn/vault-positions", () => {
       ]);
       const originalRead = readVaultPositions.getMockImplementation();
       if (!originalRead) throw new Error("Missing provider fixture");
-      const payloads: unknown[] = [];
-      const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
-        payloads.push(request.payload);
-        return { jsonrpc: "2.0", id: 1, result: { context: { slot }, value: null } } as T;
-      };
-      const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+      rpc.answer("getAccountInfo", { context: { slot }, value: null });
       readVaultPositions.mockImplementation(async (context, input) => {
-        await getAccountInfo(rpc, input.owner as Address);
+        await getAccountInfo(
+          createClusterBoundedRpc({ timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS }),
+          address(input.owner)
+        );
         return originalRead(context, input);
       });
       const response = await getPositions(`?afterMovementIds=${created.movement.id}`);
@@ -301,7 +308,7 @@ describe("GET /v1/earn/vault-positions", () => {
       });
       expect(body.data.positions).toHaveLength(1);
       expect(body.data.positions[0]?.tokenValue).toBe(slot < 101 ? undefined : "1");
-      expect(payloads).toContainEqual(
+      expect(rpc.requests).toContainEqual(
         expect.objectContaining({
           method: "getAccountInfo",
           params: [

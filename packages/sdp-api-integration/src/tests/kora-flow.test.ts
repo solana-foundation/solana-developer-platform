@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { signature } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SignerCheckApiResponse } from "../helpers/api-types";
 import {
@@ -7,7 +8,12 @@ import {
   initIntegrationApiSuite,
   requestWithApiKey,
 } from "../helpers/integration";
-import { getIntegrationLaneKora } from "../helpers/kora-lane";
+import {
+  getIntegrationLaneKora,
+  getIntegrationLaneRpc,
+  laneRpcPoolEnvKeyPattern,
+  requireIntegrationLaneRpc,
+} from "../helpers/kora-lane";
 
 const { createSigningService, getDb, SponsorshipBudgetRepository, TEST_ORG, TEST_PROJECT } =
   apiTestSupport;
@@ -17,99 +23,10 @@ const KORA_LIVE_SMOKE_POLICY_OPERATOR = "kora-live-smoke";
 const KORA_LIVE_SMOKE_POLICY_REASON =
   "Permit isolated live Kora smoke against the reviewed provider outflow ceiling";
 
-type SolanaRpcResponse<T> =
-  | { jsonrpc: "2.0"; id: number; result: T }
-  | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
-
-class SolanaRpcError extends Error {
-  constructor(
-    message: string,
-    readonly code?: number
-  ) {
-    super(message);
-    this.name = "SolanaRpcError";
-  }
-}
-
-type ParsedAccountKey = string | { pubkey: string; signer?: boolean };
-type ParsedInstruction = { programId?: string; parsed?: unknown };
-
-type ParsedTransactionResponse = {
-  slot: number;
-  transaction: {
-    message: {
-      accountKeys: ParsedAccountKey[];
-      instructions: ParsedInstruction[];
-    };
-  };
-  meta: { err: unknown } | null;
-};
-
-const SOLANA_RPC_REQUEST_TIMEOUT_MS = 10_000;
-
-async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
-  const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl) {
-    throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SOLANA_RPC_REQUEST_TIMEOUT_MS);
-  let response: Response | null = null;
-  let responseText = "";
-  try {
-    response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal: controller.signal,
-    });
-    responseText = await response.text();
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new SolanaRpcError(
-        `Request timed out calling ${method} after ${SOLANA_RPC_REQUEST_TIMEOUT_MS}ms`,
-        408
-      );
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response) {
-    throw new SolanaRpcError(`No response received calling ${method}`);
-  }
-
-  if (!response.ok) {
-    throw new SolanaRpcError(
-      `HTTP ${response.status} calling ${method}: ${responseText.slice(0, 200)}`,
-      response.status
-    );
-  }
-
-  let payload: SolanaRpcResponse<T>;
-  try {
-    payload = JSON.parse(responseText) as SolanaRpcResponse<T>;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new SolanaRpcError(`Invalid JSON response calling ${method}: ${message}`);
-  }
-
-  if ("error" in payload) {
-    throw new SolanaRpcError(
-      payload.error.message ?? `RPC error calling ${method}`,
-      payload.error.code
-    );
-  }
-
-  return payload.result;
-}
-
 function assertKoraLiveSmokeEnvConfigured() {
   const missing: string[] = [];
   if (env.RUN_INTEGRATION_TESTS !== "true") missing.push("RUN_INTEGRATION_TESTS=true");
-  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (!getIntegrationLaneRpc()) missing.push(laneRpcPoolEnvKeyPattern());
   const laneKora = getIntegrationLaneKora();
   if (!laneKora.rpcUrl) missing.push(laneKora.rpcUrlEnvKey);
   if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
@@ -270,10 +187,13 @@ describe("Kora Fee Payment (Live Smoke)", () => {
 
       // The check runs in RPC simulation and must never broadcast: the
       // wallet's signature is real, but no transaction may exist on chain.
-      const onChain = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
-        signerCheck.signature,
-        { commitment: "confirmed", encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
-      ]);
+      const onChain = await requireIntegrationLaneRpc()
+        .getTransaction(signature(signerCheck.signature), {
+          commitment: "confirmed",
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: 0,
+        })
+        .send();
       expect(onChain).toBeNull();
       signerCheckPassed = true;
     } finally {

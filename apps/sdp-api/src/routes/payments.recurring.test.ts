@@ -54,7 +54,6 @@ import {
   getRecentBlockhashMock,
   getTransactionMock,
   installPaymentsRouteTestHooks,
-  mockRecurringActivationRpc,
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
@@ -1628,7 +1627,6 @@ describe("Payments routes — recurring", () => {
   });
 
   it("creates the source token account during recurring payment activation when it is missing", async () => {
-    mockRecurringActivationRpc({ tokenAccounts: [] });
     const sourceSigner = recurringExecution.sourceSigner();
     const signAndSendMock = recurringExecution.signAndSendMock();
     signAndSendMock.mockResolvedValue(

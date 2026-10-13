@@ -1,12 +1,7 @@
-import type { RpcEnv } from "@sdp/rpc";
 import { isTransientRpcError } from "@sdp/rpc";
 import { SdpRpcError, solanaRpcError } from "@sdp/rpc/errors";
-import {
-  confirmTransaction,
-  createRpc,
-  type SolanaRpc,
-  sendAndConfirmTransaction,
-} from "@sdp/rpc/solana";
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { confirmTransaction, type SolanaRpc, sendAndConfirmTransaction } from "@sdp/rpc/solana";
 import { getBase64Codec, type Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
@@ -133,8 +128,8 @@ describe("confirmTransaction transient poll tolerance", () => {
   });
 });
 
-describe("createRpc request timeout", () => {
-  const TEST_ENV = { SOLANA_RPC_URL: "http://127.0.0.1:1" } as RpcEnv;
+describe("createEndpointRpc request timeout", () => {
+  const STALLED_ENDPOINT_URL = "http://127.0.0.1:1";
 
   /**
    * Fake fetch that behaves like a stalled server: the socket stays open and
@@ -154,7 +149,7 @@ describe("createRpc request timeout", () => {
 
   it("rejects a stalled request with a transient-classified SOLANA_RPC_ERROR", async () => {
     vi.stubGlobal("fetch", stallingFetch());
-    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 25 });
+    const rpc = createEndpointRpc(STALLED_ENDPOINT_URL, { timeoutMs: 25 });
 
     const error = await captureRejection(rpc.getSlot().send());
 
@@ -165,15 +160,14 @@ describe("createRpc request timeout", () => {
     expect(isTransientRpcError(appError)).toBe(true);
   });
 
-  it("defers to a caller-supplied abortSignal instead of imposing its own deadline", async () => {
+  it("surfaces a caller's own abort as-is rather than as the deadline timeout", async () => {
     vi.stubGlobal("fetch", stallingFetch());
-    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 60_000 });
+    const rpc = createEndpointRpc(STALLED_ENDPOINT_URL, { timeoutMs: 60_000 });
 
     const error = await captureRejection(
       rpc.getSlot().send({ abortSignal: AbortSignal.timeout(25) })
     );
 
-    // The caller's abort surfaces as-is; our transport deadline must not rewrap it.
     expect(error).not.toBeInstanceOf(SdpRpcError);
   });
 });

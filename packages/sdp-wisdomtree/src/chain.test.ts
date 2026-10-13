@@ -1,9 +1,11 @@
+import { createEndpointRpc } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import {
   WISDOMTREE_FUNDS,
   WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS,
 } from "@sdp/types/wisdomtree-programs";
-import { address, createNoopSigner, createSolanaRpc, getAddressEncoder } from "@solana/kit";
+import { address, createNoopSigner, getAddressEncoder } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWisdomTreeChainReader } from "./chain";
@@ -25,7 +27,7 @@ const OWNER = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const ON_RECEIPT = "ComputeBudget111111111111111111111111111111";
 const RPC_URL = "http://rpc.invalid";
 const SLOT = 7;
-const rpc = createSolanaRpc(RPC_URL);
+const rpc = createEndpointRpc(RPC_URL, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS });
 const runtime: WisdomTreeRuntime = { cluster: "mainnet-beta", rpc };
 const encoder = getAddressEncoder();
 
