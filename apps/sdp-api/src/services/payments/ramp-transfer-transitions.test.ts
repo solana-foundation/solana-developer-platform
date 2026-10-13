@@ -223,6 +223,8 @@ interface RampStatusWriter {
   /** A string that must appear in `file`, so a moved or deleted writer fails this test. */
   evidence: string;
   route: RampStatusWriterRoute;
+  /** Its `transitionRampTransfer` or `updateTransferStatusGuarded` calls, so a new one in a listed file still fails. */
+  guardedCalls: number;
 }
 
 const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
@@ -231,56 +233,67 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     file: "apps/sdp-api/src/services/payments/ramp-settlements.ts",
     evidence: ".transitionRampTransfer(update)",
     route: "table",
+    guardedCalls: 1,
   },
   {
     writer: "cancel",
     file: "apps/sdp-api/src/routes/payments/ramps/handlers.ts",
     evidence: 'toStatus: "canceled"',
     route: "direct",
+    guardedCalls: 1,
   },
   {
     writer: "MoonPay on-ramp quote fill and failure",
     file: "apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts",
     evidence: "status: rampQuoteTransferStatus(quote)",
     route: "direct",
+    guardedCalls: 0,
   },
   {
     writer: "MoonPay off-ramp quote fill and failure",
     file: "apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts",
     evidence: "status: rampQuoteTransferStatus(quote)",
     route: "direct",
+    guardedCalls: 0,
   },
   {
     writer: "off-ramp deposit claim",
     file: "apps/sdp-api/src/db/repositories/payments.repository.postgres.ts",
     evidence: "async updateOnchainTransferForRamp(",
     route: "direct",
+    guardedCalls: 0,
   },
   {
     writer: "off-ramp deposit outcome",
     file: "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
     evidence: 'status: reusedRampTransfer ? "settling" : "confirmed"',
     route: "direct",
+    guardedCalls: 0,
   },
   {
     writer: "BVNK off-ramp quote failure",
     file: "apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts",
     evidence: 'fromStatuses: ["pending"]',
     route: "direct_until_bvnk_removal",
+    guardedCalls: 1,
   },
   {
     writer: "BVNK quote and pay-in route helpers",
     file: "apps/sdp-api/src/routes/payments/ramps/providers/bvnk.ts",
     evidence: ".updateTransferStatusGuarded(",
     route: "direct_until_bvnk_removal",
+    guardedCalls: 2,
   },
   {
     writer: "BVNK pay-in and payout reconciliation",
     file: "apps/sdp-api/src/db/repositories/bvnk-onramp-transfers.repository.postgres.ts",
     evidence: "SET status = 'settling'",
     route: "direct_until_bvnk_removal",
+    guardedCalls: 0,
   },
 ];
+
+const GUARDED_STATUS_WRITE = /\.(transitionRampTransfer|updateTransferStatusGuarded)\(/g;
 
 function apiSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -300,19 +313,22 @@ describe("ramp transfer status writers", () => {
     }
   });
 
-  it("lists every caller of a guarded ramp status write", () => {
-    const listed = new Set(RAMP_STATUS_WRITERS.map((writer) => writer.file));
-    const callers = apiSourceFiles(path.join(repositoryRoot, "apps/sdp-api/src"))
-      .filter((file) => {
-        const source = readFileSync(file, "utf8");
-        return (
-          source.includes(".transitionRampTransfer(") ||
-          source.includes(".updateTransferStatusGuarded(")
-        );
-      })
-      .map((file) => path.relative(repositoryRoot, file));
+  it("accounts for every guarded ramp status write, call by call", () => {
+    const expected: Record<string, number> = {};
+    for (const writer of RAMP_STATUS_WRITERS) {
+      if (writer.guardedCalls > 0) {
+        expected[writer.file] = (expected[writer.file] ?? 0) + writer.guardedCalls;
+      }
+    }
+    const actual: Record<string, number> = {};
+    for (const file of apiSourceFiles(path.join(repositoryRoot, "apps/sdp-api/src"))) {
+      const calls = readFileSync(file, "utf8").match(GUARDED_STATUS_WRITE)?.length ?? 0;
+      if (calls > 0) {
+        actual[path.relative(repositoryRoot, file)] = calls;
+      }
+    }
 
-    expect(callers.filter((file) => !listed.has(file))).toEqual([]);
+    expect(actual).toEqual(expected);
   });
 
   it("keeps table writers off the caller-supplied guard", () => {

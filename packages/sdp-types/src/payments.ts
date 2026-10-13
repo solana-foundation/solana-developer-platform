@@ -188,7 +188,7 @@ export interface RampTransferTransition {
 }
 
 /** Any open status, plus `expired`, which a provider observation proves was premature. */
-const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
+export const PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES = [
   ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
   "expired",
 ] as const satisfies readonly PaymentTransferStatus[];
