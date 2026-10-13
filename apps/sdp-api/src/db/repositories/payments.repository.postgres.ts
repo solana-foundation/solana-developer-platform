@@ -786,8 +786,9 @@ export function createPostgresPaymentsRepository(
             extraValues: [params.provider, params.providerReference],
           })
         : {
-            where: "pt.provider = ? AND pt.provider_reference = ?",
-            values: [params.provider, params.providerReference],
+            where:
+              "pt.project_id IN (SELECT id FROM projects WHERE environment = ?) AND pt.provider = ? AND pt.provider_reference = ?",
+            values: [currentClusterScope().environment, params.provider, params.providerReference],
           };
 
       const row = await db
