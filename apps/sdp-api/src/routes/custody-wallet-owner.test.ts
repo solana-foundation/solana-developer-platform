@@ -509,6 +509,16 @@ describe("Custody wallet owner contract", () => {
                 )`
           )
         ).toEqual({ count: 0 });
+        if ("custodyConnectionId" in owner) {
+          // The BYOK outcome names the wallet that won, not the loser's unsaved id.
+          expect(
+            await getDb(env).queryOne(
+              `SELECT resource_id FROM audit_logs
+                WHERE resource_type = 'custody_wallet'
+                  AND metadata::jsonb->>'result' = 'already_recorded'`
+            )
+          ).toEqual({ resource_id: "cwlt_raced_winner" });
+        }
       }
     );
   });

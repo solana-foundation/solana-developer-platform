@@ -588,8 +588,19 @@ export class CustodyRuntimeTargets {
         // Another attempt under this key recorded the same Privy wallet (Privy
         // dedupes on the request id); the route answers from that row. This
         // attempt's intent is resolved, not left open for reconciliation.
+        // The outcome names the wallet that won, not this attempt's id, which
+        // was never persisted.
+        const winner = await this.db
+          .prepare("SELECT id FROM custody_wallets WHERE idempotency_request_id = ?")
+          .bind(params.idempotency?.requestId ?? null)
+          .first<{ id: string }>();
         await audit.completeCritical(params.auditContext, intent, {
-          metadata: { result: "replayed", reason: "request_already_recorded" },
+          resourceId: winner?.id,
+          metadata: {
+            result: "already_recorded",
+            custodyWalletId: winner?.id ?? null,
+            walletId: providerWalletId,
+          },
         });
         throw error;
       }

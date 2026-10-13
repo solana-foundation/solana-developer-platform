@@ -166,13 +166,15 @@ async function createTransferRecord(
   } catch (error) {
     if (idempotencyKey && isPostgresUniqueViolation(error)) {
       // A concurrent attempt under this key (a takeover) wrote the row first.
-      // The key layer holds one fingerprint per key, so it is this request's.
       const existing = await getPaymentsRepository(c).findTransferByIdempotency({
         organizationId: input.organizationId,
         projectId: input.projectId,
         idempotencyKey,
       });
       if (existing) {
+        if (existing.idempotency_fingerprint !== input.idempotency?.fingerprint) {
+          throw new AppError("IDEMPOTENCY_KEY_REUSED");
+        }
         return { row: existing, replayed: true };
       }
     }

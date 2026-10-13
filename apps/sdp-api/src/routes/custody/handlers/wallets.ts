@@ -385,9 +385,13 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   } catch (error) {
     if (idempotency !== null && isCustodyWalletIdempotencyViolation(error)) {
       // A concurrent attempt under this key recorded the wallet first: answer from its row.
-      // The key layer holds one fingerprint per key, so the row is this request's.
       const replay = await findCustodyWalletCreateReplay(c);
-      if (replay !== null) return replay.respond();
+      if (replay !== null) {
+        if (replay.fingerprint !== idempotency.fingerprint) {
+          throw new AppError("IDEMPOTENCY_KEY_REUSED");
+        }
+        return replay.respond();
+      }
     }
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {
