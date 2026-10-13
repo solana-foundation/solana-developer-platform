@@ -710,6 +710,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   it("sets a provider reference once and permits only an exact replay", async () => {
     const transfer = await repo.createTransfer({
       ...transferInput({ suffix: "provider-reference-binding" }),
+      projectId: TEST_PROJECT_ID,
       type: "offramp",
       status: "pending",
       provider: "moonpay",
@@ -723,25 +724,26 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       providerReference: "moonpay-transaction-1",
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    const stampInSandbox = (
+      stamp: Parameters<PaymentsRepository["setProviderReferenceIfEmpty"]>[0]
+    ) =>
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        repo.setProviderReferenceIfEmpty(stamp)
+      );
+    await expect(stampInSandbox(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
-    await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
+    await expect(stampInSandbox(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
     await expect(
-      repo.setProviderReferenceIfEmpty({
+      stampInSandbox({
         ...input,
         providerReference: "moonpay-transaction-2",
         updatedAt: "2026-08-31T11:01:00.000Z",
       })
     ).resolves.toBeNull();
-    await expect(
-      repo.setProviderReferenceIfEmpty({
-        ...input,
-        provider: "coinbase",
-      })
-    ).resolves.toBeNull();
+    await expect(stampInSandbox({ ...input, provider: "coinbase" })).resolves.toBeNull();
   });
 
   it("is a no-op returning null when the status moved out of fromStatuses (the race)", async () => {
@@ -850,6 +852,72 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     await expect(listProcessingIds("production")).resolves.toEqual(["xfr_by_status_production"]);
     await expect(listProcessingIds("sandbox")).resolves.toEqual(["xfr_by_status_sandbox"]);
+  });
+
+  it("finds a transfer by provider reference without a tenant only in the open cluster scope's environment", async () => {
+    const seedRampTransfer = async (id: string, projectId: string, providerReference: string) => {
+      await seedTransfer({ id, status: "awaiting_payment", projectId });
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_transfers SET provider = 'moonpay', provider_reference = ? WHERE id = ?"
+        )
+        .bind(providerReference, id)
+        .run();
+    };
+    await seedRampTransfer("xfr_by_reference_sandbox", projects.sandbox.id, "ref_sandbox");
+    await seedRampTransfer("xfr_by_reference_production", projects.production.id, "ref_production");
+    const findTransferId = async (environment: SdpEnvironment, providerReference: string) => {
+      const row = await runInClusterScope({ projectId: null, environment }, () =>
+        repo.getTransferByProviderReference({ provider: "moonpay", providerReference })
+      );
+      return row === null ? null : row.id;
+    };
+
+    await expect(findTransferId("sandbox", "ref_sandbox")).resolves.toBe(
+      "xfr_by_reference_sandbox"
+    );
+    await expect(findTransferId("sandbox", "ref_production")).resolves.toBeNull();
+    await expect(findTransferId("production", "ref_production")).resolves.toBe(
+      "xfr_by_reference_production"
+    );
+    await expect(findTransferId("production", "ref_sandbox")).resolves.toBeNull();
+  });
+
+  it("stamps a provider reference without a tenant only in the open cluster scope's environment", async () => {
+    for (const [id, projectId] of [
+      ["xfr_stamp_sandbox", projects.sandbox.id],
+      ["xfr_stamp_production", projects.production.id],
+    ] as const) {
+      await seedTransfer({ id, status: "pending", projectId });
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET provider = 'moonpay' WHERE id = ?")
+        .bind(id)
+        .run();
+    }
+    const stampInSandbox = (transferId: string) =>
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        repo.setProviderReferenceIfEmpty({
+          transferId,
+          provider: "moonpay",
+          providerReference: `ref_${transferId}`,
+          updatedAt: "2026-08-31T11:00:00.000Z",
+        })
+      );
+    const readProviderReference = async (id: string) => {
+      const row = await getDb(env)
+        .prepare("SELECT provider_reference FROM payment_transfers WHERE id = ?")
+        .bind(id)
+        .first<{ provider_reference: string | null }>();
+      return row === null ? undefined : row.provider_reference;
+    };
+
+    await expect(stampInSandbox("xfr_stamp_production")).resolves.toBeNull();
+    await expect(readProviderReference("xfr_stamp_production")).resolves.toBeNull();
+    await expect(stampInSandbox("xfr_stamp_sandbox")).resolves.toMatchObject({
+      id: "xfr_stamp_sandbox",
+      provider_reference: "ref_xfr_stamp_sandbox",
+    });
+    await expect(readProviderReference("xfr_stamp_sandbox")).resolves.toBe("ref_xfr_stamp_sandbox");
   });
 
   it("persists idempotency metadata and looks it up by (org, key)", async () => {
