@@ -364,8 +364,7 @@ export function ProviderCallout() {
         Interested in being a provider?
       </p>
       <p className="launch-docs-toc-card-desc">
-        We onboard custody, RPC, compliance, and ramp integrations through a self-service
-        contribution process.
+        We onboard infrastructure integrations through a self-service contribution process.
       </p>
       <Link href="/docs/reference/provider-onboarding" className="launch-docs-toc-card-link">
         Visit our guide <ArrowRightIcon size={12} aria-hidden="true" />
