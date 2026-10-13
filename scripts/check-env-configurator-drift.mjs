@@ -14,6 +14,8 @@ const IGNORE = new Set([
   "CACHE_MODE",
   "SIGNING_PROVIDERS",
   "POSTGRES_PASSWORD_MODE",
+  "RPC_DEVNET_PROVIDERS",
+  "RPC_MAINNET_PROVIDERS",
 ]);
 
 /** Keys declared in .env.example, including commented optionals (`# KEY=`). */
