@@ -111,3 +111,25 @@ it("does not replace an unresolved preferred wallet with another binding", () =>
     ],
   });
 });
+
+it("keeps a binding whose config or connection was deactivated only in any mode", async () => {
+  const candidateSql = async (walletStatus: "active" | "any") => {
+    const statements: string[] = [];
+    const responses = [
+      { results: [{ wallet_id: "wallet_ok", permissions: '["*"]' }] },
+      { results: [{ custody_wallet_id: "cwlt_ok", wallet_id: "wallet_ok", status: "active" }] },
+    ];
+    const db = {
+      prepare: (sql: string) => {
+        statements.push(sql);
+        return { bind: () => ({ all: async () => responses.shift() }) };
+      },
+    } as unknown as Parameters<typeof loadApiKeyWalletAuthorization>[0];
+    await loadApiKeyWalletAuthorization(db, "key_1", "org_1", "prj_1", null, walletStatus);
+    return statements[1] ?? "";
+  };
+
+  expect(await candidateSql("active")).toContain("c.status = 'active'");
+  expect(await candidateSql("any")).not.toContain("c.status = 'active'");
+  expect(await candidateSql("any")).not.toContain("w.status = 'active'");
+});

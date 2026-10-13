@@ -1,6 +1,11 @@
+import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound, walletNotFound } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
+import {
+  assertApiKeyWalletAccess,
+  loadFreshApiKeyWalletScope,
+} from "@/services/api-key-scope.service";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -50,14 +55,27 @@ export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInp
   }
 }
 
+/**
+ * The owner wallet and any puller wallet: the key's binding to each, from one
+ * fresh scope read, and each in the caller's project whatever its status, so a
+ * foreign wallet is a 404 before the key. Whether it is active is the handler's.
+ */
 async function authorizePlanWallets(
   c: AppContext,
   ownerWalletId: string,
   pullerWalletId: string | null | undefined
 ): Promise<void> {
-  await authorizeProviderWallet(c, ownerWalletId, ["payments:write"]);
-  if (typeof pullerWalletId === "string") {
-    await authorizeProviderWallet(c, pullerWalletId, ["payments:write"]);
+  const walletIds =
+    typeof pullerWalletId === "string" ? [ownerWalletId, pullerWalletId] : [ownerWalletId];
+  const scope = await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
+  for (const walletId of walletIds) {
+    assertApiKeyWalletAccess(scope, walletId, ["payments:write"]);
+  }
+  const wallets = await Promise.all(
+    walletIds.map((walletId) => findRetainedPaymentWalletByWalletId(c, walletId))
+  );
+  if (wallets.some((wallet) => wallet === null)) {
+    throw walletNotFound();
   }
 }
 

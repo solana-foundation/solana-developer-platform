@@ -10,7 +10,7 @@ import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyClaim, markIdempotencyCommitted } from "@/middleware/idempotency";
+import { getIdempotencyRecordKey, markIdempotencyCommitted } from "@/middleware/idempotency";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
@@ -149,7 +149,8 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(c, body, authorized);
-  const idempotencyKey = getIdempotencyClaim(c)?.key ?? null;
+  // The credential-bound record key (ADR 0008), never the raw client key.
+  const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
   const idempotencyFingerprint = idempotencyKey
     ? buildBatchRecordFingerprint(c, body, authorized)
     : null;

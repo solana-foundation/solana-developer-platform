@@ -72,6 +72,10 @@ validation → **`authorize`** → **this step** → replay from the domain row 
   active because the first activate worked) instead of replaying its stored answer. A credential
   narrowed since the original request gets 403; one narrowed in a way that still covers the
   resource gets the replay.
+- **State refusals are stored.** A refusal the handler raises from state (an inactive wallet, an
+  archived counterparty or counterparty account) is a 404 stored under the key for 24 hours, on
+  purpose: the same request gets the same answer, and a request that should run now uses a new
+  key.
 - **Validation runs first** because a 400 is never stored: an invalid request claims nothing.
 - A replay is not admitted again, because it isn't a new movement. Replay from the domain row also
   runs before admission, so a request that already ran is answered from its row even when
@@ -86,6 +90,11 @@ validation → **`authorize`** → **this step** → replay from the domain row 
 and a guard against concurrent duplicates. It does no foreign dedupe. The route's domain row is the
 recovery point:
 
+- it is written under a **credential-bound record key** (`getIdempotencyRecordKey`: SHA-256 over
+  the scope, organization, project, credential and key, as `deriveProviderRequestId` derives), never
+  the raw client key. Past the key record's 24 hours the row is what answers a retry, and a replay
+  only ever goes to the original credential, so another credential in the project sending the
+  same key runs as a new request;
 - it is written under its own unique key before anything is signed or sent, the signature and
   blockhash window are saved before broadcast, and the outcome is recorded before this step saves
   the response;
@@ -110,9 +119,12 @@ row, so it has no row to write first and stays `serverErrors: "store"`. A keyed 
 request id from the key, scoped by organization, project and credential (the raw key never reaches
 a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0131). A
 retry the key cannot answer (a takeover, or past 24 hours) is answered from that row by
-`replayFromRecord` without calling the provider; another request on the same key is 422. A crash
+`replayFromRecord` without calling the provider; another request on the same key is 422. That
+replay returns the wallet as it is now (its current label and status), not as the first response
+showed it. A crash
 between the provider call and the row is covered only where the provider dedupes on the id:
-Privy (`privy-idempotency-key` plus a derived `external_id` it looks up first) and Coinbase CDP
+Privy (`privy-idempotency-key` plus a derived `external_id`, looked up only when the create does
+not answer with the wallet) and Coinbase CDP
 (`X-Idempotency-Key` plus an account name seeded by the id). Fireblocks, Turnkey, Para, DFNS,
 IBM Digital Asset Haven, Anchorage and Utila get no id from our clients, so that window can still
 leave a second, unreferenced wallet there: a crash after the provider created the wallet and before
@@ -124,7 +136,8 @@ calling the provider again.
 
 | Case | Stored? | Answer |
 |---|---|---|
-| No key on a `required` route; malformed key | No, nothing claimed | 400 (`IDEMPOTENCY_KEY_REQUIRED`) |
+| No key on a `required` route | No, nothing claimed | 400 `IDEMPOTENCY_KEY_REQUIRED` |
+| Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
 | 400, 401, 403, 409, 429 refused before the handler writes its domain row (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
@@ -165,10 +178,11 @@ signing timeouts end requests well before that.
 executions and Dry-Run skipped it until approvals and wallet policies were removed, HOO-1889.)
 
 **Retention.** 24 hours. Expired rows are pruned hourly in-process and on every run of the managed
-reconciliation job. A claim ignores an expired row. A row still `in_progress` when it is pruned
-(`sdp_idempotency_unfinished_pruned`) or replaced by a new claim
-(`sdp_idempotency_unfinished_replaced`) is a request that never recorded an outcome; both log at
-error level for alerting.
+reconciliation job. A claim ignores an expired row. Unlocking marks a row released: a takeover can still claim it, and
+it is not alerted on. A row still `in_progress` whose lease lapsed without a release when it is
+pruned (`sdp_idempotency_unfinished_pruned`) or replaced by a new claim
+(`sdp_idempotency_unfinished_replaced`) is a request that crashed before recording an outcome;
+both log at error level for alerting.
 
 **Declaration.** The step carries `Symbol.for("sdp.idempotency")` with its mode. `IdempotencyKeyMode`
 lives in `@sdp/types`.

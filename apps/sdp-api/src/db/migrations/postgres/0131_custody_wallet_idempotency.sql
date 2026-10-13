@@ -17,3 +17,8 @@ ALTER TABLE custody_wallets
 CREATE UNIQUE INDEX IF NOT EXISTS custody_wallets_idempotency_request_id_idx
     ON custody_wallets(idempotency_request_id)
     WHERE idempotency_request_id IS NOT NULL;
+
+-- A keyed row carries both its request id and its fingerprint; an unkeyed row neither.
+ALTER TABLE custody_wallets
+    ADD CONSTRAINT custody_wallets_idempotency_pair_check
+    CHECK ((idempotency_request_id IS NULL) = (idempotency_fingerprint IS NULL));

@@ -588,16 +588,19 @@ export function createPostgresPaymentSubscriptionsRepository(
       projectId,
       idempotencyKey,
     }) {
-      await db
+      const row = await db
         .prepare(
           `UPDATE payment_subscription_collection_attempts
-              SET idempotency_key = COALESCE(idempotency_key, ?)
+              SET idempotency_key = ?
             WHERE id = ?
               AND organization_id = ?
-              AND project_id = ?`
+              AND project_id = ?
+              AND (idempotency_key IS NULL OR idempotency_key = ?)
+            RETURNING id`
         )
-        .bind(idempotencyKey, attemptId, organizationId, projectId)
-        .run();
+        .bind(idempotencyKey, attemptId, organizationId, projectId, idempotencyKey)
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {

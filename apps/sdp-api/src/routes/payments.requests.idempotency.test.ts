@@ -71,3 +71,41 @@ describe("Payments routes — payment request access before the key", () => {
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
   });
 });
+
+describe("Payments routes — subscription plan wallets before the key", () => {
+  installPaymentsRouteTestHooks();
+
+  function postPlan(body: Record<string, unknown>, idempotencyKey: string) {
+    return app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ token: DEVNET_USDC_MINT, amount: "1", periodHours: 24, ...body }),
+      },
+      env
+    );
+  }
+
+  it("refuses an owner wallet outside the caller's project with 404 and stores nothing", async () => {
+    const response = await postPlan(
+      { ownerWalletId: "wal_other_organization" },
+      "plan-foreign-owner"
+    );
+    expect(response.status).toBe(404);
+    expect(await storedKeyCount("plan-foreign-owner")).toBe(0);
+  });
+
+  it("refuses a puller wallet outside the caller's project with 404 and stores nothing", async () => {
+    const response = await postPlan(
+      { ownerWalletId: TEST_WALLET_ID, pullerWalletId: "wal_other_organization" },
+      "plan-foreign-puller"
+    );
+    expect(response.status).toBe(404);
+    expect(await storedKeyCount("plan-foreign-puller")).toBe(0);
+  });
+});

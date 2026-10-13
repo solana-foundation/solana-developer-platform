@@ -29,6 +29,7 @@ import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import { getDb } from "@/db";
+import { isCustodyWalletIdempotencyViolation } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
@@ -1072,8 +1073,11 @@ export class SigningService {
         idempotency: params.idempotency,
       });
     } catch (error) {
+      // The route answers this one from the row the other attempt recorded.
+      if (isCustodyWalletIdempotencyViolation(error)) throw error;
+      // No database text in the message: it reaches the caller.
       throw new SigningError(
-        `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "Failed to persist wallet record",
         "NETWORK_ERROR",
         error instanceof Error ? error : undefined
       );

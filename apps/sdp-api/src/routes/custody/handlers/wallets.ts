@@ -5,8 +5,16 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
+import { isCustodyWalletIdempotencyViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, conflict, internalError, serviceUnavailable } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  conflict,
+  internalError,
+  providerUnavailable,
+  serviceUnavailable,
+} from "@/lib/errors";
 import { deriveProviderRequestId, resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -378,11 +386,21 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
     return created(c, response);
   } catch (error) {
+    if (idempotency !== null && isCustodyWalletIdempotencyViolation(error)) {
+      // A concurrent attempt under this key recorded the wallet first: answer from its row.
+      const replay = await findCustodyWalletCreateReplay(c);
+      if (replay !== null) return replay;
+    }
     if (error instanceof SigningError) {
       if (error.code === "NOT_FOUND") {
         throw new AppError("NOT_FOUND", error.message);
       }
-      throw badRequest(error.message);
+      if (error.code === "INVALID_REQUEST") {
+        throw badRequest(error.message);
+      }
+      // The provider or the wallet's persistence failed: a 503, stored under the
+      // key like the BYOK path's.
+      throw providerUnavailable("Custody provider is temporarily unavailable");
     }
     throw error;
   }

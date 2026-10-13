@@ -11,7 +11,7 @@ import {
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, internalError } from "@/lib/errors";
-import { canonicalJson, type JsonValue } from "@/lib/idempotency";
+import { canonicalJson, deriveProviderRequestId, type JsonValue } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -499,6 +499,39 @@ export function getIdempotencyClaim(
   const key = c.get("idempotencyClaimedKey");
   const fingerprint = c.get("idempotencyFingerprint");
   return key === undefined || fingerprint === undefined ? undefined : { key, fingerprint };
+}
+
+/**
+ * The key a handler stores on, and looks up, its domain row by: the claimed
+ * key bound to its organization, project and credential (ADR 0008). After the
+ * 24-hour key record expires, the domain row is what answers a retry, so the
+ * raw client key would let another credential in the project read the
+ * original's replay; this value never matches across credentials. Undefined
+ * unless this step claimed a key for the request.
+ */
+export function getIdempotencyRecordKey(c: Context<{ Bindings: Env }>): string | undefined {
+  const claim = getIdempotencyClaim(c);
+  if (claim === undefined) return undefined;
+  const auth = getAuth(c);
+  return deriveIdempotencyRecordKey(
+    {
+      organizationId: auth.organizationId,
+      projectId: c.get("projectId") ?? null,
+      principal: auth.id,
+    },
+    claim.key
+  );
+}
+
+/** {@link getIdempotencyRecordKey}'s derivation, for a caller that holds the parts. */
+export function deriveIdempotencyRecordKey(
+  scope: { organizationId: string; projectId: string | null; principal: string },
+  idempotencyKey: string
+): string {
+  return deriveProviderRequestId(
+    ["idempotency_record", scope.organizationId, scope.projectId ?? "", scope.principal],
+    idempotencyKey
+  );
 }
 
 /**

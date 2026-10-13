@@ -53,7 +53,7 @@ import {
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyClaim, markIdempotencyCommitted } from "@/middleware/idempotency";
+import { getIdempotencyRecordKey, markIdempotencyCommitted } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
@@ -768,7 +768,8 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  const idempotencyKey = getIdempotencyClaim(c)?.key ?? null;
+  // The credential-bound record key (ADR 0008), never the raw client key.
+  const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
 
   const reusedRampTransfer = rampTransfer !== null;
   const { row: transfer, replayed } = rampTransfer

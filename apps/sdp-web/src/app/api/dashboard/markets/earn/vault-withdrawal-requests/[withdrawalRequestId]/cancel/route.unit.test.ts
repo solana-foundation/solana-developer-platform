@@ -12,7 +12,7 @@ describe("POST queued-withdrawal cancellation proxy", () => {
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
   });
 
-  it("encodes the id and forwards only Idempotency-Key", async () => {
+  it("encodes the id and leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers", async () => {
     const request = new Request("https://dashboard.example.test/api/cancel", {
       method: "POST",
       headers: { "Idempotency-Key": "cancel-key", Authorization: "secret" },
@@ -27,7 +27,6 @@ describe("POST queued-withdrawal cancellation proxy", () => {
       request,
       traceSource: "route.dashboard.earn.vault_withdrawal_requests.cancel",
       path: "/v1/earn/vault-withdrawal-requests/request%2Fwith%20slash/cancel",
-      upstreamHeaders: { "Idempotency-Key": "cancel-key" },
     });
   });
 });

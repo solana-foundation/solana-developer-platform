@@ -16,7 +16,7 @@ describe("POST /api/dashboard/markets/earn/vault-withdrawals", () => {
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
   });
 
-  it("selects only Idempotency-Key from inbound headers", async () => {
+  it("leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers", async () => {
     const request = new Request("https://dashboard.example.test/api/vault-withdrawals", {
       method: "POST",
       headers: {
@@ -34,22 +34,7 @@ describe("POST /api/dashboard/markets/earn/vault-withdrawals", () => {
       request,
       traceSource: "route.dashboard.earn.vault_withdrawals.create",
       path: "/v1/earn/vault-withdrawals",
-      upstreamHeaders: { "Idempotency-Key": "withdrawal-key" },
     });
-  });
-
-  it("supplies no client-owned upstream headers when the key is absent", async () => {
-    const request = new Request("https://dashboard.example.test/api/vault-withdrawals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    });
-
-    await POST(request);
-
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
-      expect.objectContaining({ upstreamHeaders: undefined })
-    );
   });
 });
 

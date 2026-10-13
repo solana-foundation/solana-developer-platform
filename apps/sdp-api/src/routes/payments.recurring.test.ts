@@ -30,6 +30,7 @@ import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as organizationAccess from "@/lib/organization-access";
+import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { rootLogger } from "@/runtime/logger";
@@ -85,6 +86,16 @@ import {
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
+
+/** Leaves a subscription's collection attempts unkeyed, as the cron's claim is (HOO-1918). */
+async function clearCollectionAttemptKeys(subscriptionId: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      "UPDATE payment_subscription_collection_attempts SET idempotency_key = NULL WHERE subscription_id = ?"
+    )
+    .bind(subscriptionId)
+    .run();
+}
 
 const recurringPaymentLogEventSchema = z.object({ event: z.string() });
 
@@ -997,6 +1008,56 @@ describe("Payments routes — recurring", () => {
     expect(event?.changed_fields).toEqual(expect.arrayContaining(["amount", "periodHours"]));
     expect(event?.before_values.amount).toBe("25.00");
     expect(event?.after_values.amount).toBe("30.50");
+  });
+
+  it("treats a respelled amount on an active schedule as no change, broadcasting nothing", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const sentBefore = signAndSendMock.mock.calls.length;
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "25.0" }) },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    expect(signAndSendMock.mock.calls.length).toBe(sentBefore);
+    const replacements = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::integer AS count FROM payment_recurring_payment_update_attempts
+          WHERE recurring_payment_id = ? AND 'amount' = ANY(changed_fields)`
+      )
+      .bind(activated.id)
+      .first<{ count: number }>();
+    expect(replacements).toEqual({ count: 0 });
+  });
+
+  it("links a pending schedule's update event to its attempt", async () => {
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.50" }) },
+      env
+    );
+    expect(updateRes.status).toBe(200);
+    const linked = await getDb(env)
+      .prepare(
+        `SELECT e.attempt_id = a.id AS linked
+           FROM payment_recurring_payment_update_events e
+           JOIN payment_recurring_payment_update_attempts a
+             ON a.recurring_payment_id = e.recurring_payment_id
+          WHERE e.recurring_payment_id = ?`
+      )
+      .bind(created.id)
+      .first<{ linked: boolean | null }>();
+    expect(linked).toEqual({ linked: true });
   });
 
   it("updates active recurring payment metadata in place on the existing on-chain plan", async () => {
@@ -2340,6 +2401,9 @@ describe("Payments routes — recurring", () => {
       "sdp_api_payment_submission_unresolved"
     );
 
+    // Another key never recovers this request's attempt (it would leave that key
+    // free to pull the next period); the cron's unkeyed claim can be adopted.
+    await clearCollectionAttemptKeys(activated.subscriptionId);
     const recoveredRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
       { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -2507,6 +2571,8 @@ describe("Payments routes — recurring", () => {
           ...createSubscriptionsRepository(db),
           updateCollectionAttempt,
         }));
+      // Recovered as the cron's unkeyed claim: another key never adopts it.
+      await clearCollectionAttemptKeys(activated.subscriptionId);
       let recoveryRes: Response;
       try {
         recoveryRes = await app.request(
@@ -2787,6 +2853,9 @@ describe("Payments routes — recurring", () => {
         new Date(staleAt).getTime()
       );
 
+      // The first request adopted the journal's attempt; another key never
+      // recovers it, so the attempt goes back to the cron's unkeyed claim.
+      await clearCollectionAttemptKeys(activated.subscriptionId);
       const collectRes = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/collect`,
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -4362,6 +4431,12 @@ describe("Payments routes — recurring", () => {
 
   describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
     const keyed = (key: string) => ({ ...RECURRING_HEADERS, "Idempotency-Key": key });
+    /** What the domain rows store for a key: bound to the test API key (ADR 0008). */
+    const recordKey = (key: string) =>
+      deriveIdempotencyRecordKey(
+        { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, principal: TEST_API_KEY.id },
+        key
+      );
     const errorCode = async (response: Response) =>
       z.object({ error: z.object({ code: z.string() }) }).parse(await response.json()).error.code;
     const actionPath = (id: string, action?: string) =>
@@ -4410,7 +4485,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           `UPDATE ${input.attemptTable} SET status = 'processing', updated_at = ? WHERE idempotency_key = ?`
         )
-        .bind(now, input.key)
+        .bind(now, recordKey(input.key))
         .run();
       expect(updated).toBe(1);
     }
@@ -4486,7 +4561,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           "SELECT operation, status, stage FROM payment_recurring_payment_lifecycle_attempts WHERE idempotency_key = ?"
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ operation: string; status: string; stage: string }>();
       expect(attempt).toEqual({ operation: "cancel", status: "confirmed", stage: "finalize" });
       await forgetIdempotencyKey(key);
@@ -4623,7 +4698,7 @@ describe("Payments routes — recurring", () => {
           `SELECT status FROM payment_recurring_payment_activation_attempts
             WHERE idempotency_key = ? ORDER BY created_at`
         )
-        .bind(key)
+        .bind(recordKey(key))
         .all<{ status: string }>();
       expect(attempts.results).toEqual([{ status: "failed" }, { status: "confirmed" }]);
     });
@@ -4717,7 +4792,7 @@ describe("Payments routes — recurring", () => {
             TEST_PROJECT.id,
             created.id,
             status,
-            key
+            recordKey(key)
           )
           .run();
 
@@ -4901,6 +4976,48 @@ describe("Payments routes — recurring", () => {
       expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(1);
     });
 
+    it("refuses a keyed collect that would recover another key's collection, unstored", async () => {
+      recurringExecution.signAndSendMock();
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      });
+      sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+      const firstKey = crypto.randomUUID();
+      const ambiguous = await app.request(
+        actionPath(activated.id, "collect"),
+        { method: "POST", headers: keyed(firstKey), body: "{}" },
+        env
+      );
+      expect(ambiguous.status).toBe(200);
+
+      const otherKey = crypto.randomUUID();
+      const other = await app.request(
+        actionPath(activated.id, "collect"),
+        { method: "POST", headers: keyed(otherKey), body: "{}" },
+        env
+      );
+
+      expect(other.status).toBe(409);
+      const stored = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
+        )
+        .bind(otherKey)
+        .first<{ count: number }>();
+      expect(stored).toEqual({ count: 0 });
+      const attempts = await getDb(env)
+        .prepare(
+          "SELECT idempotency_key FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+        )
+        .bind(activated.subscriptionId)
+        .all<{ idempotency_key: string | null }>();
+      expect(attempts.results).toEqual([{ idempotency_key: recordKey(firstKey) }]);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    });
+
     it("journals a pending schedule's PATCH as a keyed attempt and answers its retry from it", async () => {
       const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       const key = crypto.randomUUID();
@@ -4917,7 +5034,7 @@ describe("Payments routes — recurring", () => {
              FROM payment_recurring_payment_update_attempts
             WHERE idempotency_key = ?`
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ status: string; stage: string; fingerprinted: boolean }>();
       expect(attempt).toEqual({ status: "confirmed", stage: "finalize", fingerprinted: true });
       await forgetIdempotencyKey(key);
@@ -4960,7 +5077,7 @@ describe("Payments routes — recurring", () => {
         .prepare(
           "SELECT COUNT(*)::integer AS count FROM payment_recurring_payments WHERE idempotency_key = ?"
         )
-        .bind(key)
+        .bind(recordKey(key))
         .first<{ count: number }>();
       expect(schedules).toEqual({ count: 1 });
     });

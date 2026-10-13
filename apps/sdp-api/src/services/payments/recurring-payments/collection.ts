@@ -1395,13 +1395,19 @@ async function recoverRecurringPaymentCollection(input: {
   const recoveredTransfer = transfer;
   if (input.idempotencyKey) {
     // This request now answers for the period: a retry of it finds the attempt
-    // instead of collecting the next one once the due date moves on.
-    await input.subscriptionsRepo.adoptCollectionAttemptIdempotencyKey({
+    // instead of collecting the next one once the due date moves on. An attempt
+    // another key already answers for is that request's (a null-key cron
+    // attempt is adopted): recovering it here would leave this key free to pull
+    // the next period, so it is refused as in flight, unstored.
+    const adopted = await input.subscriptionsRepo.adoptCollectionAttemptIdempotencyKey({
       attemptId: existing.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
       idempotencyKey: input.idempotencyKey,
     });
+    if (!adopted) {
+      throw conflict("Recurring payment collection is already processing");
+    }
   }
 
   try {

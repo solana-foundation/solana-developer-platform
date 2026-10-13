@@ -15,12 +15,28 @@ const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", z.stri
  * @param input - The form as the user chose it, with the expiry preset (never
  *   the computed instant).
  * @param resolve - Reads the instant from the clock, the first time only.
+ * @returns The instant to send, `null` for no expiry, or `undefined` when the
+ *   frozen instant has already passed. That request is not sent: the earlier
+ *   attempt may have created it, so the caller says to check the list. The
+ *   expiry is forgotten, so the next press is a new action with a fresh key
+ *   and expiry.
  */
-export function expiresAtForAction(input: string, resolve: () => Date | null): string | null {
-  return frozenExpiries.valueFor(input, () => resolve()?.toISOString() ?? null);
+export function expiresAtForAction(
+  input: string,
+  resolve: () => Date | null
+): string | null | undefined {
+  const expiresAt = frozenExpiries.valueFor(input, () => resolve()?.toISOString() ?? null);
+  if (expiresAt !== null && Date.parse(expiresAt) <= Date.now()) {
+    frozenExpiries.settle(input, "definitive");
+    return undefined;
+  }
+  return expiresAt;
 }
 
 /** Record the create's answer, forgetting the expiry on the rule that retires its key. */
-export function settleExpiresAt(input: string, result: { ok: boolean; status: number | null }) {
+export function settleExpiresAt(
+  input: string,
+  result: { ok: boolean; status: number | null; replayed?: boolean }
+) {
   frozenExpiries.settle(input, dashboardFetchKeyAnswer(result));
 }
