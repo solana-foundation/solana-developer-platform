@@ -43,7 +43,7 @@ import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { walletBalanceAssetOptions } from "../ramps/wallet-options";
 import { createRecurringPayment } from "./recurring-payments.data";
-import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
+import { accountAddress, parsePeriodHours, walletLabel } from "./recurring-payments-shared";
 
 interface RecurringPaymentCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
@@ -498,10 +498,7 @@ export function RecurringPaymentCreateWorkspace({
     },
     {
       label: t("DashboardPayments.recurring.fundingWallet"),
-      value:
-        selectedWallet?.label ??
-        selectedWallet?.walletId ??
-        t("DashboardPayments.recurring.notSelected"),
+      value: walletLabel(selectedWallet, t("DashboardPayments.recurring.notSelected")),
     },
     {
       label: t("DashboardPayments.recurring.amount"),
@@ -715,7 +712,7 @@ export function RecurringPaymentCreateWorkspace({
             onChange={selectWallet}
             options={availableWallets.map((wallet) => ({
               value: wallet.id,
-              label: wallet.label ?? wallet.walletId,
+              label: walletLabel(wallet, wallet.id),
               description: shortenAddress(wallet.publicKey),
               ...(wallet.isRuntimeExecutionAllowed !== true
                 ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }

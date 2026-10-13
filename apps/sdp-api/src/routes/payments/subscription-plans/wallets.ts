@@ -5,19 +5,15 @@ import {
   assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   resolveScope,
-  resolveWallet,
   resolveWalletByCustodyWalletId,
 } from "../wallets";
 
 export async function resolveSubscriptionPlanWalletSelector(
   c: AppContext,
-  selector: { custodyWalletId?: string; walletId?: string }
+  custodyWalletId: string
 ) {
   const scope = await resolveScope(c);
-  const wallet =
-    selector.custodyWalletId !== undefined
-      ? resolveWalletByCustodyWalletId(scope.wallets, selector.custodyWalletId)
-      : resolveWallet(scope.wallets, selector.walletId ?? "");
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
   return wallet;
@@ -42,7 +38,7 @@ export async function resolveSubscriptionPlanRole(
   if (!custodyWalletId) {
     throw new AppError("CONFLICT", `Subscription plan ${role} wallet identity is unresolved`);
   }
-  const wallet = await resolveSubscriptionPlanWalletSelector(c, { custodyWalletId });
+  const wallet = await resolveSubscriptionPlanWalletSelector(c, custodyWalletId);
   if (wallet.publicKey !== savedAddress) {
     throw new AppError(
       "BAD_REQUEST",

@@ -51,7 +51,6 @@ const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   organizationId: "org_test",
   projectId: "proj_test",
   sourceCustodyWalletId: source.id,
-  sourceProviderWalletId: source.walletId,
   sourceAddress: source.publicKey,
   counterpartyId: "cpty_receiver",
   counterpartyAccountId: "cpa_receiver",
@@ -155,7 +154,7 @@ describe("Recurring Payment exact source selection", () => {
       />,
       { wrapper }
     );
-    expect(screen.queryByText("privy_shared")).toBeNull();
+    expect(screen.queryByText(/privy_shared/)).toBeNull();
     expect(screen.getAllByText("111111…1111").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Treasury" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
@@ -213,8 +212,8 @@ describe("Recurring Payment exact source selection", () => {
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
   });
 
-  it("saves a pending payment with a Connection wallet even when signing is unavailable", async () => {
-    const unavailable = { ...source, isRuntimeExecutionAllowed: false };
+  it("saves an unnamed Connection wallet by exact ID when signing is unavailable", async () => {
+    const unavailable = { ...source, label: null, isRuntimeExecutionAllowed: false };
     const writes: unknown[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("/wallets?"))
@@ -245,13 +244,14 @@ describe("Recurring Payment exact source selection", () => {
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     // The contact's only Solana address is the destination; no field asks for it.
     await user.click(screen.getByRole("button", { name: "Source wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await user.click(screen.getByRole("button", { name: /^111111/ }));
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
     const next = () => screen.getByRole("button", { name: "Continue" });
     await waitFor(() => expect(next().hasAttribute("disabled")).toBe(false));
     await user.click(next());
     await user.click(next());
+    expect(screen.queryByText(/privy_shared/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Create the schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({

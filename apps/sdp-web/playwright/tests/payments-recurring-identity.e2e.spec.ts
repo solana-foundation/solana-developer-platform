@@ -9,7 +9,6 @@ import {
 } from "../support/local-dashboard-bootstrap";
 import {
   bootstrapWalletIdentityFixtures,
-  cleanupWalletIdentityFixtures,
   walletIdentityDatabaseUrl,
 } from "../support/payments-wallet-identity";
 
@@ -21,7 +20,6 @@ test.describe
     test.skip(process.env.PLAYWRIGHT_RECURRING_IDENTITY !== "1", "Requires isolated PR4 services");
     let fixture: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>;
     let counterparty: Awaited<ReturnType<typeof seedCounterpartyWithSolanaAccount>>;
-    const created: string[] = [];
 
     async function withDatabase(fn: (db: Client) => Promise<void>) {
       const db = new Client({ connectionString: walletIdentityDatabaseUrl("recurring") });
@@ -43,17 +41,7 @@ test.describe
     });
 
     test.afterAll(async () => {
-      try {
-        await withDatabase(async (db) => {
-          await db.query(
-            "DELETE FROM payment_recurring_payments WHERE id = ANY($1::text[]) AND project_id = $2",
-            [created, fixture?.projectId ?? ""]
-          );
-        });
-        await cleanupWalletIdentityFixtures("recurring");
-      } finally {
-        await fixture?.admin.page.close();
-      }
+      await fixture?.admin.page.close();
     });
 
     async function createPendingSchedule(page: Page, wallet: { id: string; label: string | null }) {
@@ -72,6 +60,28 @@ test.describe
       const next = app.getByRole("button", { name: "Continue", exact: true });
       await next.click();
       await next.click();
+      await page.route(
+        "**/api/dashboard/payments/recurring-payments",
+        (route) =>
+          route.continue({
+            postData: JSON.stringify({
+              ...route.request().postDataJSON(),
+              sourceProviderWalletId: "retired-provider-selector",
+            }),
+          }),
+        { times: 1 }
+      );
+      const refusal = page.waitForResponse(
+        (result) =>
+          result.url().endsWith("/api/dashboard/payments/recurring-payments") &&
+          result.request().method() === "POST"
+      );
+      await app.getByRole("button", { name: "Create the schedule", exact: true }).click();
+      expect((await refusal).status()).toBe(400);
+      await expect(app.getByRole("alert")).toBeVisible();
+      await expect(page).toHaveURL(
+        projectHref(fixture.projectId, "/dashboard/payments/recurring/create")
+      );
       const response = page.waitForResponse(
         (result) =>
           result.url().endsWith("/api/dashboard/payments/recurring-payments") &&
@@ -82,10 +92,11 @@ test.describe
       expect(savedResponse.request().postDataJSON()).toMatchObject({
         sourceCustodyWalletId: wallet.id,
       });
+      expect(savedResponse.request().postDataJSON()).not.toHaveProperty("sourceProviderWalletId");
       expect(savedResponse.ok()).toBe(true);
       const saved: { data: PaymentRecurringPaymentResponse } = await savedResponse.json();
       const recurring = saved.data.recurringPayment;
-      created.push(recurring.id);
+      expect(recurring).not.toHaveProperty("sourceProviderWalletId");
       expect(recurring.sourceCustodyWalletId).toBe(wallet.id);
       expect(recurring.sourceAddress).toBe(fixture.walletA.publicKey);
       expect(recurring.status).toBe("pending_activation");
@@ -106,7 +117,7 @@ test.describe
 
     test("creates distinct alias sources, reloads links, explicitly replaces and displays unresolved history", async ({
       page,
-    }) => {
+    }, testInfo) => {
       const first = await createPendingSchedule(page, fixture.walletA);
       const second = await createPendingSchedule(page, fixture.walletB);
       await gotoProjectPage(page, fixture.projectId, "/dashboard/payments/recurring");
@@ -148,6 +159,7 @@ test.describe
         periodHours: first.periodHours,
         status: first.status,
       });
+      expect(persisted.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
       await page.reload();
       await expect(
         page.getByRole("link", { name: fixture.walletB.label ?? "", exact: true })
@@ -165,13 +177,22 @@ test.describe
       await page.reload();
       await expect(page.getByText("Source wallet unavailable", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("link", { name: /^Wallet Identity [AB]$/ })).toHaveCount(0);
+      for (const wallet of [fixture.walletA, fixture.walletB]) {
+        await expect(page.getByRole("link", { name: wallet.label ?? "", exact: true })).toHaveCount(
+          0
+        );
+      }
       const history = await fixture.api.get<{ recurringPayment: PaymentRecurringPayment }>(
         `/v1/payments/recurring-payments/${first.id}`
       );
       expect(history.recurringPayment.sourceCustodyWalletId).toBeNull();
       expect(history.recurringPayment.sourceAddress).toBe(first.sourceAddress);
+      expect(history.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
       const shortened = `${first.sourceAddress.slice(0, 6)}…${first.sourceAddress.slice(-4)}`;
       await expect(page.getByText(shortened, { exact: true }).first()).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath("recurring-identity-preserved-history.png"),
+        fullPage: true,
+      });
     });
   });

@@ -525,13 +525,34 @@ describe("Payments routes — recurring", () => {
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
-    const created = await createRecurringPaymentFixture({
-      ...DEFAULT_RECURRING_FIXTURE,
-      headers: RECURRING_HEADERS,
+    const counterpartyId = await seedCounterparty();
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    expect((await createRes.clone().json()).data.recurringPayment).not.toHaveProperty(
+      "sourceProviderWalletId"
+    );
+    const created = (await parseRecurringResponse(createRes)).data.recurringPayment;
     expect(created.id).toMatch(/^prp_/);
     expect(created.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(created.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(created.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
     expect(created.token).toBe(DEVNET_USDC_MINT);
     expect(created.amount).toBe("25.00");
@@ -543,9 +564,11 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(listRes.status).toBe(200);
+    const rawListBody = await listRes.json();
     const listBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
-      await listRes.json()
+      rawListBody
     );
+    expect(rawListBody.data.recurringPayments[0]).not.toHaveProperty("sourceProviderWalletId");
     expect(listBody.data.total).toBe(1);
     expect(listBody.data.recurringPayments[0]?.id).toBe(created.id);
 
@@ -555,6 +578,8 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(getRes.status).toBe(200);
+    const rawGetBody = await getRes.clone().json();
+    expect(rawGetBody.data.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
     const getBody = await parseRecurringResponse(getRes);
     expect(getBody.data.recurringPayment.id).toBe(created.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
@@ -617,6 +642,13 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(scopedDetail.status).toBe(200);
+    const historicalPayment = (await scopedDetail.json()).data.recurringPayment;
+    expect(historicalPayment).toMatchObject({
+      id: legacy.id,
+      sourceCustodyWalletId: null,
+      sourceAddress: recurringExecution.sourceSigner().address,
+    });
+    expect(historicalPayment).not.toHaveProperty("sourceProviderWalletId");
     const unauthorizedDetail = await app.request(
       `/v1/payments/recurring-payments/${unauthorized.id}`,
       { headers: RECURRING_HEADERS },
@@ -638,6 +670,50 @@ describe("Payments routes — recurring", () => {
     expect(tenantList.status).toBe(200);
     expect(await tenantList.json()).toMatchObject({ data: { total: 3 } });
   });
+
+  it.each(["sourceWalletId", "sourceProviderWalletId"])(
+    "rejects %s without ignoring it on recurring create or update",
+    async (legacySelector) => {
+      const payment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const create = await app.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            [legacySelector]: TEST_WALLET_ID,
+            counterpartyId: payment.counterpartyId,
+            counterpartyAccountId: payment.counterpartyAccountId,
+            token: DEVNET_USDC_MINT,
+            amount: "26.00",
+            periodHours: 720,
+          }),
+        },
+        env
+      );
+      expect(create.status).toBe(400);
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ amount: "26.00", [legacySelector]: TEST_WALLET_ID }),
+        },
+        env
+      );
+      expect(update.status).toBe(400);
+      const detail = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect((await detail.json()).data.recurringPayment).toMatchObject({
+        amount: "25.00",
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      });
+    }
+  );
 
   it.each(["all", "selected"] as const)(
     "fails closed before signing a null-pin recurring payment with %s wallet scope",

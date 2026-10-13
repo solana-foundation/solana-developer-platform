@@ -454,7 +454,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a recurring-payment subscription plan record with exact SDP owner and optional collector wallet identities. Legacy provider selectors remain temporarily supported; never combine old and new selectors for one role. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record using ownerCustodyWalletId and optional pullerCustodyWalletId. Provider wallet references are rejected. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -547,7 +547,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
     description:
-      "Updates mutable subscription plan fields and on-chain identifiers. An omitted collector selector retains its role; null clears all collector identity. Supply pullerCustodyWalletId or legacy pullerWalletId, never both.",
+      "Updates mutable subscription plan fields and on-chain identifiers. An omitted pullerCustodyWalletId retains its role; null clears all collector identity. Provider wallet references are rejected.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

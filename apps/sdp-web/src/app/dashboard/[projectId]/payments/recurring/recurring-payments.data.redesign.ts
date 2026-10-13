@@ -81,7 +81,6 @@ const recurringPaymentSchema = z.object({
   organizationId: z.string(),
   projectId: z.string(),
   sourceCustodyWalletId: z.string().nullable(),
-  sourceProviderWalletId: z.string().optional(),
   sourceAddress: z.string(),
   counterpartyId: z.string(),
   counterpartyAccountId: z.string(),

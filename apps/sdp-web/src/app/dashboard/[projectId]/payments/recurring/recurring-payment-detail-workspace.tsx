@@ -885,7 +885,7 @@ export function RecurringPaymentDetailWorkspace({
               }}
               options={liveWallets.map((entry) => ({
                 value: entry.id,
-                label: walletLabel(entry, entry.walletId),
+                label: walletLabel(entry, entry.id),
                 description: shortenAddress(entry.publicKey),
                 ...(entry.isRuntimeExecutionAllowed !== true
                   ? {

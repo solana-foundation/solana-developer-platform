@@ -17,7 +17,6 @@ const responseEnvelope = {
       organizationId: "org_1",
       projectId: "project_1",
       sourceCustodyWalletId: "cwlt_create",
-      sourceProviderWalletId: "provider-wallet-1",
       sourceAddress: "source-address-1",
       counterpartyId: "cpty_1",
       counterpartyAccountId: "cpa_1",
@@ -50,17 +49,24 @@ describe("recurring payment write requests", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it.each([getRecurringPayment, getRedesignRecurringPayment])(
-    "reads saved exact identity and address without provider response metadata",
+    "reads saved exact identity and address without exposing provider response metadata",
     async (getPayment) => {
-      const { sourceProviderWalletId: _providerMetadata, ...savedPayment } =
-        responseEnvelope.data.recurringPayment;
       vi.stubGlobal("fetch", () =>
-        Promise.resolve(Response.json({ data: { recurringPayment: savedPayment } }))
+        Promise.resolve(
+          Response.json({
+            data: {
+              recurringPayment: {
+                ...responseEnvelope.data.recurringPayment,
+                sourceProviderWalletId: "provider-wallet-1",
+              },
+            },
+          })
+        )
       );
       const payment = await getPayment("prp_1", undefined, t);
       expect(payment.sourceCustodyWalletId).toBe("cwlt_create");
       expect(payment.sourceAddress).toBe("source-address-1");
-      expect(payment.sourceProviderWalletId).toBeUndefined();
+      expect(payment).not.toHaveProperty("sourceProviderWalletId");
     }
   );
 

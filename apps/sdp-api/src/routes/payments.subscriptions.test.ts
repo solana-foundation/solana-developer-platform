@@ -145,6 +145,8 @@ describe("Payments routes — subscriptions", () => {
   );
 
   it.each([
+    { ownerWalletId: TEST_WALLET_ID },
+    { ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID, pullerWalletId: TEST_WALLET_ID },
     { ownerWalletId: TEST_WALLET_ID, ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID },
     {
       ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -153,7 +155,7 @@ describe("Payments routes — subscriptions", () => {
     },
     { ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID, pullerWalletID: TEST_WALLET_ID },
     {},
-  ])("rejects ambiguous or unknown subscription plan selectors: %j", async (selectors) => {
+  ])("rejects legacy or unknown subscription plan selectors: %j", async (selectors) => {
     const response = await app.request(
       "/v1/payments/subscription-plans",
       {
@@ -169,6 +171,51 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(response.status).toBe(400);
+  });
+
+  it.each([
+    { pullerWalletId: TEST_WALLET_ID },
+    { pullerWalletId: null },
+    { pullerWalletId: TEST_WALLET_ID, pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID },
+    { pullerWalletId: null, pullerCustodyWalletId: null },
+  ])("rejects legacy subscription plan updates: %j", async (patch) => {
+    const created = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(created.status).toBe(201);
+    const planId = (await created.json()).data.subscriptionPlan.id;
+    const rejected = await app.request(
+      `/v1/payments/subscription-plans/${planId}`,
+      {
+        method: "PATCH",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ status: "active", ...patch }),
+      },
+      env
+    );
+    expect(rejected.status).toBe(400);
+    const retained = await app.request(
+      `/v1/payments/subscription-plans/${planId}`,
+      { headers: SUBSCRIPTION_HEADERS },
+      env
+    );
+    expect((await retained.json()).data.subscriptionPlan).toMatchObject({
+      status: "draft",
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+    });
   });
 
   it("never interprets an exact owner selector as a provider reference", async () => {
@@ -426,25 +473,26 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(response.status).toBe(201);
-    const body = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
-      await response.json()
-    );
+    const rawBody = await response.json();
+    const body = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(rawBody);
     expect(body.data.subscriptionPlan).toMatchObject({
       ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      ownerWalletId: TEST_WALLET_ID,
-      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      pullerWalletId: TEST_WALLET_ID,
-    });
-    const exactPlan = structuredClone(body.data.subscriptionPlan);
-    delete exactPlan.ownerWalletId;
-    delete exactPlan.pullerWalletId;
-    expect(
-      paymentSubscriptionPlanResponseSchema.parse({ subscriptionPlan: exactPlan }).subscriptionPlan
-    ).toMatchObject({
-      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
     });
+    expect(rawBody.data.subscriptionPlan).not.toHaveProperty("ownerWalletId");
+    expect(rawBody.data.subscriptionPlan).not.toHaveProperty("pullerWalletId");
     const planId = body.data.subscriptionPlan.id;
+    const savedRoles = () =>
+      getDb(env)
+        .prepare(
+          "SELECT owner_wallet_id, puller_wallet_id FROM payment_subscription_plans WHERE id = ?"
+        )
+        .bind(planId)
+        .first();
+    expect(await savedRoles()).toEqual({
+      owner_wallet_id: TEST_WALLET_ID,
+      puller_wallet_id: TEST_WALLET_ID,
+    });
     for (const patch of [
       { pullerWalletId: null, pullerCustodyWalletId: null },
       { status: "active", pullerWalletID: TEST_WALLET_ID },
@@ -469,6 +517,10 @@ describe("Payments routes — subscriptions", () => {
     expect((await unchanged.json()).data.subscriptionPlan.pullerCustodyWalletId).toBe(
       TEST_CUSTODY_WALLET_ID
     );
+    expect(await savedRoles()).toEqual({
+      owner_wallet_id: TEST_WALLET_ID,
+      puller_wallet_id: TEST_WALLET_ID,
+    });
     const cleared = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
       {
@@ -481,9 +533,9 @@ describe("Payments routes — subscriptions", () => {
     expect(cleared.status).toBe(200);
     expect((await cleared.json()).data.subscriptionPlan).toMatchObject({
       pullerCustodyWalletId: null,
-      pullerWalletId: null,
       pullerAddress: null,
     });
+    expect(await savedRoles()).toEqual({ owner_wallet_id: TEST_WALLET_ID, puller_wallet_id: null });
   });
 
   it("requires owner wallet access when updating subscription plans", async () => {
@@ -493,7 +545,7 @@ describe("Payments routes — subscriptions", () => {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: DEVNET_USDC_MINT,
           amount: "25.00",
           periodHours: 720,
@@ -567,7 +619,7 @@ describe("Payments routes — subscriptions", () => {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: DEVNET_USDC_MINT,
           amount: "25.00",
           periodHours: 720,
@@ -642,7 +694,7 @@ describe("Payments routes — subscriptions", () => {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: DEVNET_USDC_MINT,
           amount: "25.00",
           periodHours: 720,
@@ -659,7 +711,7 @@ describe("Payments routes — subscriptions", () => {
     );
     const planId = planBody.data.subscriptionPlan.id;
     expect(planBody.data.subscriptionPlan).toMatchObject({
-      ownerWalletId: TEST_WALLET_ID,
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
       amount: "25.00",
       periodHours: 720,
@@ -674,7 +726,7 @@ describe("Payments routes — subscriptions", () => {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
-          ownerWalletId: TEST_WALLET_ID,
+          ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           token: DEVNET_USDC_MINT,
           amount: "25.00",
           periodHours: 720,
@@ -707,7 +759,7 @@ describe("Payments routes — subscriptions", () => {
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
           metadataUri: "https://sdp.dev/plan-active.json",
-          pullerWalletId: TEST_WALLET_ID,
+          pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
           status: "active",
         }),
       },
@@ -720,7 +772,7 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(updatePlanBody.data.subscriptionPlan).toMatchObject({
       id: planId,
-      pullerWalletId: TEST_WALLET_ID,
+      pullerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       pullerAddress: TEST_SOLANA_ADDRESSES.wallet1,
       metadataUri: "https://sdp.dev/plan-active.json",
       status: "active",

@@ -66,16 +66,18 @@ export async function bootstrapWalletIdentityFixtures(
   profile: "foundation" | "recurring" = "foundation"
 ) {
   const databaseUrl = walletIdentityDatabaseUrl(profile);
-  await cleanupWalletIdentityFixtures(profile);
+  if (profile === "foundation") await cleanupWalletIdentityFixtures(profile);
+  const runLabel = profile === "recurring" ? ` ${crypto.randomUUID().slice(0, 8)}` : "";
   const admin = await getPlaywrightAdminSession(browser);
   const fixture = await bootstrapLocalWalletFixtures({
     identity: admin.identity,
     bearerToken: admin.getBearerToken,
     provider: "local",
-    walletLabel: "Wallet Identity A",
+    walletLabel: `Wallet Identity A${runLabel}`,
     walletCount: 1,
     fundSourceWallet: false,
     tier: "enterprise",
+    preserveExistingFixtures: profile === "recurring",
   });
   const walletA = fixture.wallets[0];
   if (!walletA) throw new Error("Local wallet identity fixture was not created");
@@ -95,8 +97,8 @@ export async function bootstrapWalletIdentityFixtures(
   try {
     await db.query("BEGIN");
     for (const [ownerProject, label] of [
-      [projectId, "Wallet Identity B"],
-      [otherProjectId, "Wallet Identity Other Project"],
+      [projectId, `Wallet Identity B${runLabel}`],
+      [otherProjectId, `Wallet Identity Other Project${runLabel}`],
     ]) {
       const suffix = crypto.randomUUID();
       const credentialId = `pcred_identity_${suffix}`;

@@ -45,7 +45,6 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    ownerWalletId: row.owner_wallet_id,
     ownerCustodyWalletId: row.owner_custody_wallet_id,
     ownerAddress: row.owner_address,
     token: row.token,
@@ -54,7 +53,6 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
     programPlanId: row.program_plan_id,
     planPda: row.plan_pda,
     destinationAddress: row.destination_address,
-    pullerWalletId: row.puller_wallet_id,
     pullerCustodyWalletId: row.puller_custody_wallet_id,
     pullerAddress: row.puller_address,
     metadataUri: row.metadata_uri,
@@ -87,28 +85,24 @@ async function persistPlanPda(
 
 async function resolvePullerWalletAddress(
   c: AppContext,
-  pullerWalletId: string | null | undefined,
   pullerCustodyWalletId: string | null | undefined
 ): Promise<{
   pullerWalletId: string | null | undefined;
   pullerCustodyWalletId: string | null | undefined;
   pullerAddress: string | null | undefined;
 }> {
-  if (pullerWalletId === undefined && pullerCustodyWalletId === undefined) {
+  if (pullerCustodyWalletId === undefined) {
     return {
       pullerWalletId: undefined,
       pullerCustodyWalletId: undefined,
       pullerAddress: undefined,
     };
   }
-  if (pullerWalletId === null || pullerCustodyWalletId === null) {
+  if (pullerCustodyWalletId === null) {
     return { pullerWalletId: null, pullerCustodyWalletId: null, pullerAddress: null };
   }
 
-  const wallet = await resolveSubscriptionPlanWalletSelector(c, {
-    walletId: pullerWalletId,
-    custodyWalletId: pullerCustodyWalletId,
-  });
+  const wallet = await resolveSubscriptionPlanWalletSelector(c, pullerCustodyWalletId);
   return {
     pullerWalletId: wallet.walletId,
     pullerCustodyWalletId: wallet.id,
@@ -123,16 +117,9 @@ export const createSubscriptionPlan = async (
   const body = c.req.valid("json");
 
   const auth = getAuth(c);
-  const ownerWallet = await resolveSubscriptionPlanWalletSelector(c, {
-    walletId: body.ownerWalletId,
-    custodyWalletId: body.ownerCustodyWalletId,
-  });
+  const ownerWallet = await resolveSubscriptionPlanWalletSelector(c, body.ownerCustodyWalletId);
 
-  const puller = await resolvePullerWalletAddress(
-    c,
-    body.pullerWalletId,
-    body.pullerCustodyWalletId
-  );
+  const puller = await resolvePullerWalletAddress(c, body.pullerCustodyWalletId);
   const now = new Date().toISOString();
   const id = `psp_${crypto.randomUUID()}`;
   const createdBy = await resolveCreatorUserId(c);
@@ -328,11 +315,7 @@ export const updateSubscriptionPlan = async (
 
   await resolveSubscriptionPlanRole(c, existingPlan, "owner");
 
-  const puller = await resolvePullerWalletAddress(
-    c,
-    body.pullerWalletId,
-    body.pullerCustodyWalletId
-  );
+  const puller = await resolvePullerWalletAddress(c, body.pullerCustodyWalletId);
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,
