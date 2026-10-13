@@ -13,7 +13,6 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
@@ -200,11 +199,11 @@ export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope 
  */
 export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipScope {
   const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment, cluster } = currentClusterScope();
 
   return {
     environment,
-    cluster: currentClusterScope().cluster,
+    cluster,
     organizationId: auth.organizationId,
     projectId: c.get("projectId") ?? auth.projectId ?? null,
     actor:

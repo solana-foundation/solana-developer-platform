@@ -54,7 +54,6 @@ function createAuth(overrides: Partial<ApiKeyContext> = {}): ApiKeyContext {
     projectId: "proj_test",
     role: "admin",
     permissions: [],
-    environment: "dashboard",
     signingWalletId: null,
     signingWalletIds: [],
     walletBindings: [],

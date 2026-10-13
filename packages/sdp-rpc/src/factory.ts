@@ -29,10 +29,18 @@ import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
 import { isTransientRpcError } from "./transient";
 import type { ManagedRpcEnv } from "./types";
 
-/**
- * Each cluster's managed pool env key per provider. Key order is the failover order;
- * `default` (often a public endpoint) last.
- */
+/** The managed pool's failover order; `default` (often a public endpoint) last. */
+const MANAGED_RPC_FAILOVER_ORDER = [
+  "triton",
+  "helius",
+  "alchemy",
+  "quicknode",
+  "validationcloud",
+  "nodit",
+  "default",
+] as const satisfies readonly OrganizationRpcProvider[];
+
+/** Each cluster's managed pool env key per provider. */
 const MANAGED_RPC_ENV_KEYS = {
   devnet: {
     triton: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL",
@@ -254,6 +262,26 @@ function withGenesisGuard(
 }
 
 /**
+ * Prove `endpointUrl` serves `cluster`, for callers that send raw JSON-RPC instead of going
+ * through `createClusterRpc()`. Shares the door's per-endpoint proof cache and in-flight probe,
+ * so an endpoint the door already proved costs nothing.
+ *
+ * @param cluster - The cluster the endpoint is configured for.
+ * @param endpointUrl - The managed pool endpoint.
+ * @returns Resolves once the endpoint holds an unexpired genesis match for `cluster`.
+ * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ */
+export async function assertEndpointServesCluster(
+  cluster: SolanaCluster,
+  endpointUrl: string
+): Promise<void> {
+  const genesisProofKey = `${cluster} ${endpointUrl}`;
+  const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
+  if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
+  await proveGenesis(createDefaultRpcTransport({ url: endpointUrl }), cluster, genesisProofKey);
+}
+
+/**
  * A transient failure that happened before the request left SDP (the genesis probe failed), so
  * the pool may try another endpoint even for `sendTransaction`.
  */
@@ -335,6 +363,32 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
   };
 }
 
+/** One configured endpoint of a cluster's managed pool. */
+export interface ManagedRpcEndpoint {
+  providerId: OrganizationRpcProvider;
+  endpointUrl: string;
+}
+
+/**
+ * The configured endpoints of `cluster`'s managed pool, in failover order.
+ *
+ * @param cluster - The cluster whose pool to read.
+ * @returns One entry per non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function managedRpcEndpoints(cluster: SolanaCluster): ManagedRpcEndpoint[] {
+  const endpoints = MANAGED_RPC_FAILOVER_ORDER.flatMap((providerId) => {
+    const endpointUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster][providerId]];
+    return endpointUrl ? [{ providerId, endpointUrl }] : [];
+  });
+  if (endpoints.length === 0) {
+    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
+      cluster,
+    });
+  }
+  return endpoints;
+}
+
 /**
  * The configured endpoint URLs for `cluster`, in failover order.
  *
@@ -343,16 +397,7 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
 function managedEndpointUrls(cluster: SolanaCluster): string[] {
-  const endpointUrls = Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
-    const endpointUrl = process.env[envKey];
-    return endpointUrl ? [endpointUrl] : [];
-  });
-  if (endpointUrls.length === 0) {
-    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
-      cluster,
-    });
-  }
-  return endpointUrls;
+  return managedRpcEndpoints(cluster).map((endpoint) => endpoint.endpointUrl);
 }
 
 /**

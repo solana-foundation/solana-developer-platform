@@ -6,7 +6,9 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
 import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { TransactionSigner } from "@solana/kit";
 import type { resolveTokenAccount } from "@solana/mosaic-sdk";
@@ -39,10 +41,13 @@ export function createMosaicSdkRpc(): SolanaRpc & MosaicSdkRpc {
  *
  * @param env - Environment bindings
  * @param signer - Transaction signer (from SigningService.getTransactionSigner)
- * @param feePayment - "sponsored" routes fees through the Kora relay when
- * KORA_RPC_URL is configured (gasless for the custody wallet) and degrades to
- * signer-paid fees when it is not; "wallet" always makes the signer pay
- * transaction fees from its own SOL.
+ * @param feePayment - "sponsored" routes fees through the fee payer when the
+ * deployment has one for the cluster scope's cluster (gasless for the custody
+ * wallet) and degrades to signer-paid fees when it does not; "wallet" always
+ * makes the signer pay transaction fees from its own SOL.
+ * @param sponsorshipScope - The request's sponsorship scope; required when sponsoring.
+ * @returns The Mosaic service.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope when sponsoring.
  */
 export function createMosaicService(
   env: Env,
@@ -50,14 +55,15 @@ export function createMosaicService(
   feePayment: MosaicFeePayment,
   sponsorshipScope?: SponsorshipScope
 ): MosaicService {
-  if (feePayment === "sponsored" && env.KORA_RPC_URL && !sponsorshipScope) {
-    throw new Error("Sponsorship scope is required for Kora-backed issuance");
+  const sponsored =
+    feePayment === "sponsored" &&
+    isFeePaymentConfiguredForCluster(env, currentClusterScope().cluster);
+  if (sponsored && !sponsorshipScope) {
+    throw new Error("Sponsorship scope is required for sponsored issuance");
   }
 
   const sponsor =
-    feePayment === "sponsored" && env.KORA_RPC_URL && sponsorshipScope
-      ? createSponsorshipFeePayment(env, sponsorshipScope)
-      : undefined;
+    sponsored && sponsorshipScope ? createSponsorshipFeePayment(env, sponsorshipScope) : undefined;
   return new MosaicService(env, createMosaicSdkRpc(), signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.

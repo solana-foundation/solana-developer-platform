@@ -569,7 +569,6 @@ function createApiKeyAuth(
     projectId: null,
     role: "api_developer",
     permissions: ["*"],
-    environment: "sandbox",
     signingWalletId: null,
     signingWalletIds: [],
     walletBindings: [],

@@ -1,6 +1,7 @@
 import { isClusterFundableInEnvironment, supportsPortfolioWallets } from "@sdp/earn";
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   EarnPortfolioAllocationInput,
   EarnPortfolioWalletSnapshot,
@@ -48,7 +49,7 @@ import {
   assertEarnProviderConfigured,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
-import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
+import { type AppContext, earnRuntime, getEarnRepository } from "../context";
 import {
   type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
@@ -173,7 +174,7 @@ function requirePortfolioClient(provider: string): EarnPortfolioWalletProvider {
 async function requireProgram(c: AppContext, programId: string): Promise<EarnProviderWalletRow> {
   const row = await getEarnRepository(c).getProviderWalletById({
     organizationId: getAuth(c).organizationId,
-    environment: resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     walletId: programId,
   });
 
@@ -197,19 +198,23 @@ async function requireProgram(c: AppContext, programId: string): Promise<EarnPro
 }
 
 /**
- * The `:programId` preamble every per-program route shares: row, client, and
- * the sandbox/production mode the credential checks key off — resolved once
- * here so handlers cannot drift on which environment they assert against.
+ * The `:programId` preamble every per-program route shares: the row and its
+ * provider client. The credential checks key off the open cluster scope's
+ * environment, which `requireProgram` already matched the row against.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param programId - The program the path names.
+ * @returns The program row and its portfolio-wallet client.
+ * @throws AppError `NOT_FOUND` when the program is outside the caller's organization, project or environment.
  */
 async function requireProgramContext(
   c: AppContext,
   programId: string
-): Promise<{ row: EarnProviderWalletRow; client: EarnPortfolioWalletProvider; testMode: boolean }> {
+): Promise<{ row: EarnProviderWalletRow; client: EarnPortfolioWalletProvider }> {
   const row = await requireProgram(c, programId);
   return {
     row,
     client: requirePortfolioClient(row.provider),
-    testMode: row.environment === "sandbox",
   };
 }
 
@@ -231,7 +236,7 @@ async function assertKnownYieldSources(
   }
 
   const repo = getEarnRepository(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const known = new Set<string>();
   const pageSize = 200;
   // The repository has no provider filter, so page the (small) environment
@@ -393,12 +398,11 @@ const LIST_LIVE_READ_CONCURRENCY = 8;
 
 export const listEarnPrograms = async (c: AppContext) => {
   const query = parseQuery(c, earnProgramsListQuerySchema);
-  const environment = resolveSdpEnvironment(c);
-  const testMode = environment === "sandbox";
+  const { environment } = currentClusterScope();
 
   if (query.provider) {
     requirePortfolioClient(query.provider);
-    assertEarnProviderConfigured(c.env, query.provider, testMode);
+    assertEarnProviderConfigured(c.env, query.provider);
   }
 
   const { rows, total } = await getEarnRepository(c).listProviderWallets({
@@ -423,7 +427,7 @@ export const listEarnPrograms = async (c: AppContext) => {
   for (const row of rows) {
     if (!clients.has(row.provider)) {
       const client = requirePortfolioClient(row.provider);
-      assertEarnProviderConfigured(c.env, client.provider, testMode);
+      assertEarnProviderConfigured(c.env, client.provider);
       clients.set(row.provider, client);
     }
   }
@@ -459,7 +463,7 @@ export const createEarnProgram = async (
   const body = c.req.valid("json");
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
 
   // Money-in gate: release channel, surfacing, entitlement and credentials.
   // A new position is the only program route that checks surfacing; re-target
@@ -594,8 +598,8 @@ export const retargetEarnProgram = async (
 
 export const getEarnProgram = async (c: AppContext) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
-  const { row, client, testMode } = await requireProgramContext(c, programId);
-  assertEarnProviderConfigured(c.env, client.provider, testMode);
+  const { row, client } = await requireProgramContext(c, programId);
+  assertEarnProviderConfigured(c.env, client.provider);
 
   const { wallet, portfolioYield } = await loadProgramState(c, client, row.provider_wallet_ref);
 
@@ -606,8 +610,8 @@ export const getEarnProgram = async (c: AppContext) => {
 export const listEarnProgramDeposits = async (c: AppContext) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const query = parseQuery(c, earnProgramDepositsQuerySchema);
-  const { row, client, testMode } = await requireProgramContext(c, programId);
-  assertEarnProviderConfigured(c.env, client.provider, testMode);
+  const { row, client } = await requireProgramContext(c, programId);
+  assertEarnProviderConfigured(c.env, client.provider);
 
   const response: EarnProgramDepositsResponse = await client.listPortfolioDeposits(earnRuntime(c), {
     providerWalletRef: row.provider_wallet_ref,
@@ -636,10 +640,10 @@ export const previewEarnProgramWithdrawal = async (
 ) => {
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = c.req.valid("json");
-  const { row, client, testMode } = await requireProgramContext(c, programId);
+  const { row, client } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
-  assertEarnProviderConfigured(c.env, client.provider, testMode);
+  assertEarnProviderConfigured(c.env, client.provider);
 
   assertProgramKeyIsNotWalletScoped(c, "read Earn program withdrawal liquidity");
 
@@ -757,10 +761,10 @@ export async function extractEarnProgramWithdrawal(
 ): Promise<RequestGateExtraction> {
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = c.req.valid("json");
-  const { row, client, testMode } = await requireProgramContext(c, programId);
+  const { row, client } = await requireProgramContext(c, programId);
 
   // Money-out path: credentials only, never the entitlement gate.
-  assertEarnProviderConfigured(c.env, client.provider, testMode);
+  assertEarnProviderConfigured(c.env, client.provider);
 
   assertProgramKeyIsNotWalletScoped(c, "withdraw from Earn programs");
 
@@ -875,7 +879,7 @@ export const createEarnProgramWithdrawal = async (
       intentRow = await ledger.createCustodialMovement({
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        environment: resolveSdpEnvironment(c),
+        environment: currentClusterScope().environment,
         providerWalletId: row.id,
         provider: client.provider,
         amountRequestedUsd: body.amountUsd,
@@ -958,9 +962,9 @@ export const createEarnProgramWithdrawal = async (
 
 export const getEarnProgramWithdrawal = async (c: AppContext) => {
   const { programId, withdrawalRef } = parseParams(c, earnProgramWithdrawalParamsSchema);
-  const { row, client, testMode } = await requireProgramContext(c, programId);
+  const { row, client } = await requireProgramContext(c, programId);
 
-  assertEarnProviderConfigured(c.env, client.provider, testMode);
+  assertEarnProviderConfigured(c.env, client.provider);
 
   // BOLA guard, defense in depth: every SDP organization shares one provider
   // account, so a withdrawal ref this program does not own must 404 HERE —

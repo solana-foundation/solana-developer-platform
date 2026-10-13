@@ -1621,13 +1621,16 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Conventions
 
-- Environment resolution is the shared `@/lib/sdp-environment` helper: API-key
-  callers use the key's (project-derived) environment; dashboard/session
-  callers use the membership-verified `x-project-id` project's environment; a
-  request with neither fails closed (500), never defaults to sandbox. The
-  keyless-capable Earn handlers are the single exception: with no tenant
-  authenticated, the caller's `?environment=` or the named strategy's row
-  decides (PRO-1998), never the deployment's `ENVIRONMENT`. A
+- Environment resolution is the open cluster scope (`currentClusterScope()`
+  from `@sdp/rpc/scope`), read where the value is used rather than threaded
+  through parameters. `projectContextMiddleware` opens it for keyed requests:
+  API-key callers get the key's (project-derived) environment; dashboard/session
+  callers get the membership-verified `x-project-id` project's environment. A
+  request with no open scope fails closed (`CLUSTER_SCOPE_MISSING`), never
+  defaults to sandbox. The keyless-capable Earn handlers are the single
+  exception: with no tenant authenticated, the keyless router middleware opens
+  the scope from the caller's `?environment=` or the named strategy's row
+  (PRO-1998), never the deployment's `ENVIRONMENT`. A
   production-project dashboard session therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
