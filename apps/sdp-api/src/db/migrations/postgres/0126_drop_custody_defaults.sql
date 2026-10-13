@@ -60,23 +60,6 @@ LOCK TABLE organizations, projects, custody_configs, custody_connections,
     custody_wallets, custody_scope_defaults
     IN ACCESS EXCLUSIVE MODE;
 
--- Fails the migration, rather than deleting or moving anything, when a custody
--- config belongs to a Production project.
-DO $$
-DECLARE
-    production_config_count BIGINT;
-BEGIN
-    SELECT COUNT(*) INTO production_config_count
-      FROM custody_configs config
-      JOIN projects project ON project.id = config.project_id
-     WHERE project.environment <> 'sandbox';
-
-    IF production_config_count > 0 THEN
-        RAISE EXCEPTION '% custody config(s) belong to a Production project', production_config_count;
-    END IF;
-END;
-$$;
-
 -- Fails the migration, rather than deleting anything, when a custody
 -- connection is organization-scoped or bound to a credential outside its own
 -- project.
@@ -96,6 +79,22 @@ END;
 $$;
 
 DROP TABLE custody_scope_defaults;
+
+-- Deletes every custody config that belongs to a Production project, since the
+-- project_environment foreign key below counts archived configs too. Stage and
+-- Production applied this file while it still failed on such a config, and
+-- held none; only dev drifted. It runs after custody_scope_defaults is dropped,
+-- whose config foreign key is ON DELETE NO ACTION. The delete cascades to the
+-- config's custody_wallets, and fails with 23503 if a payments, earn, dvp, or
+-- issuance row still references one of those wallets. The cascade queues
+-- checks for the deferred custody_configs_default_wallet_fkey (0056), and
+-- dropping that key below fails while they are pending, so they fire here.
+DELETE FROM custody_configs config
+ USING projects project
+ WHERE project.id = config.project_id
+   AND project.environment <> 'sandbox';
+
+SET CONSTRAINTS custody_configs_default_wallet_fkey IMMEDIATE;
 
 ALTER TABLE custody_configs
     DROP CONSTRAINT custody_configs_default_wallet_fkey,
