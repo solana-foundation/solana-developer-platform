@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpRampProviderStages } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
 import { getDb } from "@/db";
@@ -58,7 +59,14 @@ function currentAppRevision(env: Env): string {
  * once attempts are exhausted — the alertable state, because it means a
  * provider told SDP about a settlement and SDP could not act on it.
  *
+ * Runs under a cluster scope with no project for the row's environment, opened by the caller:
+ * the webhook handler from the URL's environment, the replay loop from the stored row's.
+ *
+ * @param env - Process environment used for repository and provider access.
+ * @param row - The persisted event to apply.
  * @param attempts - Attempts spent including the one this call is making.
+ * @returns Whether the event applied and its row was discharged.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` from the processor when no cluster scope is open.
  */
 export async function applyStoredRampWebhookEvent(
   env: Env,
@@ -83,7 +91,7 @@ export async function applyStoredRampWebhookEvent(
   const processor: WebhookProcessor<unknown, unknown> =
     RAMP_PROVIDER_WEBHOOK_PROCESSOR[row.provider];
   try {
-    await processor.process(env, row.environment, processor.parse(row.payload));
+    await processor.process(env, processor.parse(row.payload));
     await events.deleteEvent(row.id);
     return true;
   } catch (error) {
@@ -200,8 +208,13 @@ export async function replayRampWebhookEvents(
       break;
     }
     claimed += 1;
-    // `claimReplayable` already spent this attempt.
-    if (await applyStoredRampWebhookEvent(env, row, row.attempts)) {
+    // `claimReplayable` already spent this attempt. Each event is the entry point of its own
+    // apply, so it opens its own scope from its stored environment.
+    if (
+      await runInClusterScope({ projectId: null, environment: row.environment }, () =>
+        applyStoredRampWebhookEvent(env, row, row.attempts)
+      )
+    ) {
       applied += 1;
     }
   }
