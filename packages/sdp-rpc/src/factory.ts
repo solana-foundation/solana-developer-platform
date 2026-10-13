@@ -722,7 +722,7 @@ export function createEndpointRpc(endpointUrl: string, options: EndpointRpcOptio
   return createEndpointRpcFromTransport(
     createDefaultRpcTransport({
       url: endpointUrl,
-      ...(options.headers ? { headers: options.headers } : {}),
+      headers: options.headers,
     }),
     { timeoutMs: options.timeoutMs }
   );
