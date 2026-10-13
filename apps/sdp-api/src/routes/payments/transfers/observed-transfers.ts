@@ -1,6 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { getSignaturesForAddress, SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
@@ -50,7 +50,7 @@ interface ObservedTransferContext {
   walletIdsByAddress: Map<string, string>;
 }
 
-type SignatureHistoryEntry = Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number];
+type SignatureHistoryEntry = Awaited<ReturnType<typeof getSignaturesForAddress>>[number];
 
 function resolveWalletIdForTokenAccount(
   context: ObservedTransferContext,
@@ -234,7 +234,7 @@ export function dedupeSignatureHistory(
 
 export async function resolveWalletTokenAccountAddresses(
   c: AppContext,
-  rpc: solanaRpc.SolanaRpc,
+  rpc: SolanaRpc,
   owner: Address,
   walletId: string
 ): Promise<Address[]> {
@@ -698,7 +698,7 @@ function buildObservedTransferRows(
 }
 
 export async function buildObservedTransfersForSignatures(
-  signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
+  signatures: Array<Awaited<ReturnType<typeof getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
   if (signatures.length === 0 || context.walletIdsByAddress.size === 0) {
