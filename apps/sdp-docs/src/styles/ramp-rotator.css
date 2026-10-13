@@ -23,6 +23,14 @@
 }
 
 /* One keyframe set per rotation length, about 3s per row. */
+.rpr-track-2 {
+  animation: rpr-cycle-2 6s infinite;
+}
+
+.rpr-track-3 {
+  animation: rpr-cycle-3 9s infinite;
+}
+
 .rpr-track-4 {
   animation: rpr-cycle-4 12s infinite;
 }
@@ -40,6 +48,38 @@
 
 .rpr-item[data-name]::after {
   content: attr(data-name);
+}
+
+@keyframes rpr-cycle-2 {
+  0%,
+  43.1% {
+    transform: translateY(0);
+  }
+  50%,
+  93.1% {
+    transform: translateY(-1lh);
+  }
+  100% {
+    transform: translateY(-2lh);
+  }
+}
+
+@keyframes rpr-cycle-3 {
+  0%,
+  28.73% {
+    transform: translateY(0);
+  }
+  33.33%,
+  62.07% {
+    transform: translateY(-1lh);
+  }
+  66.67%,
+  95.4% {
+    transform: translateY(-2lh);
+  }
+  100% {
+    transform: translateY(-3lh);
+  }
 }
 
 @keyframes rpr-cycle-4 {

@@ -24,7 +24,7 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -77,7 +77,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     if (!wallet) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+    assertApiKeyCustodyWalletAccess(auth, wallet.id, ["wallets:write"]);
     // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
     const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
       kind: "wallet",

@@ -5,8 +5,8 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import {
+  assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
-  assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
   resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
@@ -151,31 +151,12 @@ export function resolveWalletByCustodyWalletId(
   return wallet;
 }
 
-export async function assertFreshPaymentWalletAccess(
-  c: AppContext,
-  wallet: CustodyWallet,
-  requiredWalletPermissions: Permission[]
-): Promise<void> {
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    getAuth(c),
-    wallet.id,
-    requiredWalletPermissions
-  );
-}
-
 export function assertPaymentWalletExactAccess(
   c: AppContext,
   custodyWalletId: string,
   requiredWalletPermissions: Permission[]
 ): void {
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
-    getAuth(c),
-    requiredWalletPermissions
-  );
-  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(custodyWalletId)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
+  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
 }
 
 export async function admitExactPaymentWallet(
@@ -183,7 +164,7 @@ export async function admitExactPaymentWallet(
   wallet: CustodyWallet,
   requiredWalletPermissions: Permission[]
 ): Promise<void> {
-  await assertFreshPaymentWalletAccess(c, wallet, requiredWalletPermissions);
+  assertPaymentWalletExactAccess(c, wallet.id, requiredWalletPermissions);
   await admitPaymentWalletRuntimeExecution(c, wallet);
 }
 

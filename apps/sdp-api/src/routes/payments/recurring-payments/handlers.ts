@@ -24,7 +24,6 @@ import {
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   assertPaymentWalletReadAccess,
   type ResolvedScope,
@@ -97,7 +96,6 @@ export const createRecurringPayment = async (
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const recurringPayment = await createRecurringPaymentRecord({
     env: c.env,
@@ -151,14 +149,12 @@ export const updateRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
   const nextSourceWallet =
     body.sourceCustodyWalletId && body.sourceCustodyWalletId !== sourceWallet.id
       ? resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId)
       : undefined;
   if (nextSourceWallet) {
     assertPaymentWalletExactAccess(c, nextSourceWallet.id, ["payments:write"]);
-    await assertFreshPaymentWalletAccess(c, nextSourceWallet, ["payments:write"]);
   }
 
   const updated = await updateRecurringPaymentRecord({
@@ -207,7 +203,6 @@ export const activateRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const activated = await activateRecurringPaymentRecord({
     env: c.env,
@@ -257,7 +252,6 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const updated =
     operation === "cancel"
@@ -327,7 +321,6 @@ export const collectRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,

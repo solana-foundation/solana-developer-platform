@@ -55,6 +55,11 @@ ENV NEXT_PUBLIC_SDP_WEB_URL=$NEXT_PUBLIC_SDP_WEB_URL \
     NEXT_PUBLIC_SDP_API_URL=$NEXT_PUBLIC_SDP_API_URL \
     NEXT_BUILD_STANDALONE=1
 
+# The docs document only the modules this release channel runs; match the API
+# deployment's SDP_RELEASE_CHANNEL. The default documents every module.
+ARG SDP_RELEASE_CHANNEL=experimental
+ENV SDP_RELEASE_CHANNEL=$SDP_RELEASE_CHANNEL
+
 RUN pnpm --filter sdp-docs build
 
 FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner

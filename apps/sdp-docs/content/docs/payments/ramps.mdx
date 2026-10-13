@@ -1,11 +1,81 @@
 ---
+module: ramps
 title: Ramps
 description: Fiat on-ramps and off-ramps — discover corridors, price a Ramp Quote just-in-time, and hand off to the provider's own execution flow.
 ---
 
+
 SDP wraps ramp providers behind a single pricing step: a **Ramp Quote**, priced just-in-time against the provider. There is no execute endpoint — SDP quotes the ramp and hands the end-user to the provider's own flow (hosted redirect or funding instructions) to complete it.
 
 Every quote is tied to a **Counterparty** — the KYC subject for the ramp — and a custody wallet you control. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
+
+## One call for every provider
+
+The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+
+<Tabs items={["JavaScript", "Python", "curl"]}>
+<Tab value="JavaScript">
+```javascript title="onramp-quote.js" rotate-providers
+const response = await fetch(
+  "https://api.solana.com/v1/payments/ramps/onramp/quote",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      provider: "moonpay",
+      counterpartyId: "cp_...",
+      destinationCustodyWalletId: "cwlt_...",
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "100.00",
+    }),
+  },
+);
+const quote = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python title="onramp_quote.py" rotate-providers
+import requests
+
+response = requests.post(
+    "https://api.solana.com/v1/payments/ramps/onramp/quote",
+    headers={"Authorization": "Bearer sk_test_..."},
+    json={
+        "provider": "moonpay",
+        "counterpartyId": "cp_...",
+        "destinationCustodyWalletId": "cwlt_...",
+        "assetRail": "usdc.solana",
+        "fiatCurrency": "USD",
+        "fiatAmount": "100.00",
+    },
+)
+quote = response.json()
+```
+</Tab>
+<Tab value="curl">
+```bash title="Terminal" rotate-providers
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "moonpay",
+    "counterpartyId": "cp_...",
+    "destinationCustodyWalletId": "cwlt_...",
+    "assetRail": "usdc.solana",
+    "fiatCurrency": "USD",
+    "fiatAmount": "100.00"
+  }'
+```
+</Tab>
+</Tabs>
+
+Rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, move onchain, and exit back to fiat without stitching together provider-specific integrations. See [Ramp providers](/docs/payments/ramps-providers) for supported providers.
+
+Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements.
 
 ## Prerequisites
 
@@ -82,7 +152,7 @@ Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash title="Terminal"
+```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -97,7 +167,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="onramp-quote.ts"
+```typescript title="onramp-quote.ts" rotate-providers
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/quote",
   {
@@ -121,7 +191,7 @@ const { data } = await response.json();
 ```
 </Tab>
 <Tab value="Java">
-```java title="OnrampQuote.java"
+```java title="OnrampQuote.java" rotate-providers
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
     .header("Authorization", "Bearer sk_test_...")
@@ -144,11 +214,11 @@ HttpRequest request = HttpRequest.newBuilder()
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `bvnk`, `coinbase`, `stripe`. |
+| `provider` | yes | A provider from the [capability matrix](/docs/payments/ramps-providers#capability-matrix). |
 | `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
 | `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), resolved against your API key's wallet scope. Same shape for every provider. |
 | `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
-| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for BVNK offramp. |
+| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp, and for offramp where the provider's page says so. |
 | `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
 | `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
 
@@ -158,12 +228,13 @@ The quote also creates the underlying **Payment Transfer** record for the ramp; 
 
 `quote.deliveryMode` tells you how to complete the flow with the named provider:
 
-| Provider | `deliveryMode` | What to do |
-| --- | --- | --- |
-| MoonPay | `hosted` | Redirect the user to `quote.hostedUrl`. |
-| BVNK | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions`. |
-| Coinbase | `hosted` | Redirect the user to `quote.hostedUrl`. Onramp only; quote creation is sandbox-only today. |
-| Stripe | `session_widget` | Mount the session with `quote.clientSecret` and `quote.publishableKey`. Onramp only. |
+| Delivery mode | What to do |
+| --- | --- |
+| `hosted` | Redirect the user to `quote.hostedUrl`. |
+| `manual_instructions` | Display the funding instructions in `quote.paymentInstructions`. |
+| `session_widget` | Mount the session with `quote.clientSecret` and `quote.publishableKey`. |
+
+Each provider's delivery mode is in the [capability matrix](/docs/payments/ramps-providers#capability-matrix).
 
 There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
 
@@ -171,17 +242,33 @@ There is no further SDP endpoint to call after this — the provider owns settle
 
 `POST /v1/payments/ramps/transfers/cancel` cancels the transfer behind a quote while it is still `pending` or `awaiting_payment` — before the provider has moved money.
 
-```bash title="Terminal"
+```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "bvnk",
+    "provider": "moonpay",
     "providerReference": "..."
   }'
 ```
 
 A transfer past that window (already funded or settling) returns an error instead of canceling.
+
+## Transfer status
+
+Each quote creates a **Payment Transfer** with its own lifecycle, separate from wallet transfers ([Verifying a payment](/docs/payments/accept-verification)):
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | The quote was created; no funding has been detected yet. No `signature`. |
+| `awaiting_payment` | The quote's delivery mode is `manual_instructions` — SDP is waiting for the payer to fund the account described in the quote. |
+| `settling` | The provider has detected or started processing the payment. |
+| `completed` | The provider reports the ramp settled. |
+| `canceled` | Canceled via `POST /v1/payments/ramps/transfers/cancel` before funding. |
+| `expired` | The funding window elapsed without payment. |
+| `failed` | The provider rejected or reversed the ramp. The `error` field describes why, when set. |
+
+Any state can transition to `failed`; `failed`, `completed`, `canceled`, and `expired` are terminal. Ramp transfers can start at `pending` while provider-side steps are still underway.
 
 ## Status field
 

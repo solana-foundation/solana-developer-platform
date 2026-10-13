@@ -1,20 +1,14 @@
 ---
 title: What is SDP?
 icon: BookOpen
-description: One API for tokenization, custody, payments, and compliance on Solana.
+description: One API in front of interchangeable providers for building on Solana.
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
-import "../../src/styles/ramp-rotator.css";
 
-SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
+SDP puts each of its modules behind one stable API in front of interchangeable providers. Operations use project-scoped authentication.
 
-| Module | What it does |
-| --- | --- |
-| **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
-| **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
-| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
-| **Compliance** | Screen wallets and transactions against your regulatory program |
+<ModuleTable />
 
 ## Background
 
@@ -28,64 +22,43 @@ Assets at this scale need regulated custody, enforceable compliance, and auditab
 <Step>
 ### Unified Programming Interface
 
-SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same call works for every custody provider. The `provider` field is the only thing that changes.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
-```javascript title="onramp-quote.js" rotate-providers
-const response = await fetch(
-  "https://api.solana.com/v1/payments/ramps/onramp/quote",
-  {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      provider: "moonpay",
-      counterpartyId: "cp_...",
-      destinationCustodyWalletId: "cwlt_...",
-      assetRail: "usdc.solana",
-      fiatCurrency: "USD",
-      fiatAmount: "100.00",
-    }),
+```javascript title="create-wallet.js"
+const response = await fetch("https://api.solana.com/v1/wallets", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer sk_test_...",
+    "Content-Type": "application/json",
   },
-);
-const quote = await response.json();
+  body: JSON.stringify({
+    provider: "privy",
+    label: "Treasury wallet",
+  }),
+});
+const wallet = await response.json();
 ```
 </Tab>
 <Tab value="Python">
-```python title="onramp_quote.py" rotate-providers
+```python title="create_wallet.py"
 import requests
 
 response = requests.post(
-    "https://api.solana.com/v1/payments/ramps/onramp/quote",
+    "https://api.solana.com/v1/wallets",
     headers={"Authorization": "Bearer sk_test_..."},
-    json={
-        "provider": "moonpay",
-        "counterpartyId": "cp_...",
-        "destinationCustodyWalletId": "cwlt_...",
-        "assetRail": "usdc.solana",
-        "fiatCurrency": "USD",
-        "fiatAmount": "100.00",
-    },
+    json={"provider": "privy", "label": "Treasury wallet"},
 )
-quote = response.json()
+wallet = response.json()
 ```
 </Tab>
 <Tab value="curl">
-```bash title="Terminal" rotate-providers
-curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
-  -d '{
-    "provider": "moonpay",
-    "counterpartyId": "cp_...",
-    "destinationCustodyWalletId": "cwlt_...",
-    "assetRail": "usdc.solana",
-    "fiatCurrency": "USD",
-    "fiatAmount": "100.00"
-  }'
+  -d '{ "provider": "privy", "label": "Treasury wallet" }'
 ```
 </Tab>
 </Tabs>
@@ -108,55 +81,9 @@ Provision signing wallets through integrated custody providers, so your team nev
    Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
 </Step>
 <Step>
-### Issuance and Compliance with Token-2022
+### Onchain Transfers
 
-Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
-
-Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
-
-<Tabs items={["JavaScript", "Python", "curl"]}>
-<Tab value="JavaScript">
-```javascript title="compliance-action.js" rotate-token-ops
-const response = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-  {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer sk_test_...",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(operationParams),
-  },
-);
-const result = await response.json();
-```
-</Tab>
-<Tab value="Python">
-```python title="compliance_action.py" rotate-token-ops
-import requests
-
-response = requests.post(
-    "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sk_test_..."},
-    json=operation_params,
-)
-result = response.json()
-```
-</Tab>
-<Tab value="curl">
-```bash title="Terminal" rotate-token-ops
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d "$OPERATION_PARAMS"
-```
-</Tab>
-</Tabs>
-</Step>
-<Step>
-### Ramps and Onchain Transfers
-
-SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP exposes unified endpoints for onchain transfers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
 
 <Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
@@ -210,7 +137,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+See [Payments](/docs/payments) for transfers, batches, and payment requests.
 </Step>
 <Step>
 ### Audit Trails
@@ -220,11 +147,9 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | Area                    | Recorded events                                                                    |
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
-| Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
-| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
 | Organization & access   | Members, invitations, projects, and project membership             |
-| Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
+| Counterparties          | Counterparty and Counterparty Account changes                                      |
 </Step>
 </Steps>
