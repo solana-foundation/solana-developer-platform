@@ -1,4 +1,5 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
@@ -177,10 +178,7 @@ export async function resolvePermanentDelegateAuthority(
 
     return permanentDelegate;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve permanent delegate authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve permanent delegate authority");
   }
 }
 
@@ -200,10 +198,7 @@ export async function resolveMetadataAuthority(token: TokenRecord): Promise<stri
     // failed read. Do not restore stale stored authority after revocation.
     return metadataAuthority;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve metadata authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve metadata authority");
   }
 }
 
@@ -227,10 +222,7 @@ export async function resolveFreezeOperationAuthority(token: TokenRecord): Promi
     const { freezeAuthority } = await fetchMintAuthorities(token.mintAddress);
     return freezeAuthority;
   } catch (error) {
-    throw new AppError(
-      "SOLANA_RPC_ERROR",
-      error instanceof Error ? error.message : "Failed to resolve freeze authority"
-    );
+    throwAuthorityReadError(error, "Failed to resolve freeze authority");
   }
 }
 
@@ -254,10 +246,7 @@ export async function resolveCurrentAuthorityForRole(
         const { mintAuthority } = await fetchMintAuthorities(token.mintAddress);
         currentAuthority = mintAuthority;
       } catch (error) {
-        throw new AppError(
-          "SOLANA_RPC_ERROR",
-          error instanceof Error ? error.message : "Failed to resolve mint authority"
-        );
+        throwAuthorityReadError(error, "Failed to resolve mint authority");
       }
       break;
     }
@@ -535,4 +524,21 @@ export function getInitialPermanentDelegateAuthority(
   }
 
   return undefined;
+}
+
+/**
+ * Rethrows a failed on-chain authority read: a cluster-scope or pool error (`RPC_NOT_CONFIGURED`,
+ * `RPC_CLUSTER_MISMATCH`, `CLUSTER_SCOPE_MISSING`) keeps its own code and status; anything else
+ * becomes `SOLANA_RPC_ERROR`.
+ *
+ * @param error - What the read threw.
+ * @param fallbackMessage - The message when `error` is not an `Error`.
+ * @throws SdpRpcError the original error when it carries its own code.
+ * @throws AppError `SOLANA_RPC_ERROR` otherwise.
+ */
+function throwAuthorityReadError(error: unknown, fallbackMessage: string): never {
+  if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+    throw error;
+  }
+  throw new AppError("SOLANA_RPC_ERROR", error instanceof Error ? error.message : fallbackMessage);
 }
