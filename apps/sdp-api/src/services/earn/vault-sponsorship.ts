@@ -66,9 +66,10 @@ export interface ResolveVaultSponsorshipInput {
  * outage; resolving sponsorship first would make a already-signed movement
  * un-returnable exactly when a caller is retrying.
  *
- * Fail-closed by construction: an unset flag, or a cluster with no paymaster
- * configured, answers `wallet-pays`, so turning sponsorship off (or on, per
- * cluster) is a configuration change and never a code change. Provider
+ * An unset flag answers `wallet-pays`. A set flag sponsors every movement: a
+ * cluster with no Kora configured is refused with 503, never downgraded to
+ * `wallet-pays`, so the operator wires every cluster's Kora before turning the
+ * flag on (see `isEarnVaultSponsorshipEnabled`). Provider
  * construction goes through the shared sponsorship boundary rather than a raw
  * adapter, so managed deployments keep the budget reservation and the Kora
  * usage identity that boundary owns; bypassing it would spend the fee payer's
@@ -81,6 +82,8 @@ export interface ResolveVaultSponsorshipInput {
  * @param input.walletId - Custody wallet id, used as the sponsorship quota actor.
  * @param input.deadline - The movement's deadline, bounding the fee-payer lookup.
  * @returns The fee mode for the movement.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` (503) when the flag is on and the scope's
+ *   cluster has no Kora configured.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope when the flag is on.
  */
 export async function resolveVaultSponsorship(

@@ -728,21 +728,18 @@ transaction signed by the organization custody wallet or external owner.
     payer used to SIMULATE. Simulation matters as much as signing here, because
     it enforces that the fee payer can pay: a zero-SOL wallet simulated as its
     own fee payer dies with `AccountNotFound` and no logs, before signing.
-  - **Sponsorship is per cluster, and the cluster gate is exit safety, not
-    caution.** One process serves both clusters and withdrawals are deliberately
-    NOT environment-gated, so a deployment-global flag would sponsor mainnet
-    exits the instant devnet deposits were enabled, against a paymaster the
-    deployment may not have for that cluster. That is a 5xx on a customer's
-    money-OUT path, the one failure ADR 0002 rules out.
-    `isEarnVaultSponsorshipEnabled` therefore answers per cluster from
-    CONFIGURATION: the flag, plus a Kora for the open cluster scope's cluster
-    (`isFeePaymentConfigured`, @sdp/payments): `KORA_RPC_URL_DEVNET` /
-    `KORA_RPC_URL_MAINNET`; there is no built-in default URL and no unsuffixed
-    trio. The movement runs under its project's cluster scope, so the matching
+  - **Sponsorship is one flag, and a missing Kora is a 503, never wallet-pays.**
+    `isEarnVaultSponsorshipEnabled` reads only the flag; with it on,
+    `resolveVaultSponsorship` builds the fee payer for the open cluster scope's
+    cluster (`KORA_RPC_URL_DEVNET` / `KORA_RPC_URL_MAINNET`, no unsuffixed trio)
+    and a cluster without Kora answers `PROVIDER_NOT_AVAILABLE` (503). One
+    process serves both clusters and withdrawals are NOT environment-gated
+    (ADR 0002), so an operator must not turn the flag on before every cluster
+    has its Kora, or exits on the unwired cluster are refused. The matching
     Kora signs, the matching budget network is charged and the fee is priced on
-    the matching RPC (`createClusterRpc()`). Opening mainnet is wiring
-    the mainnet Kora in after its policy is opened and `sbp_mainnet_global`
-    is enabled (PRO-1738); no code changes either way.
+    the matching RPC (`createClusterRpc()`). Opening mainnet is wiring the
+    mainnet Kora in after its policy is opened and `sbp_mainnet_global` is
+    enabled (PRO-1738).
   - Sponsored signing stays sign-only, so record-before-broadcast survives
     unchanged. Turning the flag off returns both routes to `wallet-pays` with no
     code change.
