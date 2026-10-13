@@ -3,6 +3,8 @@ import {
   buildCompleteSettlement,
   bvnkPayoutObservationFromSource,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -611,10 +613,9 @@ describe("BvnkOnrampTransfersRepository (postgres)", () => {
     await setUpdatedAt("xfr_pollable_fresh_poll", "2026-09-18T00:00:20.000Z");
     await setUpdatedAt("xfr_pollable_no_id", "2026-09-18T00:00:30.000Z");
 
-    const rows = await repo.listPollablePayoutCandidates({
-      limit: 10,
-      cutoff: "2026-09-18T01:00:00.000Z",
-    });
+    const rows = await runInClusterScope({ projectId: null, environment: SANDBOX }, () =>
+      repo.listPollablePayoutCandidates({ limit: 10, cutoff: "2026-09-18T01:00:00.000Z" })
+    );
     expect(rows.map((row) => row.id)).toEqual([
       "xfr_pollable_never_polled",
       "xfr_pollable_stale_poll",
@@ -622,11 +623,73 @@ describe("BvnkOnrampTransfersRepository (postgres)", () => {
     expect(rows.every((row) => row.fundingWalletReference === fundingWalletReference)).toBe(true);
     // Poll rotation: a cutoff between the claims and their polls clears the
     // polled rows (their lastPolledAt already advanced past it).
-    const rotated = await repo.listPollablePayoutCandidates({
-      limit: 10,
-      cutoff: "2026-09-18T00:15:00.000Z",
-    });
+    const rotated = await runInClusterScope({ projectId: null, environment: SANDBOX }, () =>
+      repo.listPollablePayoutCandidates({ limit: 10, cutoff: "2026-09-18T00:15:00.000Z" })
+    );
     expect(rotated.map((row) => row.id)).toEqual(["xfr_pollable_never_polled"]);
+  });
+
+  it("lists payout candidates only from the open cluster scope's environment", async () => {
+    const db = getDb(env);
+    const projectIdByEnvironment = {
+      sandbox: TEST_PROJECT_ID,
+      production: TEST_PRODUCTION_PROJECT_ID,
+    } as const satisfies Record<SdpEnvironment, string>;
+    const claimedAt = "2026-09-18T00:00:00.000Z";
+    const cutoff = "2026-09-18T01:00:00.000Z";
+    const candidateSeed = (environment: SdpEnvironment, branch: string) => {
+      const name = `scope_${environment}_${branch}`;
+      const fundingWalletReference = `a:wallet:${name}:1`;
+      return {
+        ...seedScope(name, fundingWalletReference),
+        projectId: projectIdByEnvironment[environment],
+        transferId: `xfr_${name}`,
+        destinationAddress: `Addr${name}`,
+        payin: makePayin(`payin_${name}`, fundingWalletReference),
+      };
+    };
+    for (const environment of SDP_ENVIRONMENTS) {
+      await seedBvnkOnrampPayinApplied(db, candidateSeed(environment, "unclaimed"));
+      await seedBvnkOnrampPayoutClaimed(db, {
+        ...candidateSeed(environment, "recoverable"),
+        claimedAt,
+        intent: makeIntent(`AddrScopeRecoverable${environment}`),
+      });
+      await seedBvnkOnrampPayoutIssued(db, {
+        ...candidateSeed(environment, "pollable"),
+        claimedAt,
+        intent: makeIntent(`AddrScopePollable${environment}`),
+        environment,
+        payoutId: `payout_scope_${environment}`,
+      });
+    }
+    const listCandidateIds = async (environment: SdpEnvironment) => {
+      const [unclaimed, recoverable, pollable] = await runInClusterScope(
+        { projectId: null, environment },
+        () =>
+          Promise.all([
+            repo.listUnclaimedPayoutCandidates({ limit: 10, cutoff }),
+            repo.listRecoverablePayoutCandidates({ limit: 10, cutoff }),
+            repo.listPollablePayoutCandidates({ limit: 10, cutoff }),
+          ])
+      );
+      return {
+        unclaimed: unclaimed.map((row) => row.id),
+        recoverable: recoverable.map((row) => row.id),
+        pollable: pollable.map((row) => row.id),
+      };
+    };
+
+    await expect(listCandidateIds(PRODUCTION)).resolves.toEqual({
+      unclaimed: ["xfr_scope_production_unclaimed"],
+      recoverable: ["xfr_scope_production_recoverable"],
+      pollable: ["xfr_scope_production_pollable"],
+    });
+    await expect(listCandidateIds(SANDBOX)).resolves.toEqual({
+      unclaimed: ["xfr_scope_sandbox_unclaimed"],
+      recoverable: ["xfr_scope_sandbox_recoverable"],
+      pollable: ["xfr_scope_sandbox_pollable"],
+    });
   });
 
   it("getByPayinId_and_getById_isolate_projects_by_environment", async () => {
