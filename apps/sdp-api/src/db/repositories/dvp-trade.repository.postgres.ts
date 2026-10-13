@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { DVP_TRADE_STATUSES, type DvpSettlementAvailability } from "@sdp/types";
 import { type Address, address, type Signature, signature } from "@solana/kit";
 import { z } from "zod";
@@ -197,11 +198,13 @@ function walletScopeClause(sdpWalletIds: string[] | null | undefined): {
 
 export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository {
   /**
-   * Inserts a DvP claim through either the client or its transaction executor.
+   * Inserts a DvP claim through either the client or its transaction executor,
+   * recording the open cluster scope's environment on the row.
    *
    * @param executor - Database executor owning the statement.
    * @param row - Claim to insert.
    * @returns The inserted claim.
+   * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
    */
   async function insert(executor: DatabaseExecutor, row: DvpTradeInsert): Promise<DvpTradeRow> {
     const inserted = await executor
@@ -215,7 +218,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               user_a_settlement_destination, user_b_settlement_destination, ref_string,
               escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
               idempotency_key, idempotency_fingerprint,
-              create_signature, create_last_valid_block_height
+              create_signature, create_last_valid_block_height, environment
             ) VALUES (
               ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
@@ -225,7 +228,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?, ?,
               ?, ?, ?, ?,
               ?, ?,
-              ?, ?
+              ?, ?, ?
             )
             RETURNING ${SELECT_COLUMNS}`
       )
@@ -262,7 +265,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         row.idempotencyKey,
         row.idempotencyFingerprint,
         row.createSignature,
-        row.createLastValidBlockHeight
+        row.createLastValidBlockHeight,
+        currentClusterScope().environment
       )
       .first<Record<string, unknown>>();
     if (!inserted) {
@@ -369,9 +373,10 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                       ELSE 2
                     END AS lane
                FROM dvp_trades t
-              WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-                 OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                     AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
+              WHERE t.environment = ?
+                AND (t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+                     OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                         AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days'))
            ), ranked AS (
              SELECT laned.*,
                     ROW_NUMBER() OVER (
@@ -393,7 +398,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                      lane ASC, lane_rank ASC
             LIMIT ?`
         )
-        .bind(limit)
+        .bind(currentClusterScope().environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },
@@ -587,11 +592,12 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           `UPDATE dvp_trades
               SET close_claim_signature = NULL, close_claim_action = NULL,
                   close_claim_expiry_height = NULL, updated_at = sdp_iso_now()
-            WHERE close_claim_signature IS NOT NULL
+            WHERE environment = ?
+              AND close_claim_signature IS NOT NULL
               AND CAST(close_claim_expiry_height AS NUMERIC) < ?
             RETURNING id`
         )
-        .bind(blockHeight.toString())
+        .bind(currentClusterScope().environment, blockHeight.toString())
         .all<{ id: string }>();
       return result.results.length;
     },
@@ -664,8 +670,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
 
     async getByIdAsParty(tradeId) {
       const row = await db
-        .prepare(`SELECT ${SELECT_COLUMNS} FROM dvp_trades WHERE id = ?`)
-        .bind(tradeId)
+        .prepare(`SELECT ${SELECT_COLUMNS} FROM dvp_trades WHERE id = ? AND environment = ?`)
+        .bind(tradeId, currentClusterScope().environment)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },
@@ -688,12 +694,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           `SELECT ${SELECT_COLUMNS}
              FROM dvp_trades
             WHERE status IN ('created', 'partially_funded', 'funded')
+              AND environment = ?
               AND project_id <> ?
               AND (user_a IN (${placeholders}) OR user_b IN (${placeholders}))
             ORDER BY created_at DESC
             LIMIT ?`
         )
-        .bind(scope.projectId, ...scope.partyAddresses, ...scope.partyAddresses, limit)
+        .bind(
+          currentClusterScope().environment,
+          scope.projectId,
+          ...scope.partyAddresses,
+          ...scope.partyAddresses,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapDvpTradeRow(row));
     },

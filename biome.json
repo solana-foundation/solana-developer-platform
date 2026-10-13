@@ -355,7 +355,6 @@
         "**/apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.ts",
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
-        "**/apps/sdp-api/src/services/jobs/reconcile-dvp-trades.ts",
         "**/apps/sdp-api/src/services/jobs/track-pending-withdrawals.ts",
         "**/apps/sdp-api/src/services/payments/recurring-payments/activation.ts",
         "**/apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
