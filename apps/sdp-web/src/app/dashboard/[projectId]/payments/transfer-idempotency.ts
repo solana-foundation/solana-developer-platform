@@ -53,7 +53,7 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
   return store.claim(fingerprint).key;
 }
 
-/** Retire the key once the API recorded the transfer or definitively refused it. */
+/** Retire the key once an answer retires it (`answerRetiresKey`). */
 export function releaseTransferIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
 }

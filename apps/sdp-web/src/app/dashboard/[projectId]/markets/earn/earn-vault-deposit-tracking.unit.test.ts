@@ -251,20 +251,4 @@ describe("the floor memo", () => {
     rememberVaultDepositFloor(fingerprint, "1.5");
     expect(recallVaultDepositFloor(fingerprint)).toBe("1.5");
   });
-
-  it("bounds abandoned entries instead of growing without limit", () => {
-    for (let index = 0; index < 40; index += 1) {
-      rememberVaultDepositFloor(
-        vaultDepositRequestFingerprint({ ...request, amount: `40${index}` }),
-        "1"
-      );
-    }
-    // The oldest fell off; the newest is intact.
-    expect(
-      recallVaultDepositFloor(vaultDepositRequestFingerprint({ ...request, amount: "400" }))
-    ).toBeUndefined();
-    expect(
-      recallVaultDepositFloor(vaultDepositRequestFingerprint({ ...request, amount: "4039" }))
-    ).toBe("1");
-  });
 });

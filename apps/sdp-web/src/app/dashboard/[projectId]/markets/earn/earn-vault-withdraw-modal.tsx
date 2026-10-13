@@ -861,11 +861,12 @@ export function EarnVaultWithdrawModal({
     });
     const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
-    // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
-    // live — must replay the floor it was MINTED with, verbatim — the deposit
-    // modal documents why. The changed-request refusal is a 409, which retires
-    // the key and lets the next submit mint a fresh one while the first attempt
-    // may already have exited. The floor memo answers for it. A fresh key takes
+    // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
+    // a refusal that settled nothing) — must replay the floor it was MINTED
+    // with, verbatim — the deposit modal documents why. A changed floor under
+    // the key is a 422, which retires the key and lets the next submit mint a
+    // fresh one while the first attempt may already have exited. The floor
+    // memo answers for it. A fresh key takes
     // the freshly derived floor, and records it for exactly that future replay.
     // A reuse whose memo LOST the floor cannot re-floor safely at all — it
     // stops here, submitting nothing, rather than pair the live key with a
@@ -904,9 +905,13 @@ export function EarnVaultWithdrawModal({
       fingerprint,
       fetchResultAnswer(result)
     );
+    // A slippage refusal comes from simulation, run only after no movement was
+    // found under this key: the retry is a new request (see the deposit modal).
+    const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
+    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint);
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
-    if (retired) forgetVaultWithdrawalFloor(fingerprint);
+    if (retired || slippageRefused) forgetVaultWithdrawalFloor(fingerprint);
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
       result,

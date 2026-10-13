@@ -221,15 +221,15 @@ export function settleIdempotencyKey(
 }
 
 /**
- * A bounded per-tab memo of the floor each in-flight fingerprint's key was
- * MINTED with. The fingerprint deliberately carries the user's TOLERANCE, not
- * the quote-derived floor (a floor moves with the live rate, and a fingerprint
- * must be reproducible from user input after a reload) — but the API's own
- * idempotency fingerprint includes the floor and refuses a replay whose floor
- * changed, so a held key must resubmit the exact floor it first carried. Same
- * tiers as the key store: `sessionStorage` so it survives the reload the held
- * key survives, memory when storage is refused, and a hard bound so an
- * abandoned tab cannot grow it without limit.
+ * A per-tab memo of the floor each kept fingerprint's key was MINTED with. The
+ * fingerprint deliberately carries the user's TOLERANCE, not the quote-derived
+ * floor (a floor moves with the live rate, and a fingerprint must be
+ * reproducible from user input after a reload) — but the API's own idempotency
+ * fingerprint includes the floor and refuses a replay whose floor changed, so a
+ * kept key must resubmit the exact floor it first carried. Same tiers as the
+ * key store: `sessionStorage` so it survives the reload the kept key survives,
+ * and memory when storage is refused. Like the keys, a floor is never evicted;
+ * it is forgotten when its key retires.
  */
 export interface FloorMemo {
   /** Record the floor `fingerprint`'s key is being submitted with. */
@@ -246,8 +246,6 @@ export interface FloorMemo {
   /** Test-only. @internal */
   resetForTests(): void;
 }
-
-const FLOOR_MEMO_BOUND = 32;
 
 /**
  * One per money flow, each under its own versioned `sessionStorage` key.
@@ -308,10 +306,6 @@ export function createFloorMemo(unscopedKey: string): FloorMemo {
       const entries = read();
       delete entries[fingerprint];
       entries[fingerprint] = floor;
-      const keys = Object.keys(entries);
-      for (const stale of keys.slice(0, Math.max(0, keys.length - FLOOR_MEMO_BOUND))) {
-        delete entries[stale];
-      }
       write(entries);
     },
     recall(fingerprint) {
