@@ -13,7 +13,9 @@
  * making a late deposit recoverable.
  */
 
-import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { confirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { getLogger } from "@/runtime/logger";
@@ -25,11 +27,14 @@ import { readDvpTradeObservation } from "./read-chain";
 /**
  * Observes one trade now and records what it finds.
  *
- * Never throws. The caller has already done the thing that mattered — the
- * transfer is broadcast, the money has moved — and failing their request
- * because a follow-up read timed out would report a failure that did not
- * happen. A missed observation costs at most one sweep of latency, which is
- * exactly where this started.
+ * Never fails on a chain read, including one a failover endpoint refuses as
+ * another cluster's. The caller has already done the thing that mattered — the
+ * transfer is broadcast, the money has moved — and failing their request would
+ * drop the signature and report a failure that did not happen. A missed
+ * observation costs at most one sweep of latency, which is exactly where this
+ * started. Building the client is outside that guarantee: every post-action
+ * caller already built it in the same request, so a door misconfiguration has
+ * surfaced before money moved.
  *
  * @param env - API process environment.
  * @param trade - The trade to re-read.
@@ -38,15 +43,16 @@ import { readDvpTradeObservation } from "./read-chain";
  * @returns The updated row, or null when nothing was written — an unreadable
  *   chain, or the sweep having moved the row first, in which case the caller's
  *   own copy is the stale one and it should re-read rather than trust this.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
  */
 export async function observeDvpTradeNow(
   env: Env,
   trade: DvpTradeRow,
   awaitSignature?: Signature
 ): Promise<DvpTradeRow | null> {
+  const rpc = createClusterRpc();
   try {
-    const rpc = createRpc(env);
-
     if (awaitSignature) {
       // Reading before the transfer confirms would record the balance it had
       // beforehand and leave the row saying the opposite of what just happened.
@@ -115,22 +121,22 @@ export async function observeDvpTradeNow(
  *
  * Returns the trade unchanged when the chain cannot be read, which is the same
  * answer the recording path gives: a reading that failed is not a balance of
- * zero, and must not be shown as one.
+ * zero, and must not be shown as one. A door misconfiguration is not a failed
+ * reading and throws instead of degrading to the stored row.
  *
- * @param env - API process environment.
  * @param trade - The trade to read without recording.
  * @returns The live derived trade, or the stored trade when it is ineligible or
  *   the chain cannot be read.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint, or
+ *   `RPC_CLUSTER_MISMATCH` when an endpoint serves another cluster.
  */
-export async function observeDvpTradeWithoutRecording(
-  env: Env,
-  trade: DvpTradeRow
-): Promise<DvpTradeRow> {
+export async function observeDvpTradeWithoutRecording(trade: DvpTradeRow): Promise<DvpTradeRow> {
   if (OBSERVATION_MAX_AGE_BY_STATUS[trade.status] === null) {
     return trade;
   }
+  const rpc = createClusterRpc();
   try {
-    const rpc = createRpc(env);
     const blockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
     const observation = await readDvpTradeObservation(
       rpc,
@@ -163,6 +169,9 @@ export async function observeDvpTradeWithoutRecording(
       observedClusterTimestamp: observation.clusterUnixTimestamp.toString(),
     };
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     getLogger().warn(
       { error, tradeId: trade.id },
       "dvp: could not read the trade for a party; showing the stored reading"
@@ -212,6 +221,8 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
  * @param trade - The trade as it was last stored.
  * @param now - Current time, injectable for tests.
  * @returns A fresher row when one was written, otherwise the row given.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` or `RPC_NOT_CONFIGURED` from the door when a
+ *   reading is due.
  */
 export async function observeDvpTradeIfStale(
   env: Env,

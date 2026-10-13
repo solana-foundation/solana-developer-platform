@@ -8,21 +8,19 @@
  * status-specific cadence.
  */
 
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow, DvpTradeStatus } from "@/db/repositories";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
+import { CLUSTER_RPC_URLS, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn(() => ({ send: async () => 100n })));
 const resolveDvpClose = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight }),
-  confirmTransaction: vi.fn(),
-}));
 vi.mock("@/db/repositories", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/repositories")>()),
   createDvpTradeRepository: () => ({ recordObservation }),
@@ -34,7 +32,7 @@ vi.mock("./observe", async (importOriginal) => ({
   deriveDvpTradeState: () => ({ status: "funded" }),
 }));
 
-const { observeDvpTradeIfStale } = await import("./observe-now");
+const { observeDvpTradeIfStale, observeDvpTradeWithoutRecording } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
 const NEVER_REREAD_STATUSES = ["create_failed"] as const satisfies readonly DvpTradeStatus[];
@@ -54,9 +52,18 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   });
 }
 
+function observeIfStale(row: DvpTradeRow, now: number) {
+  return runInClusterScope({ projectId: row.projectId, environment: "sandbox" }, () =>
+    observeDvpTradeIfStale(env, row, now)
+  );
+}
+
 describe("observeDvpTradeIfStale", () => {
+  const rpc = installClusterRpcStub();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    rpc.answer("getBlockHeight", 100);
     readDvpTradeObservation.mockResolvedValue({
       tradeAccountExists: true,
       legA: { exists: true, amount: 1n, frozen: false },
@@ -70,7 +77,7 @@ describe("observeDvpTradeIfStale", () => {
   });
 
   it("re-reads an open trade whose last reading has aged out", async () => {
-    const result = await observeDvpTradeIfStale(env, trade(), NOW);
+    const result = await observeIfStale(trade(), NOW);
 
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("funded");
@@ -79,11 +86,7 @@ describe("observeDvpTradeIfStale", () => {
   // The pairing with the page's poll interval is the whole cost control: most
   // polls must be answered from the row, not from the cluster.
   it("answers from the row when the reading is recent", async () => {
-    await observeDvpTradeIfStale(
-      env,
-      trade({ observedAt: new Date(NOW - 1_000).toISOString() }),
-      NOW
-    );
+    await observeIfStale(trade({ observedAt: new Date(NOW - 1_000).toISOString() }), NOW);
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
@@ -92,7 +95,7 @@ describe("observeDvpTradeIfStale", () => {
   // gives NaN, and NaN comparisons are false — so "recent enough" must not be
   // what an unparseable timestamp falls through to.
   it("reads a trade that has never been observed", async () => {
-    await observeDvpTradeIfStale(env, trade({ observedAt: null }), NOW);
+    await observeIfStale(trade({ observedAt: null }), NOW);
 
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
@@ -100,15 +103,13 @@ describe("observeDvpTradeIfStale", () => {
   // An expired trade's escrows still exist: a reclaim can drain one and a
   // deposit can land, and the counterparty's page has no other way to see it.
   it("re-reads an expired trade on the open cadence", async () => {
-    await observeDvpTradeIfStale(
-      env,
+    await observeIfStale(
       trade({ status: "expired", observedAt: new Date(NOW - 5_000).toISOString() }),
       NOW
     );
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
 
-    await observeDvpTradeIfStale(
-      env,
+    await observeIfStale(
       trade({ status: "expired", observedAt: new Date(NOW - 11_000).toISOString() }),
       NOW
     );
@@ -116,7 +117,7 @@ describe("observeDvpTradeIfStale", () => {
   });
 
   it.each(NEVER_REREAD_STATUSES)("never spends a chain read on a %s trade", async (status) => {
-    await observeDvpTradeIfStale(env, trade({ status }), NOW);
+    await observeIfStale(trade({ status }), NOW);
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
@@ -124,8 +125,7 @@ describe("observeDvpTradeIfStale", () => {
   it.each(CLOSED_REREAD_STATUSES)(
     "answers a recently observed %s trade from the row",
     async (status) => {
-      await observeDvpTradeIfStale(
-        env,
+      await observeIfStale(
         trade({ status, observedAt: new Date(NOW - 30_000).toISOString() }),
         NOW
       );
@@ -137,8 +137,7 @@ describe("observeDvpTradeIfStale", () => {
   it.each(CLOSED_REREAD_STATUSES)(
     "re-reads a %s trade after the closed cadence elapses",
     async (status) => {
-      await observeDvpTradeIfStale(
-        env,
+      await observeIfStale(
         trade({ status, observedAt: new Date(NOW - 90_000).toISOString() }),
         NOW
       );
@@ -157,8 +156,7 @@ describe("observeDvpTradeIfStale", () => {
       closeResolution: null,
     });
 
-    await observeDvpTradeIfStale(
-      env,
+    await observeIfStale(
       trade({
         status: "settled",
         closeSignature: signature("1".repeat(64)),
@@ -175,8 +173,54 @@ describe("observeDvpTradeIfStale", () => {
   it("falls back to the stored row when the chain cannot be read", async () => {
     readDvpTradeObservation.mockRejectedValue(new Error("rpc down"));
 
-    const result = await observeDvpTradeIfStale(env, trade(), NOW);
+    const result = await observeIfStale(trade(), NOW);
 
     expect(result.status).toBe("partially_funded");
+  });
+
+  it("rejects instead of answering from the row when the scope's cluster has no endpoint", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
+
+    await expect(observeIfStale(trade(), NOW)).rejects.toMatchObject({
+      code: "RPC_NOT_CONFIGURED",
+      details: { cluster: "devnet" },
+    });
+    expect(rpc.calls).toEqual([]);
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    expect(recordObservation).not.toHaveBeenCalled();
+  });
+
+  it("keeps answering from the row when a failover endpoint serves mainnet-beta", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+    const row = trade();
+
+    await expect(observeIfStale(row, NOW)).resolves.toBe(row);
+    expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toEqual([]);
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    expect(recordObservation).not.toHaveBeenCalled();
+  });
+});
+
+describe("observeDvpTradeWithoutRecording", () => {
+  const rpc = installClusterRpcStub();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects instead of showing the stored reading when the devnet pool serves mainnet-beta", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+    const row = trade();
+
+    await expect(
+      runInClusterScope({ projectId: row.projectId, environment: "sandbox" }, () =>
+        observeDvpTradeWithoutRecording(row)
+      )
+    ).rejects.toMatchObject({
+      code: "RPC_CLUSTER_MISMATCH",
+      details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+    });
+    expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toEqual([]);
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
 });

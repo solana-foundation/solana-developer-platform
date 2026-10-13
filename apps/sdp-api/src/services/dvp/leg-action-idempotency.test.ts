@@ -7,16 +7,17 @@
  * key can stop it moving the leg a second time.
  */
 
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc: () => ({}) }));
 
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { conflict } from "@/lib/errors";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -97,8 +98,10 @@ function once(
   ) => Promise<{ signature: typeof SIG; leg: "a" | "b"; amount: string }>,
   scope: DvpLegActionRequestScope = SCOPE
 ) {
-  return runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
-    runDvpLegActionOnce(env, key, scope, run)
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
+      runDvpLegActionOnce(env, key, scope, run)
+    )
   );
 }
 
@@ -109,6 +112,8 @@ async function sends(recordAttempt: RecordDvpLegActionAttempt) {
 }
 
 describe("runDvpLegActionOnce", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
@@ -266,8 +271,10 @@ function closeOnce(
   ) => Promise<{ signature: typeof SIG; landed: boolean }>,
   scope: DvpCloseRequestScope = CLOSE_SCOPE
 ) {
-  return runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
-    runDvpCloseOnce(env, key, scope, run)
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    runWithTenantDatabaseIdentity({ organizationId: ORG }, () =>
+      runDvpCloseOnce(env, key, scope, run)
+    )
   );
 }
 
@@ -278,6 +285,8 @@ async function closes(recordAttempt: RecordDvpLegActionAttempt) {
 }
 
 describe("runDvpCloseOnce", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
