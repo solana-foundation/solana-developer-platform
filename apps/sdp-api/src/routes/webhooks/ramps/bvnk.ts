@@ -23,12 +23,12 @@ import {
   bvnkPayoutObservationFromSource,
   readStoredBvnkSettlement,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
-import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
+import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   BVNK_FUNDING_WALLET_STATUS,
   type BvnkOfframpChannelSettlement,
   NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-  type SdpEnvironment,
 } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -42,6 +42,7 @@ import type { CounterpartyRow } from "@/db/repositories/counterparty.repository"
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { AppError, badRequest, internalError, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { rampRuntimeForScope } from "@/routes/payments/context";
 import {
   type BvnkProvisioningAudit,
   ensureBvnkFundingWallet,
@@ -84,10 +85,6 @@ function isBvnkOnrampPayinUniqueViolation(error: unknown): boolean {
     "constraint" in error &&
     (error as { constraint?: unknown }).constraint === BVNK_ONRAMP_PAYIN_UNIQUE_CONSTRAINT
   );
-}
-
-function webhookRampContext(env: Env, environment: SdpEnvironment): RampRuntimeContext {
-  return { env: env as unknown as Record<string, string | undefined>, mode: environment };
 }
 
 /**
@@ -149,19 +146,17 @@ async function resolvePayinReplay(
  * replay rule; an id with no owner in this environment is terminal.
  *
  * @param env - Process environment used for repository access.
- * @param environment - The project environment the webhook was delivered for.
  * @param payinId - The pay-in id whose owner must be re-resolved.
  * @param data - Parsed v1 pay-in status-change event data.
  */
 async function resolveRacedPayinOwner(
   env: Env,
-  environment: SdpEnvironment,
   payinId: string,
   data: BvnkV1PayinData
 ): Promise<void> {
   const racedOwner = await createPostgresBvnkOnrampTransfersRepository(getDb(env)).getByPayinId({
     payinId,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (racedOwner === null) {
     throw new TerminalRampWebhookError("stray pay-in: conflicting pay-in has no owner");
@@ -179,14 +174,9 @@ async function resolveRacedPayinOwner(
  * are acknowledged whatever the transfer status.
  *
  * @param env - Process environment used for repository access.
- * @param environment - The project environment the webhook was delivered for.
  * @param data - Parsed v1 pay-in status-change event data.
  */
-async function handleBvnkPayinStatusChange(
-  env: Env,
-  environment: SdpEnvironment,
-  data: BvnkV1PayinData
-): Promise<void> {
+async function handleBvnkPayinStatusChange(env: Env, data: BvnkV1PayinData): Promise<void> {
   if (!isBvnkPayinStatus(data.status)) {
     getLogger().info(
       { payin_id: data.transactionReference, status: data.status },
@@ -197,7 +187,7 @@ async function handleBvnkPayinStatusChange(
   const transfers = createPostgresBvnkOnrampTransfersRepository(getDb(env));
   const transferOwner = await transfers.getByPayinId({
     payinId: data.transactionReference,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (transferOwner !== null) {
     return resolvePayinReplay(transferOwner, data);
@@ -217,12 +207,15 @@ async function handleBvnkPayinStatusChange(
   if (parsedTransferId === null) {
     throw new TerminalRampWebhookError("stray pay-in: no transfer reference");
   }
-  const transfer = await transfers.getById({ transferId: parsedTransferId, environment });
+  const transfer = await transfers.getById({
+    transferId: parsedTransferId,
+    environment: currentClusterScope().environment,
+  });
   if (transfer === null) {
     throw new TerminalRampWebhookError("stray pay-in: unknown transfer or environment mismatch");
   }
   if (transfer.status !== "awaiting_payment") {
-    return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
+    return resolveRacedPayinOwner(env, data.transactionReference, data);
   }
   if (transfer.counterparty_id === null) {
     throw new TerminalRampWebhookError("stray pay-in: transfer has no counterparty");
@@ -231,7 +224,7 @@ async function handleBvnkPayinStatusChange(
   const fundingRow = await accounts.findActiveFundingWalletByReference({
     provider: "bvnk",
     externalAccountReference: data.beneficiary.walletId,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (fundingRow === null) {
     throw new TerminalRampWebhookError("stray pay-in: unknown funding wallet");
@@ -264,12 +257,12 @@ async function handleBvnkPayinStatusChange(
     });
   } catch (error) {
     if (isBvnkOnrampPayinUniqueViolation(error)) {
-      return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
+      return resolveRacedPayinOwner(env, data.transactionReference, data);
     }
     throw error;
   }
   if (applied === null) {
-    return resolveRacedPayinOwner(env, environment, data.transactionReference, data);
+    return resolveRacedPayinOwner(env, data.transactionReference, data);
   }
   getLogger().info(
     {
@@ -290,12 +283,10 @@ async function handleBvnkPayinStatusChange(
  * operation; unknown statuses are ignored.
  *
  * @param env - Process environment used for repository access.
- * @param environment - The project environment the webhook was delivered for.
  * @param data - Parsed crypto payout status-change event data.
  */
 async function handleBvnkCryptoPayoutStatusChange(
   env: Env,
-  environment: SdpEnvironment,
   data: BvnkCryptoPayoutData
 ): Promise<void> {
   if (!isBvnkCryptoPayoutStatus(data.status)) {
@@ -309,7 +300,10 @@ async function handleBvnkCryptoPayoutStatusChange(
     throw new TerminalRampWebhookError("stray payout: no transfer reference");
   }
   const transfers = createPostgresBvnkOnrampTransfersRepository(getDb(env));
-  const transfer = await transfers.getById({ transferId: data.reference, environment });
+  const transfer = await transfers.getById({
+    transferId: data.reference,
+    environment: currentClusterScope().environment,
+  });
   if (transfer === null) {
     throw new TerminalRampWebhookError("stray payout: unknown transfer or environment mismatch");
   }
@@ -337,7 +331,6 @@ async function handleBvnkCryptoPayoutStatusChange(
   }
   await applyTerminalBvnkPayoutObservation({
     repo: transfers,
-    environment,
     transfer,
     observation: parsed.observation,
     failError: data.status,
@@ -352,14 +345,12 @@ async function handleBvnkCryptoPayoutStatusChange(
  * mutation stays inside that tenant scope.
  *
  * @param env - Process environment used for repository access.
- * @param environment - Sandbox or production ramp environment.
  * @param counterparty - Counterparty the event targets.
  * @param eventName - Parsed BVNK event name, used in the missing-link log.
  * @param options - Whether to refresh the provider account, or patch the verified status the event carries.
  */
 async function applyBvnkCustomerStateWebhook(
   env: Env,
-  environment: SdpEnvironment,
   counterparty: CounterpartyRow,
   eventName: string,
   options: { refresh: true } | { refresh: false; status: string }
@@ -376,7 +367,7 @@ async function applyBvnkCustomerStateWebhook(
     return;
   }
   if (options.refresh) {
-    await refreshBvnkCustomerAccount(env, webhookRampContext(env, environment), {
+    await refreshBvnkCustomerAccount(env, rampRuntimeForScope(env), {
       counterparty,
       projectId: counterparty.project_id,
       providerAccountId: row.id,
@@ -395,7 +386,7 @@ async function applyBvnkCustomerStateWebhook(
     if (!updated) {
       throw internalError("BVNK customer status update escaped its tenant scope.");
     }
-    await ensureBvnkFundingWallet(env, webhookRampContext(env, environment), {
+    await ensureBvnkFundingWallet(env, rampRuntimeForScope(env), {
       counterparty,
       projectId: counterparty.project_id,
       customerLink: row,
@@ -413,19 +404,17 @@ async function applyBvnkCustomerStateWebhook(
  * not resolve in this environment is terminal.
  *
  * @param env - Process environment used for repository access.
- * @param environment - Sandbox or production ramp environment.
  * @param event - Parsed v2 platform customer status-change event.
  */
 async function handleBvnkCustomerStatusChange(
   env: Env,
-  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:platform:customer:status-change" }>
 ): Promise<void> {
   const repo = createSystemCounterpartiesRepository(env);
   const counterparty = await repo.findActiveCounterpartyByProviderCustomerReference({
     provider: "bvnk",
     providerCustomerReference: event.data.reference,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (!counterparty) {
     throw new TerminalRampWebhookError(
@@ -433,20 +422,19 @@ async function handleBvnkCustomerStatusChange(
     );
   }
   if (isBvnkCustomerVerified(event.data.status)) {
-    await applyBvnkCustomerStateWebhook(env, environment, counterparty, event.event, {
+    await applyBvnkCustomerStateWebhook(env, counterparty, event.event, {
       refresh: false,
       status: event.data.status,
     });
     return;
   }
-  await applyBvnkCustomerStateWebhook(env, environment, counterparty, event.event, {
+  await applyBvnkCustomerStateWebhook(env, counterparty, event.event, {
     refresh: true,
   });
 }
 
 async function handleBvnkPlatformCustomerUpdate(
   env: Env,
-  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:platform:customer:update" }>
 ): Promise<void> {
   const counterpartyId = parseBvnkCustomerExternalReference(event.data.reference);
@@ -458,14 +446,14 @@ async function handleBvnkPlatformCustomerUpdate(
   const repo = createSystemCounterpartiesRepository(env);
   const counterparty = await repo.findActiveCounterpartyById({
     counterpartyId,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (!counterparty) {
     throw new TerminalRampWebhookError(
       `BVNK webhook customer ${event.data.reference} was not found or is not active in this environment`
     );
   }
-  await applyBvnkCustomerStateWebhook(env, environment, counterparty, event.event, {
+  await applyBvnkCustomerStateWebhook(env, counterparty, event.event, {
     refresh: true,
   });
 }
@@ -475,12 +463,10 @@ async function handleBvnkPlatformCustomerUpdate(
  * customer link that owns the session in the webhook's environment.
  *
  * @param env - Process environment used for repository access.
- * @param environment - Sandbox or production ramp environment.
  * @param event - Parsed BVNK agreement-session status-change event.
  */
 async function handleBvnkPlatformCustomerAgreementSessionStatusChange(
   env: Env,
-  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:platform:customer:agreement-session-status-change" }>
 ): Promise<void> {
   const sessionReference = event.data.reference;
@@ -495,7 +481,7 @@ async function handleBvnkPlatformCustomerAgreementSessionStatusChange(
   const row = await accounts.findCustomerLinkBySessionReference({
     provider: "bvnk",
     sessionReference,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (row === null) {
     throw new TerminalRampWebhookError(
@@ -583,13 +569,11 @@ function webhookProvisioningAudit(env: Env, counterparty: CounterpartyRow): Bvnk
  * an event before the reference is assigned fails loudly and replay heals it.
  *
  * @param env - Process environment used for repository access.
- * @param environment - The project environment the event was delivered for.
  * @param wallet - Parsed funding-wallet name carrying the customer-link row id.
  * @param data - Parsed status-change event data.
  */
 async function handleBvnkFundingWalletStatusChange(
   env: Env,
-  environment: SdpEnvironment,
   wallet: Extract<BVNKWallet, { kind: "funding_wallet" }>,
   data: Extract<BvnkWebhook, { event: "ledger:v2:wallet:status-change" }>["data"]
 ): Promise<void> {
@@ -608,7 +592,7 @@ async function handleBvnkFundingWalletStatusChange(
     provider: "bvnk",
     customerLinkId: wallet.providerAccountId,
     fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-    environment,
+    environment: currentClusterScope().environment,
   });
   if (row === null) {
     throw new TerminalRampWebhookError(
@@ -659,13 +643,11 @@ async function handleBvnkFundingWalletStatusChange(
  * event is never retried.
  *
  * @param env - Process environment used for repository access.
- * @param environment - The project environment the event was delivered for.
  * @param wallet - Parsed wallet name, or the unrecognised name itself.
  * @param data - Parsed status-change event data.
  */
 async function applyBvnkWalletEvent(
   env: Env,
-  environment: SdpEnvironment,
   wallet: BVNKWallet | BvnkUnrecognisedWalletName,
   data: BvnkWalletWebhookData
 ): Promise<void> {
@@ -678,7 +660,7 @@ async function applyBvnkWalletEvent(
         );
         return;
       }
-      return handleBvnkFundingWalletStatusChange(env, environment, wallet, data);
+      return handleBvnkFundingWalletStatusChange(env, wallet, data);
     }
     case "unrecognised":
       getLogger().warn(
@@ -705,13 +687,11 @@ type BvnkOfframpChannelOutcome =
  * terminal transfer matches no row and the replay is acknowledged as a no-op.
  *
  * @param env - Process environment used for database access.
- * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier, already proven against its recorded channel.
  * @param outcome - The status to apply and, when completed, the credited fiat and settlement blob.
  */
 async function settleBvnkOfframpChannel(
   env: Env,
-  environment: SdpEnvironment,
   transferId: string,
   outcome: BvnkOfframpChannelOutcome
 ): Promise<void> {
@@ -739,7 +719,7 @@ async function settleBvnkOfframpChannel(
       new Date().toISOString(),
       transferId,
       ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-      environment
+      currentClusterScope().environment
     )
     .run();
 }
@@ -774,13 +754,11 @@ function bvnkChannelTransferId(
  * read failure stays a plain provider error so the inbox replay retries it.
  *
  * @param env - Process environment used for database access.
- * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
  * @returns The proven BVNK channel read-back and the transfer's recorded channel facts.
  */
 async function proveBvnkOfframpChannel(
   env: Env,
-  environment: SdpEnvironment,
   transferId: string
 ): Promise<{
   channel: BvnkChannelResponse;
@@ -796,7 +774,7 @@ async function proveBvnkOfframpChannel(
          AND pt.type = 'offramp'
          AND prj.environment = ?`
     )
-    .bind(transferId, environment)
+    .bind(transferId, currentClusterScope().environment)
     .first<{
       provider_reference: string | null;
       provider_data: PaymentTransferRow["provider_data"];
@@ -824,10 +802,9 @@ async function proveBvnkOfframpChannel(
       `stray off-ramp channel event: recorded channel id mismatch (expected ${row.provider_reference}, got ${recorded.channel.id})`
     );
   }
-  const channel = await RAMP_PROVIDER_CLIENTS.bvnk.getChannelV2(
-    webhookRampContext(env, environment),
-    { channelId: row.provider_reference }
-  );
+  const channel = await RAMP_PROVIDER_CLIENTS.bvnk.getChannelV2(rampRuntimeForScope(env), {
+    channelId: row.provider_reference,
+  });
   const expectedReference = buildBvnkOfframpReference(transferId);
   if (channel.reference !== expectedReference) {
     throw new TerminalRampWebhookError(
@@ -891,20 +868,18 @@ function assertBvnkOfframpEventMatchesChannel(
  * failure parks the event, a BVNK read failure stays retryable.
  *
  * @param env - Process environment used for database access.
- * @param environment - The project environment the event was delivered for.
  * @param event - Parsed detected channel transaction event.
  */
 async function handleBvnkPaymentChannelTransactionDetected(
   env: Env,
-  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-detected" }>
 ): Promise<void> {
   const transferId = bvnkChannelTransferId(event);
   if (transferId === undefined) {
     return;
   }
-  await proveBvnkOfframpChannel(env, environment, transferId);
-  await settleBvnkOfframpChannel(env, environment, transferId, { status: "settling" });
+  await proveBvnkOfframpChannel(env, transferId);
+  await settleBvnkOfframpChannel(env, transferId, { status: "settling" });
 }
 
 /**
@@ -921,22 +896,20 @@ async function handleBvnkPaymentChannelTransactionDetected(
  * it.
  *
  * @param env - Process environment used for database access.
- * @param environment - The project environment the event was delivered for.
  * @param event - Parsed confirmed channel transaction event.
  */
 async function handleBvnkPaymentChannelTransactionConfirmed(
   env: Env,
-  environment: SdpEnvironment,
   event: Extract<BvnkWebhook, { event: "bvnk:payment:channel:transaction-confirmed" }>
 ): Promise<void> {
   const transferId = bvnkChannelTransferId(event);
   if (transferId === undefined) {
     return;
   }
-  const { channel, recordedChannel } = await proveBvnkOfframpChannel(env, environment, transferId);
+  const { channel, recordedChannel } = await proveBvnkOfframpChannel(env, transferId);
   assertBvnkOfframpEventMatchesChannel(event.data, recordedChannel);
   const settlement = bvnkOfframpChannelSettlementFromEvent(event.data);
-  await settleBvnkOfframpChannel(env, environment, transferId, {
+  await settleBvnkOfframpChannel(env, transferId, {
     status: "completed",
     walletAmount: event.data.walletAmount,
     settlement,
@@ -1031,16 +1004,15 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
   /**
    * Applies a parsed BVNK webhook event.
    * @param env - Process environment used for repository access.
-   * @param environment - Sandbox or production ramp environment.
    * @param webhook - The parsed webhook event.
    */
-  async process(env: Env, environment: SdpEnvironment, webhook: BvnkParsedWebhook): Promise<void> {
+  async process(env: Env, webhook: BvnkParsedWebhook): Promise<void> {
     switch (webhook.event) {
       case "ignore":
         getLogger().info(`[bvnk webhook] ignored event: ${webhook.reason}`);
         return;
       case "bvnk:payment:payin:status-change":
-        return handleBvnkPayinStatusChange(env, environment, webhook.data);
+        return handleBvnkPayinStatusChange(env, webhook.data);
       case "payment:v2:payin:status-change":
         getLogger().info(
           { payin_id: webhook.data.id, status: webhook.data.status },
@@ -1048,25 +1020,20 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
         );
         return;
       case "bvnk:payment:crypto:status-change":
-        return handleBvnkCryptoPayoutStatusChange(env, environment, webhook.data);
+        return handleBvnkCryptoPayoutStatusChange(env, webhook.data);
       case "bvnk:payment:channel:transaction-detected":
-        return handleBvnkPaymentChannelTransactionDetected(env, environment, webhook);
+        return handleBvnkPaymentChannelTransactionDetected(env, webhook);
       case "bvnk:payment:channel:transaction-confirmed":
-        return handleBvnkPaymentChannelTransactionConfirmed(env, environment, webhook);
+        return handleBvnkPaymentChannelTransactionConfirmed(env, webhook);
       case "bvnk:platform:customer:status-change":
-        return handleBvnkCustomerStatusChange(env, environment, webhook);
+        return handleBvnkCustomerStatusChange(env, webhook);
       case "bvnk:platform:customer:update":
-        return handleBvnkPlatformCustomerUpdate(env, environment, webhook);
+        return handleBvnkPlatformCustomerUpdate(env, webhook);
       case "bvnk:platform:customer:agreement-session-status-change":
-        return handleBvnkPlatformCustomerAgreementSessionStatusChange(env, environment, webhook);
+        return handleBvnkPlatformCustomerAgreementSessionStatusChange(env, webhook);
       case "ledger:v2:wallet:status-change":
       case "bvnk:ledger:wallet:create":
-        return applyBvnkWalletEvent(
-          env,
-          environment,
-          parseBvnkWalletName(webhook.data.name),
-          webhook.data
-        );
+        return applyBvnkWalletEvent(env, parseBvnkWalletName(webhook.data.name), webhook.data);
       default: {
         const exhaustive: never = webhook;
         return exhaustive;

@@ -138,7 +138,7 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
     return moonpayTransactionSettlementEvent(transactionData.data);
   }
 
-  async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
+  async process(env: Env, event: MoonpaySettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
       return;

@@ -1,7 +1,7 @@
 import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { LightsparkGridAmount, LightsparkRampSettlement, SdpEnvironment } from "@sdp/types";
+import type { LightsparkGridAmount, LightsparkRampSettlement } from "@sdp/types";
 import { z } from "zod";
 import { AppError, badRequest } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
@@ -346,7 +346,7 @@ export class LightsparkWebhookProcessor implements WebhookProcessor<string, Ramp
     return parseLightsparkEvent(payload);
   }
 
-  async process(env: Env, _environment: SdpEnvironment, event: RampSettlementEvent) {
+  async process(env: Env, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[lightspark webhook] ignored event: ${event.reason}`);
       return;
