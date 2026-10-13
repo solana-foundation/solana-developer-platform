@@ -71,6 +71,16 @@ Sign-in problems point at the Clerk configuration. Re-check
 against your Clerk application, and confirm the keys match the environment
 (development vs production) you intend to run.
 
+## Requests fail with `503 RPC_NOT_CONFIGURED`
+
+The project's cluster has no RPC URL. Sandbox projects read the devnet pool and
+Production projects the mainnet pool, so a Production project on a deployment
+with only devnet URLs gets this error for every request that touches the chain.
+Add at least one `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` (or
+`SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` for Sandbox projects) to `.env` and
+run `docker compose up -d` again. See
+[Solana RPC](/docs/self-hosting/env-reference#solana-rpc).
+
 ## Still stuck?
 
 Capture the failing service's logs and your (secret-redacted) `.env` settings,

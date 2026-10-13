@@ -98,9 +98,26 @@ test("a value containing a newline cannot inject extra .env lines", () => {
   assert.doesNotMatch(env, /^INJECTED=/m);
 });
 
-test("NEXT_PUBLIC_SOLANA_NETWORK is derived from SOLANA_NETWORK", () => {
-  const env = generateEnv({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
-  assert.match(env, /^NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta$/m);
+test("selecting Kora emits only the per-cluster Kora names", () => {
+  const env = generateEnv({
+    ...defaultValues(),
+    FEE_PAYMENT_PROVIDER: "kora",
+    KORA_RPC_URL_DEVNET: "https://kora-devnet.sdp.test",
+    KORA_API_KEY_DEVNET: "kora-devnet-key",
+    KORA_CLOUD_RUN_AUDIENCE_DEVNET: "https://kora-devnet-audience.sdp.test",
+    KORA_RPC_URL_MAINNET: "https://kora-mainnet.sdp.test",
+    KORA_API_KEY_MAINNET: "kora-mainnet-key",
+    KORA_CLOUD_RUN_AUDIENCE_MAINNET: "https://kora-mainnet-audience.sdp.test",
+  });
+  const koraKeys = [...env.matchAll(/^(KORA_[A-Z0-9_]*)=/gm)].map((match) => match[1]);
+  assert.deepEqual(koraKeys, [
+    "KORA_RPC_URL_DEVNET",
+    "KORA_API_KEY_DEVNET",
+    "KORA_CLOUD_RUN_AUDIENCE_DEVNET",
+    "KORA_RPC_URL_MAINNET",
+    "KORA_API_KEY_MAINNET",
+    "KORA_CLOUD_RUN_AUDIENCE_MAINNET",
+  ]);
 });
 
 test("Asset Profiles remains an explicit production opt-in", () => {

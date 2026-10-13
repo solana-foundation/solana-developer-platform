@@ -33,13 +33,63 @@ test("invisible required field is not validated", () => {
 });
 
 test("a select value outside its options reports an error", () => {
-  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "testnet" });
-  assert.match(errors.SOLANA_NETWORK ?? "", /must be one of: devnet, mainnet-beta/);
+  const errors = validateValues({ ...defaultValues(), ENVIRONMENT: "staging" });
+  assert.match(errors.ENVIRONMENT ?? "", /must be one of: production, development/);
 });
 
 test("a valid select value has no error", () => {
-  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
-  assert.equal(errors.SOLANA_NETWORK, undefined);
+  const errors = validateValues({ ...defaultValues(), ENVIRONMENT: "development" });
+  assert.equal(errors.ENVIRONMENT, undefined);
+});
+
+test("a config with only mainnet RPC providers still requires a devnet provider", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    RPC_DEVNET_PROVIDERS: "",
+    RPC_MAINNET_PROVIDERS: "helius",
+    SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet.helius.rpc.sdp.test/key",
+  });
+  assert.match(errors.RPC_DEVNET_PROVIDERS ?? "", /is required/);
+  assert.equal(errors.RPC_MAINNET_PROVIDERS, undefined);
+  assert.equal(errors.SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL, undefined);
+});
+
+test("a selected RPC provider without its URL reports an error on that URL", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    RPC_DEVNET_PROVIDERS: "helius",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet.helius.rpc.sdp.test/key",
+    RPC_MAINNET_PROVIDERS: "triton",
+    SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "",
+  });
+  assert.match(errors.SOLANA_RPC_TRITON_MAINNET_API_KEY_URL ?? "", /is required/);
+  assert.equal(errors.SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL, undefined);
+});
+
+test("an RPC URL whose provider is missing from its own cluster's list reports an error on that URL", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    RPC_DEVNET_PROVIDERS: "helius",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet.helius.rpc.sdp.test/key",
+    SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet.triton.rpc.sdp.test/key",
+    RPC_MAINNET_PROVIDERS: "triton",
+    SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://mainnet.triton.rpc.sdp.test/key",
+  });
+  assert.equal(
+    errors.SOLANA_RPC_TRITON_DEVNET_API_KEY_URL,
+    "Triton devnet URL is set but triton is not in RPC_DEVNET_PROVIDERS, so it would be dropped"
+  );
+  assert.equal(errors.SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL, undefined);
+  assert.equal(errors.SOLANA_RPC_TRITON_MAINNET_API_KEY_URL, undefined);
+});
+
+test("a non-https RPC URL reports an error", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    RPC_DEVNET_PROVIDERS: "helius",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "http://devnet.helius.rpc.sdp.test/key",
+  });
+  assert.match(errors.SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL ?? "", /invalid format/);
 });
 
 test("managed signing with native fees requires a fee payer key", () => {
