@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
 import type { PrivateChannelInstance, PrivateChannelTransfer } from "@sdp/types";
 import { PRIVATE_CHANNEL_EVENT_STATUSES, PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
@@ -196,10 +196,7 @@ async function broadcastTransfer(
   return withGatewayRpc(env, input.instance.gatewayUrl, input.gatewayAuth, async (gatewayRpc) => {
     // SPC accepts and then discards `commitment` (one sequencer, no fork choice),
     // so the level here is inert; it is passed only to match the other SPC paths.
-    const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(
-      gatewayRpc,
-      "confirmed"
-    );
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(gatewayRpc, "confirmed");
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(signer, m),
@@ -209,7 +206,7 @@ async function broadcastTransfer(
     const signed = await signTransactionMessageWithSigners(message);
     await input.onSigned(getSignatureFromTransaction(signed));
     const signedBytes = new Uint8Array(getTransactionEncoder().encode(signed));
-    return solanaRpc.sendTransaction(gatewayRpc, signedBytes);
+    return sendTransaction(gatewayRpc, signedBytes);
   });
 }
 

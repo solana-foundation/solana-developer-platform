@@ -1,7 +1,12 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  confirmTransaction,
+  getRecentBlockhash,
+  getSignaturesForAddress,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { isSuccessfulPaymentTransferStatus, TRANSFER_CHAIN_VERDICT_STATUSES } from "@sdp/types";
@@ -552,7 +557,7 @@ async function executeSponsoredTransfer(
     buildInstructions: (context: {
       signer: TransactionSigner;
       feePayer: Address;
-      rpc: solanaRpc.SolanaRpc;
+      rpc: SolanaRpc;
     }) => Promise<readonly Instruction[]>;
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
@@ -569,7 +574,7 @@ async function executeSponsoredTransfer(
   }
 
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
@@ -593,7 +598,7 @@ async function executeSponsoredTransfer(
     store: params.submissionStore,
   });
 
-  const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
+  const confirmation = await confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });
 
@@ -1050,7 +1055,7 @@ export async function listTransfers(c: AppContext) {
     });
 
     const [ownerSignatures, tokenAccountAddresses, persistedResult] = await Promise.all([
-      solanaRpc.getSignaturesForAddress(historyRpc, ownerAddress, {
+      getSignaturesForAddress(historyRpc, ownerAddress, {
         limit: historyLimit,
         commitment: "confirmed",
       }),
@@ -1087,7 +1092,7 @@ export async function listTransfers(c: AppContext) {
       signatureSearchAddresses.slice(1),
       SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
       (searchAddress) =>
-        solanaRpc.getSignaturesForAddress(historyRpc, searchAddress, {
+        getSignaturesForAddress(historyRpc, searchAddress, {
           limit: historyLimit,
           commitment: "confirmed",
         })

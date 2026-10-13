@@ -13,7 +13,7 @@ import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { confirmTransaction, getRecentBlockhash } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
   type Address,
@@ -152,7 +152,7 @@ export async function reclaimDvpTradeLeg(
     createNoopSigner(sponsor)
   );
 
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
@@ -377,7 +377,7 @@ async function releaseOnceConfirmed(
   reclaimSignature: Signature
 ) {
   try {
-    const confirmation = await solanaRpc.confirmTransaction(rpc, reclaimSignature, {
+    const confirmation = await confirmTransaction(rpc, reclaimSignature, {
       timeoutMs: RECLAIM_CONFIRM_TIMEOUT_MS,
     });
     if (

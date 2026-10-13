@@ -32,7 +32,7 @@
  *    `failed` would be just as wrong — a slow read does not mean nothing landed.
  */
 
-import * as solanaRpc from "@sdp/rpc/solana";
+import { confirmTransaction } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import type {
   PrivateChannelTransferRepository,
@@ -75,7 +75,7 @@ export async function confirmAndPersistTransfer(
       input.gatewayUrl,
       input.gatewayAuth,
       (gatewayRpc) =>
-        solanaRpc.confirmTransaction(gatewayRpc, input.signature, {
+        confirmTransaction(gatewayRpc, input.signature, {
           timeoutMs: TRANSFER_CONFIRM_TIMEOUT_MS,
           pollIntervalMs: TRANSFER_CONFIRM_POLL_INTERVAL_MS,
         })
