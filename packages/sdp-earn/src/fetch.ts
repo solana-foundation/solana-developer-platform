@@ -1,4 +1,5 @@
 import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
 
@@ -121,6 +122,8 @@ export function providerFetch<TBody = never>(
  * @param init - The request.
  * @returns The response, its raw body, and the body parsed as JSON when it is JSON.
  * @throws SdpEarnError `PROVIDER_UNAVAILABLE` when `send` fails or the timeout elapses.
+ * @throws SdpRpcError as `send` threw it when `send` is the door's fetch and the door refuses the
+ *   read (a pool serving another cluster, a missing scope).
  */
 export async function providerFetchVia<TBody = never>(
   send: typeof fetch,
@@ -143,7 +146,8 @@ export async function providerFetchVia<TBody = never>(
       signal,
     });
     raw = await response.text();
-  } catch {
+  } catch (error) {
+    if (error instanceof SdpRpcError) throw error;
     // A timeout is a provider we could not reach in the time we had, which is
     // the same fact as a refused connection to every caller of this module.
     throw new SdpEarnError(

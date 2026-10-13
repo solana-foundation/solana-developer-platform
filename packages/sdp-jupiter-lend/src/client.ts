@@ -9,6 +9,7 @@ import {
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
 import { JupiterLendEarnClient } from "@sdp/earn/providers/jupiter_lend/client";
+import { assertRuntimeMatchesScope } from "@sdp/earn/runtime-scope";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -177,6 +178,7 @@ export class JupiterLendVaultDirectClient
     operation: (connection: Connection, assertActive: () => void) => Promise<T>
   ): Promise<T> {
     return this.runOperation(label, async (assertActive) => {
+      assertRuntimeMatchesScope(ctx, "Jupiter Lend");
       const cluster: SolanaCluster = ctx.environment === "production" ? "mainnet-beta" : "devnet";
       if (cluster !== "mainnet-beta") {
         throw new SdpJupiterLendError(

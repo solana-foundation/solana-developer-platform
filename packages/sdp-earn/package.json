@@ -29,6 +29,11 @@
       "import": "./src/support.ts",
       "default": "./src/support.ts"
     },
+    "./runtime-scope": {
+      "types": "./src/runtime-scope.ts",
+      "import": "./src/runtime-scope.ts",
+      "default": "./src/runtime-scope.ts"
+    },
     "./providers/veda/vault-state": {
       "types": "./src/providers/veda/vault-state.ts",
       "import": "./src/providers/veda/vault-state.ts",

@@ -1,6 +1,6 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
-import { internalError } from "@sdp/earn/errors";
 import { VedaEarnClient } from "@sdp/earn/providers/veda/client";
+import { assertRuntimeMatchesScope } from "@sdp/earn/runtime-scope";
 import type {
   EarnRuntimeContext,
   EarnVaultDepositInput,
@@ -33,7 +33,6 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { createClusterBoundedRpc, createClusterReadRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { vedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
@@ -65,24 +64,6 @@ import type {
   VedaRuntime,
   VedaWithdrawalLifecycleEvent,
 } from "./types";
-
-/**
- * Refuse a runtime whose environment differs from the open cluster scope's: program ids come from
- * `ctx.environment` and clients from the scope, so a mismatch would read one cluster with the
- * other cluster's programs.
- *
- * @param ctx - The request's runtime context.
- * @throws SdpEarnError `INTERNAL_ERROR` when the two environments differ.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- */
-function assertContextMatchesScope(ctx: EarnRuntimeContext): void {
-  const scopeEnvironment = currentClusterScope().environment;
-  if (scopeEnvironment !== ctx.environment) {
-    throw internalError(
-      `Veda was asked to run on ${ctx.environment} inside a ${scopeEnvironment} cluster scope`
-    );
-  }
-}
 
 /** One position page may fan out over several vaults; never fan out unbounded. */
 export const VEDA_POSITION_READ_CONCURRENCY = 4;
@@ -294,7 +275,7 @@ export class VedaVaultDirectClient
   private runtime(ctx: EarnRuntimeContext): { runtime: VedaRuntime; config: VedaClusterConfig } {
     const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
     const config = vedaClusterConfig(cluster);
-    assertContextMatchesScope(ctx);
+    assertRuntimeMatchesScope(ctx, "Veda");
     return {
       runtime: {
         cluster,
