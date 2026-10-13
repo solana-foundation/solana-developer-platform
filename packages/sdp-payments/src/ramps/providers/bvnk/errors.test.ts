@@ -39,11 +39,11 @@ describe("parseBvnkResponse", () => {
   it("reports schema issues in diagnostics, not in public details", () => {
     assert.throws(
       () => parseBvnkResponse(z.object({ walletId: z.string() }), { walletId: 7 }),
-      (error: unknown) => {
-        assert.ok(error instanceof SdpPaymentsError);
-        assert.equal(error.code, "PROVIDER_UNAVAILABLE");
-        assert.deepEqual(error.details, { provider: "bvnk" });
-        assert.ok(error.diagnostics?.issues);
+      (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+        assert.deepEqual(cause.details, { provider: "bvnk" });
+        assert.ok(cause.diagnostics?.issues);
         return true;
       }
     );
