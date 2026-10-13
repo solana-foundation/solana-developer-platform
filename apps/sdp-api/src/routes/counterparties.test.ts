@@ -36,6 +36,7 @@ import {
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
+import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
@@ -551,22 +552,10 @@ describe("Counterparties Routes", () => {
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
 
-      const kv = createKVStoreSet(env);
-      await kv.apiKeys.put(
-        `key:${apiKeyHash}`,
-        JSON.stringify({
-          ...TEST_CACHED_API_KEY,
-          projectId: TEST_PROJECT_ID,
-          walletScope: "selected",
-          walletBindings: [
-            {
-              walletId: "wallet_counterparties_other",
-              custodyWalletId: "cwlt_counterparties_other",
-              permissions: ["*"],
-            },
-          ],
-        })
-      );
+      // Authentication reads bindings from Postgres on every request.
+      await replaceApiKeyWalletBindings(getDb(env), TEST_CACHED_API_KEY.id, [
+        { walletId: "wallet_counterparties_other", permissions: ["*"] },
+      ]);
 
       const res = await app.request(
         `/v1/counterparties/${counterparty.id}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,

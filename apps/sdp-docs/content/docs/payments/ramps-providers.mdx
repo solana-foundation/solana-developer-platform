@@ -1,9 +1,10 @@
 ---
+module: ramps
 title: Ramp providers
-description: Capability matrix, configuration, and per-provider notes for MoonPay, BVNK, Coinbase, and Stripe.
+description: Capability matrix, sandbox selection, and provider availability for SDP ramp providers.
 ---
 
-SDP currently integrates four ramp providers. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
+SDP integrates the ramp providers in the matrix below. They are configured at the organization level via environment variables on the SDP API deployment; the same `provider` string on `POST /v1/payments/ramps/onramp/quote` and `POST /v1/payments/ramps/offramp/quote` selects between them.
 
 ## Sandbox vs production selection
 
@@ -12,82 +13,31 @@ The sandbox/production mode is chosen **per request**, not at deployment time:
 - Non-production SDP deployments (`ENVIRONMENT !== "production"`) always use sandbox credentials.
 - In production deployments, the calling API key's environment picks the mode — `sk_test_` keys use sandbox, `sk_live_` use production.
 
-Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment: MoonPay and BVNK read separate sandbox and production credentials this way. Coinbase and Stripe use a single credential pair regardless of the resolved mode (see their sections below).
+Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment, when the provider reads separate sandbox and production credentials; each provider's page says which.
 
 ## Capability matrix
 
-| Provider | Onramp | Offramp | Sandbox | Delivery mode | Notes |
-| --- | --- | --- | --- | --- | --- |
-| MoonPay | ✓ | ✓ | ✓ | `hosted` | Sandbox vs production is selected per request (see [Sandbox vs production](#sandbox-vs-production-selection)). |
-| BVNK | ✓ | ✓ | ✓ | `manual_instructions` | Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request. |
-| Coinbase | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Rate estimates work in production; order creation is sandbox-only. Onramp only. |
-| Stripe | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | No separate sandbox credentials — supply a Stripe test-mode secret key. Onramp only. |
+<RampProviderMatrix />
 
-## MoonPay
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `MOONPAY_API_KEY` | conditional | Production API key. Required when the request resolves to production. |
-| `MOONPAY_SECRET_KEY` | conditional | Production secret used to sign onramp / offramp URLs. Paired with `MOONPAY_API_KEY`. |
-| `MOONPAY_SANDBOX_API_KEY` | conditional | Sandbox API key. Required when the request resolves to sandbox. |
-| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Sandbox secret. Paired with `MOONPAY_SANDBOX_API_KEY`. |
-| `MOONPAY_ONRAMP_URL` | no | Override the onramp host. Defaults to MoonPay's standard URLs; the sandbox/production choice follows the [per-request rule](#sandbox-vs-production-selection). |
-| `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
-
-MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.
-
-## BVNK
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `BVNK_WALLET_ID` | conditional | Production BVNK-side wallet used for settlement. |
-| `BVNK_HAWK_AUTH_ID` | conditional | Production Hawk auth id. Paired with `BVNK_HAWK_SECRET_KEY`. |
-| `BVNK_HAWK_SECRET_KEY` | conditional | Production Hawk secret key. |
-| `BVNK_SANDBOX_WALLET_ID` | conditional | Sandbox BVNK wallet. Required when the request resolves to sandbox. |
-| `BVNK_SANDBOX_HAWK_AUTH_ID` | conditional | Sandbox Hawk auth id. |
-| `BVNK_SANDBOX_HAWK_SECRET_KEY` | conditional | Sandbox Hawk secret key. |
-
-BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
-
-BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
-
-BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
-
-## Coinbase
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `COINBASE_CDP_API_KEY_ID` | conditional | CDP Secret API Key id. Same key is used for sandbox and production — sandbox is flagged per-request, not by a separate credential. |
-| `COINBASE_CDP_API_KEY_SECRET` | conditional | CDP Secret API Key secret. Paired with `COINBASE_CDP_API_KEY_ID`; used to sign a per-request JWT. |
-
-Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject with "Coinbase Onramp does not support off-ramp." Onramp quotes always return `deliveryMode: "hosted"`: SDP creates a guest-checkout Apple Pay order and returns its payment link as `hostedUrl`.
-
-Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Coinbase also requires email and phone values; quote creation currently fails at the pending just-in-time collection seam.
-
-## Stripe
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `STRIPE_SECRET_KEY` | conditional | Secret key, sent as the username on HTTP Basic auth. A single key serves both modes — use a `sk_test_…` key to sandbox it, `sk_live_…` for production. |
-| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, echoed back on the quote for the client to mount the onramp session. |
-
-Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
+Each provider's page covers its configuration and limits.
 
 ## Provider gating
 
-Even when all four providers' env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call: if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
+Even when every provider's env vars are populated, an org can be restricted to a subset. This is [**Provider Availability**](/docs/reference/provider-onboarding): a provider must be configured for the deployment and either generally available or manually activated for the organization. SDP checks this on every ramp call: if the org lacks availability for the requested provider, the call returns an error. To activate or change provider availability for a deployment, see [Provider onboarding](/docs/reference/provider-onboarding).
 
 ## Choosing a provider
 
-| Need | Lean towards |
-| --- | --- |
-| Fastest sandbox iteration | MoonPay or BVNK. |
-| Travel-rule / compliance party metadata | BVNK. |
-| Broadest payment-method coverage | MoonPay (corridor-dependent). |
-| Widget/session-embedded onramp UI | Stripe. |
-| Onramp only, no off-ramp needed | Coinbase or Stripe. |
+The **Best for** column of the capability matrix compares the providers this deployment offers.
 
 For self-hosted deployments where only a subset of providers will ever be configured, see [Providers optional for self-hosted SDP](/docs/reference/provider-onboarding) — SDP supports running with any single provider active.
+
+## Become a ramp provider
+
+Ramp integrations follow the [provider onboarding](/docs/reference/provider-onboarding) process with their own intake and criteria:
+
+| Category | Intake form | Criteria |
+| --- | --- | --- |
+| Ramp | [Complete ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) | [Download ramp criteria PDF](/provider-onboarding/ramp-criteria.pdf) |
 
 ## Related
 

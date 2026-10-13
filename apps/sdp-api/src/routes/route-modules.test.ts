@@ -7,9 +7,9 @@ import {
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
+import { routeOwnerOf as ownerOf, ROUTE_OWNERS } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
 import { env as baseEnv } from "@/test/helpers/env";
-import { ownerOf, ROUTE_OWNERS } from "@/test/helpers/route-owners";
 
 function registeredRoutes() {
   const app = createApp({

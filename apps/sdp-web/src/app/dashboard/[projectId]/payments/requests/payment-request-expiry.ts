@@ -8,7 +8,7 @@ const frozenExpiries = createActionMemo("sdp:payments:request-expiry:v1", z.stri
 
 /**
  * The `expiresAt` a payment-request create sends, read from the clock once per
- * user action and kept until the action is definitively answered.
+ * user action and kept until an answer retires its key (`answerRetiresKey`).
  * `dashboard-fetch` keys a mutation by its body, so an expiry read again on
  * the retry (after an edit and back, or a reload) would be a new body under a
  * new key, and a first attempt that did create could be repeated.

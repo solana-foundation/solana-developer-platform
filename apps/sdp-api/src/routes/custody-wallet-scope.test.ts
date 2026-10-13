@@ -8,10 +8,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import {
-  replaceApiKeyWalletBindings,
-  upsertApiKeyWalletBinding,
-} from "@/services/api-key-wallets.service";
+import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -220,14 +217,6 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
         })
       )
     : undefined;
-  if (override.walletBindings) {
-    // Access checks read the bindings fresh (HOO-1918), so Postgres holds them too.
-    await replaceApiKeyWalletBindings(
-      getDb(env),
-      TEST_API_KEY.id,
-      override.walletBindings.map(({ walletId, permissions }) => ({ walletId, permissions }))
-    );
-  }
   await seedCachedApiKey(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
@@ -1082,16 +1071,13 @@ describe("Custody wallet scope routes", () => {
       uiAmount: "3",
     });
 
+    // A binding names a Provider wallet ID, which two Connections share here, so
+    // authentication's fresh read cannot tell which wallet it means: the key
+    // stays wallet-scoped and reaches neither (deny-only, fail closed).
     await seedCachedKey({
       walletScope: "selected",
       signingWalletId: sharedWalletId,
-      walletBindings: [
-        {
-          walletId: sharedWalletId,
-          custodyWalletId: "cwlt_scope_shared_a",
-          permissions: ["*"],
-        },
-      ],
+      walletBindings: [{ walletId: sharedWalletId, permissions: ["*"] }],
     });
 
     const selectedList = await app.request(
@@ -1105,9 +1091,7 @@ describe("Custody wallet scope routes", () => {
     const selectedListBody = (await selectedList.json()) as {
       data: { wallets: Array<{ id: string }> };
     };
-    expect(selectedListBody.data.wallets.map((wallet) => wallet.id)).toEqual([
-      "cwlt_scope_shared_a",
-    ]);
+    expect(selectedListBody.data.wallets).toEqual([]);
 
     const selectedDetail = await app.request(
       `/v1/wallets/${sharedWalletId}?includeBalance=false`,
@@ -1116,46 +1100,7 @@ describe("Custody wallet scope routes", () => {
       },
       env
     );
-    expect(selectedDetail.status).toBe(200);
-    expect(await selectedDetail.json()).toMatchObject({
-      data: { wallet: { id: "cwlt_scope_shared_a", publicKey: TEST_SOLANA_ADDRESSES.wallet2 } },
-    });
-
-    const selectedPublicKey = await app.request(
-      `/v1/wallets/public-key?walletId=${sharedWalletId}`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedPublicKey.status).toBe(200);
-    expect(await selectedPublicKey.json()).toMatchObject({
-      data: { publicKey: TEST_SOLANA_ADDRESSES.wallet2 },
-    });
-
-    const selectedBalances = await app.request(
-      `/v1/payments/wallets/${sharedWalletId}/balances`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedBalances.status).toBe(200);
-
-    const selectedDelete = await app.request(
-      "/v1/wallets",
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ walletId: sharedWalletId, provider: "privy" }),
-      },
-      env
-    );
-    // A delete's access check reads the binding fresh (HOO-1918). Postgres binds the key by
-    // Provider wallet ID, which two Connections share here, so the fresh read is deny-only.
-    expect(selectedDelete.status).toBe(404);
-    expect(await selectedDelete.json()).toMatchObject({
-      error: { message: "Custody wallet not found" },
-    });
+    expect(selectedDetail.status).toBe(404);
   });
 
   it("returns the requested public key when the wallet is authorized", async () => {

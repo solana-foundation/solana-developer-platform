@@ -1,4 +1,3 @@
-import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import type { ApiKeyContext } from "@/lib/auth";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -7,7 +6,6 @@ import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   assertApiKeyCustodyWalletAccess,
   getAllowedApiKeyWalletAuthorizationForPermissions,
-  loadFreshApiKeyWalletScope,
 } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
@@ -53,11 +51,6 @@ export interface AuthorizedRecurringPaymentCreate {
 
 const PERMISSIONS = ["payments:write"] as const;
 
-/** The caller with its wallet bindings read fresh, deactivated wallets kept. */
-function freshWalletScope(c: AppContext): Promise<ApiKeyContext> {
-  return loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
-}
-
 /** The counterparty and its account, in the caller's project whatever their status. */
 async function assertCounterpartyAccountInProject(
   c: AppContext,
@@ -96,9 +89,7 @@ export async function authorizeRecurringPaymentCreate(
     counterpartyId: string;
     counterpartyAccountId: string;
   };
-  assertApiKeyCustodyWalletAccess(await freshWalletScope(c), body.sourceCustodyWalletId, [
-    ...PERMISSIONS,
-  ]);
+  assertApiKeyCustodyWalletAccess(getAuth(c), body.sourceCustodyWalletId, [...PERMISSIONS]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
   // Every id the caller names is checked before the key is claimed: a
@@ -145,7 +136,7 @@ export async function authorizeRecurringPayment(
   c: AppContext,
   input: AuthorizeInput
 ): Promise<AuthorizedRecurringPayment> {
-  return authorizeExistingRecurringPayment(c, input, await freshWalletScope(c));
+  return authorizeExistingRecurringPayment(c, input, getAuth(c));
 }
 
 /**
@@ -156,7 +147,7 @@ export async function authorizeRecurringPaymentUpdate(
   c: AppContext,
   input: AuthorizeInput
 ): Promise<AuthorizedRecurringPaymentUpdate> {
-  const access = await freshWalletScope(c);
+  const access = getAuth(c);
   const authorized = await authorizeExistingRecurringPayment(c, input, access);
   // SAFETY: mounted after validateBody(updateRecurringPaymentSchema).
   const body = input.body as {

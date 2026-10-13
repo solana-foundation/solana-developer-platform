@@ -6,7 +6,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { badRequest, internalError } from "@/lib/errors";
+import { AppError, badRequest, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -57,7 +57,7 @@ export async function authorizeTransferBatch(
   const body = input.body as CreateTransferBatchInput;
   // Read fresh, never from the cached snapshot, which drops a binding once its
   // wallet is inactive and would refuse the replay of a batch that ran.
-  await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
+  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
 }
 
@@ -203,6 +203,9 @@ export async function createTransferBatch(
         idempotencyKey,
       });
       if (replay) {
+        if (replay.idempotency_fingerprint !== idempotencyFingerprint) {
+          throw new AppError("IDEMPOTENCY_KEY_REUSED");
+        }
         return respondToTransferBatchReplay(
           c,
           replay,

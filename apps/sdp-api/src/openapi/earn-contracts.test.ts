@@ -30,7 +30,7 @@ describe("Earn API contract coverage", () => {
 
   it("keeps every Treasury operation authenticated and unpublished", () => {
     const internal = createOpenApiDocument();
-    const published = createPublicOpenApiDocument();
+    const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
     for (const [path, item] of Object.entries(internal.paths)) {
       if (!path.startsWith("/v1/earn/")) continue;
       expect(published.paths[path]).toBeUndefined();

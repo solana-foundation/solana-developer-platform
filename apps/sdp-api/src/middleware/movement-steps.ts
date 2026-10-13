@@ -2,7 +2,12 @@ import type { Context, MiddlewareHandler, Next } from "hono";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { type AuthorizeInput, getAuthorized, validatedInput } from "./authorize";
-import { getIdempotencyFingerprint, getIdempotencyRecordKey } from "./idempotency";
+import {
+  getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
+  IDEMPOTENT_REPLAYED_HEADER,
+  markIdempotencyCommitted,
+} from "./idempotency";
 
 /**
  * The steps between `idempotent()` and a money-moving handler (HOO-1918, ADR
@@ -42,7 +47,8 @@ export interface RecordAnswer {
  * finder looks the row up by the credential-bound record key and returns it
  * with its stored fingerprint; a matching fingerprint is answered from the row
  * and nothing runs again, another is 422 `IDEMPOTENCY_KEY_REUSED`, and null
- * means the key has no row yet.
+ * means the key has no row yet. A row's answer, success or failure, is marked
+ * `Idempotent-Replayed` and stored under the key.
  *
  * It works from the validated request and what `authorize` loaded only: no
  * RPC, nothing that can change after the original ran (a token account closed,
@@ -66,6 +72,11 @@ export function replayFromRecord<TAuthorized>(
         if (answer.fingerprint !== null && answer.fingerprint !== getIdempotencyFingerprint(c)) {
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }
+        // The row is the request's recorded answer, success or failure: stored
+        // under the key like any answer after the row exists, and marked as a
+        // replay, so a client retires the key on it.
+        markIdempotencyCommitted(c);
+        c.header(IDEMPOTENT_REPLAYED_HEADER, "true");
         return answer.respond();
       }
     }

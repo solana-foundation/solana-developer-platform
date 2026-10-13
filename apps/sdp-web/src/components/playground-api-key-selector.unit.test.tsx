@@ -46,6 +46,8 @@ const PLAYGROUND_API_KEYS = workspace.playgroundApiKeys;
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
+  // No release channel: the playground offers its endpoints unfiltered.
+  useOptionalDashboardWorkspace: () => null,
 }));
 
 vi.mock("@/lib/dashboard-url-state", () => ({

@@ -9,7 +9,6 @@ import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
-  reloadTestApiKeyCache,
   seedCachedKey,
   sendTransactionMock,
   TEST_API_KEY,
@@ -196,9 +195,6 @@ describe("Payments routes — transfer wallet access", () => {
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
-    // The real path: once the key's snapshot reloads, its binding to the
-    // now-inactive wallet is gone from it; only the fresh read still sees it.
-    await reloadTestApiKeyCache();
     createOrgSignerForCustodyWalletMock.mockClear();
     const replay = await postTransfer(JSON.parse(body), {
       idempotencyKey: headers["Idempotency-Key"],
@@ -206,6 +202,17 @@ describe("Payments routes — transfer wallet access", () => {
     expect(replay.status).toBe(200);
     const replayBody = await readTransferResponse(replay);
     expect(replayBody.data).toEqual(firstBody.data);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+
+    // The binding still reaches the deactivated wallet (wallet status is state,
+    // not access), so new work is refused by runtime admission, not the binding.
+    const fresh = await postTransfer(JSON.parse(body), {
+      idempotencyKey: "deactivated-wallet-transfer-fresh",
+    });
+    expect(fresh.status).toBe(409);
+    expect(await fresh.json()).toMatchObject({
+      error: { details: { reason: "runtime_execution_unavailable" } },
+    });
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
   it("denies a completed transfer replay for a duplicate exact wallet outside the key binding", async () => {
@@ -242,19 +249,13 @@ describe("Payments routes — transfer wallet access", () => {
     expect(replay.status).toBe(403);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
-  // Greptile (#2267): the replay check reads wallet access fresh, as the
-  // handler does, so a binding removed while the auth cache still holds it
-  // cannot read the stored response.
+  // Greptile (#2267): authentication reads the key's bindings fresh on every
+  // request (HOO-2048), so a binding removed while the auth cache still holds
+  // it cannot read the stored response.
   it("refuses a replay once a selected-wallet key loses its binding", async () => {
-    await getDb(env)
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('akw_selected_replay_revoked', ?, ?, '["*"]')`)
-      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
-      .run();
+    // Writes the binding to the cache and, as authentication reads it, to Postgres.
     await seedCachedKey({
       walletScope: "selected",
-      signingWalletId: TEST_WALLET_ID,
-      signingWalletIds: [TEST_WALLET_ID],
       walletBindings: [
         { walletId: TEST_WALLET_ID, custodyWalletId: TEST_CUSTODY_WALLET_ID, permissions: ["*"] },
       ],
@@ -268,8 +269,11 @@ describe("Payments routes — transfer wallet access", () => {
     const idempotencyKey = "selected-replay-revoked";
     expect((await postTransfer(body, { idempotencyKey })).status).toBe(200);
 
+    // Still wallet-scoped (a key with no bindings at all reaches every wallet),
+    // but no longer bound to this one.
     await getDb(env)
-      .prepare("DELETE FROM api_key_wallet_permissions WHERE id = 'akw_selected_replay_revoked'")
+      .prepare("UPDATE api_key_wallet_permissions SET wallet_id = 'wal_other' WHERE api_key_id = ?")
+      .bind(TEST_API_KEY.id)
       .run();
     const retry = await postTransfer(body, { idempotencyKey });
     expect(retry.status).toBe(403);

@@ -293,6 +293,15 @@ describe("Payments routes — signed submission", () => {
       const lateBody = await errorBody(late);
       expect(lateBody.error.code).toBe("TRANSACTION_FAILED");
       expect(lateBody.error.message).toContain("new Idempotency-Key");
+      // The row's answer is marked a replay, so a client retires the key, and is
+      // stored under the key again.
+      expect(late.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(
+        await getDb(env)
+          .prepare("SELECT status, response_status FROM idempotency_keys WHERE idempotency_key = ?")
+          .bind(key)
+          .first<{ status: string; response_status: number | null }>()
+      ).toEqual({ status: "completed", response_status: 400 });
       expect(sendTransactionMock).toHaveBeenCalledOnce();
       expect(await listTransferRows()).toHaveLength(1);
     });

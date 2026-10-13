@@ -33,7 +33,6 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
-  reloadTestApiKeyCache,
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -1326,8 +1325,6 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
-    // Once the key's snapshot reloads, the inactive wallet's binding is gone from it.
-    await reloadTestApiKeyCache(TEST_API_KEY.raw);
     createOrgSignerForCustodyWalletMock.mockClear();
 
     const replay = await app.request(

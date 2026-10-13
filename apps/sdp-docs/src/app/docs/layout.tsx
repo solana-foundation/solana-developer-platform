@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
 import { DocsSidebar } from "@/components/docs-shell/sidebar";
 import { source } from "@/lib/source";
+// Code-fence carousels (`rotate-providers`, `rotate-token-ops`) can sit on any page.
+import "@/styles/ramp-rotator.css";
 
 function resolveDashboardUrl() {
   const configuredUrl = process.env.NEXT_PUBLIC_SDP_WEB_URL?.trim();

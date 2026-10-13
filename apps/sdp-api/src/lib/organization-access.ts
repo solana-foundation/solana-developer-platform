@@ -1,11 +1,13 @@
 import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
+import { resolveApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -16,6 +18,8 @@ import type { Env } from "@/types/env";
  *   stops authenticating on its next request, whatever a cache still says;
  * - for an API key, the key's own row is still usable (active, not expired,
  *   not past its rotation deadline), read in the same statement by primary key;
+ * - for an API key, its wallet scope and bindings (HOO-2048), so routes check
+ *   wallets against this request's read and never re-read them;
  * - the request's origin passes `settings.allowedIpAddresses`.
  *
  * Caches (the API-key KV entry, its reconciliation sweep) only make rejection
@@ -96,29 +100,111 @@ export async function enforceOrganizationAccess(
 }
 
 /**
+ * The `wallet_bindings` aggregate. `permissions` is the raw column, which
+ * {@link resolveApiKeyWalletAuthorization} parses and fails closed on.
+ */
+const walletBindingCandidatesSchema = z.array(
+  z.object({
+    wallet_id: z.string(),
+    permissions: z.unknown(),
+    candidates: z.array(z.object({ id: z.string(), status: z.string() })),
+  })
+);
+
+/** What the uncached API-key read decided: the settings and the key's wallet scope. */
+export interface ApiKeyOrganizationAccess {
+  settings: string | null;
+  walletAuthorization: ReturnType<typeof resolveApiKeyWalletAuthorization>;
+}
+
+/**
  * Organization access for an API key, with the key's own live row in the same
  * statement: the organization must be `active` and the key's row must exist
  * and be usable, whatever the cached entry says. A cached key with no row is
  * refused like an unknown key; nothing falls back to the organization's word.
+ *
+ * The same statement reads the key's wallet bindings (HOO-2048), each with the
+ * custody wallets it could name and their status, so the request's wallet scope is never
+ * the cache's: a key narrowed from all wallets to selected ones, or a binding
+ * removed, takes effect on the key's next request. One round trip; routes
+ * check wallets against this snapshot and do not re-read bindings.
  */
 export async function enforceApiKeyOrganizationAccess(
   c: Context<{ Bindings: Env }>,
   organizationId: string,
   apiKeyId: string
-): Promise<string | null> {
+): Promise<ApiKeyOrganizationAccess> {
   const row = await getDb(c.env)
     .prepare(
       `SELECT o.status AS organization_status, o.settings,
-              ak.status, ak.expires_at, ak.rotation_deadline
+              ak.status, ak.expires_at, ak.rotation_deadline,
+              ak.signing_wallet_id, wb.wallet_bindings
          FROM organizations o
          LEFT JOIN api_keys ak ON ak.id = ? AND ak.organization_id = o.id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(
+                    json_agg(
+                      json_build_object(
+                        'wallet_id', b.wallet_id,
+                        'permissions', b.permissions,
+                        'candidates', (
+                          SELECT COALESCE(
+                                   json_agg(json_build_object('id', m.id, 'status', m.status) ORDER BY m.id),
+                                   '[]'::json
+                                 )
+                            FROM (
+                              SELECT w.id, w.status
+                                FROM custody_wallets w
+                                JOIN custody_configs cc ON cc.id = w.custody_config_id
+                               WHERE cc.organization_id = o.id
+                                 AND cc.project_id = ak.project_id
+                                 AND cc.status = 'active'
+                                 AND w.wallet_id = b.wallet_id
+                              UNION ALL
+                              SELECT w.id, w.status
+                                FROM custody_wallets w
+                                JOIN custody_connections cn ON cn.id = w.custody_connection_id
+                               WHERE cn.organization_id = o.id
+                                 AND cn.project_id = ak.project_id
+                                 AND cn.status = 'active'
+                                 AND w.wallet_id = b.wallet_id
+                            ) m
+                        )
+                      )
+                      ORDER BY b.created_at
+                    ),
+                    '[]'::json
+                  ) AS wallet_bindings
+             FROM (
+               SELECT p.wallet_id, p.permissions, p.created_at
+                 FROM api_key_wallet_permissions p
+                WHERE p.api_key_id = ak.id
+               UNION ALL
+               -- A legacy signing-wallet key carries no binding rows and holds
+               -- full access to its signing wallet.
+               SELECT ak.signing_wallet_id, '["*"]', ''
+                WHERE ak.signing_wallet_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM api_key_wallet_permissions p WHERE p.api_key_id = ak.id
+                  )
+             ) b
+         ) wb ON true
         WHERE o.id = ?`
     )
     .bind(apiKeyId, organizationId)
     .first<
-      { organization_status: string; settings: string | null } & (
-        | ApiKeyLifecycleColumns
-        | { status: null; expires_at: null; rotation_deadline: null }
+      {
+        organization_status: string;
+        settings: string | null;
+        wallet_bindings: unknown;
+      } & (
+        | (ApiKeyLifecycleColumns & { signing_wallet_id: string | null })
+        | {
+            status: null;
+            expires_at: null;
+            rotation_deadline: null;
+            signing_wallet_id: null;
+          }
       )
     >();
 
@@ -138,5 +224,11 @@ export async function enforceApiKeyOrganizationAccess(
     throw new AppError("EXPIRED_API_KEY");
   }
   enforceIpAllowlist(c, row.settings);
-  return row.settings;
+  return {
+    settings: row.settings,
+    walletAuthorization: resolveApiKeyWalletAuthorization(
+      walletBindingCandidatesSchema.parse(parsePostgresJson<unknown>(row.wallet_bindings)),
+      row.signing_wallet_id
+    ),
+  };
 }

@@ -35,7 +35,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
-Issuance operations keep their own key handling for now: a key is scoped to your organization across every issuance operation and token, and reusing it for a different request returns `409`.
+Modules with their own key handling say so on their pages.
 
 ## Choosing a key
 

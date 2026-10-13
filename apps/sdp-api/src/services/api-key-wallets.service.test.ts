@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   hydrateApiKeyWalletAuthorization,
   loadApiKeyWalletAuthorization,
+  resolveApiKeyWalletAuthorization,
 } from "./api-key-wallets.service";
 
 const { warn } = vi.hoisted(() => ({ warn: vi.fn() }));
@@ -59,9 +60,9 @@ it("warns once per selector that does not resolve to exactly one active wallet",
     },
     {
       results: [
-        { custody_wallet_id: "cwlt_multi_1", wallet_id: "wallet_multi" },
-        { custody_wallet_id: "cwlt_multi_2", wallet_id: "wallet_multi" },
-        { custody_wallet_id: "cwlt_ok", wallet_id: "wallet_ok" },
+        { custody_wallet_id: "cwlt_multi_1", wallet_id: "wallet_multi", status: "active" },
+        { custody_wallet_id: "cwlt_multi_2", wallet_id: "wallet_multi", status: "active" },
+        { custody_wallet_id: "cwlt_ok", wallet_id: "wallet_ok", status: "active" },
       ],
     },
   ];
@@ -112,24 +113,39 @@ it("does not replace an unresolved preferred wallet with another binding", () =>
   });
 });
 
-it("keeps a binding whose config or connection was deactivated only in any mode", async () => {
-  const candidateSql = async (walletStatus: "active" | "any") => {
-    const statements: string[] = [];
-    const responses = [
-      { results: [{ wallet_id: "wallet_ok", permissions: '["*"]' }] },
-      { results: [{ custody_wallet_id: "cwlt_ok", wallet_id: "wallet_ok", status: "active" }] },
-    ];
-    const db = {
-      prepare: (sql: string) => {
-        statements.push(sql);
-        return { bind: () => ({ all: async () => responses.shift() }) };
+// Wallet status is state, not access: a binding still names its deactivated
+// wallet, so a replay passes the same check as the original request.
+it("resolves a binding to its one active wallet, else to its one wallet of any status", () => {
+  const auth = resolveApiKeyWalletAuthorization(
+    [
+      {
+        wallet_id: "wallet_reimported",
+        permissions: '["*"]',
+        candidates: [
+          { id: "cwlt_old", status: "inactive" },
+          { id: "cwlt_new", status: "active" },
+        ],
       },
-    } as unknown as Parameters<typeof loadApiKeyWalletAuthorization>[0];
-    await loadApiKeyWalletAuthorization(db, "key_1", "org_1", "prj_1", null, walletStatus);
-    return statements[1] ?? "";
-  };
+      {
+        wallet_id: "wallet_deactivated",
+        permissions: '["*"]',
+        candidates: [{ id: "cwlt_deactivated", status: "inactive" }],
+      },
+      {
+        wallet_id: "wallet_ambiguous",
+        permissions: '["*"]',
+        candidates: [
+          { id: "cwlt_inactive_1", status: "inactive" },
+          { id: "cwlt_inactive_2", status: "inactive" },
+        ],
+      },
+    ],
+    null
+  );
 
-  expect(await candidateSql("active")).toContain("c.status = 'active'");
-  expect(await candidateSql("any")).not.toContain("c.status = 'active'");
-  expect(await candidateSql("any")).not.toContain("w.status = 'active'");
+  expect(auth.walletBindings).toEqual([
+    { walletId: "wallet_reimported", custodyWalletId: "cwlt_new", permissions: ["*"] },
+    { walletId: "wallet_deactivated", custodyWalletId: "cwlt_deactivated", permissions: ["*"] },
+  ]);
+  expect(auth.walletScope).toBe("selected");
 });
