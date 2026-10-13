@@ -1,3 +1,5 @@
+import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
@@ -52,6 +54,12 @@ const REAL_COMPLETED_PAYLOAD = `{
 }`;
 
 const processor = new LightsparkWebhookProcessor();
+
+function processInSandbox(event: RampSettlementEvent) {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    processor.process(env, event)
+  );
+}
 
 async function seedTransfer() {
   await getDb(env).batch([
@@ -159,8 +167,8 @@ describe("LightsparkWebhookProcessor", () => {
 
   it("settles the transfer whose quote reference the event carries, idempotently", async () => {
     await seedTransfer();
-    await processor.process(env, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
-    await processor.process(env, "sandbox", processor.parse(REAL_COMPLETED_PAYLOAD));
+    await processInSandbox(processor.parse(REAL_COMPLETED_PAYLOAD));
+    await processInSandbox(processor.parse(REAL_COMPLETED_PAYLOAD));
 
     const transfer = await getDb(env)
       .prepare(
@@ -192,7 +200,7 @@ describe("LightsparkWebhookProcessor", () => {
       `"quoteId": "${QUOTE_ID}"`,
       '"quoteId": "Quote:unknown"'
     );
-    await processor.process(env, "sandbox", processor.parse(payload));
+    await processInSandbox(processor.parse(payload));
 
     const transfer = await getDb(env)
       .prepare("SELECT status, signature, provider_reference FROM payment_transfers WHERE id = ?")
