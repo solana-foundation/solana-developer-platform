@@ -1,3 +1,4 @@
+import { isDecimalString } from "@sdp/solana/amount";
 import { z } from "zod";
 
 export const walletTokenBalanceSchema = z.object({
@@ -7,6 +8,7 @@ export const walletTokenBalanceSchema = z.object({
   uiAmount: z
     .string()
     .min(1)
+    .refine(isDecimalString)
     .refine((value) => Number.isFinite(Number(value)) && Number(value) >= 0),
   decimals: z.number().int().nonnegative(),
   usdPrice: z.number().optional(),

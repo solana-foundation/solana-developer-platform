@@ -1,3 +1,4 @@
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchWalletBalance, fetchWalletBalances } from "./wallet-balances.data";
 
@@ -5,6 +6,14 @@ vi.mock("@/lib/dashboard-fetch", () => ({
   dashboardRequest: (...args: Parameters<typeof fetch>) => fetch(...args),
 }));
 afterEach(() => vi.unstubAllGlobals());
+
+const usdcBalance = {
+  token: WELL_KNOWN_TOKENS.USDC.symbol,
+  mint: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
+  amount: "1000000",
+  uiAmount: "1",
+  decimals: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].decimals,
+};
 
 describe("exact wallet balance reads", () => {
   it("rejects a successful response that identifies another wallet", async () => {
@@ -42,6 +51,75 @@ describe("exact wallet balance reads", () => {
       vi.fn(async () => Response.json({ data: { walletBalances } }))
     );
     await expect(fetchWalletBalance("wallet-a")).rejects.toThrow();
+  });
+  it.each([
+    "",
+    "   ",
+    " 1 ",
+    "0x10",
+    "0b10",
+    "1e3",
+    "1e-9",
+    "+1",
+    "-1",
+    "-0",
+    "Infinity",
+    "NaN",
+    "1.2.3",
+    "9".repeat(309),
+  ])("rejects invalid token balance %j instead of displaying an amount", async (uiAmount) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            walletBalances: {
+              custodyWalletId: "wallet-a",
+              address: "address",
+              balances: [{ ...usdcBalance, uiAmount }],
+            },
+          },
+        })
+      )
+    );
+    await expect(fetchWalletBalance("wallet-a")).rejects.toThrow();
+  });
+  it.each([
+    { amount: "0", uiAmount: "0" },
+    { amount: "1", uiAmount: "0.000001" },
+    { amount: "1250000", uiAmount: "1.25" },
+    { amount: "1250000", uiAmount: "001.2500" },
+    { amount: "500000", uiAmount: ".5" },
+    { amount: "1000000", uiAmount: "1." },
+  ])("preserves a successful decimal token balance $uiAmount", async (amount) => {
+    const balances = [{ ...usdcBalance, ...amount }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            walletBalances: { custodyWalletId: "wallet-a", address: "address", balances },
+          },
+        })
+      )
+    );
+    await expect(fetchWalletBalance("wallet-a")).resolves.toEqual(balances);
+  });
+  it("excludes an invalid batch balance without fabricating zero or dropping a valid wallet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            wallets: [
+              { id: "wallet-a", balances: [usdcBalance] },
+              { id: "wallet-b", balances: [{ ...usdcBalance, uiAmount: "0x10" }] },
+            ],
+          },
+        })
+      )
+    );
+    await expect(fetchWalletBalances()).resolves.toEqual({ "wallet-a": [usdcBalance] });
   });
   it("preserves a successful zero balance", async () => {
     vi.stubGlobal(
