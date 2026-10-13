@@ -55,6 +55,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
 import { seedRateLimit } from "@/test/mocks/kv";
@@ -3492,18 +3493,24 @@ describe("Payments routes — ramps", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
         .run();
+      const otherTenantProjects = await seedDefaultProjects(getDb(env), {
+        organizationId: "org_test_other_tenant",
+        createdBy: TEST_USER.id,
+        members: [],
+      });
       await getDb(env)
         .prepare(
           `INSERT INTO payment_transfers (
              id, organization_id, project_id, wallet_id, source_address, destination_address,
              token, amount, memo, type, direction, status, provider, provider_reference,
              delivery_mode, provider_data, created_at, updated_at
-           ) VALUES (?, ?, NULL, ?, NULL, ?, 'USDC', NULL, NULL, 'onramp', 'inbound', 'pending',
+           ) VALUES (?, ?, ?, ?, NULL, ?, 'USDC', NULL, NULL, 'onramp', 'inbound', 'pending',
                      'moneygram', ?, 'session_widget', ?::jsonb, ?, ?)`
         )
         .bind(
           "xfr_moneygram_foreign_tenant",
           "org_test_other_tenant",
+          otherTenantProjects.sandbox.id,
           "wallet_other_tenant",
           MG_DEPOSIT_WALLET,
           "mg_sess_foreign_1",

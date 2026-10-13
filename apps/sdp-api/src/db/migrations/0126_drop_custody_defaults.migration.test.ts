@@ -15,6 +15,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate,
   FK_VIOLATION,
+  NOT_NULL_VIOLATION,
   seedOrgProject,
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
@@ -24,6 +25,10 @@ import {
   CUSTODY_DEFAULTS_DROP_MIGRATION,
   restorePreCustodyDefaultsDropSchema,
 } from "./custody-defaults-schema";
+import {
+  PROJECT_ID_NOT_NULL_MIGRATION,
+  restorePreProjectIdNotNullSchema,
+} from "./project-id-not-null-schema";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const RAISE_EXCEPTION = "P0001";
@@ -70,6 +75,7 @@ interface StoredConfigRow {
 }
 
 async function restorePreDefaultsDropSchema(): Promise<void> {
+  await restorePreProjectIdNotNullSchema(client);
   await restorePreCustodyDefaultsDropSchema(client);
   await client.query("DELETE FROM schema_migrations WHERE version = $1", [
     CUSTODY_DEFAULTS_DROP_MIGRATION,
@@ -228,6 +234,9 @@ describe("0126 drop custody defaults migration", () => {
 
   afterEach(async () => {
     await seedTestDatabase(env);
+    await client.query("DELETE FROM schema_migrations WHERE version = $1", [
+      PROJECT_ID_NOT_NULL_MIGRATION,
+    ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });
 
@@ -522,7 +531,7 @@ describe("0126 drop custody defaults constraints", () => {
           lastCheckAt: null,
           activatedAt: null,
         }),
-      CHECK_VIOLATION
+      NOT_NULL_VIOLATION
     );
     await expectSqlstate(
       client,
