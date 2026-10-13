@@ -413,7 +413,7 @@ export function TransfersSketch() {
       </text>
       <LabelChip x={132} y={32} width={76} label="RECURRING" />
       <LabelChip x={132} y={61} width={76} label="BATCH" />
-      <LabelChip x={132} y={90} width={76} label="REQUEST" />
+      <LabelChip x={132} y={90} width={76} label="TRANSFER" />
     </SketchSvg>
   );
 }

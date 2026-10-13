@@ -124,7 +124,9 @@ balance with a live one.
   until launch. The pinned list is asserted against
   `createPublicOpenApiDocument({ publishEarn: true })`, and a sibling test
   asserts the default document is Earn-free. Flipping the constant is the
-  sign-off PR. The flag reaches one runtime response:
+  sign-off PR; it also adds `earn` to `PUBLIC_TAG_SLUGS` in
+  `apps/sdp-docs/scripts/lib/public-openapi.mjs`, or docs `generate:api` fails.
+  The flag reaches one runtime response:
   `GET /v1/projects/{projectId}/provider-availability` omits Earn entries
   while it is false, so the response matches the public document.
   The current contract pins eight optional-auth operations: strategy list/detail,

@@ -7,12 +7,17 @@
     "send-basic-payment",
     "send-payment-with-memo",
     "send-payouts",
+    "recurring-payments",
     "---Accept Payments---",
     "accept-overview",
     "accept-verification",
     "accept-indexing",
+    "---Counterparties---",
+    "counterparties",
     "---Ramps---",
     "ramps",
-    "ramps-providers"
+    "ramps-providers",
+    "---Activity---",
+    "transactions"
   ]
 }

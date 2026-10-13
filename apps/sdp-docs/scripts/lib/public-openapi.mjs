@@ -6,8 +6,10 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "issuance",
   "payments",
   "compliance",
+  "counterparties",
   "asset-profiles",
   // "earn" returns with EARN_PUBLIC_SURFACE_PUBLISHED (apps/sdp-api/src/openapi/spec.ts), PRO-2038.
+  // generate-api-docs.mjs fails until it is listed here once that flag flips.
 ]);
 
 export const POSTMAN_COLLECTION_ROUTE = "/docs/postman/collection.json";

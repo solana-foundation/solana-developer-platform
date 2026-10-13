@@ -12,9 +12,11 @@
 ## Supported surfaces
 - Wallets and custody
 - API key management
+- Allowed operations on API keys
 - Projects
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
+- Counterparties and ramp requirements
 - Compliance screening
 - Asset profiles and public token metadata
 
@@ -27,10 +29,10 @@
 - [Create a Token](https://platform.solana.com/docs/tokens/create-a-token): Define a new token using a template or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/tokens/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn](https://platform.solana.com/docs/tokens/mint-and-burn): Increase or decrease token supply by minting to an address or burning from an account you control.
-- [Overview](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, send, accept, and ramps.
+- [Overview](https://platform.solana.com/docs/payments): What SDP Payments covers today — counterparties, transfers, transfer batches, recurring payments, on-ramp quotes, inbound payments, and transaction history.
 - [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP.
 - [Tokenization Templates](https://platform.solana.com/docs/reference/issuance-token-types): How to choose a token template, and the default controls each one applies.
-- [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
+- [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): Register two contractors as counterparties, pay both with one transfer batch, track each payment until it settles, and find it in the transaction history.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
 - [Documentation for AI](https://platform.solana.com/docs/reference/docs-for-ai): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
@@ -42,6 +44,7 @@
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, and ramps.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+- [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): Counterparty (customer/beneficiary) identity records.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide

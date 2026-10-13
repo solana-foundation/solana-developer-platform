@@ -9,6 +9,7 @@
     "issuance",
     "payments",
     "compliance",
+    "counterparties",
     "asset-profiles"
   ]
 }
