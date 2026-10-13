@@ -1297,6 +1297,13 @@ export function findWallet(
   return walletList(world).find((wallet) => wallet.id === id || wallet.walletId === id);
 }
 
+export function findWalletByCustodyWalletId(
+  world: DemoWorld,
+  id: string | null | undefined
+): DemoWallet | undefined {
+  return walletList(world).find((wallet) => wallet.id === id);
+}
+
 function walletsBody(world: DemoWorld, params: URLSearchParams) {
   const includeBalances = params.get("includeBalances") === "true";
   return {

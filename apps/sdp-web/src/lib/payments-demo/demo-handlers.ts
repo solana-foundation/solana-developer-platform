@@ -21,8 +21,10 @@ import { getRampProviderLabel } from "../ramps";
 import {
   DEMO_TOKENS,
   type DemoTokenKey,
+  type DemoWallet,
   type DemoWorld,
   findWallet,
+  findWalletByCustodyWalletId,
   fromBaseUnits,
   MINUTE_MS,
   symbolForMint,
@@ -110,8 +112,7 @@ function tokenSymbol(mint: string): string {
 }
 
 /** Null when the wallet holds enough of the token; otherwise why it cannot pay. */
-function shortfall(world: DemoWorld, walletId: string, mint: string, amount: string) {
-  const wallet = findWallet(world, walletId);
+function shortfall(wallet: DemoWallet | undefined, mint: string, amount: string) {
   const key = tokenKeyForMint(mint);
   if (!wallet) return "That wallet is not in this project.";
   if (!key) return "The demo wallets don't hold that token.";
@@ -947,8 +948,8 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     if (!tokenKey) return assetRefusal(assetRail);
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
     if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
-    const wallet = findWallet(world, destinationCustodyWalletId);
-    if (!wallet || wallet.id !== destinationCustodyWalletId) {
+    const wallet = findWalletByCustodyWalletId(world, destinationCustodyWalletId);
+    if (!wallet) {
       return error(404, "That wallet is not in this project.", "not_found");
     }
     if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
@@ -1002,15 +1003,15 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   if (!tokenKey) return assetRefusal(assetRail);
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
-  const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet || wallet.id !== sourceCustodyWalletId) {
+  const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+  if (!wallet) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
     return pairRefusal(provider, getCryptoRailAssetLabel(assetRail as CryptoRailId), fiatCurrency);
   }
   const amounts = rampAmounts(provider, direction, fiatCurrency, tokenKey, Number(cryptoAmount));
-  const notEnough = shortfall(world, sourceCustodyWalletId, amounts.mint, cryptoAmount);
+  const notEnough = shortfall(wallet, amounts.mint, cryptoAmount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
   const offrampQuote = offrampQuoteFor(provider, {
     ...context,
@@ -1086,6 +1087,9 @@ function simulatePayIn({ body, world, ops, now }: WriteContext): DemoWriteResult
   if (target.status !== "awaiting_payment") {
     return error(409, "That deposit has already been paid.", "conflict");
   }
+  if (!findWalletByCustodyWalletId(world, target.custodyWalletId)) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   return record([{ k: "ramp-paid", id: target.id, at: now.getTime() }], () => ({ status: 204 }));
 }
 
@@ -1131,10 +1135,11 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
     if (existing.status !== "awaiting_payment") {
       return error(409, "This payout has already been funded.", "conflict");
     }
-    if (findWallet(world, sourceCustodyWalletId)?.id !== sourceCustodyWalletId) {
+    const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+    if (!wallet) {
       return error(404, "That wallet is not in this project.", "not_found");
     }
-    const notEnough = shortfall(world, sourceCustodyWalletId, token, amount);
+    const notEnough = shortfall(wallet, token, amount);
     if (notEnough) return error(400, notEnough, "insufficient_funds");
     const id = existing.id;
     return record([{ k: "ramp-paid", id, at }], (after) =>
@@ -1144,14 +1149,14 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
   // The same payment sent again answers with the first one.
   if (existing) return record([], () => ok({ data: { transfer: existing } }));
 
-  const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet || wallet.id !== sourceCustodyWalletId) {
+  const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+  if (!wallet) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   if (destination === wallet.publicKey) {
     return error(400, "Choose an address other than the wallet sending the payment.");
   }
-  const notEnough = shortfall(world, wallet.id, token, amount);
+  const notEnough = shortfall(wallet, token, amount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
   const id = transferId?.startsWith("demo_") ? transferId : newDemoId("xfr");
   return record(
@@ -1186,7 +1191,8 @@ function batchTotal(amounts: readonly string[], mint: string): string {
 }
 
 function checkBatch(world: DemoWorld, input: z.infer<typeof batchSchema>): DemoWriteResult | null {
-  if (findWallet(world, input.sourceCustodyWalletId)?.id !== input.sourceCustodyWalletId) {
+  const wallet = findWalletByCustodyWalletId(world, input.sourceCustodyWalletId);
+  if (!wallet) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   for (const recipient of input.recipients) {
@@ -1199,7 +1205,7 @@ function checkBatch(world: DemoWorld, input: z.infer<typeof batchSchema>): DemoW
     input.recipients.map((recipient) => recipient.amount),
     input.token
   );
-  const notEnough = shortfall(world, input.sourceCustodyWalletId, input.token, total);
+  const notEnough = shortfall(wallet, input.token, total);
   return notEnough ? error(400, notEnough, "insufficient_funds") : null;
 }
 
@@ -1434,8 +1440,7 @@ function scheduleActionRefusal(
         return error(409, "The next run isn't due yet.", "conflict");
       }
       const notEnough = shortfall(
-        world,
-        schedule.sourceCustodyWalletId ?? "",
+        findWallet(world, schedule.sourceCustodyWalletId ?? ""),
         schedule.token,
         schedule.amount
       );
