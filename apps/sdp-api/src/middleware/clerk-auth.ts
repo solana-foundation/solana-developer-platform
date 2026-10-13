@@ -271,6 +271,10 @@ function membershipRefusal(
       return unauthorized("Organization membership is inactive");
     case "invitation_revoked":
       return unauthorized("Invitation to this organization was revoked");
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
   }
 }
 

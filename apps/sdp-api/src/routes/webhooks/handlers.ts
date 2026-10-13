@@ -6,7 +6,7 @@ import type {
   UserJSON,
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
-import type { SdpEnvironment } from "@sdp/types";
+import type { MemberStatus, SdpEnvironment } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
@@ -214,34 +214,35 @@ async function ensureUserMapping(
     return existing.user_id;
   }
 
-  await db
-    .prepare(
-      `INSERT INTO users (id, email, name, email_verified, status)
-       VALUES (?, ?, ?, 1, 'active')
-       ON CONFLICT (email) DO NOTHING`
-    )
-    .bind(`usr_${crypto.randomUUID()}`, email, user.name)
-    .run();
-  const localUser = await db
-    .prepare("SELECT id FROM users WHERE email = ?")
-    .bind(email)
-    .first<{ id: string }>();
-  if (!localUser) {
-    throw new AppError("INTERNAL_ERROR", "Unable to resolve Clerk user");
-  }
-  const userId = localUser.id;
+  return db.transaction(async (tx) => {
+    await tx
+      .prepare(
+        `INSERT INTO users (id, email, name, email_verified, status)
+         VALUES (?, ?, ?, 1, 'active')
+         ON CONFLICT (email) DO NOTHING`
+      )
+      .bind(`usr_${crypto.randomUUID()}`, email, user.name)
+      .run();
+    const localUser = await tx
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .bind(email)
+      .first<{ id: string }>();
+    if (!localUser) {
+      throw new AppError("INTERNAL_ERROR", "Unable to resolve Clerk user");
+    }
 
-  await db
-    .prepare(
-      `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-       VALUES (?, 'clerk', ?, ?, ?)
-       ON CONFLICT (provider, provider_user_id)
-       DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = datetime('now')`
-    )
-    .bind(`aui_${crypto.randomUUID()}`, user.id, userId, email)
-    .run();
+    await tx
+      .prepare(
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES (?, 'clerk', ?, ?, ?)
+         ON CONFLICT (provider, provider_user_id)
+         DO UPDATE SET user_id = EXCLUDED.user_id, email = EXCLUDED.email, updated_at = datetime('now')`
+      )
+      .bind(`aui_${crypto.randomUUID()}`, user.id, localUser.id, email)
+      .run();
 
-  return userId;
+    return localUser.id;
+  });
 }
 
 async function syncUser(c: AppContext, data: UserJSON) {
@@ -310,9 +311,9 @@ async function resolveMemberEmail(c: AppContext, userId: string): Promise<string
 
 /**
  * Applies a Clerk membership to SDP through the shared admission rules, then
- * mirrors the Clerk role onto a member who was already active (the Clerk
- * organization profile is still where roles change) and provisions the
- * default projects for an admitted member.
+ * provisions the default projects for an admitted member. The Clerk role only
+ * seeds a join without an invitation; an existing member's role is SDP's and
+ * is left alone.
  *
  * @param c - Webhook request context
  * @param data - The Clerk membership being applied
@@ -334,13 +335,11 @@ async function upsertVerifiedMembership(
   if (!email) {
     throw new AppError("INTERNAL_ERROR", "Clerk member has no stored email");
   }
-  const clerkRole = mapClerkRoleToOrgRole(data.role);
-
   const admission = await admitOrganizationMember(getDb(c.env), {
     organizationId,
     userId: data.userId,
     email,
-    clerkRole,
+    clerkRole: mapClerkRoleToOrgRole(data.role),
   });
 
   if (!admission.admitted) {
@@ -354,17 +353,6 @@ async function upsertVerifiedMembership(
       "webhooks: declined Clerk membership"
     );
     return;
-  }
-
-  if (!admission.joined && admission.role !== clerkRole) {
-    await getDb(c.env)
-      .prepare(
-        `UPDATE organization_members
-            SET role = ?
-          WHERE organization_id = ? AND user_id = ? AND status = 'active'`
-      )
-      .bind(clerkRole, organizationId, data.userId)
-      .run();
   }
 
   const projectService = new ProjectService(getDb(c.env));
@@ -410,12 +398,27 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
   }
 
   await getDb(c.env).transaction(async (tx) => {
+    // The organization row is locked first, as admission does, so a duplicate
+    // delivery waits for this one and then reads the row it removed. A removal
+    // that already landed is not repeated: revoking again would withdraw a
+    // re-invite issued since.
+    await tx
+      .prepare("SELECT id FROM organizations WHERE id = ? FOR NO KEY UPDATE")
+      .bind(mapping.organization_id)
+      .first();
+    const member = await tx
+      .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(mapping.organization_id, identity.user_id)
+      .first<{ status: MemberStatus }>();
+    if (member?.status !== "active") {
+      return;
+    }
     await revokePendingInvitationsForUser(tx, mapping.organization_id, identity.user_id);
     await tx
       .prepare(
         `UPDATE organization_members
-         SET status = 'removed'
-         WHERE organization_id = ? AND user_id = ?`
+            SET status = 'removed'
+          WHERE organization_id = ? AND user_id = ? AND status = 'active'`
       )
       .bind(mapping.organization_id, identity.user_id)
       .run();
