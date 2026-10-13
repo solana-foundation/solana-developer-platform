@@ -34,14 +34,15 @@ type InFlightRead = {
   controller: AbortController;
 };
 
-type RememberedBlockTime = { response: unknown; expiresAt: number };
+type RememberedBlockTime = { response: unknown; stamp: number; expiresAt: number };
 
 /**
  * A process-wide transport for concurrent reads that shares one in-flight response among
  * identical reads (same method and params, `SHARED_READ_METHODS` only): kit's coalescer covers one
  * microtask, while SDKs are several awaits deep before they send. A slot's block time is a fact of
- * that slot, so a numeric answer is reused for `SHARED_BLOCK_TIME_TTL_MS`; errors and nulls are
- * never remembered. Nothing else outlives its request: an entry is dropped when it settles.
+ * that slot, so a numeric answer is reused for `SHARED_BLOCK_TIME_TTL_MS`, under the same read
+ * floor rule as a join (only for a caller whose floor predates the answer's request); errors and
+ * nulls are never remembered. Nothing else outlives its request: an entry is dropped when it settles.
  *
  * Belongs BELOW the read context, so a key carries any `minContextSlot` a scoped read adds and
  * every consumer still validates the returned context itself. A consumer whose signal aborts
@@ -58,9 +59,13 @@ export function withInFlightReadSharing(transport: RpcTransport): RpcTransport {
   const inFlight = new Map<string, InFlightRead>();
   const blockTimes = new Map<string, RememberedBlockTime>();
 
-  const rememberBlockTime = (requestKey: string, response: unknown) => {
+  const rememberBlockTime = (requestKey: string, response: unknown, stamp: number) => {
     blockTimes.delete(requestKey);
-    blockTimes.set(requestKey, { response, expiresAt: Date.now() + SHARED_BLOCK_TIME_TTL_MS });
+    blockTimes.set(requestKey, {
+      response,
+      stamp,
+      expiresAt: Date.now() + SHARED_BLOCK_TIME_TTL_MS,
+    });
     while (blockTimes.size > SHARED_BLOCK_TIME_CAPACITY) {
       const oldestKey = blockTimes.keys().next().value;
       if (oldestKey === undefined) break;
@@ -75,13 +80,19 @@ export function withInFlightReadSharing(transport: RpcTransport): RpcTransport {
     }
     const requestKey = stableRequestKey([payload.method, payload.params]);
 
+    const callerFloor = readFloor();
     const rememberedBlockTime = blockTimes.get(requestKey);
-    if (rememberedBlockTime && rememberedBlockTime.expiresAt > Date.now()) {
+    if (
+      rememberedBlockTime &&
+      rememberedBlockTime.expiresAt > Date.now() &&
+      (callerFloor === undefined || rememberedBlockTime.stamp > callerFloor)
+    ) {
       return asTransportResponse<TResponse>(Promise.resolve(rememberedBlockTime.response));
     }
-    if (rememberedBlockTime) blockTimes.delete(requestKey);
+    if (rememberedBlockTime && rememberedBlockTime.expiresAt <= Date.now()) {
+      blockTimes.delete(requestKey);
+    }
 
-    const callerFloor = readFloor();
     let entry = inFlight.get(requestKey);
     if (
       entry &&
@@ -103,7 +114,7 @@ export function withInFlightReadSharing(transport: RpcTransport): RpcTransport {
         (response) => {
           if (inFlight.get(requestKey) === created) inFlight.delete(requestKey);
           if (payload.method === "getBlockTime" && isBlockTimeAnswer(response)) {
-            rememberBlockTime(requestKey, response);
+            rememberBlockTime(requestKey, response, created.stamp);
           }
         },
         () => {
