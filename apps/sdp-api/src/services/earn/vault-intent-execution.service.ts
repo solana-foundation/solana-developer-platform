@@ -1,6 +1,5 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { createRpc } from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import { createClusterBoundedRpc } from "@sdp/rpc/factory";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
@@ -49,12 +48,16 @@ export function isSlippageSimulationFailure(error: string, logs: readonly string
 const BLOCK_HEIGHT_READ_TIMEOUT_MS = 2_000;
 
 /**
- * The cluster's confirmed block height, the same commitment the build's
+ * The open cluster scope's confirmed block height, the same commitment the build's
  * `lastValidBlockHeight` was quoted at and the reconciler compares against.
+ *
+ * @returns The confirmed block height.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
-export async function readConfirmedBlockHeight(env: Env, rpcUrl: string): Promise<bigint> {
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS });
-  return rpc.getBlockHeight({ commitment: "confirmed" }).send();
+export async function readConfirmedBlockHeight(): Promise<bigint> {
+  return createClusterBoundedRpc({ timeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS })
+    .getBlockHeight({ commitment: "confirmed" })
+    .send();
 }
 
 interface SignedVaultIntentResult {
@@ -70,11 +73,9 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
   walletId: string;
   walletPublicKey: string;
   signerMismatchMessage: string;
-  cluster: SolanaCluster;
   deadline: VaultDeadline;
   expectedAssetIdentity: EarnVaultAssetIdentity;
   plan: EarnVaultTransactionPlan;
-  rpcUrl: string;
   /**
    * Who pays, resolved by the caller BEFORE it built the plan, because a
    * sponsor also has to be named inside the instructions as the rent payer.
@@ -99,13 +100,11 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
 
   let prepared: PreparedVaultPlanExecution;
   try {
-    const simulation = await simulateVaultPlan(env, {
-      cluster: input.cluster,
+    const simulation = await simulateVaultPlan({
       deadline: input.deadline,
       expectedAssetIdentity: input.expectedAssetIdentity,
       plan: input.plan,
       owner: address(input.walletPublicKey),
-      rpcUrl: input.rpcUrl,
       fee: input.fee,
     });
     if (!simulation.ok) {
@@ -180,13 +179,11 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     if (signer.address !== input.walletPublicKey) {
       throw badRequest(input.signerMismatchMessage);
     }
-    signed = await signVaultPlan(env, {
-      cluster: input.cluster,
+    signed = await signVaultPlan({
       deadline: input.deadline,
       expectedAssetIdentity: input.expectedAssetIdentity,
       plan: input.plan,
       owner: signer,
-      rpcUrl: input.rpcUrl,
       fee: input.fee,
       prepared,
     });
@@ -201,9 +198,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
   const movement = await broadcastRecordedVaultMovement(env, {
     operation,
     organizationId: input.organizationId,
-    cluster: input.cluster,
     deadline: input.deadline,
-    rpcUrl: input.rpcUrl,
     bytes: signed.bytes,
     signature: signed.signature,
     movement: result.movement,
@@ -223,27 +218,31 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
  * (PRO-1722), which records a movement it never signed and so has no
  * simulate/sign head — but past the durable write the two paths must not
  * differ at all.
+ *
+ * @param env - The API bindings, for the ledger.
+ * @param input - The recorded movement and its signed bytes.
+ * @param input.operation - The movement's direction, for logs and errors.
+ * @param input.organizationId - The movement's organization, scoping the ledger reads.
+ * @param input.deadline - The workflow's shared budget.
+ * @param input.bytes - The recorded signed wire transaction.
+ * @param input.signature - The recorded signature.
+ * @param input.movement - The durable `requested` row.
+ * @returns The movement as advanced, or as recorded when the broadcast outcome is unknown.
+ * @throws AppError 500 when the broadcast landed but the ledger transition cannot be verified.
  */
 export async function broadcastRecordedVaultMovement(
   env: Env,
   input: {
     operation: string;
     organizationId: string;
-    cluster: SolanaCluster;
     deadline: VaultDeadline;
-    rpcUrl: string;
     bytes: Uint8Array;
     signature: string;
     movement: EarnMovementRow;
   }
 ): Promise<EarnMovementRow> {
   try {
-    await broadcastVaultTransaction(env, {
-      cluster: input.cluster,
-      deadline: input.deadline,
-      bytes: input.bytes,
-      rpcUrl: input.rpcUrl,
-    });
+    await broadcastVaultTransaction({ deadline: input.deadline, bytes: input.bytes });
   } catch (error) {
     getLogger().error(
       { movementId: input.movement.id, signature: input.signature, error },

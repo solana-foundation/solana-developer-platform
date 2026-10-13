@@ -7,6 +7,7 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import { address } from "@solana/kit";
@@ -32,8 +33,6 @@ import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
 import type { Env } from "@/types/env";
 import {
-  earnClusterFor,
-  resolveClusterRpcUrl,
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";
@@ -366,9 +365,10 @@ async function quoteAndBuildRequest(
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
-  if (built.cluster !== earnClusterFor(input.actor.environment)) {
+  const { cluster } = currentClusterScope();
+  if (built.cluster !== cluster) {
     throw internalError(
-      `Asynchronous withdrawal builder returned a ${built.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
+      `Asynchronous withdrawal builder returned a ${built.cluster} plan for the configured ${cluster} cluster`
     );
   }
   return {
@@ -392,8 +392,6 @@ async function prepareCustodyTransaction(
   }
 ): Promise<{ signed: SignedVaultTransaction; fee: VaultFeeMode }> {
   const deadline = createVaultDeadline();
-  const cluster = earnClusterFor(input.actor.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
@@ -404,13 +402,11 @@ async function prepareCustodyTransaction(
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
   };
-  const simulation = await simulateVaultPlan(env, {
-    cluster,
+  const simulation = await simulateVaultPlan({
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.actor.custodyWalletPublicKey),
-    rpcUrl,
     fee,
   });
   if (!simulation.ok) {
@@ -430,13 +426,11 @@ async function prepareCustodyTransaction(
   if (signer.address !== input.actor.custodyWalletPublicKey) {
     throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
   }
-  const signed = await signVaultPlan(env, {
-    cluster,
+  const signed = await signVaultPlan({
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: signer,
-    rpcUrl,
     fee,
     prepared: simulation.prepared,
   });
@@ -448,14 +442,10 @@ async function broadcastQueuedAction(
   result: QueuedWithdrawalMutationResult
 ): Promise<QueuedWithdrawalMutationResult> {
   if (result.replayed) return result;
-  const cluster = earnClusterFor(result.request.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   try {
-    await broadcastVaultTransaction(env, {
-      cluster,
+    await broadcastVaultTransaction({
       deadline: createVaultDeadline(),
       bytes: Uint8Array.from(Buffer.from(result.action.signed_transaction, "base64")),
-      rpcUrl,
     });
   } catch (error) {
     getLogger().error(
@@ -544,20 +534,16 @@ export async function createCustodyQueuedWithdrawal(
   try {
     // Reuse the already resolved sponsorship identity in signing. Resolving it
     // twice could put a different payer in the message than in the plan.
-    const cluster = earnClusterFor(input.actor.environment);
-    const rpcUrl = resolveClusterRpcUrl(env, cluster);
     const executionDeadline = createVaultDeadline();
     const expectedAssetIdentity = {
       depositTokenMint: input.position.tokenMint,
       shareMint: input.position.shareMint,
     };
-    const simulation = await simulateVaultPlan(env, {
-      cluster,
+    const simulation = await simulateVaultPlan({
       deadline: executionDeadline,
       expectedAssetIdentity,
       plan,
       owner: address(input.actor.custodyWalletPublicKey),
-      rpcUrl,
       fee,
     });
     if (!simulation.ok) {
@@ -577,13 +563,11 @@ export async function createCustodyQueuedWithdrawal(
     if (signer.address !== input.actor.custodyWalletPublicKey) {
       throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
     }
-    const signed = await signVaultPlan(env, {
-      cluster,
+    const signed = await signVaultPlan({
       deadline: executionDeadline,
       expectedAssetIdentity,
       plan,
       owner: signer,
-      rpcUrl,
       fee,
       prepared: simulation.prepared,
     });
@@ -801,20 +785,27 @@ function isKeyedExternalActor(actor: ExternalBuildActor): actor is QueuedWithdra
   return "organizationId" in actor;
 }
 
-async function compileExternalPlan(
-  env: Env,
-  input: {
-    actor: ExternalBuildActor;
-    position: QueuedWithdrawalPosition;
-    plan: EarnVaultTransactionPlan;
-    feePayer?: string;
-  }
-) {
+/**
+ * Simulate an external-wallet queue plan as its fee payer, then compile it unsigned, on the open
+ * cluster scope's cluster.
+ *
+ * @param input - The actor, position and plan to compile.
+ * @param input.actor - The keyed or anonymous caller.
+ * @param input.position - The position the plan exits.
+ * @param input.plan - The provider's unsigned plan.
+ * @param input.feePayer - The caller-provided fee payer, keyed callers only.
+ * @returns The unsigned transaction for the owner to sign.
+ * @throws AppError 400 when an anonymous caller names a fee payer or the simulation fails.
+ */
+async function compileExternalPlan(input: {
+  actor: ExternalBuildActor;
+  position: QueuedWithdrawalPosition;
+  plan: EarnVaultTransactionPlan;
+  feePayer?: string;
+}) {
   if (!isKeyedExternalActor(input.actor) && input.feePayer !== undefined) {
     throw badRequest("feePayer requires an API key; anonymous builds are paid by the owner");
   }
-  const cluster = earnClusterFor(input.actor.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const deadline = createVaultDeadline();
   const fee: VaultFeeMode = input.feePayer
     ? { kind: "caller-provided", feePayer: address(input.feePayer) }
@@ -823,13 +814,11 @@ async function compileExternalPlan(
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
   };
-  const simulation = await simulateVaultPlan(env, {
-    cluster,
+  const simulation = await simulateVaultPlan({
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.position.ownerAddress),
-    rpcUrl,
     fee,
   });
   if (!simulation.ok)
@@ -838,7 +827,6 @@ async function compileExternalPlan(
       rawSimulationDetails(simulation.raw)
     );
   return compileUnsignedVaultTransaction({
-    cluster,
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
@@ -867,7 +855,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     rentPayer: feePayer,
     memoKind: "external-withdrawal-request",
   });
-  const unsigned = await compileExternalPlan(env, {
+  const unsigned = await compileExternalPlan({
     actor: input.actor,
     position: input.position,
     plan,
@@ -900,10 +888,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     last_valid_block_height: unsigned.lastValidBlockHeight,
   };
   if (!isKeyedExternalActor(input.actor)) return built;
-  const currentBlockHeight = await readConfirmedBlockHeight(
-    env,
-    resolveClusterRpcUrl(env, earnClusterFor(input.actor.environment))
-  );
+  const currentBlockHeight = await readConfirmedBlockHeight();
   return createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(env)
   ).createExternalWalletTransaction({
@@ -1049,13 +1034,14 @@ export async function buildExternalQueuedWithdrawalCancel(
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
-  if (plan.cluster !== earnClusterFor(input.actor.environment)) {
+  const { cluster } = currentClusterScope();
+  if (plan.cluster !== cluster) {
     throw internalError(
-      `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
+      `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
     );
   }
   const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
-  const unsigned = await compileExternalPlan(env, {
+  const unsigned = await compileExternalPlan({
     actor: input.actor,
     position: input.position,
     plan,

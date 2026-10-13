@@ -345,15 +345,9 @@
     {
       "includes": [
         "**/packages/sdp-rpc/src/**/*.ts",
-        "**/apps/sdp-api/src/routes/earn/handlers/vault-reconciliation.ts",
         "**/apps/sdp-api/src/services/earn/deposit-mint-guard.ts",
         "**/apps/sdp-api/src/services/earn/execution-registry.ts",
         "**/apps/sdp-api/src/services/earn/owner-token-balance.ts",
-        "**/apps/sdp-api/src/services/earn/vault-balance-read-context.ts",
-        "**/apps/sdp-api/src/services/earn/vault-execution.service.ts",
-        "**/apps/sdp-api/src/services/earn/vault-intent-execution.service.ts",
-        "**/apps/sdp-api/src/services/earn/vault-movement-reconciliation.service.ts",
-        "**/apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.ts",
         "**/apps/sdp-api/src/services/helius-rings/rpc-adapter.ts",
         "**/apps/sdp-api/src/services/jobs/detect-orphaned-earn-split-swaps.ts",
         "**/packages/sdp-api-integration/src/helpers/integration.ts",
