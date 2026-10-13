@@ -1,14 +1,21 @@
 import { createHmac } from "node:crypto";
+import type { MoonpaySettlementEvent } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
+import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import {
   RETIRED_RAMP_PROVIDERS,
+  SDP_ENVIRONMENTS,
   SDP_RAMP_PROVIDER_STAGES,
+  type SdpEnvironment,
   type SdpRampProviderStages,
 } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
-import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
+import {
+  createPostgresRampWebhookEventsRepository,
+  type RampWebhookEventRow,
+} from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
 import { TerminalRampWebhookError } from "@/routes/webhooks/ramps/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/routes/webhooks/ramps/registry";
@@ -156,6 +163,12 @@ describe("Ramp webhook event inbox", () => {
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
   });
 
+  function applyInRowScope(row: RampWebhookEventRow, attempts: number) {
+    return runInClusterScope({ projectId: null, environment: row.environment }, () =>
+      applyStoredRampWebhookEvent(env, row, attempts)
+    );
+  }
+
   async function readInboxRows() {
     const result = await getDb(env)
       .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
@@ -244,6 +257,51 @@ describe("Ramp webhook event inbox", () => {
 
     expect(applied).toBe(1);
     expect(await readTransferStatus()).toBe("completed");
+    expect(await readInboxRows()).toHaveLength(0);
+  });
+
+  it("replays each stored event under the cluster scope of its own environment", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    for (const environment of SDP_ENVIRONMENTS) {
+      await events.insertEvent({
+        provider: "moonpay",
+        environment,
+        payload: {
+          ...completedPayload,
+          data: { ...completedPayload.data, id: `moonpay_replay_${environment}` },
+        },
+      });
+    }
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ?")
+      .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z")
+      .run();
+    const processed: { event: MoonpaySettlementEvent; environment: SdpEnvironment }[] = [];
+    const processSpy = vi
+      .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
+      .mockImplementation(async (_env, event) => {
+        processed.push({ event, environment: currentClusterScope().environment });
+      });
+
+    try {
+      expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(2);
+    } finally {
+      processSpy.mockRestore();
+    }
+
+    expect(processed).toHaveLength(2);
+    expect(processed).toEqual(
+      expect.arrayContaining([
+        {
+          event: expect.objectContaining({ reference: "moonpay_replay_production" }),
+          environment: "production",
+        },
+        {
+          event: expect.objectContaining({ reference: "moonpay_replay_sandbox" }),
+          environment: "sandbox",
+        },
+      ])
+    );
     expect(await readInboxRows()).toHaveLength(0);
   });
 
@@ -346,14 +404,12 @@ describe("Ramp webhook event inbox", () => {
       payload: { type: "transaction_updated", data: { status: 42 } },
     });
 
-    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+    expect(await applyInRowScope(stored, 1)).toBe(false);
     let rows = await readInboxRows();
     expect(rows[0]?.status).toBe("pending");
     expect(rows[0]?.last_error).toBeTruthy();
 
-    expect(await applyStoredRampWebhookEvent(env, stored, RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS)).toBe(
-      false
-    );
+    expect(await applyInRowScope(stored, RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS)).toBe(false);
     rows = await readInboxRows();
     expect(rows[0]?.status).toBe("failed");
   });
@@ -369,7 +425,7 @@ describe("Ramp webhook event inbox", () => {
       .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
       .mockRejectedValue(new TerminalRampWebhookError("customer was not found or is not active"));
     try {
-      expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+      expect(await applyInRowScope(stored, 1)).toBe(false);
     } finally {
       processSpy.mockRestore();
     }
@@ -387,7 +443,7 @@ describe("Ramp webhook event inbox", () => {
       .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
       .mockRejectedValue(new TerminalRampWebhookError("customer was not found or is not active"));
     try {
-      expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
+      expect(await applyInRowScope(stored, 1)).toBe(false);
     } finally {
       processSpy.mockRestore();
     }

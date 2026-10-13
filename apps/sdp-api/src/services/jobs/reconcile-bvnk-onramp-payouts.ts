@@ -34,6 +34,7 @@ import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterpa
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { internalError } from "@/lib/errors";
 import { isRampProviderAvailable } from "@/lib/feature-flags";
+import { rampRuntimeForScope } from "@/routes/payments/context";
 import { buildBvnkOnrampPayout } from "@/routes/payments/ramps/providers/bvnk";
 import {
   applyTerminalBvnkPayoutObservation,
@@ -55,14 +56,16 @@ const BVNK_PAYOUT_ASSET_CURRENCIES = new Set<string>(BVNK_CRYPTO_CURRENCIES);
 /**
  * Reconciles every BVNK on-ramp payout due on this tick across the unclaimed,
  * recoverable, and pollable branches. Candidate eligibility is decided in SQL
- * before each LIMIT; every BVNK call runs under the candidate's own project
- * environment credentials (R6), per-candidate failures are logged with ids
- * and never abort the batch, and every operation inside a candidate boundary
- * is awaited (P2-1).
+ * before each LIMIT and only candidates of the open cluster scope's
+ * environment are selected, so every BVNK call runs under that environment's
+ * credentials (R6); per-candidate failures are logged with ids and never
+ * abort the batch, and every operation inside a candidate boundary is awaited
+ * (P2-1). Runs once per environment under `runPerCluster`.
  *
  * @param env - Process environment used for database and provider access.
  * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests may pass their own.
  * @returns The number of candidate rows touched by at least one database write or a successful provider-side create/record.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no cluster scope is open.
  */
 export async function reconcileBvnkOnrampPayouts(
   env: Env,
@@ -103,16 +106,6 @@ export async function reconcileBvnkOnrampPayouts(
     }
   }
   return touched;
-}
-
-function candidateRampContext(
-  env: Env,
-  candidate: BvnkOnrampTransferCandidateRow
-): RampRuntimeContext {
-  return {
-    env: env as unknown as Record<string, string | undefined>,
-    mode: candidate.environment,
-  };
 }
 
 /**
@@ -157,7 +150,7 @@ async function reconcileUnclaimedPayout(
         `BVNK on-ramp payout candidate ${candidate.id} pay-in wallet diverges from its funding wallet`
       );
     }
-    const ctx = candidateRampContext(env, candidate);
+    const ctx = rampRuntimeForScope(env);
     const cryptoCurrency = resolveBvnkOnrampAsset(candidate.token);
     if (cryptoCurrency === null) {
       await definitiveUnclaimedFail(
@@ -221,7 +214,6 @@ async function reconcileUnclaimedPayout(
     );
     await recordBvnkPayoutCreation({
       repo,
-      environment: candidate.environment,
       transfer: claimed,
       claimedAt,
       summary: created,
@@ -446,7 +438,6 @@ async function adjudicateRecoveryLookup(
     const hydrated = await RAMP_PROVIDER_CLIENTS.bvnk.getPayoutSummary(ctx, { payoutId: row.uuid });
     await recordBvnkPayoutCreation({
       repo,
-      environment: candidate.environment,
       transfer: candidate,
       claimedAt: claimTimestamp,
       summary: hydrated,
@@ -510,7 +501,6 @@ async function reissueRecoveryPayout(
     );
     await recordBvnkPayoutCreation({
       repo,
-      environment: candidate.environment,
       transfer: candidate,
       claimedAt: claimTimestamp,
       summary: created,
@@ -602,7 +592,7 @@ async function reconcileRecoverablePayout(
       return false;
     }
     leaseLanded = true;
-    const ctx = candidateRampContext(env, candidate);
+    const ctx = rampRuntimeForScope(env);
     const listed = await RAMP_PROVIDER_CLIENTS.bvnk.listPayoutsByReference(ctx, {
       walletId: fundingWalletReference,
       reference: candidate.id,
@@ -673,10 +663,9 @@ async function reconcilePollablePayout(
         `BVNK on-ramp payout candidate ${candidate.id} carried no payout id to poll`
       );
     }
-    const summary = await RAMP_PROVIDER_CLIENTS.bvnk.getPayoutSummary(
-      candidateRampContext(env, candidate),
-      { payoutId: payout.payoutId }
-    );
+    const summary = await RAMP_PROVIDER_CLIENTS.bvnk.getPayoutSummary(rampRuntimeForScope(env), {
+      payoutId: payout.payoutId,
+    });
     const parsed = bvnkPayoutObservationFromSource(summary);
     if (!parsed.ok) {
       throw internalError(
@@ -692,7 +681,6 @@ async function reconcilePollablePayout(
     } else {
       await applyTerminalBvnkPayoutObservation({
         repo,
-        environment: candidate.environment,
         transfer: candidate,
         observation,
         failError: summary.status,
@@ -726,7 +714,7 @@ async function reconcilePollablePayout(
 
 /**
  * Loads the BVNK customer link row and the provider customer it names for a
- * candidate, both scoped to the candidate's project environment.
+ * candidate, both scoped to the open cluster scope's environment.
  *
  * @param env - Process environment used for repository and provider access.
  * @param candidate - The payout candidate row.
@@ -755,13 +743,9 @@ async function resolveBvnkOnrampCustomer(
   if (customerLink === null) {
     throw internalError(`BVNK on-ramp payout candidate ${candidate.id} has no BVNK customer link`);
   }
-  const customer = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(
-    {
-      env: env as unknown as Record<string, string | undefined>,
-      mode: candidate.environment,
-    },
-    { reference: customerLink.provider_customer_reference }
-  );
+  const customer = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(rampRuntimeForScope(env), {
+    reference: customerLink.provider_customer_reference,
+  });
   return { customerLink, customer };
 }
 

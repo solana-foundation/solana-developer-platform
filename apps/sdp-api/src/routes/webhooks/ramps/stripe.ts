@@ -1,6 +1,5 @@
 import { readRecord, readString } from "@sdp/payments/json";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
-import type { SdpEnvironment } from "@sdp/types";
 import { AppError, badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
@@ -176,7 +175,7 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     return { provider: this.provider, kind, reference };
   }
 
-  async process(env: Env, _environment: SdpEnvironment, event: RampSettlementEvent) {
+  async process(env: Env, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[stripe webhook] ignored event: ${event.reason}`);
       return;

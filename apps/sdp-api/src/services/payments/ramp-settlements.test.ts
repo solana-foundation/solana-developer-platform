@@ -1,4 +1,5 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
@@ -91,6 +92,12 @@ async function readTransfer(id: string) {
     }>();
 }
 
+function applyInSandbox(event: RampSettlementEvent) {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    applyRampSettlementEvent(env, event)
+  );
+}
+
 describe("applyRampSettlementEvent", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -119,7 +126,7 @@ describe("applyRampSettlementEvent", () => {
       provider: "moonpay",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "moonpay",
       kind: "settled",
       reference: "order_onchain_settlement",
@@ -150,7 +157,7 @@ describe("applyRampSettlementEvent", () => {
       signature: "sdp-submitted-signature",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "moonpay",
       kind: "settled",
       reference: "order_onchain_payment",
@@ -176,7 +183,7 @@ describe("applyRampSettlementEvent", () => {
   it("never reopens a canceled transfer", async () => {
     await seedTransfer({ id: "xfr_canceled", reference: "order_canceled", status: "canceled" });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "settled",
       reference: "order_canceled",
@@ -192,7 +199,7 @@ describe("applyRampSettlementEvent", () => {
   it("revives an expired transfer when the provider proves the checkout completed", async () => {
     await seedTransfer({ id: "xfr_expired", reference: "order_expired", status: "expired" });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "settled",
       reference: "order_expired",
@@ -213,7 +220,7 @@ describe("applyRampSettlementEvent", () => {
       type: "offramp",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "settled",
       reference: "order_processing_deposit",
@@ -230,7 +237,7 @@ describe("applyRampSettlementEvent", () => {
   it("does not regress a settling transfer on an out-of-order event", async () => {
     await seedTransfer({ id: "xfr_settling", reference: "order_settling", status: "settling" });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "awaiting_payment",
       reference: "order_settling",
@@ -246,7 +253,7 @@ describe("applyRampSettlementEvent", () => {
       { provider: "coinbase", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
-    await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
+    await Promise.all(events.map((event) => applyInSandbox(event)));
 
     const transfer = await readTransfer("xfr_race");
     expect(["completed", "failed"]).toContain(transfer?.status);
@@ -267,13 +274,13 @@ describe("applyRampSettlementEvent", () => {
       status: "pending",
       counterpartyId: COUNTERPARTY_ID,
     });
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "awaiting_payment",
       reference: "order_first_wins",
       providerCustomerId: "cust_first",
     });
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "settled",
       reference: "order_first_wins",
@@ -300,7 +307,7 @@ describe("applyRampSettlementEvent", () => {
       status: "settling",
       counterpartyId: COUNTERPARTY_ID,
     });
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "failed",
       reference: "order_refused_link",
@@ -308,7 +315,7 @@ describe("applyRampSettlementEvent", () => {
       providerCustomerId: "cust_winner",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyInSandbox({
       provider: "coinbase",
       kind: "settled",
       reference: "order_refused_link",
@@ -336,8 +343,8 @@ describe("applyRampSettlementEvent", () => {
       receivedAmount: "9",
     };
 
-    await applyRampSettlementEvent(env, event);
-    await applyRampSettlementEvent(env, { ...event, receivedAmount: "999" });
+    await applyInSandbox(event);
+    await applyInSandbox({ ...event, receivedAmount: "999" });
 
     expect(await readTransfer("xfr_retry")).toMatchObject({
       status: "completed",
