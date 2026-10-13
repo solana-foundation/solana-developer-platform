@@ -100,6 +100,9 @@ function isTimeoutError(error: unknown): boolean {
 // if it can tell "the upstream never answered" apart from "the upstream said
 // no" — hence distinct codes instead of one generic relay error.
 function toRelayError(error: unknown): AppError | SdpRpcError {
+  if (error instanceof SdpRpcError && error.details?.timedOut === true) {
+    return new AppError("SOLANA_RPC_TIMEOUT");
+  }
   if (error instanceof SdpRpcError) {
     return error;
   }
