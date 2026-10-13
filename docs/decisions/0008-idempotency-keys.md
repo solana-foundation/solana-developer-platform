@@ -99,7 +99,8 @@ reconciler works from them.
 
 | Case | Stored? | Answer |
 |---|---|---|
-| No key on a `required` route; malformed key | No, nothing claimed | 400 (`IDEMPOTENCY_KEY_REQUIRED`) |
+| No key on a `required` route | No, nothing claimed | 400 `IDEMPOTENCY_KEY_REQUIRED` |
+| Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
 | 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
@@ -126,10 +127,11 @@ signing timeouts end requests well before that.
 executions and Dry-Run skipped it until approvals and wallet policies were removed, HOO-1889.)
 
 **Retention.** 24 hours. Expired rows are pruned hourly in-process and on every run of the managed
-reconciliation job. A claim ignores an expired row. A row still `in_progress` when it is pruned
-(`sdp_idempotency_unfinished_pruned`) or replaced by a new claim
-(`sdp_idempotency_unfinished_replaced`) is a request that never recorded an outcome; both log at
-error level for alerting.
+reconciliation job. A claim ignores an expired row. Unlocking marks a row released: a takeover can still claim it, and
+it is not alerted on. A row still `in_progress` whose lease lapsed without a release when it is
+pruned (`sdp_idempotency_unfinished_pruned`) or replaced by a new claim
+(`sdp_idempotency_unfinished_replaced`) is a request that crashed before recording an outcome;
+both log at error level for alerting.
 
 **Declaration.** The step carries `Symbol.for("sdp.idempotency")` with its mode. `IdempotencyKeyMode`
 lives in `@sdp/types`.

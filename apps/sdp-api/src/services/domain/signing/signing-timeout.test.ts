@@ -1,7 +1,11 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { TransactionSigner } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { boundSigningTime } from "./signing-timeout";
+import {
+  boundSigningTime,
+  CUSTODY_SIGNING_TIMEOUT_MS,
+  custodySigningTimeoutMs,
+} from "./signing-timeout";
 
 describe("boundSigningTime", () => {
   it("fails a signing call that outlives the bound, as a retryable network error", async () => {
@@ -40,5 +44,25 @@ describe("boundSigningTime", () => {
     expect(await bounded.signTransactions()).toEqual(["signed"]);
     expect(bounded.signAndSendTransactions).toBe(original.signAndSendTransactions);
     expect(await bounded.signAndSendTransactions()).toEqual(["sent"]);
+  });
+});
+
+describe("custodySigningTimeoutMs", () => {
+  it("covers the default poll budget, and a longer configured Utila budget, with a margin", () => {
+    const defaultBound = custodySigningTimeoutMs({});
+    expect(defaultBound).toBeGreaterThan(60 * 1_000);
+    expect(defaultBound).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
+
+    const longBudget = custodySigningTimeoutMs({
+      UTILA_POLL_INTERVAL_MS: "2000",
+      UTILA_MAX_POLL_ATTEMPTS: "90",
+    });
+    expect(longBudget).toBeGreaterThan(180_000);
+  });
+
+  it("never drops below the base bound for a short budget", () => {
+    expect(
+      custodySigningTimeoutMs({ UTILA_POLL_INTERVAL_MS: "100", UTILA_MAX_POLL_ATTEMPTS: "5" })
+    ).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
   });
 });

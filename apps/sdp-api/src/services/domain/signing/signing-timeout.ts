@@ -9,6 +9,32 @@ import type { TransactionSigner } from "@solana/kit";
  */
 export const CUSTODY_SIGNING_TIMEOUT_MS = 60_000;
 
+/** The Fireblocks and Utila signers' default poll budget: 60 attempts, 1s apart. */
+const DEFAULT_SIGNING_POLL_BUDGET_MS = 60 * 1_000;
+
+/** Room past the poll budget for the signing request itself. */
+const SIGNING_POLL_MARGIN_MS = 15_000;
+
+/**
+ * The signing bound for this deployment: {@link CUSTODY_SIGNING_TIMEOUT_MS},
+ * raised to the configured custody poll budget plus a margin, so the bound
+ * never cuts off a signer that is still polling within its budget. Utila's is
+ * the only budget set by configuration; Fireblocks uses the default.
+ */
+export function custodySigningTimeoutMs(env: {
+  UTILA_POLL_INTERVAL_MS?: string;
+  UTILA_MAX_POLL_ATTEMPTS?: string;
+}): number {
+  const interval = Number(env.UTILA_POLL_INTERVAL_MS ?? 1_000);
+  const attempts = Number(env.UTILA_MAX_POLL_ATTEMPTS ?? 60);
+  const utilaBudget = interval * attempts;
+  const budget = Math.max(
+    DEFAULT_SIGNING_POLL_BUDGET_MS,
+    Number.isFinite(utilaBudget) ? utilaBudget : 0
+  );
+  return Math.max(CUSTODY_SIGNING_TIMEOUT_MS, budget + SIGNING_POLL_MARGIN_MS);
+}
+
 function withSigningTimeout<T>(signing: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<never>((_resolve, reject) => {

@@ -150,6 +150,51 @@ describe("idempotency keys repository", () => {
     });
   });
 
+  it("does not report a released row its claim replaces, and reports one taken over and lapsed", async () => {
+    const released = claimInput();
+    await repository().claim(released);
+    await repository().unlock(released.id, released.claimToken);
+    await getDb(env).execute(
+      `UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE id = ?`,
+      [released.id]
+    );
+    expect(await repository().claim(claimInput())).toEqual({
+      kind: "claimed",
+      fresh: true,
+      replacedUnfinished: false,
+    });
+
+    // Released, then taken over by a request that crashed: its lease lapsed.
+    const first = claimInput({ idempotencyKey: "key-takeover" });
+    await repository().claim(first);
+    await repository().unlock(first.id, first.claimToken);
+    const takeover = claimInput({ idempotencyKey: "key-takeover" });
+    expect(await repository().claim(takeover)).toMatchObject({ kind: "claimed", fresh: false });
+    await getDb(env).execute(
+      `UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE id = ?`,
+      [takeover.id]
+    );
+    expect(await repository().claim(claimInput({ idempotencyKey: "key-takeover" }))).toEqual({
+      kind: "claimed",
+      fresh: true,
+      replacedUnfinished: true,
+    });
+  });
+
+  it("prunes a released row without counting it unfinished", async () => {
+    const released = claimInput({ idempotencyKey: "released" });
+    await repository().claim(released);
+    await repository().unlock(released.id, released.claimToken);
+    const lapsed = claimInput({ idempotencyKey: "lapsed" });
+    await repository().claim(lapsed);
+    await getDb(env).execute(
+      `UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE id IN (?, ?)`,
+      [released.id, lapsed.id]
+    );
+
+    expect(await repository().pruneExpired(100)).toEqual({ deleted: 2, unfinished: 1 });
+  });
+
   it("keeps project-less keys unique", async () => {
     expect(await repository().claim(claimInput({ projectId: null }))).toEqual({
       kind: "claimed",
