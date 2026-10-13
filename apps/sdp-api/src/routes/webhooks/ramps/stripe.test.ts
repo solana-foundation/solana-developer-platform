@@ -27,7 +27,13 @@ describe("StripeWebhookProcessor", () => {
     });
     expect(
       processor.parse(
-        event("fulfillment_complete", { transaction_details: { destination_amount: "0.5" } })
+        event("fulfillment_complete", {
+          transaction_details: {
+            destination_amount: "0.5",
+            destination_currency: "usdc",
+            destination_network: "solana",
+          },
+        })
       )
     ).toMatchObject({ kind: "settled", reference: "cos_1", receivedAmount: "0.5" });
     expect(processor.parse(event("rejected"))).toMatchObject({ kind: "failed" });
@@ -37,7 +43,7 @@ describe("StripeWebhookProcessor", () => {
     });
   });
 
-  it("reports the rail a completed session delivered, null when it is not one SDP sells", () => {
+  it("reports the rail a completed session delivered, null for an asset SDP does not sell", () => {
     const processor = new StripeWebhookProcessor();
     const completed = (transactionDetails: Record<string, unknown>) =>
       processor.parse({
@@ -60,7 +66,27 @@ describe("StripeWebhookProcessor", () => {
     expect(
       completed({ destination_currency: "eth", destination_network: "ethereum" })
     ).toMatchObject({ deliveredAssetRail: null });
-    expect(completed({ destination_amount: "0.5" })).toMatchObject({ deliveredAssetRail: null });
+  });
+
+  it("throws on a completed session without its destination currency or network", () => {
+    const processor = new StripeWebhookProcessor();
+    const completed = (transactionDetails?: Record<string, unknown>) => () =>
+      processor.parse({
+        type: "crypto.onramp_session.updated",
+        data: {
+          object: {
+            id: "cos_1",
+            status: "fulfillment_complete",
+            transaction_details: transactionDetails,
+          },
+        },
+      });
+
+    expect(completed()).toThrow("destination currency or network");
+    expect(completed({ destination_amount: "0.5" })).toThrow("destination currency or network");
+    expect(completed({ destination_currency: 7, destination_network: "solana" })).toThrow(
+      "destination currency or network"
+    );
   });
 
   it("throws on a known event type with a malformed envelope", () => {
