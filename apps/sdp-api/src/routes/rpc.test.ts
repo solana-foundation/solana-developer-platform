@@ -1,15 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type MockInstance,
-  vi,
-} from "vitest";
+import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import type { KVStore } from "@/runtime/kv";
@@ -83,6 +75,42 @@ function jsonRpcResponse(body: unknown, status: number): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+const LYING_DEVNET_ENDPOINT_URL = "https://lying-devnet.rpc.test";
+
+const genesisProbeSchema = z.object({
+  id: z.union([z.string(), z.number()]),
+  method: z.literal("getGenesisHash"),
+});
+
+interface RelayedRequest {
+  endpointUrl: string;
+  init: RequestInit | undefined;
+}
+
+function stubUpstream(answer: (endpointUrl: string) => Promise<Response>): RelayedRequest[] {
+  const relayed: RelayedRequest[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const endpointUrl = String(input);
+    if (init !== undefined && typeof init.body === "string") {
+      const probe = genesisProbeSchema.safeParse(JSON.parse(init.body));
+      if (probe.success) {
+        const servedCluster = endpointUrl === LYING_DEVNET_ENDPOINT_URL ? "mainnet-beta" : "devnet";
+        return jsonRpcResponse(
+          { jsonrpc: "2.0", id: probe.data.id, result: GENESIS_HASH_BY_CLUSTER[servedCluster] },
+          200
+        );
+      }
+    }
+    relayed.push({ endpointUrl, init });
+    return answer(endpointUrl);
+  });
+  return relayed;
+}
+
+function relayedHosts(relayed: readonly RelayedRequest[]): string[] {
+  return relayed.map(({ endpointUrl }) => new URL(endpointUrl).host);
 }
 
 async function relayProxy(payload: unknown): Promise<Response> {
@@ -203,17 +231,15 @@ describe("RPC Relay Routes", () => {
     vi.unstubAllEnvs();
   });
 
-  it("relays through plain fetch with a 30s bound and answers the masked provider", async () => {
+  it("relays through plain fetch with a 30s bound and answers the provider's host", async () => {
     vi.stubEnv(
       "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
       "https://rpc.quicknode.test/?api-key=quicknode_key"
     );
     const timeout = vi.spyOn(AbortSignal, "timeout");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        jsonRpcResponse({ jsonrpc: "2.0", id: 1, result: { solanaCore: "2.0.0" } }, 200)
-      );
+    const relayed = stubUpstream(async () =>
+      jsonRpcResponse({ jsonrpc: "2.0", id: 1, result: { solanaCore: "2.0.0" } }, 200)
+    );
 
     const response = await relayProxy({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] });
 
@@ -221,25 +247,24 @@ describe("RPC Relay Routes", () => {
     const body = await response.json();
     expect(body.data.provider).toEqual({
       id: "quicknode",
-      endpoint: "https://rpc.quicknode.test/?api-key=***",
+      endpoint: "https://rpc.quicknode.test",
     });
     expect(body.data.response.result).toEqual({ solanaCore: "2.0.0" });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "https://rpc.quicknode.test/?api-key=quicknode_key",
-      expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) })
-    );
+    expect(relayed).toEqual([
+      {
+        endpointUrl: "https://rpc.quicknode.test/?api-key=quicknode_key",
+        init: expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) }),
+      },
+    ]);
     expect(timeout).toHaveBeenCalledWith(30_000);
   });
 
   it("alternates two managed providers across requests", async () => {
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
     vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", "https://rpc.helius.test");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () =>
-        jsonRpcResponse({ jsonrpc: "2.0", id: 1, result: { solanaCore: "2.0.0" } }, 200)
-      );
+    const relayed = stubUpstream(async () =>
+      jsonRpcResponse({ jsonrpc: "2.0", id: 1, result: { solanaCore: "2.0.0" } }, 200)
+    );
 
     const first = await relayProxy({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] });
     const second = await relayProxy({ jsonrpc: "2.0", id: 2, method: "getVersion", params: [] });
@@ -250,10 +275,7 @@ describe("RPC Relay Routes", () => {
     const secondBody = await second.json();
     expect(firstBody.data.provider.id).toBe("triton");
     expect(secondBody.data.provider.id).toBe("helius");
-    expect(fetchSpy.mock.calls.map(([input]) => new URL(String(input)).host)).toEqual([
-      "rpc.triton.test",
-      "rpc.helius.test",
-    ]);
+    expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
   });
 
   describe("faucet airdrop failover", () => {
@@ -274,10 +296,6 @@ describe("RPC Relay Routes", () => {
       error: { code: -32603, message: "Faucet has run dry" },
     };
 
-    function upstreamHosts(fetchSpy: MockInstance<typeof fetch>): string[] {
-      return fetchSpy.mock.calls.map(([input]) => new URL(String(input)).host);
-    }
-
     beforeEach(async () => {
       await seedCustodyWalletForProject(
         TEST_ORG.id,
@@ -291,8 +309,8 @@ describe("RPC Relay Routes", () => {
     });
 
     it("hops to the next provider when the first answers a JSON-RPC error", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        if (String(input).includes("rpc.triton.test")) {
+      const relayed = stubUpstream(async (endpointUrl) => {
+        if (endpointUrl.includes("rpc.triton.test")) {
           return jsonRpcResponse(rateLimited, 429);
         }
         return jsonRpcResponse(
@@ -304,15 +322,15 @@ describe("RPC Relay Routes", () => {
       const response = await relayProxy(airdrop);
 
       expect(response.status).toBe(200);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
       const body = await response.json();
-      expect(body.data.provider).toEqual({ id: "helius", endpoint: "https://rpc.helius.test/" });
+      expect(body.data.provider).toEqual({ id: "helius", endpoint: "https://rpc.helius.test" });
       expect(body.data.response.result).toBe("helius_airdrop_sig");
     });
 
     it("hops to the next provider when the first throws", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        if (String(input).includes("rpc.triton.test")) {
+      const relayed = stubUpstream(async (endpointUrl) => {
+        if (endpointUrl.includes("rpc.triton.test")) {
           throw new TypeError("fetch failed");
         }
         return jsonRpcResponse(
@@ -324,34 +342,32 @@ describe("RPC Relay Routes", () => {
       const response = await relayProxy(airdrop);
 
       expect(response.status).toBe(200);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
       const body = await response.json();
       expect(body.data.provider.id).toBe("helius");
       expect(body.data.response.result).toBe("helius_airdrop_sig");
     });
 
     it("answers the last provider's JSON-RPC error with 200 when every provider refuses", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockImplementation(async (input) =>
-          String(input).includes("rpc.triton.test")
-            ? jsonRpcResponse(rateLimited, 429)
-            : jsonRpcResponse(faucetDry, 200)
-        );
+      const relayed = stubUpstream(async (endpointUrl) =>
+        endpointUrl.includes("rpc.triton.test")
+          ? jsonRpcResponse(rateLimited, 429)
+          : jsonRpcResponse(faucetDry, 200)
+      );
 
       const response = await relayProxy(airdrop);
 
       expect(response.status).toBe(200);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
       const body = await response.json();
-      expect(body.data.provider).toEqual({ id: "helius", endpoint: "https://rpc.helius.test/" });
+      expect(body.data.provider).toEqual({ id: "helius", endpoint: "https://rpc.helius.test" });
       expect(body.data.upstream).toEqual({ ok: true, status: 200, statusText: "" });
       expect(body.data.response).toEqual(faucetDry);
     });
 
     it("answers the refusing provider's response when a later provider throws", async () => {
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        if (String(input).includes("rpc.triton.test")) {
+      stubUpstream(async (endpointUrl) => {
+        if (endpointUrl.includes("rpc.triton.test")) {
           return jsonRpcResponse(rateLimited, 429);
         }
         throw new TypeError("fetch failed");
@@ -367,43 +383,55 @@ describe("RPC Relay Routes", () => {
     });
 
     it("fails with SOLANA_RPC_ERROR when every provider throws", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockRejectedValue(new TypeError("fetch failed"));
+      const relayed = stubUpstream(async () => {
+        throw new TypeError("fetch failed");
+      });
 
       const response = await relayProxy(airdrop);
 
       expect(response.status).toBe(502);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
       const body = await response.json();
       expect(body.error.code).toBe("SOLANA_RPC_ERROR");
     });
 
     it("fails with SOLANA_RPC_TIMEOUT when every provider times out", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError"));
+      const relayed = stubUpstream(async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      });
 
       const response = await relayProxy(airdrop);
 
       expect(response.status).toBe(504);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test", "rpc.helius.test"]);
       const body = await response.json();
       expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
     });
 
     it("sends a batch-wrapped airdrop to a single provider without hopping", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(jsonRpcResponse([rateLimited], 200));
+      const relayed = stubUpstream(async () => jsonRpcResponse([rateLimited], 200));
 
       const response = await relayProxy([airdrop]);
 
       expect(response.status).toBe(200);
-      expect(upstreamHosts(fetchSpy)).toEqual(["rpc.triton.test"]);
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test"]);
       const body = await response.json();
       expect(body.data.provider.id).toBe("triton");
       expect(body.data.response).toEqual([rateLimited]);
+    });
+
+    it("skips a provider that serves another cluster and relays the airdrop to the next", async () => {
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", LYING_DEVNET_ENDPOINT_URL);
+      const relayed = stubUpstream(async () =>
+        jsonRpcResponse({ jsonrpc: "2.0", id: "faucet-test", result: "helius_airdrop_sig" }, 200)
+      );
+
+      const response = await relayProxy(airdrop);
+
+      expect(response.status).toBe(200);
+      expect(relayedHosts(relayed)).toEqual(["rpc.helius.test"]);
+      const body = await response.json();
+      expect(body.data.provider).toEqual({ id: "helius", endpoint: "https://rpc.helius.test" });
     });
   });
 
@@ -510,16 +538,14 @@ describe("RPC Relay Routes", () => {
         "batch_owned",
         "active"
       );
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          jsonRpcResponse([{ jsonrpc: "2.0", id: 1, result: "owned_airdrop_sig" }], 200)
-        );
+      const relayed = stubUpstream(async () =>
+        jsonRpcResponse([{ jsonrpc: "2.0", id: 1, result: "owned_airdrop_sig" }], 200)
+      );
 
       const response = await relayProxy([airdropRequest(OWNED_FAUCET_ADDRESS)]);
 
       expect(response.status).toBe(200);
-      expect(fetchSpy).toHaveBeenCalled();
+      expect(relayedHosts(relayed)).toEqual(["rpc.triton.test"]);
     });
   });
 
@@ -566,9 +592,9 @@ describe("RPC Relay Routes", () => {
 
     it("answers a distinct code when the upstream times out", async () => {
       vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", "https://rpc.triton.test");
-      vi.spyOn(globalThis, "fetch").mockRejectedValue(
-        new DOMException("The operation timed out.", "TimeoutError")
-      );
+      stubUpstream(async () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      });
 
       const response = await relayProxy({
         jsonrpc: "2.0",
@@ -580,6 +606,25 @@ describe("RPC Relay Routes", () => {
       expect(response.status).toBe(504);
       const body = await response.json();
       expect(body.error.code).toBe("SOLANA_RPC_TIMEOUT");
+    });
+
+    it("refuses an endpoint that serves another cluster before it sees the payload", async () => {
+      vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", LYING_DEVNET_ENDPOINT_URL);
+      const relayed = stubUpstream(async () =>
+        jsonRpcResponse({ jsonrpc: "2.0", id: 1, result: "relayed_signature" }, 200)
+      );
+
+      const response = await relayProxy({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: [],
+      });
+
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body.error.code).toBe("RPC_CLUSTER_MISMATCH");
+      expect(relayed).toEqual([]);
     });
 
     it("charges the quota by batch size", async () => {
