@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS, ondoDeployment } from "@sdp/types/ondo-programs";
 import { SdpEarnError } from "../../errors";
@@ -163,7 +164,7 @@ describe("OndoEarnClient.listStrategies", () => {
     stubRpc({}, GENESIS_HASH_BY_CLUSTER.devnet);
     await assert.rejects(
       listProductionUsdy(),
-      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_UNAVAILABLE"
+      (error: unknown) => error instanceof SdpRpcError && error.code === "RPC_CLUSTER_MISMATCH"
     );
   });
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import {
   isVedaDeployed,
@@ -522,9 +523,10 @@ describe("VedaEarnClient.listStrategies", () => {
     it("throws when the RPC serves a different cluster", async () => {
       pointCataloguePool("devnet", WRONG_GENESIS_DEVNET_URL);
       stubRpc({ genesis: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] });
-      await assert.rejects(listSandboxVaults(DEPLOYMENT), {
-        code: "PROVIDER_UNAVAILABLE",
-      });
+      await assert.rejects(
+        listSandboxVaults(DEPLOYMENT),
+        (error: unknown) => error instanceof SdpRpcError && error.code === "RPC_CLUSTER_MISMATCH"
+      );
     });
 
     it("proves the cluster BEFORE reading any account", async () => {
