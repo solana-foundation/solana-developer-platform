@@ -161,7 +161,7 @@ export async function createEarnVaultDepositPreview(
     // channel, so a partner's existing blockingIssues handling covers both.
     blockingIssues: capIssue === null ? quote.blockingIssues : [...quote.blockingIssues, capIssue],
     // Sponsorship INTENT, for honest fee copy on the confirm step — the same
-    // flag+cluster gate resolveVaultSponsorship applies at execution. A
+    // flag resolveVaultSponsorship applies at execution. A
     // swap-funded deposit forces wallet-pays regardless; the swap choice lives
     // client-side, so the client applies that override to the copy.
     feeSponsored: isEarnVaultSponsorshipEnabled(c.env),
