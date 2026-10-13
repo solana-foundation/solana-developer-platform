@@ -6,13 +6,14 @@
  * getTransaction, ...). It is not a full validator, so unsupported methods
  * (e.g. `getVersion`) return "Method not found" — don't call them.
  *
- * Because it is Solana-JSON-RPC-compatible, we reuse `@sdp/rpc`'s Kit client,
- * just re-pointed at the gateway URL. The engine passes a structural env in
- * (never `process.env`), the same discipline as `config.ts`.
+ * Because it is Solana-JSON-RPC-compatible, the client is `@sdp/rpc`'s endpoint client
+ * (`createEndpointRpc`): the gateway is a different chain from any managed cluster, so it
+ * is dialed directly, never through the managed pool or its genesis guard.
  */
 
-import { isForbiddenRpcError, type RpcEnv } from "@sdp/rpc";
-import { createRpc, getAccountInfo, type RpcRequestHeaders, type SolanaRpc } from "@sdp/rpc/solana";
+import { isForbiddenRpcError } from "@sdp/rpc";
+import { createEndpointRpc, type RpcRequestHeaders } from "@sdp/rpc/factory";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
@@ -26,16 +27,21 @@ export interface GatewayClientOptions {
 }
 
 /**
- * Build a Solana-Kit RPC client pointed at the SPC gateway. This is `@sdp/rpc`'s
- * standard client with the URL overridden; every read/write helper in
- * `@sdp/rpc/solana` works against the returned client.
+ * A Solana-Kit RPC client pointed at the SPC gateway, with `@sdp/rpc`'s per-request deadline
+ * and read socket retry; every read/write helper in `@sdp/rpc/solana` works against it.
+ *
+ * @param gatewayUrl - The channel instance's gateway URL.
+ * @param options - Extra request headers, e.g. the gateway bearer token.
+ * @returns The gateway RPC client.
  */
 export function createChannelGatewayRpc(
-  env: RpcEnv,
   gatewayUrl: string,
   options?: GatewayClientOptions
 ): SolanaRpc {
-  return createRpc(env, { rpcUrl: gatewayUrl, headers: options?.headers });
+  return createEndpointRpc(gatewayUrl, {
+    timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+    ...(options?.headers ? { headers: options.headers } : {}),
+  });
 }
 
 /** A channel token-account balance as reported by the gateway. */

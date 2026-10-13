@@ -9,7 +9,6 @@ if [ -z "${JUPITER_LEND_MAINNET_RPC_URL:-}" ]; then
 fi
 
 export SURFPOOL_REMOTE_RPC_URL="${JUPITER_LEND_MAINNET_RPC_URL}"
-export SOLANA_NETWORK=mainnet-beta
 export SURFPOOL_CLUSTER=mainnet-beta
 export JUPITER_LEND_SURFPOOL_E2E=true
 export SDP_INTEGRATION_SUITE=kora

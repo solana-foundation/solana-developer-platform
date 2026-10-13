@@ -16,7 +16,6 @@ import { getChannelTokenBalance } from "@sdp/private-channels";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { PrivateChannelBalance, PrivateChannelInstance, SolanaCluster } from "@sdp/types";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { knownMintToken, resolveRegisteredChannelToken } from "./mint";
 
@@ -29,22 +28,19 @@ type BalanceInstance = Pick<PrivateChannelInstance, "gatewayUrl">;
  * `auth` is the SPC auth context for gateway reads (see `./auth/gateway-auth`).
  * Required — the gateway JWT-gates balance reads.
  */
-export async function getChannelBalance(
-  env: Env,
-  {
-    instance,
-    owner,
-    mint,
-    auth,
-    cluster,
-  }: {
-    instance: BalanceInstance;
-    owner: string;
-    mint?: string;
-    auth: SpcAuthContext;
-    cluster: SolanaCluster;
-  }
-): Promise<PrivateChannelBalance> {
+export async function getChannelBalance({
+  instance,
+  owner,
+  mint,
+  auth,
+  cluster,
+}: {
+  instance: BalanceInstance;
+  owner: string;
+  mint?: string;
+  auth: SpcAuthContext;
+  cluster: SolanaCluster;
+}): Promise<PrivateChannelBalance> {
   const ownerAddress = assertValidAddress(owner, "owner");
   const mintAddress = assertValidAddress(
     mint ?? resolveRegisteredChannelToken(cluster).mint,
@@ -61,7 +57,7 @@ export async function getChannelBalance(
     "tokenProgram"
   );
 
-  const { tokenAccount, balance } = await withGatewayRpc(env, instance.gatewayUrl, auth, (rpc) =>
+  const { tokenAccount, balance } = await withGatewayRpc(instance.gatewayUrl, auth, (rpc) =>
     getChannelTokenBalance(rpc, ownerAddress, mintAddress, tokenProgram)
   );
 

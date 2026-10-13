@@ -1,8 +1,11 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk";
-import { createClusterRpc } from "@sdp/rpc/factory";
 import {
-  createRpc,
-  createRpcFromTransport,
+  createClusterRpc,
+  createEndpointRpc,
+  createEndpointRpcFromTransport,
+} from "@sdp/rpc/factory";
+import {
+  DEFAULT_RPC_REQUEST_TIMEOUT_MS,
   getSignatureStatuses,
   type SolanaRpc,
   sendTransaction,
@@ -64,8 +67,10 @@ export async function submitRingsOuterTransaction(
     // endpoints legitimately resolve to loopback.
     rpc =
       input.env.ENVIRONMENT === "development"
-        ? createRpc(input.env, { rpcUrl: input.rpcUrl })
-        : createRpcFromTransport(createCustomerRpcTransport(input.rpcUrl));
+        ? createEndpointRpc(input.rpcUrl, { timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS })
+        : createEndpointRpcFromTransport(createCustomerRpcTransport(input.rpcUrl), {
+            timeoutMs: DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+          });
   } else {
     rpc = createClusterRpc();
   }

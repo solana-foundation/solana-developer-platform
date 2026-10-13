@@ -299,9 +299,7 @@ write_runtime_env() {
   {
     echo "SURFPOOL_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SURFPOOL_REMOTE_RPC_URL=$(shell_quote "${SURFPOOL_REMOTE_RPC_URL:-}")"
-    echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
-    echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
     write_cluster_pool_env
     write_cluster_kora_env
     echo "KORA_SHIM_RPC_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_RPC_TIMEOUT_MS}")"
@@ -387,7 +385,7 @@ NODE
       export KORA_SHIM_PORT
       export KORA_SHIM_RPC_TIMEOUT_MS
       export KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS
-      export SOLANA_RPC_URL="${SURFPOOL_RPC_URL}"
+      export SURFPOOL_RPC_URL
       export SIGNER_PRIVATE_KEY
       exec node scripts/kora-surfpool-shim.mjs
     ) >"${KORA_SHIM_LOG}" 2>&1 &
@@ -479,9 +477,8 @@ cat <<EOF
 Local Kora-on-Surfpool is ready.
 
 Use these environment overrides with Doppler-backed commands:
-  export SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
+  export SOLANA_RPC_DEFAULT_$(surfpool_lane_suffix)_API_KEY_URL=${SURFPOOL_RPC_URL}
   export SOLANA_RPC_CI_PREFERRED_PROVIDER=default
-  export SOLANA_RPC_DEFAULT_PROVIDER=default
   export KORA_RPC_URL_$(surfpool_lane_suffix)=${KORA_LANE_RPC_URL}
   export FEE_PAYMENT_PROVIDER=kora
   export RUN_INTEGRATION_TESTS=true

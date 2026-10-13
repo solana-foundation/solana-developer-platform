@@ -1,12 +1,12 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
+import { withTransientRpcRetry } from "@sdp/rpc";
 import {
   confirmTransaction,
-  createRpc,
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
+  type SolanaRpc,
 } from "@sdp/rpc/solana";
 import {
-  type Address,
   appendTransactionMessageInstructions,
   compileTransaction,
   createNoopSigner,
@@ -15,11 +15,16 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  address as toAddress,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
-import { getIntegrationLaneKora } from "./kora-lane";
+import {
+  getIntegrationLaneKora,
+  getIntegrationLaneRpc,
+  requestIntegrationLaneAirdrop,
+} from "./kora-lane";
 
 const {
   app,
@@ -45,7 +50,8 @@ const INTEGRATION_CUSTODY_PROVIDER = getIntegrationCustodyProvider();
 const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
 const INTEGRATION_CUSTODY_CONFIGURED =
   INTEGRATION_CUSTODY_PROVIDER === "local" ? LOCAL_CUSTODY_CONFIGURED : PRIVY_CONFIGURED;
-const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && INTEGRATION_CUSTODY_CONFIGURED;
+const LANE_RPC = getIntegrationLaneRpc();
+const SOLANA_CONFIGURED = LANE_RPC !== null && INTEGRATION_CUSTODY_CONFIGURED;
 
 let cachedKeyHash: string | null = null;
 export interface IntegrationCustodyWallet {
@@ -64,10 +70,6 @@ const INTEGRATION_CUSTODY_FUND_LAMPORTS = 50_000_000;
 // Fallback when the relay does not expose its policy; matches the deployed
 // devnet max_allowed_lamports.
 const KORA_MAX_TRANSFER_LAMPORTS = 9_900_000n;
-
-type SolanaRpcResponse<T> =
-  | { jsonrpc: "2.0"; id: number; result: T }
-  | { jsonrpc: "2.0"; id: number; error: { code: number; message: string; data?: unknown } };
 
 function getOrganizationSettingsForIntegration(): string | null {
   if (INTEGRATION_CUSTODY_PROVIDER !== "local") {
@@ -339,7 +341,7 @@ async function ensurePrivyCustodyWallet(): Promise<IntegrationCustodyWallet> {
 
   for (const wallet of walletRows) {
     // eslint-disable-next-line no-await-in-loop
-    if (await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key)) {
+    if (LANE_RPC && (await solanaAccountExists(LANE_RPC, wallet.public_key))) {
       return fundIntegrationCustodyWallet(wallet);
     }
   }
@@ -396,12 +398,12 @@ async function ensureIntegrationCustodyWallet(): Promise<IntegrationCustodyWalle
 }
 
 async function ensureAddressAccountExists(address: string): Promise<void> {
-  const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl) {
+  const rpc = LANE_RPC;
+  if (!rpc) {
     return;
   }
 
-  const exists = await solanaAccountExists(rpcUrl, address);
+  const exists = await solanaAccountExists(rpc, address);
   if (exists) {
     return;
   }
@@ -412,13 +414,15 @@ async function ensureAddressAccountExists(address: string): Promise<void> {
     return false;
   });
   if (koraFunded) {
-    await waitForAccountExistence(rpcUrl, address, 30_000);
+    await waitForAccountExistence(rpc, address, 30_000);
     return;
   }
 
   try {
-    await solanaRequestAirdrop(rpcUrl, address, INTEGRATION_CUSTODY_FUND_LAMPORTS);
-    await waitForAccountExistence(rpcUrl, address, 30_000);
+    await withTransientRpcRetry(() =>
+      requestIntegrationLaneAirdrop(address, INTEGRATION_CUSTODY_FUND_LAMPORTS)
+    );
+    await waitForAccountExistence(rpc, address, 30_000);
   } catch (airdropError) {
     const koraMessage =
       koraFundingError instanceof Error ? koraFundingError.message : String(koraFundingError);
@@ -434,27 +438,24 @@ async function ensureAddressAccountExists(address: string): Promise<void> {
 }
 
 async function getAddressLamports(address: string): Promise<number> {
-  const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl) {
+  const rpc = LANE_RPC;
+  if (!rpc) {
     return 0;
   }
 
-  type Balance = { value: number };
-  const response = await solanaRpc<Balance>(rpcUrl, "getBalance", [
-    address,
-    { commitment: "confirmed" },
-  ]);
-
-  return response.value ?? 0;
+  const response = await withTransientRpcRetry(() =>
+    rpc.getBalance(toAddress(address), { commitment: "confirmed" }).send()
+  );
+  return Number(response.value);
 }
 
 async function fundAddressViaKoraFeePayer(
   address: string,
   lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
-  const rpcUrl = env.SOLANA_RPC_URL;
+  const rpc = LANE_RPC;
   const laneKora = getIntegrationLaneKora();
-  if (!rpcUrl || !laneKora.rpcUrl) {
+  if (!rpc || !laneKora.rpcUrl) {
     return false;
   }
 
@@ -464,7 +465,6 @@ async function fundAddressViaKoraFeePayer(
     identityTokenAudience: laneKora.identityTokenAudience,
   });
   const feePayer = await feePayment.getFeePayer();
-  const rpc = createRpc(env);
   const maxTransferLamports =
     (await feePayment
       .getSponsorshipConfiguration?.()
@@ -482,7 +482,7 @@ async function fundAddressViaKoraFeePayer(
 
     const instruction = getTransferSolInstruction({
       source: createNoopSigner(feePayer),
-      destination: address as Address,
+      destination: toAddress(address),
       amount,
     });
 
@@ -532,7 +532,7 @@ export async function fundAddressToLamports(
   }
 
   try {
-    await solanaRequestAirdrop(env.SOLANA_RPC_URL as string, address, requiredLamports);
+    await withTransientRpcRetry(() => requestIntegrationLaneAirdrop(address, requiredLamports));
     await waitForLamports(address, minimumLamports, 30_000);
   } catch (airdropError) {
     const koraMessage =
@@ -548,32 +548,22 @@ export async function fundAddressToLamports(
   }
 }
 
-async function solanaAccountExists(rpcUrl: string, address: string): Promise<boolean> {
-  type AccountInfo = { value: null | object };
-  const response = await solanaRpc<AccountInfo>(rpcUrl, "getAccountInfo", [
-    address,
-    { encoding: "base64", commitment: "confirmed" },
-  ]);
+async function solanaAccountExists(rpc: SolanaRpc, address: string): Promise<boolean> {
+  const response = await withTransientRpcRetry(() =>
+    rpc.getAccountInfo(toAddress(address), { encoding: "base64", commitment: "confirmed" }).send()
+  );
   return response.value !== null;
 }
 
-async function solanaRequestAirdrop(
-  rpcUrl: string,
-  address: string,
-  lamports: number
-): Promise<void> {
-  await solanaRpc<string>(rpcUrl, "requestAirdrop", [address, lamports]);
-}
-
 async function waitForAccountExistence(
-  rpcUrl: string,
+  rpc: SolanaRpc,
   address: string,
   timeoutMs: number
 ): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     // eslint-disable-next-line no-await-in-loop
-    const exists = await solanaAccountExists(rpcUrl, address);
+    const exists = await solanaAccountExists(rpc, address);
     if (exists) {
       return;
     }
@@ -601,64 +591,6 @@ async function waitForLamports(address: string, minimumLamports: number, timeout
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const maxRetries = 4;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      });
-
-      const responseText = await response.text();
-      let payload: SolanaRpcResponse<T>;
-      try {
-        payload = JSON.parse(responseText) as SolanaRpcResponse<T>;
-      } catch (error) {
-        const parseMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Solana RPC returned ${response.status} with empty/invalid body calling ${method}: ${parseMessage}`
-        );
-      }
-      if ("error" in payload) {
-        throw new Error(payload.error.message ?? `Solana RPC error calling ${method}`);
-      }
-
-      return payload.result;
-    } catch (error) {
-      if (attempt < maxRetries && isRetryableSolanaRpcError(error)) {
-        await sleep((attempt + 1) * 500);
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error(`Solana RPC error calling ${method}`);
-}
-
-function isRetryableSolanaRpcError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("empty/invalid body") ||
-    message.includes("internal error") ||
-    message.includes("unable to complete request") ||
-    message.includes("request timed out") ||
-    message.includes("timed out") ||
-    message.includes("service unavailable") ||
-    message.includes("try again") ||
-    message.includes("too many requests") ||
-    message.includes("429") ||
-    message.includes("500") ||
-    message.includes("502") ||
-    message.includes("503") ||
-    message.includes("504")
-  );
 }
 
 export async function createFundedPrivyWallet(input: {
