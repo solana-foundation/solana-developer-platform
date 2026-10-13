@@ -1,7 +1,7 @@
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { toProbeResultDto, verifyInstanceConnection } from "@/services/private-channels";
-import { loadPrivateChannelProjectRpcClient } from "../context";
+import { loadProjectRpcClient } from "@/services/private-channels/project-rpc";
 import type { probeConnectionSchema } from "../schemas";
 
 // Same probe the Connect handler runs internally — `probe.ok === true` here
@@ -15,7 +15,7 @@ export async function probePrivateChannelConnection(
   c: ValidatedBodyContext<typeof probeConnectionSchema>
 ) {
   const body = c.req.valid("json");
-  const projectRpc = await loadPrivateChannelProjectRpcClient(c);
+  const projectRpc = loadProjectRpcClient();
   const deployment =
     body.escrowProgramId && body.escrowInstanceAddr
       ? {

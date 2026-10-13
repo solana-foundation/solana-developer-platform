@@ -26,6 +26,7 @@ import {
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -181,6 +182,18 @@ const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
   "indexing",
 ]);
 
+/**
+ * Whether Helius Rings serves the open cluster scope's cluster. Rings is devnet-only: the
+ * schema's network CHECK is the second half of this guard, so going to mainnet is a
+ * deliberate migration, not a config flip.
+ *
+ * @returns `true` when the scope's cluster is devnet.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+export function ringsServesScopeCluster(): boolean {
+  return currentClusterScope().cluster === "devnet";
+}
+
 export function createHeliusRingsService(
   env: Env,
   tenant: HeliusRingsTenant,
@@ -210,9 +223,7 @@ export class HeliusRingsService {
     private readonly tenant: HeliusRingsTenant,
     dependencies: HeliusRingsServiceDependencies = {}
   ) {
-    // The schema's network CHECK is the second half of this guard. Going to
-    // mainnet is a deliberate migration, not a config flip.
-    if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
+    if (!ringsServesScopeCluster()) {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
     this.initiatedByKeyId = dependencies.initiatedByKeyId ?? null;

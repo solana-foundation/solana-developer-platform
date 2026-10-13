@@ -4,6 +4,7 @@ import {
   type PrivateOperationInput,
   RINGS_IDENTITY_MISMATCH,
 } from "@sdp/helius-rings";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   AccountRole,
   type Address,
@@ -27,7 +28,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signBytes,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { aroundEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   createHeliusRingsProjectRingRepository,
@@ -239,6 +240,10 @@ function retryableFailureService() {
 }
 
 describe("HeliusRingsService", () => {
+  aroundEach((runTest) =>
+    runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, runTest)
+  );
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
@@ -315,14 +320,6 @@ describe("HeliusRingsService", () => {
       ownerAddress: WALLET_OWNER,
       materialTag: "simulated",
       expectedStatus: "pending",
-    });
-  });
-
-  describe("devnet guard", () => {
-    it("refuses to construct outside devnet", () => {
-      expect(() =>
-        createHeliusRingsService({ ...env, SOLANA_NETWORK: "mainnet-beta" }, tenant)
-      ).toThrow(AppError);
     });
   });
 
@@ -2385,6 +2382,22 @@ describe("HeliusRingsService", () => {
       expect(replay.id).toBe(first.id);
       expect(first.intentKey).toBe(computeIntentKey(input, RING_PROGRAM));
     });
+  });
+});
+
+describe("HeliusRingsService devnet guard", () => {
+  it("refuses to construct in a Production project's scope", () => {
+    const productionProjectId = `${TEST_PROJECT_ID}_production`;
+    const construct = () =>
+      runInClusterScope({ projectId: productionProjectId, environment: "production" }, () =>
+        createHeliusRingsService(env, {
+          organizationId: TEST_ORG.id,
+          projectId: productionProjectId,
+        })
+      );
+
+    expect(construct).toThrow(AppError);
+    expect(construct).toThrow("Helius Rings is devnet-only");
   });
 });
 
