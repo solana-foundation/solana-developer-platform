@@ -61,7 +61,7 @@ export const SDP_MODULE_STAGES = {
   recurring_payments: "stable",
   compliance: "stable",
   issuance: "experimental",
-  earn: "experimental",
+  earn: "beta",
   dvp: "experimental",
   private_channels: "experimental",
   helius_rings: "experimental",
@@ -97,7 +97,6 @@ export const SDP_RAMP_PROVIDER_STAGES = {
   bvnk: "experimental",
   moneygram: "experimental",
   coinbase: "experimental",
-  mural: "experimental",
   stripe: "experimental",
 } as const satisfies SdpRampProviderStages;
 

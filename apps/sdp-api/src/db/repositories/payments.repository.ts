@@ -8,7 +8,7 @@ import {
   type RampTransferType,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { RepositoryDbClient } from "./base";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
@@ -33,7 +33,8 @@ export interface PaymentTransferRow {
   kind: PaymentTransactionKind;
   direction: PaymentTransferDirection;
   status: PaymentTransferStatus;
-  provider: RampProviderId | null;
+  /** A retired provider's historical row reads too; writes take a live `RampProviderId`. */
+  provider: PersistedRampProviderId | null;
   provider_reference: string | null;
   delivery_mode: PaymentTransferDeliveryMode | null;
   fiat_currency: string | null;

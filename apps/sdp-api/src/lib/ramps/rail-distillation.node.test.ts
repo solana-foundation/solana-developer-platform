@@ -1,7 +1,6 @@
 import { distillBvnkRailSupport } from "@sdp/payments/ramps/providers/bvnk/currencies";
 import { distillCoinbaseRailSupport } from "@sdp/payments/ramps/providers/coinbase/client";
 import { distillLightsparkRailSupport } from "@sdp/payments/ramps/providers/lightspark/currencies";
-import { distillMuralRailSupport } from "@sdp/payments/ramps/providers/mural/client";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
 import { resolveOfframpDestination } from "@sdp/types/ramp-resolution";
 import { describe, expect, it } from "vitest";
@@ -116,33 +115,6 @@ describe("ramp rail distillation", () => {
   it("validates ISO 4217 currency codes", () => {
     expect(isActiveIso4217CurrencyCode("ADP")).toBe(false);
     expect(isActiveIso4217CurrencyCode("MXN")).toBe(true);
-  });
-
-  it("distills Mural country/currency support from its countries dump", () => {
-    const mural = distillMuralRailSupport({
-      "usd-peru": {
-        status: 200,
-        body: {
-          count: 1,
-          countries: [{ alpha2Code: "PE", name: "Peru", subdivisions: [] }],
-        },
-      },
-      mxn: {
-        status: 200,
-        body: {
-          count: 1,
-          countries: [{ alpha2Code: "MX", name: "Mexico", subdivisions: [] }],
-        },
-      },
-    });
-    expect(mural.snapshot.onramp.currencies).toEqual({
-      MXN: { min: null, max: null },
-      USD: { min: null, max: null },
-    });
-    expect(mural.snapshot.onramp.countrySupport).toEqual({
-      coverage: "by-country",
-      countries: { MX: ["MXN"], PE: ["USD"] },
-    });
   });
 
   it("distills Coinbase onramp currency limits and crypto support", () => {

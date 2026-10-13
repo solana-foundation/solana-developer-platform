@@ -508,7 +508,6 @@ const USD_PER_UNIT: Record<string, number> = {
 const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
   lightspark: 0.01,
   bvnk: 0.008,
-  mural: 0.006,
   moonpay: 0.035,
   coinbase: 0.015,
   moneygram: 0.02,
@@ -698,16 +697,6 @@ function bvnkBankAccount(fiatCurrency: string, reference: string) {
       };
 }
 
-function muralBankDetails(fiatCurrency: string, reference: string): Record<string, string> {
-  return {
-    bankName: "Mural Sandbox Bank",
-    beneficiaryName: "Mural Pay Sandbox",
-    accountNumber: fiatCurrency === "USD" ? "7721009934" : "CLABE 646180157000000004",
-    ...(fiatCurrency === "USD" ? { routingNumber: "101019644" } : {}),
-    reference,
-  };
-}
-
 /** A provider's on-ramp quote: bank instructions, a hosted checkout, or a widget session. */
 function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQuote {
   const base = { id: q.quoteId, status: "pending" as const };
@@ -751,20 +740,6 @@ function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQ
             bankAccount: bvnkBankAccount(fiatCurrency, reference),
             paymentReference: reference,
             instructionsNotes: "Include the reference so BVNK matches the payment to this deposit.",
-          },
-        ],
-      };
-    case "mural":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "manual_instructions",
-        paymentInstructions: [
-          {
-            provider,
-            fiatCurrency,
-            payinRails: fiatCurrency === "USD" ? ["ACH", "WIRE"] : ["SPEI"],
-            bankDetails: muralBankDetails(fiatCurrency, reference),
           },
         ],
       };

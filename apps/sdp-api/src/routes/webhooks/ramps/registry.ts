@@ -4,7 +4,6 @@ import { BvnkWebhookProcessor } from "./bvnk";
 import { CoinbaseWebhookProcessor } from "./coinbase";
 import { LightsparkWebhookProcessor } from "./lightspark";
 import { MoonpayWebhookProcessor } from "./moonpay";
-import { MuralWebhookProcessor } from "./mural";
 import type { WebhookProcessor } from "./processor";
 import { StripeWebhookProcessor } from "./stripe";
 
@@ -13,7 +12,6 @@ export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   lightspark: new LightsparkWebhookProcessor(),
   bvnk: new BvnkWebhookProcessor(),
   coinbase: new CoinbaseWebhookProcessor(),
-  mural: new MuralWebhookProcessor(),
   stripe: new StripeWebhookProcessor(),
 } as const satisfies Record<
   Exclude<RampProviderId, "moneygram">,

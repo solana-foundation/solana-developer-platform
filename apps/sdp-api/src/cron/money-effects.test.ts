@@ -9,6 +9,7 @@ import { PENDING_DEPOSITS_MONITOR } from "./pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "./pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "./pending-withdrawals";
 import { PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR } from "./provider-credential-secret-cleanup";
+import { RAMP_TRANSFERS_MONITOR } from "./ramp-transfers";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "./recurring-payments";
 import { REVOKED_API_KEY_CACHE_MONITOR } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_MONITOR } from "./rings-indexing";
@@ -27,6 +28,7 @@ describe("cron money effects (HOO-1955)", () => {
         PENDING_TRANSFERS_MONITOR,
         PENDING_WITHDRAWALS_MONITOR,
         PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR,
+        RAMP_TRANSFERS_MONITOR,
         RECURRING_PAYMENTS_COLLECTION_MONITOR,
         REVOKED_API_KEY_CACHE_MONITOR,
         RINGS_INDEXING_MONITOR,

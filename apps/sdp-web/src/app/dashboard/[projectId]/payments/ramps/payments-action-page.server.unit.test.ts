@@ -64,7 +64,6 @@ describe("loadPaymentsActionPageData", () => {
       enabledComplianceProviders: [],
       rampProviderAccess: {
         moonpay: { entitled: true, configured: true, enabled: true },
-        mural: { entitled: true, configured: true, enabled: true },
         stripe: { entitled: true, configured: true, enabled: true },
       },
     };

@@ -9,7 +9,7 @@ import {
   type SdpEnvironment,
 } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import { PERSISTED_RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { internalError } from "@/lib/errors";
 
@@ -31,7 +31,8 @@ export const counterpartyProviderAccountRowSchema = z.object({
   organization_id: z.string(),
   project_id: z.string(),
   counterparty_id: z.string(),
-  provider: z.enum(RAMP_PROVIDERS),
+  // A retired provider's row still reads; writes take a live `RampProviderId`.
+  provider: z.enum(PERSISTED_RAMP_PROVIDERS),
   provider_customer_reference: z.string(),
   kind: z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
   external_account_reference: z.string().nullable(),

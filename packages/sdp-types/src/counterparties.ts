@@ -1,5 +1,5 @@
 import type { Country, CountryCode } from "./countries";
-import type { RampProviderId } from "./provider-access";
+import type { PersistedRampProviderId } from "./provider-access";
 
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
@@ -118,7 +118,8 @@ export type ProviderWalletBalance =
 
 export interface CounterpartyProviderAccount {
   id: string;
-  provider: RampProviderId;
+  /** A retired provider's accounts still read, as stored. */
+  provider: PersistedRampProviderId;
   kind: CounterpartyProviderAccountKind;
   fiatCurrency: string | null;
   destinationCountry: CountryCode | null;
@@ -186,7 +187,7 @@ export interface BvnkCounterpartyProviderCustomerLink extends CounterpartyProvid
 
 export interface GenericCounterpartyProviderCustomerLink
   extends CounterpartyProviderCustomerLinkBase {
-  provider: Exclude<RampProviderId, "bvnk">;
+  provider: Exclude<PersistedRampProviderId, "bvnk">;
   providerCustomerReference: string;
 }
 

@@ -25,7 +25,7 @@ onramp.post(
 );
 onramp.post(
   "/quote",
-  requirePermissions("payments:write", "wallets:read"),
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
   requireAllowedOperation("ramp_onramp_quote"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),

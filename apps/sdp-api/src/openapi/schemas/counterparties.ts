@@ -1,4 +1,9 @@
-import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
+import {
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTRY_CODES,
+  PERSISTED_RAMP_PROVIDERS,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
@@ -324,17 +329,8 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: withOpenApi(z.enum(["lightspark", "mural"]), { example: "mural" }),
+      provider: z.literal("lightspark"),
       status: z.literal("onboarding_not_started"),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("mural"),
-      status: z.literal("terms_of_service_required"),
-      termsOfServiceUrl: withOpenApi(z.url(), {
-        description: "Provider terms-of-service link the counterparty must accept.",
-        example: "https://example.com/terms-of-service",
-      }),
     }),
     z.object({
       ...requirementBase,
@@ -367,7 +363,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: withOpenApi(z.enum(["bvnk", "mural"]), { example: "bvnk" }),
+      provider: z.literal("bvnk"),
       status: z.literal("customer_verification_required"),
       verificationUrl: withOpenApi(z.url(), {
         description: "Provider-hosted identity verification link for the counterparty.",
@@ -376,7 +372,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: withOpenApi(z.enum(["bvnk", "mural"]), { example: "bvnk" }),
+      provider: z.literal("bvnk"),
       status: withOpenApi(z.enum(["customer_verifying", "customer_verification_failed"]), {
         example: "customer_verifying",
       }),
@@ -390,11 +386,6 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.literal("bvnk"),
       status: z.literal("customer_funding_account_provisioning"),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("mural"),
-      status: z.literal("funding_account_provisioning"),
     }),
     z.object({
       ...requirementBase,
@@ -654,8 +645,8 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       description: "Counterparty provider-account row identifier.",
       example: "counterparty_provider_account_example",
     }),
-    provider: withOpenApi(z.enum(RAMP_PROVIDERS), {
-      description: "Ramp provider owning the account.",
+    provider: withOpenApi(z.enum(PERSISTED_RAMP_PROVIDERS), {
+      description: "Ramp provider owning the account. A retired provider's accounts keep its id.",
       example: "lightspark",
     }),
     kind: withOpenApi(
@@ -744,7 +735,7 @@ export const counterpartyProviderAccountSchema = withOpenApi(
           }),
           z.object({
             provider: withOpenApi(
-              z.enum(RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
+              z.enum(PERSISTED_RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
               { example: "lightspark" }
             ),
             ...customerLinkBaseDocFields,

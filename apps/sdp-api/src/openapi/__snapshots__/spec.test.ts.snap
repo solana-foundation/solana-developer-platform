@@ -26,7 +26,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "bvnk",
                       "moneygram",
                       "coinbase",
-                      "mural",
                       "stripe",
                     ],
                     "example": "moonpay",
@@ -1300,7 +1299,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "bvnk",
                       "moneygram",
                       "coinbase",
-                      "mural",
                       "stripe",
                     ],
                     "example": "moonpay",
@@ -3711,7 +3709,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "bvnk",
                       "moneygram",
                       "coinbase",
-                      "mural",
                       "stripe",
                     ],
                     "example": "bvnk",
@@ -3751,9 +3748,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider": {
                     "enum": [
                       "lightspark",
-                      "mural",
                     ],
-                    "example": "mural",
                     "type": "string",
                   },
                   "status": {
@@ -3767,44 +3762,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "direction",
                   "provider",
                   "status",
-                ],
-                "type": "object",
-              },
-              {
-                "properties": {
-                  "direction": {
-                    "description": "Ramp direction evaluated for this counterparty.",
-                    "enum": [
-                      "onramp",
-                      "offramp",
-                    ],
-                    "example": "onramp",
-                    "type": "string",
-                  },
-                  "provider": {
-                    "enum": [
-                      "mural",
-                    ],
-                    "type": "string",
-                  },
-                  "status": {
-                    "enum": [
-                      "terms_of_service_required",
-                    ],
-                    "type": "string",
-                  },
-                  "termsOfServiceUrl": {
-                    "description": "Provider terms-of-service link the counterparty must accept.",
-                    "example": "https://example.com/terms-of-service",
-                    "format": "uri",
-                    "type": "string",
-                  },
-                },
-                "required": [
-                  "direction",
-                  "provider",
-                  "status",
-                  "termsOfServiceUrl",
                 ],
                 "type": "object",
               },
@@ -3896,9 +3853,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider": {
                     "enum": [
                       "bvnk",
-                      "mural",
                     ],
-                    "example": "bvnk",
                     "type": "string",
                   },
                   "status": {
@@ -3936,9 +3891,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider": {
                     "enum": [
                       "bvnk",
-                      "mural",
                     ],
-                    "example": "bvnk",
                     "type": "string",
                   },
                   "status": {
@@ -4008,37 +3961,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "status": {
                     "enum": [
                       "customer_funding_account_provisioning",
-                    ],
-                    "type": "string",
-                  },
-                },
-                "required": [
-                  "direction",
-                  "provider",
-                  "status",
-                ],
-                "type": "object",
-              },
-              {
-                "properties": {
-                  "direction": {
-                    "description": "Ramp direction evaluated for this counterparty.",
-                    "enum": [
-                      "onramp",
-                      "offramp",
-                    ],
-                    "example": "onramp",
-                    "type": "string",
-                  },
-                  "provider": {
-                    "enum": [
-                      "mural",
-                    ],
-                    "type": "string",
-                  },
-                  "status": {
-                    "enum": [
-                      "funding_account_provisioning",
                     ],
                     "type": "string",
                   },

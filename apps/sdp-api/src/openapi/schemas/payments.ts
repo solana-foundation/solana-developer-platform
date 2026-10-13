@@ -2,6 +2,7 @@ import {
   COUNTERPARTY_ENTITY_TYPES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
+  PERSISTED_RAMP_PROVIDERS,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   RAMP_FIAT_CURRENCIES,
   RAMP_PROVIDERS,
@@ -535,8 +536,9 @@ export const transferSchema = z
       }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
-    provider: z.enum(RAMP_PROVIDERS).optional().openapi({
-      description: "Ramp provider for on-ramp and off-ramp transfer records.",
+    provider: z.enum(PERSISTED_RAMP_PROVIDERS).optional().openapi({
+      description:
+        "Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.",
       example: "moonpay",
     }),
     counterpartyId: z.string().optional().openapi({

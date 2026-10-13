@@ -116,3 +116,25 @@ The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE
 Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
+
+## Ramps: retired provider ids
+
+A removed ramp provider's id moves from `RAMP_PROVIDERS` to
+`RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
+
+- **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
+  schema and the `ramp_webhook_events` row parse `provider` against
+  `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id
+  this deployment does not know throws instead of being cast. Write inputs keep
+  `RampProviderId`, so nothing creates a row for a retired provider.
+- **Dispatch goes through `resolveRampProviderClient`** (`@sdp/payments/ramps`):
+  a retired or unknown id answers 503 `PROVIDER_NOT_CONFIGURED`. Retired rows
+  list as stored, without enrichment; actions on them answer 503.
+- **Replay only claims rows it can parse.** The claim, park and re-arm
+  statements filter on `PERSISTED_RAMP_PROVIDERS`, so an unknown provider's row
+  waits for the deployment that knows it. A retired provider's row parks, not
+  terminally, for want of a processor.
+- **Retiring a provider:** move the id, delete its code, leave its migrations
+  and SQL predicates alone. The fixtures in
+  `../../routes/payments.retired-ramp-providers.test.ts` run over every
+  retired id.

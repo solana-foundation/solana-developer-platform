@@ -120,7 +120,7 @@ describe("ramp requirements", () => {
   });
 
   it("is ready at once with providers that run no onboarding", () => {
-    for (const provider of ["mural", "moonpay", "coinbase", "moneygram", "stripe"]) {
+    for (const provider of ["moonpay", "coinbase", "moneygram", "stripe"]) {
       expect(
         read(`/v1/counterparties/demo_cpty_jane/requirements?provider=${provider}`).body.data.status
       ).toBe("ready");
@@ -399,7 +399,7 @@ describe("ramp estimates and quotes", () => {
       return quoted?.status === 201 ? quoted.body.data.quote.paymentInstructions[0] : null;
     };
     for (const fiat of ["USD", "EUR", "GBP", "MXN", "ARS"]) {
-      for (const provider of ["lightspark", "bvnk", "mural"]) {
+      for (const provider of ["lightspark", "bvnk"]) {
         const instruction = instructions(provider, fiat);
         if (instruction) expect(instruction.provider).toBe(provider);
       }
@@ -463,7 +463,7 @@ describe("ramp pay-ins and cancels", () => {
     expect(simulate({})?.status).toBe(400);
     // The provider's own sandbox payloads are not what the API takes any more.
     expect(
-      simulate({ provider: "mural", payload: { counterpartyId: "demo_cpty_jane" } })?.status
+      simulate({ provider: "lightspark", payload: { counterpartyId: "demo_cpty_jane" } })?.status
     ).toBe(400);
     expect(refusal(simulate({ transferId: "demo_xfr_nobody" }))).toEqual([404, "not_found"]);
     const { transferId } = deposit();

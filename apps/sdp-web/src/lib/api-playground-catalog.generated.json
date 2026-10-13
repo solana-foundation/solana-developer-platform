@@ -738,10 +738,6 @@
                 "value": "coinbase"
               },
               {
-                "label": "mural",
-                "value": "mural"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3535,10 +3531,6 @@
                 "value": "coinbase"
               },
               {
-                "label": "mural",
-                "value": "mural"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -4244,10 +4236,6 @@
               {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",
@@ -5638,10 +5626,6 @@
               {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",

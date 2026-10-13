@@ -93,7 +93,7 @@ function buildApp(observability: Observability) {
   // identity echoed back in the message, and the request payload hung off the
   // error as `context`.
   app.all(PII_UNEXPECTED_ERROR_PATH, () => {
-    throw Object.assign(new Error("Mural rejected jane.doe@example.com (phone=+15551234567)"), {
+    throw Object.assign(new Error("Provider rejected jane.doe@example.com (phone=+15551234567)"), {
       context: {
         counterpartyId: "cp_1",
         identity: { firstName: "Jane", lastName: "Doe", dateOfBirth: "1988-04-02" },

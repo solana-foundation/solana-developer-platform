@@ -61,7 +61,6 @@ The full status union, discriminated on `(provider, status)` (lightspark's `read
 | every provider | `ready`, `collect(fields)`, `unsupported(reason)` |
 | lightspark | `onboarding_not_started`, `collect_counterparty(fields)`, `collect_account(payout: PayoutRequirementTree)`, offramp `ready(providerAccountId, payout?)` |
 | bvnk | `onboarding_not_started`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning`, `provisioning_failed` |
-| mural | `onboarding_not_started`, `terms_of_service_required(termsOfServiceUrl)`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning` |
 
 The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src/ramp-requirements.ts` — re-read it before editing; this table goes stale. Extend it only when generic `ready` / `collect` / `unsupported` cannot represent the provider.
 

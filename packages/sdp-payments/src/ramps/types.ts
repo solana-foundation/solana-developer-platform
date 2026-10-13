@@ -32,13 +32,6 @@ import type { StripeCustomerInfo } from "./providers/stripe/client";
 export type { BvnkCustomerResolution } from "./providers/bvnk/provider-data";
 export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 export type { LightsparkCustomerResolution } from "./providers/lightspark/client";
-export type {
-  MuralAccountResolution,
-  MuralKycStatus,
-  MuralOrganizationResolution,
-  MuralPayinMethod,
-  MuralTosStatus,
-} from "./providers/mural/provider-data";
 export type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export const rampPayoutFieldSchema = z

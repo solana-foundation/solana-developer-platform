@@ -28,6 +28,7 @@ import {
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env as baseEnv } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -154,7 +155,7 @@ describe("SPC gateway auth — KV cache + 401 retry (Redis KV + Postgres)", () =
     const result = await withGatewayRpc(testEnv, GATEWAY_URL, auth, async (rpc) => {
       attempts += 1;
       if (attempts === 1) {
-        throw { context: { statusCode: 401 } };
+        throw rpcHttpError(401);
       }
       return rpc;
     });

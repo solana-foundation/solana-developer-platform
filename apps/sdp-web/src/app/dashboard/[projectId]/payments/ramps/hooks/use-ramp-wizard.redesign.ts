@@ -421,10 +421,10 @@ export function useRampWizard<TId extends string>(
         toast.dismiss(toastId);
         return;
       }
-      // From the memo step (a provider with no fields to collect, such as a first Mural
-      // onboarding) an unfinished onboarding moves on too: the memo step has nowhere to show
-      // the terms or verification link, so staying would strand the user. The last step shows
-      // the onboarding and the readiness effect quotes once it reaches ready.
+      // From the memo step (a provider with no fields to collect) an unfinished onboarding
+      // moves on too: the memo step has nowhere to show the verification link, so staying
+      // would strand the user. The last step shows the onboarding and the readiness effect
+      // quotes once it reaches ready.
       // Reaching the transaction stage with derived readiness fires the quote
       // through the single readiness effect above.
       setStepIndex((current) => current + 1);

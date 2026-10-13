@@ -26,6 +26,7 @@ import {
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
   runProviderCredentialSecretCleanup,
 } from "./provider-credential-secret-cleanup";
+import { RAMP_TRANSFERS_CRON, runRampTransfersReconciliation } from "./ramp-transfers";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -144,6 +145,11 @@ vi.mock("./provider-credential-secret-cleanup", () => ({
   runProviderCredentialSecretCleanup: vi.fn(),
 }));
 
+vi.mock("./ramp-transfers", () => ({
+  RAMP_TRANSFERS_CRON: "* * * * *",
+  runRampTransfersReconciliation: vi.fn(),
+}));
+
 function makeBg(): BackgroundRunner {
   return { run: vi.fn(), awaitAll: vi.fn(async () => {}), draining: false };
 }
@@ -171,6 +177,7 @@ describe("startCron", () => {
     vi.mocked(runRingsIndexingPoll).mockReset();
     vi.mocked(runSecretRetirements).mockReset();
     vi.mocked(runProviderCredentialSecretCleanup).mockReset();
+    vi.mocked(runRampTransfersReconciliation).mockReset();
     vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
   });
 
@@ -181,7 +188,7 @@ describe("startCron", () => {
   // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { ...CHANNEL, SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 13;
+  const ALL_TASKS = 14;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { ...CHANNEL, DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -211,6 +218,29 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[10][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
     expect(scheduleMock.mock.calls[11][0]).toBe(DVP_TRADES_CRON);
     expect(scheduleMock.mock.calls[12][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[13][0]).toBe(RAMP_TRANSFERS_CRON);
+  });
+
+  // The managed job runs the same ramp list (job.node.test.ts), so a ramp job
+  // can't run on one scheduler only.
+  it("schedules ramp transfer reconciliation behind no flag, under a system identity", () => {
+    const bg = makeBg();
+    const observability = makeObservability();
+    vi.mocked(runRampTransfersReconciliation).mockImplementationOnce(() => {
+      expect(currentDatabaseIdentity()).toEqual({
+        kind: "system",
+        component: "cron:ramp-transfers",
+      });
+    });
+    startCron({ env: SELF_HOSTED_NO_PROFILES, bg, observability });
+
+    (scheduleMock.mock.calls[13][1] as () => void)();
+
+    expect(runRampTransfersReconciliation).toHaveBeenCalledExactlyOnceWith({
+      env: SELF_HOSTED_NO_PROFILES,
+      bg,
+      observability: expect.anything(),
+    });
   });
 
   it("always schedules revoked API key cache reconciliation", () => {

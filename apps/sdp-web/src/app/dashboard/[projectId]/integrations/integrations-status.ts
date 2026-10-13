@@ -39,7 +39,6 @@ const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
   bvnk: "Shared.integrations.rampBvnkDescription",
   moneygram: "Shared.integrations.rampMoneygramDescription",
   coinbase: "Shared.integrations.rampCoinbaseDescription",
-  mural: "Shared.integrations.rampMuralDescription",
   stripe: "Shared.integrations.rampStripeDescription",
 };
 
@@ -56,7 +55,6 @@ export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   bvnk: "BVNK",
   moneygram: "MoneyGram",
   coinbase: "Coinbase",
-  mural: "Mural",
   stripe: "Stripe",
 };
 

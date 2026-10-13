@@ -1062,7 +1062,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   });
   const kycStatusSchema = z.enum(KYC_STATUSES).openapi({
     description:
-      "SDP-owned, provider-agnostic KYC status of the wallet. KYC providers (Mural today) write into it.",
+      "SDP-owned, provider-agnostic KYC status of the wallet.",
     example: "verified",
   });
   const enrollmentFields = {
@@ -1118,7 +1118,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       kyc_provider: z.string().nullable().openapi({
         description:
           "Provider that last set the KYC status, if any. Records who verified the wallet; `kyc_status` is the source of truth.",
-        example: "mural",
+        example: null,
       }),
       provider_ref: z.string().nullable().openapi({
         description:
