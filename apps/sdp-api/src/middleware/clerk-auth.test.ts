@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import type { InvitationStatus, LegacyOrganizationRole, MemberStatus } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -17,7 +18,12 @@ import {
   signTestClerkClaims,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
-import { readInvitations, seedRemovedMember } from "@/test/helpers/organization-invitations";
+import {
+  readInvitations,
+  readMemberships,
+  seedInvitations,
+  seedRemovedMember,
+} from "@/test/helpers/organization-invitations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -260,7 +266,7 @@ describe("Clerk auth request cache", () => {
     const membership = await getDb(env)
       .prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
       .bind(TEST_ORG.id, "usr_test_clerk_second_admin")
-      .first<{ role: string }>();
+      .first<{ role: LegacyOrganizationRole }>();
     assert(membership !== null);
     expect(membership.role).toBe("admin");
   });
@@ -334,7 +340,7 @@ describe("Clerk auth request cache", () => {
     const membership = await getDb(env)
       .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
       .bind(TEST_ORG.id, TEST_USER.id)
-      .first<{ status: string }>();
+      .first<{ status: MemberStatus }>();
     assert(membership !== null);
     expect(membership.status).toBe("removed");
   });
@@ -441,24 +447,19 @@ describe("Clerk auth request cache", () => {
     ]);
   });
 
-  async function seedInvitation(status: string, createdAt: string, expiresInDays: number) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO invitations
-           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
-         VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        `inv_${status}_${createdAt}`,
-        TEST_ORG.id,
-        TEST_USER.email,
-        TEST_USER.id,
-        `hash_${status}_${createdAt}`,
-        new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+  async function seedInvitation(status: InvitationStatus, createdAt: string) {
+    await seedInvitations(getDb(env), [
+      {
+        id: `inv_${status}_${createdAt}`,
+        organizationId: TEST_ORG.id,
+        email: TEST_USER.email,
+        role: "member",
+        invitedBy: TEST_USER.id,
         status,
-        createdAt
-      )
-      .run();
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        createdAt,
+      },
+    ]);
   }
 
   function cachedUserPayload(): ClerkJwtPayload {
@@ -471,10 +472,7 @@ describe("Clerk auth request cache", () => {
   }
 
   function readTestOrgMemberships() {
-    return getDb(env).queryMany<{ role: string; status: string }>(
-      "SELECT role, status FROM organization_members WHERE organization_id = ?",
-      [TEST_ORG.id]
-    );
+    return readMemberships(getDb(env), TEST_ORG.id);
   }
 
   it("refuses a sign-in into a deleted organization for a user with no membership", async () => {
@@ -503,7 +501,7 @@ describe("Clerk auth request cache", () => {
 
   it("reactivates a removed member through a live invitation and accepts it", async () => {
     await seedRemovedMember(getDb(env), { organizationId: TEST_ORG.id, userId: TEST_USER.id });
-    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
@@ -524,7 +522,7 @@ describe("Clerk auth request cache", () => {
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
@@ -550,7 +548,7 @@ describe("Clerk auth request cache", () => {
       .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_test_clerk_user_cached'")
       .bind("{{user.primary_email_address.email_address}}")
       .run();
-    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
@@ -564,14 +562,14 @@ describe("Clerk auth request cache", () => {
     const membership = await getDb(env)
       .prepare("SELECT role FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
-      .first<{ role: string }>();
+      .first<{ role: LegacyOrganizationRole }>();
     assert(membership !== null);
     expect(membership.role).toBe("member");
 
     const invitation = await getDb(env)
       .prepare("SELECT status FROM invitations WHERE organization_id = ?")
       .bind(TEST_ORG.id)
-      .first<{ status: string }>();
+      .first<{ status: InvitationStatus }>();
     assert(invitation !== null);
     expect(invitation.status).toBe("accepted");
   });
@@ -634,8 +632,8 @@ describe("Clerk auth request cache", () => {
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
-    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
@@ -648,7 +646,7 @@ describe("Clerk auth request cache", () => {
   });
 
   it("does not lock out an existing member carrying a stale revoked invitation", async () => {
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(

@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import type { InvitationStatus, OrganizationRole } from "@sdp/types";
+import type {
+  InvitationStatus,
+  LegacyOrganizationRole,
+  MemberStatus,
+  OrganizationRole,
+} from "@sdp/types";
 import type { DatabaseClient } from "@/db";
 import type { Organization, User } from "@/test/helpers/factories";
 
@@ -11,6 +16,7 @@ export interface InvitationSeed {
   invitedBy: string;
   status: InvitationStatus;
   expiresAt: string;
+  createdAt: string;
 }
 
 /**
@@ -62,8 +68,8 @@ export async function seedInvitations(
       db
         .prepare(
           `INSERT INTO invitations
-             (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           invitation.id,
@@ -73,7 +79,8 @@ export async function seedInvitations(
           invitation.invitedBy,
           `hash_${invitation.id}`,
           invitation.expiresAt,
-          invitation.status
+          invitation.status,
+          invitation.createdAt
         )
     )
   );
@@ -87,9 +94,26 @@ export async function seedInvitations(
  */
 export async function readInvitations(
   db: DatabaseClient
-): Promise<{ id: string; role: string; status: string }[]> {
-  return db.queryMany<{ id: string; role: string; status: string }>(
+): Promise<{ id: string; role: LegacyOrganizationRole; status: InvitationStatus }[]> {
+  return db.queryMany<{ id: string; role: LegacyOrganizationRole; status: InvitationStatus }>(
     "SELECT id, role, status FROM invitations ORDER BY id"
+  );
+}
+
+/**
+ * Reads the role and status of every membership in one organization, ordered by id.
+ *
+ * @param db - Test database client.
+ * @param organizationId - Organization whose memberships are read.
+ * @returns The membership rows.
+ */
+export async function readMemberships(
+  db: DatabaseClient,
+  organizationId: string
+): Promise<{ role: LegacyOrganizationRole; status: MemberStatus }[]> {
+  return db.queryMany<{ role: LegacyOrganizationRole; status: MemberStatus }>(
+    "SELECT role, status FROM organization_members WHERE organization_id = ? ORDER BY id",
+    [organizationId]
   );
 }
 

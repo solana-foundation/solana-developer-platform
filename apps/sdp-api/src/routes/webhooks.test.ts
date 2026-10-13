@@ -14,7 +14,16 @@ import {
   bvnkLedgerWallet,
   bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS, type PaymentTransferStatus } from "@sdp/types";
+import {
+  type ApiKeyStatus,
+  BVNK_FUNDING_WALLET_STATUS,
+  type InvitationStatus,
+  type LegacyOrganizationRole,
+  type MemberStatus,
+  type OrganizationRole,
+  type OrganizationStatus,
+  type PaymentTransferStatus,
+} from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -51,6 +60,7 @@ import { startJsonServer } from "@/test/helpers/json-server";
 import {
   type InvitationSeed,
   readInvitations,
+  readMemberships,
   seedInvitations,
   seedOrganizationsAndUsers,
   seedRemovedMember,
@@ -474,13 +484,13 @@ describe("Clerk webhooks", () => {
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_unverified_collision")
       .first<{
-        role: string;
-        status: string;
+        role: LegacyOrganizationRole;
+        status: MemberStatus;
       }>();
     expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
-  async function syncMembershipAfterInvitation(invitationStatuses: string[]): Promise<{
-    status: string;
+  async function syncMembershipAfterInvitation(invitationStatuses: InvitationStatus[]): Promise<{
+    status: MemberStatus;
   } | null> {
     const clerkOrgId = `org_clerk_revoked_${invitationStatuses.join("_")}`;
     const organizationId = `org_revoked_${invitationStatuses.join("_")}`;
@@ -539,7 +549,7 @@ describe("Clerk webhooks", () => {
           WHERE om.organization_id = ? AND u.email = ?`)
       .bind(organizationId, email)
       .first<{
-        status: string;
+        status: MemberStatus;
       }>();
   }
   it("declines a Clerk membership when the invitation was revoked", async () => {
@@ -611,8 +621,8 @@ describe("Clerk webhooks", () => {
         email: string;
         user_id: string;
         organization_id: string;
-        role: string;
-        status: string;
+        role: LegacyOrganizationRole;
+        status: MemberStatus;
       }>();
     expect(membership).toMatchObject({
       email: "admin@example.com",
@@ -655,7 +665,7 @@ describe("Clerk webhooks", () => {
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
       .first<{
-        status: string;
+        status: MemberStatus;
       }>();
     expect(required(removed).status).toBe("removed");
     const delayedUserUpdate = await simulateClerkWebhook({
@@ -680,7 +690,7 @@ describe("Clerk webhooks", () => {
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
       .first<{
-        status: string;
+        status: MemberStatus;
       }>();
     expect(required(stillRemoved).status).toBe("removed");
     const readded = await simulateClerkWebhook({
@@ -706,7 +716,7 @@ describe("Clerk webhooks", () => {
          WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
       .first<{
-        status: string;
+        status: MemberStatus;
       }>();
     expect(required(afterReadd).status).toBe("removed");
   });
@@ -835,9 +845,9 @@ describe("Clerk webhooks", () => {
          WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
       .bind("org_clerk_lifecycle")
       .first<{
-        org_status: string;
-        member_status: string;
-        api_key_status: string;
+        org_status: OrganizationStatus;
+        member_status: MemberStatus;
+        api_key_status: ApiKeyStatus;
       }>();
     expect(lifecycleState).toEqual({
       org_status: "deleted",
@@ -846,7 +856,8 @@ describe("Clerk webhooks", () => {
     });
   });
   const INVITATION_EXPIRES_AT = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  async function seedClerkAdmin(slug: string) {
+  const INVITATION_CREATED_AT = "2026-01-01 00:00:00";
+  async function seedClerkMember(slug: string, role: OrganizationRole) {
     const member = {
       organizationId: `org_${slug}`,
       clerkOrgId: `org_clerk_${slug}`,
@@ -858,14 +869,8 @@ describe("Clerk webhooks", () => {
       organizations: [createOrganization({ id: member.organizationId, slug })],
       users: [createUser({ id: member.userId, email: member.email })],
     });
-    await seedClerkIdentity(getDb(env), { ...member, orgSlug: slug, role: "admin" });
+    await seedClerkIdentity(getDb(env), { ...member, orgSlug: slug, role });
     return member;
-  }
-  function readMemberships(organizationId: string) {
-    return getDb(env).queryMany<{ role: string; status: string }>(
-      "SELECT role, status FROM organization_members WHERE organization_id = ?",
-      [organizationId]
-    );
   }
   function readUserStatus(userId: string) {
     return getDb(env).queryMany<{ status: string }>("SELECT status FROM users WHERE id = ?", [
@@ -873,7 +878,7 @@ describe("Clerk webhooks", () => {
     ]);
   }
   it("keeps a removed member removed on a membership update without a live invitation", async () => {
-    const member = await seedClerkAdmin("webhook-removed");
+    const member = await seedClerkMember("webhook-removed", "admin");
     await seedRemovedMember(getDb(env), member);
     mockClerkUserLookup(member.clerkUserId, member.email, {
       verificationStatus: "verified",
@@ -890,32 +895,74 @@ describe("Clerk webhooks", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await readMemberships(member.organizationId)).toEqual([
+    expect(await readMemberships(getDb(env), member.organizationId)).toEqual([
       { role: "admin", status: "removed" },
     ]);
   });
-  it("revokes the removed member's pending invitation when Clerk deletes the membership", async () => {
-    const member = await seedClerkAdmin("webhook-membership-deleted");
-    const inviter = createUser({ id: "usr_webhook_inviter", email: "webhook-inviter@example.com" });
-    await seedOrganizationsAndUsers(getDb(env), { organizations: [], users: [inviter] });
+  it("keeps an active member's SDP role when a membership update carries a different Clerk role", async () => {
+    const member = await seedClerkMember("webhook-role-kept", "member");
+    mockClerkUserLookup(member.clerkUserId, member.email, {
+      verificationStatus: "verified",
+      memberships: [],
+    });
+
+    const res = await simulateClerkWebhook({
+      type: "organizationMembership.updated",
+      data: {
+        organization: { id: member.clerkOrgId, name: "Role Kept Org", slug: "webhook-role-kept" },
+        role: "org:admin",
+        public_user_data: { user_id: member.clerkUserId, identifier: member.email },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await readMemberships(getDb(env), member.organizationId)).toEqual([
+      { role: "member", status: "active" },
+    ]);
+  });
+  it("joins a member without an invitation at the event's Clerk role", async () => {
+    const clerkOrganization = {
+      id: "org_clerk_webhook_event_role",
+      name: "Event Role Org",
+      slug: "webhook-event-role",
+    };
+    mockClerkUserLookup("user_clerk_webhook_event_role", "webhook-event-role@example.com", {
+      verificationStatus: "verified",
+      memberships: [{ role: "org:member", organization: clerkOrganization }],
+    });
+
+    const res = await simulateClerkWebhook({
+      type: "organizationMembership.created",
+      data: {
+        organization: clerkOrganization,
+        role: "org:admin",
+        public_user_data: {
+          user_id: "user_clerk_webhook_event_role",
+          identifier: "webhook-event-role@example.com",
+        },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(
+      await getDb(env).queryMany<{ role: LegacyOrganizationRole; status: MemberStatus }>(
+        "SELECT role, status FROM organization_members"
+      )
+    ).toEqual([{ role: "admin", status: "active" }]);
+  });
+  it("keeps a re-invite pending when a late Clerk deletion arrives for an already removed member", async () => {
+    const member = await seedClerkMember("webhook-late-delete", "admin");
+    await seedRemovedMember(getDb(env), member);
     await seedInvitations(getDb(env), [
       {
-        id: "inv_webhook_member",
+        id: "inv_webhook_reinvite",
         organizationId: member.organizationId,
         email: member.email,
-        role: "admin",
-        invitedBy: inviter.id,
-        status: "pending",
-        expiresAt: INVITATION_EXPIRES_AT,
-      },
-      {
-        id: "inv_webhook_other",
-        organizationId: member.organizationId,
-        email: "webhook-other@example.com",
         role: "member",
-        invitedBy: inviter.id,
+        invitedBy: member.userId,
         status: "pending",
         expiresAt: INVITATION_EXPIRES_AT,
+        createdAt: INVITATION_CREATED_AT,
       },
     ]);
 
@@ -928,7 +975,50 @@ describe("Clerk webhooks", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await readMemberships(member.organizationId)).toEqual([
+    expect(await readMemberships(getDb(env), member.organizationId)).toEqual([
+      { role: "admin", status: "removed" },
+    ]);
+    expect(await readInvitations(getDb(env))).toEqual([
+      { id: "inv_webhook_reinvite", role: "member", status: "pending" },
+    ]);
+  });
+  it("revokes the removed member's pending invitation when Clerk deletes the membership", async () => {
+    const member = await seedClerkMember("webhook-membership-deleted", "admin");
+    const inviter = createUser({ id: "usr_webhook_inviter", email: "webhook-inviter@example.com" });
+    await seedOrganizationsAndUsers(getDb(env), { organizations: [], users: [inviter] });
+    await seedInvitations(getDb(env), [
+      {
+        id: "inv_webhook_member",
+        organizationId: member.organizationId,
+        email: member.email,
+        role: "admin",
+        invitedBy: inviter.id,
+        status: "pending",
+        expiresAt: INVITATION_EXPIRES_AT,
+        createdAt: INVITATION_CREATED_AT,
+      },
+      {
+        id: "inv_webhook_other",
+        organizationId: member.organizationId,
+        email: "webhook-other@example.com",
+        role: "member",
+        invitedBy: inviter.id,
+        status: "pending",
+        expiresAt: INVITATION_EXPIRES_AT,
+        createdAt: INVITATION_CREATED_AT,
+      },
+    ]);
+
+    const res = await simulateClerkWebhook({
+      type: "organizationMembership.deleted",
+      data: {
+        organization: { id: member.clerkOrgId },
+        public_user_data: { user_id: member.clerkUserId },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await readMemberships(getDb(env), member.organizationId)).toEqual([
       { role: "admin", status: "removed" },
     ]);
     expect(await readInvitations(getDb(env))).toEqual([
@@ -937,7 +1027,7 @@ describe("Clerk webhooks", () => {
     ]);
   });
   it("revokes pending invitations when Clerk deletes the organization", async () => {
-    const member = await seedClerkAdmin("webhook-org-deleted");
+    const member = await seedClerkMember("webhook-org-deleted", "admin");
     await seedInvitations(getDb(env), [
       {
         id: "inv_webhook_org_deleted",
@@ -947,6 +1037,7 @@ describe("Clerk webhooks", () => {
         invitedBy: member.userId,
         status: "pending",
         expiresAt: INVITATION_EXPIRES_AT,
+        createdAt: INVITATION_CREATED_AT,
       },
     ]);
 
@@ -961,7 +1052,7 @@ describe("Clerk webhooks", () => {
     ]);
   });
   it("removes the user and revokes their pending invitations in every organization on user.deleted", async () => {
-    const member = await seedClerkAdmin("webhook-user-deleted");
+    const member = await seedClerkMember("webhook-user-deleted", "admin");
     const organizationA = createOrganization({ id: "org_webhook_ud_a", slug: "ud-a" });
     const organizationB = createOrganization({ id: "org_webhook_ud_b", slug: "ud-b" });
     await seedOrganizationsAndUsers(getDb(env), {
@@ -981,6 +1072,7 @@ describe("Clerk webhooks", () => {
           invitedBy: member.userId,
           status: "pending",
           expiresAt: INVITATION_EXPIRES_AT,
+          createdAt: INVITATION_CREATED_AT,
         })
       )
     );
@@ -992,7 +1084,7 @@ describe("Clerk webhooks", () => {
 
     expect(res.status).toBe(200);
     expect(await readUserStatus(member.userId)).toEqual([{ status: "deleted" }]);
-    expect(await readMemberships(member.organizationId)).toEqual([
+    expect(await readMemberships(getDb(env), member.organizationId)).toEqual([
       { role: "admin", status: "removed" },
     ]);
     expect(await readInvitations(getDb(env))).toEqual([
@@ -1002,7 +1094,7 @@ describe("Clerk webhooks", () => {
     ]);
   });
   it("keeps a deleted user deleted on a later user.updated", async () => {
-    const member = await seedClerkAdmin("webhook-deleted-user-updated");
+    const member = await seedClerkMember("webhook-deleted-user-updated", "admin");
     mockClerkUserLookup(member.clerkUserId, member.email, {
       verificationStatus: "verified",
       memberships: [],

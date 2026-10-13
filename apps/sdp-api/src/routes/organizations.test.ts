@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Organization } from "@sdp/types";
+import type { MemberStatus, Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -350,7 +350,7 @@ describe("Organizations routes", () => {
         .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
-          status: string;
+          status: MemberStatus;
         }>();
       for (const member of members.results) {
         expect(member.status).toBe("removed");
@@ -375,6 +375,7 @@ describe("Organizations routes", () => {
           invitedBy: TEST_USER.id,
           status: "pending",
           expiresAt,
+          createdAt: "2026-01-01 00:00:00",
         },
         {
           id: "inv_test_organizations_other",
@@ -384,6 +385,7 @@ describe("Organizations routes", () => {
           invitedBy: TEST_USER.id,
           status: "pending",
           expiresAt,
+          createdAt: "2026-01-01 00:00:00",
         },
       ]);
 
