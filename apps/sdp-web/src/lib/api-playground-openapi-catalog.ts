@@ -109,7 +109,12 @@ type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 /** Example responses are JSON (the catalog's, and the hand-authored forms'). */
 const jsonSchema: z.ZodType<Json> = z.json();
 
-/** An example response without values the channel does not run (the API prunes the same way). */
+/**
+ * An example without values the channel does not run. Only the naming field
+ * goes: catalog samples are synthesized from property examples, so dropping a
+ * whole object would also drop, say, a plain transfer whose optional `provider`
+ * example names a ramp provider.
+ */
 function pruneExample(value: Json, published: Published): Json | undefined {
   if (typeof value === "string") return published(value) ? value : undefined;
   if (Array.isArray(value)) {
@@ -118,12 +123,8 @@ function pruneExample(value: Json, published: Published): Json | undefined {
       .filter((entry): entry is Json => entry !== undefined);
   }
   if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value);
-    if (entries.some(([, field]) => typeof field === "string" && !published(field))) {
-      return undefined;
-    }
     const kept: { [key: string]: Json } = {};
-    for (const [key, field] of entries) {
+    for (const [key, field] of Object.entries(value)) {
       const prunedField = pruneExample(field, published);
       if (prunedField !== undefined) kept[key] = prunedField;
     }
@@ -132,17 +133,43 @@ function pruneExample(value: Json, published: Published): Json | undefined {
   return value;
 }
 
+/** A JSON body default with the unpublished values pruned, formatted as the catalog writes it. */
+function pruneJsonDefault(defaultValue: string, published: Published): string {
+  const pruned = pruneExample(jsonSchema.parse(JSON.parse(defaultValue)), published);
+  if (pruned === undefined) throw new Error("A JSON body default names only unpublished values");
+  return JSON.stringify(pruned, null, 2);
+}
+
+/**
+ * A field without the values the channel does not run, or undefined when the
+ * field is a select with no option left (the API drops that parameter too).
+ */
 function pruneField(
   field: ApiPlaygroundFieldConfig,
   published: Published
-): ApiPlaygroundFieldConfig {
+): ApiPlaygroundFieldConfig | undefined {
   const options = field.options?.filter((option) => published(option.value));
+  if (field.options !== undefined && field.options.length > 0 && options?.length === 0) {
+    return undefined;
+  }
+  if (field.valueType === "json" && field.defaultValue !== undefined) {
+    return { ...field, options, defaultValue: pruneJsonDefault(field.defaultValue, published) };
+  }
   const keepDefault = field.defaultValue === undefined || published(field.defaultValue);
   return {
     ...field,
     options,
     defaultValue: keepDefault ? field.defaultValue : options?.[0]?.value,
   };
+}
+
+function pruneFields(
+  fields: ApiPlaygroundFieldConfig[],
+  published: Published
+): ApiPlaygroundFieldConfig[] {
+  return fields
+    .map((field) => pruneField(field, published))
+    .filter((field): field is ApiPlaygroundFieldConfig => field !== undefined);
 }
 
 /**
@@ -171,8 +198,8 @@ export function filterPlaygroundEndpointsToReleaseChannel(
     })
     .map((endpoint) => ({
       ...endpoint,
-      pathFields: endpoint.pathFields.map((field) => pruneField(field, published)),
-      bodyFields: endpoint.bodyFields.map((field) => pruneField(field, published)),
+      pathFields: pruneFields(endpoint.pathFields, published),
+      bodyFields: pruneFields(endpoint.bodyFields, published),
       expectedResponse: pruneExample(jsonSchema.parse(endpoint.expectedResponse), published),
     }));
 }

@@ -51,7 +51,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Treasury wallet\",\n  \"purpose\": \"transfer\"\n}",
             "required": true
           }
         ],

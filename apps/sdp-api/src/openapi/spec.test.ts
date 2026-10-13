@@ -576,8 +576,8 @@ describe("OpenAPI spec", () => {
     expect(requestSchema.properties).toBeUndefined();
     expect(requestSchema.example).toEqual({
       provider: "privy",
-      label: "Mint authority wallet",
-      purpose: "mint_authority",
+      label: "Treasury wallet",
+      purpose: "transfer",
     });
   });
 

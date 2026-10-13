@@ -95,6 +95,27 @@ describe("API playground release channel", () => {
     expect(JSON.stringify(transactions?.expectedResponse)).not.toMatch(/"(issuance|dvp|rings)"/);
   });
 
+  it("prunes values, not the objects that hold them, and drops selects left empty", () => {
+    const payments = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("payments"),
+      "stable"
+    );
+    const batches = payments.find((endpoint) => endpoint.id === "create-payment-transfer-batch");
+    expect(JSON.stringify(batches?.expectedResponse)).toMatch(/"transfers":\[\{/);
+    expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|bvnk|stripe/);
+
+    const transfers = payments.find((endpoint) => endpoint.id === "list-payment-transfers");
+    expect(transfers?.pathFields.map((field) => field.key)).not.toContain("provider");
+
+    const wallet = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("wallets"),
+      "stable"
+    ).find((endpoint) => endpoint.id === "create-wallet");
+    const body = wallet?.bodyFields.find((field) => field.key === "$body")?.defaultValue ?? "";
+    expect(body).not.toMatch(/mint_authority/);
+    expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
+  });
+
   it("filters every playground's forms on every channel without rejecting their examples", () => {
     const builders = [
       buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
