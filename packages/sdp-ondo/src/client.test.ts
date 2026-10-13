@@ -26,6 +26,10 @@ const PRODUCTION_SCOPE: Parameters<typeof runInClusterScope>[0] = {
   projectId: "proj_ondo_client",
   environment: "production",
 };
+const SANDBOX_SCOPE: Parameters<typeof runInClusterScope>[0] = {
+  projectId: "proj_ondo_client",
+  environment: "sandbox",
+};
 
 function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
   return {
@@ -44,15 +48,19 @@ function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
   };
 }
 
-function makeClient(port: Partial<OndoSwapPort>) {
+function makeClientIn(scope: Parameters<typeof runInClusterScope>[0], port: Partial<OndoSwapPort>) {
   const swapPort: OndoSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "0", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => leg("0")),
   };
   return new OndoVaultDirectClient(
-    (_label, operation) => runInClusterScope(PRODUCTION_SCOPE, () => operation(() => {})),
+    (_label, operation) => runInClusterScope(scope, () => operation(() => {})),
     () => swapPort
   );
+}
+
+function makeClient(port: Partial<OndoSwapPort>) {
+  return makeClientIn(PRODUCTION_SCOPE, port);
 }
 
 function tokenAccount(amount: string, pubkey = USDY_ATA, state = "initialized") {
@@ -435,7 +443,7 @@ describe("readVaultPositions", () => {
   });
 
   it("fails closed on a sandbox request: devnet has no deployment", async () => {
-    const client = makeClient({});
+    const client = makeClientIn(SANDBOX_SCOPE, {});
     await expect(
       client.readVaultPositions(
         { env: {}, environment: "sandbox" },
