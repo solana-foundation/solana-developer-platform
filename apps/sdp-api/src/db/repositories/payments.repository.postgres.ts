@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
@@ -917,8 +918,11 @@ export function createPostgresPaymentsRepository(
         return [];
       }
 
-      const clauses = [`pt.status IN (${buildInClause(statuses.length)})`];
-      const values: unknown[] = [...statuses];
+      const clauses = [
+        "pt.project_id IN (SELECT id FROM projects WHERE environment = ?)",
+        `pt.status IN (${buildInClause(statuses.length)})`,
+      ];
+      const values: unknown[] = [currentClusterScope().environment, ...statuses];
 
       if (types?.length) {
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
@@ -964,14 +968,21 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
-           WHERE pt.status = ?
+           WHERE pt.project_id IN (SELECT id FROM projects WHERE environment = ?)
+             AND pt.status = ?
              AND pt.type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
              AND pt.signature IS NOT NULL
              AND pt.confirmed_at > ?
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
-        .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
+        .bind(
+          currentClusterScope().environment,
+          pollableStatus,
+          ...WALLET_TRANSFER_TYPES,
+          confirmedAfter,
+          limit
+        )
         .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);

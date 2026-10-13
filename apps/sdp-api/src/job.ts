@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import * as solanaRpc from "@sdp/rpc/solana";
 
 import { parse as parseCron, validate as validateCron } from "node-cron";
+import { runPerCluster } from "@/cron/cluster-runs";
 import { DVP_TRADES_MONITOR } from "@/cron/dvp-trades";
 import { EARN_CATALOGUE_SYNC_MONITOR, runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import {
@@ -197,9 +198,11 @@ export async function runCronJob(): Promise<void> {
               (async () => {
                 // Keep revocation recovery ahead of payment reconciliation.
                 await reconcileRevokedApiKeyCache(env);
-                await trackPendingTransfers(env);
+                await runPerCluster("track-pending-transfers", () => trackPendingTransfers(env));
               })(),
-              reconcileSponsorshipBudgets(env),
+              runPerCluster("reconcile-sponsorship-budgets", () =>
+                reconcileSponsorshipBudgets(env)
+              ),
             ]);
             throwCollected(
               rejectionReasons(outcomes),
