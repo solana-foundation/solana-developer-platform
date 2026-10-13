@@ -159,7 +159,6 @@ export interface Env extends ManagedRpcEnv {
   FIREBLOCKS_API_KEY?: string;
   FIREBLOCKS_API_SECRET?: string;
   FIREBLOCKS_VAULT_ID?: string;
-  FIREBLOCKS_ASSET_ID?: string;
   FIREBLOCKS_API_BASE_URL?: string;
 
   // Privy configuration (@solana/keychain-privy)
@@ -174,7 +173,6 @@ export interface Env extends ManagedRpcEnv {
   COINBASE_CDP_API_KEY_SECRET?: string;
   COINBASE_CDP_WALLET_SECRET?: string;
   COINBASE_CDP_API_BASE_URL?: string;
-  COINBASE_CDP_NETWORK?: "solana" | "solana-devnet";
   COINBASE_CDP_WALLET_ID?: string;
   COINBASE_CDP_ACCOUNT_NAMESPACE?: string;
 
@@ -216,7 +214,6 @@ export interface Env extends ManagedRpcEnv {
   UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   UTILA_VAULT_ID?: string;
   UTILA_WALLET_ID?: string;
-  UTILA_NETWORK?: "networks/solana-devnet" | "networks/solana-mainnet";
   UTILA_API_BASE_URL?: string;
   UTILA_POLL_INTERVAL_MS?: string;
   UTILA_MAX_POLL_ATTEMPTS?: string;
