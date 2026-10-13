@@ -4,6 +4,7 @@ import {
   bvnkOnrampRemittance,
   readBvnkOnrampTransferData,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { CANCELABLE_RAMP_TRANSFER_STATUSES, isCancelableRampTransferStatus } from "@sdp/types";
 import { getDb } from "@/db";
@@ -18,7 +19,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../context";
+import { getPaymentsRepository, rampRuntime } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
 import { admitRamp } from "./admission";
@@ -64,7 +65,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
 export async function simulateSandboxTransfer(
   c: ValidatedBodyContext<typeof simulateSandboxTransferSchema>
 ) {
-  if (resolveSdpEnvironment(c) !== "sandbox") {
+  if (currentClusterScope().environment !== "sandbox") {
     throw forbidden("Sandbox transfer simulation is only available in sandbox mode");
   }
 

@@ -1,4 +1,5 @@
 import type { EarnVaultDepositQuoteIssue } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   addDecimalAmounts,
   compareDecimalAmounts,
@@ -13,7 +14,6 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { serviceUnavailable, vaultExposureCapExceeded } from "@/lib/errors";
 import { isEarnVolumeCapsEnforced } from "@/lib/feature-flags";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import {
   DEFAULT_VAULT_EXPOSURE_CAP,
   VAULT_EXPOSURE_CAPS,
@@ -397,19 +397,28 @@ export async function assessVaultExposure(input: {
 type ExposureContext = Context<{ Bindings: Env }>;
 
 /**
- * Request-scoped form of `assessVaultExposure`. Previews read through the
- * cache; an admission passes `fresh` and reads the ledger. Non-throwing on the
- * verdict; throws 503 on an unreadable exposure.
+ * Request-scoped form of `assessVaultExposure`, in the open cluster scope's
+ * environment. Previews read through the cache; an admission passes `fresh`
+ * and reads the ledger. Non-throwing on the verdict; throws 503 on an
+ * unreadable exposure.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param strategy - The vault's catalogue row.
+ * @param amount - The deposit amount to project.
+ * @param options - Read options.
+ * @param options.fresh - Read the ledger instead of the preview cache.
+ * @returns The exposure verdict.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export function checkVaultExposure(
   c: ExposureContext,
   strategy: EarnStrategyRow,
   amount: string,
-  options: { environment?: SdpEnvironment; fresh?: boolean } = {}
+  options: { fresh?: boolean } = {}
 ): Promise<VaultExposureVerdict> {
   return assessVaultExposure({
     env: c.env,
-    environment: options.environment ?? resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     strategy,
     amount,
     stage: options.fresh ? "admission" : "preview",
@@ -447,17 +456,19 @@ function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExpo
  * for no simulation or signing, but it cannot see a deposit admitted a moment
  * earlier whose row has not landed. The ledger write repeats the decision
  * under a lock (`ledgerVaultExposureGate`).
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param strategy - The vault's catalogue row.
+ * @param amount - The deposit amount.
+ * @returns The admitted verdict.
+ * @throws AppError `VAULT_EXPOSURE_CAP` when the verdict blocks under enforcement.
  */
 export async function assertVaultExposureWithinCap(
   c: ExposureContext,
   strategy: EarnStrategyRow,
-  amount: string,
-  options: { environment?: SdpEnvironment } = {}
+  amount: string
 ): Promise<VaultExposureVerdict> {
-  const verdict = await checkVaultExposure(c, strategy, amount, {
-    ...options,
-    fresh: true,
-  });
+  const verdict = await checkVaultExposure(c, strategy, amount, { fresh: true });
   return admitOrRefuse(verdict, amount);
 }
 

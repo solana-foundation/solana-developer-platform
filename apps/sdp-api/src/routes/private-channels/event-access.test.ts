@@ -10,7 +10,6 @@ const AUTH_BASE = {
   projectId: PROJECT_ID,
   role: "member",
   permissions: ["payments:read"],
-  environment: "dashboard",
   signingWalletId: null,
   signingWalletIds: [],
   walletBindings: [],
