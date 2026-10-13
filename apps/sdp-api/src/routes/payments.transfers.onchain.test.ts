@@ -1,5 +1,5 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -7,23 +7,26 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
-  mockRecurringActivationRpc,
+  seedProductionPrivyWalletUnderTestKey,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
+  listProjectTransferRows,
   listTransferRows,
   postRawTransfer,
   postTransfer,
@@ -35,6 +38,23 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  function answerSourceUsdcTokenAccount() {
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: DEVNET_USDC_MINT,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+  }
+
   it("rejects the retired privateTransfer field at the request boundary", async () => {
     const res = await postRawTransfer(
       {
@@ -342,8 +362,52 @@ describe("Payments routes — on-chain transfers", () => {
     expect(rows[0]?.signature).toBeFalsy();
   });
 
+  it("records and reads a Production project's USDC as the mainnet-beta mint", async () => {
+    const mainnetUsdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+    await seedProductionPrivyWalletUnderTestKey({
+      custodyWalletId: "cwlt_payments_production",
+      walletId: "privy_payments_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+    });
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: mainnetUsdcMint,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+
+    await postTransfer(
+      {
+        sourceCustodyWalletId: "cwlt_payments_production",
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "USDC",
+        amount: "1",
+      },
+      {}
+    );
+
+    expect(await listProjectTransferRows(TEST_PRODUCTION_PROJECT_ID)).toEqual([
+      expect.objectContaining({
+        custody_wallet_id: "cwlt_payments_production",
+        token: mainnetUsdcMint,
+      }),
+    ]);
+    expect(rpc.calls).toContainEqual({
+      cluster: "mainnet-beta",
+      method: "getTokenAccountsByOwner",
+    });
+    expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+  });
+
   it("persists a signed outbox for an SPL transfer", async () => {
-    mockRecurringActivationRpc({});
+    answerSourceUsdcTokenAccount();
 
     const res = await postTransfer(
       {
@@ -394,7 +458,7 @@ describe("Payments routes — on-chain transfers", () => {
   });
 
   it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
-    mockRecurringActivationRpc({});
+    answerSourceUsdcTokenAccount();
     sendTransactionMock.mockRejectedValueOnce(
       new Error(
         "Failed to send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"

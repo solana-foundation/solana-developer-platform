@@ -1,5 +1,7 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
+import { SdpRpcError } from "@sdp/rpc/errors";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
@@ -193,7 +195,7 @@ async function getBalancesByWalletId(
   const [tokenLabelsByMint, observedBalances] = await Promise.all([
     resolveIssuedTokenLabelsByMint(c),
     readWalletBalances(
-      solanaRpc.createRpc(c.env),
+      createClusterRpc(),
       buildWalletBalanceCacheScope(c),
       walletPublicKeys,
       c.get("requestId")
@@ -537,10 +539,13 @@ export const getWalletById = async (c: AppContext) => {
   let lamports = 0n;
 
   try {
-    const rpc = solanaRpc.createRpc(c.env);
+    const rpc = createClusterRpc();
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
     lamports = accountInfo?.lamports ?? 0n;
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     getLogger().error(
       {
         requestId: c.get("requestId"),
