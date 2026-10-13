@@ -21,11 +21,13 @@ function run(command, env = {}, extraArgs = []) {
 test("docker emits KEY=VALUE for committed and secret keys", () => {
   const result = run("docker", {
     SDP_RELEASE_CHANNEL: "beta",
+    KORA_RPC_URL_DEVNET: "https://kora-devnet.sdp.test",
     CLERK_SECRET_KEY: "sk_test_clerk",
     PRIVY_APP_SECRET: "privy_secret",
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^SDP_RELEASE_CHANNEL=beta$/m);
+  assert.match(result.stdout, /^KORA_RPC_URL_DEVNET=https:\/\/kora-devnet\.sdp\.test$/m);
   assert.match(result.stdout, /^CLERK_SECRET_KEY=sk_test_clerk$/m);
   assert.match(result.stdout, /^PRIVY_APP_SECRET=privy_secret$/m);
 });

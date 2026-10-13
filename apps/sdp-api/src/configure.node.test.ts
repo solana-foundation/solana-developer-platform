@@ -1,4 +1,4 @@
-import { FIELDS, generateEnv } from "@sdp/env-config";
+import { FIELDS, generateEnv, parseList } from "@sdp/env-config";
 import { describe, expect, it } from "vitest";
 import { collectFromEnv, getOutPath, resolveMultiSelectTokens } from "../scripts/configure";
 
@@ -137,10 +137,27 @@ describe("collectFromEnv", () => {
   it("emits derived fields without taking them from input", () => {
     // The interactive loop skips any field with a derive (they are computed),
     // yet generate still emits them from the values they depend on.
-    const network = FIELDS.find((f) => f.key === "NEXT_PUBLIC_SOLANA_NETWORK");
-    expect(network?.derive).toBeTypeOf("function");
+    expect(FIELDS.find((f) => f.key === "SDP_DEPLOYMENT_MODE")).toHaveProperty(
+      "derive",
+      expect.any(Function)
+    );
 
-    const env = generateEnv(collectFromEnv({ SOLANA_NETWORK: "mainnet-beta" }));
-    expect(env).toContain("NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta");
+    const env = generateEnv(collectFromEnv({ SDP_DEPLOYMENT_MODE: "managed" }));
+    expect(env).toMatch(/^SDP_DEPLOYMENT_MODE=self_hosted$/m);
+    expect(env).not.toMatch(/^SDP_DEPLOYMENT_MODE=managed$/m);
+  });
+
+  it("derives the devnet RPC providers from the URLs set and leaves mainnet empty", () => {
+    const values = collectFromEnv({
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet.helius.rpc.sdp.test/key",
+    });
+    expect(parseList(values.RPC_DEVNET_PROVIDERS)).toEqual(["helius"]);
+    expect(parseList(values.RPC_MAINNET_PROVIDERS)).toEqual([]);
+
+    const env = generateEnv(values);
+    expect(env).toMatch(
+      /^SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL=https:\/\/devnet\.helius\.rpc\.sdp\.test\/key$/m
+    );
+    expect(env).not.toMatch(/^RPC_DEVNET_PROVIDERS=/m);
   });
 });
