@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveChannelGates } from "../src/lib/channel-gates";
+import { expandDocsBlocks } from "../src/lib/docs-blocks";
 import { isPageSourcePublished, publicSurface } from "../src/lib/release-channel";
 import { getDocsPagePath } from "../src/lib/site";
 
@@ -16,8 +16,9 @@ const configPath = path.resolve(__dirname, "link-check.config.json");
 const EXTERNAL_URL_TIMEOUT_MS = 10_000;
 
 // Links are checked as the build for src/generated/public-surface.json renders
-// them: pages a `module:` tag leaves out do not exist, and neither do links in a
-// gate the build drops (src/lib/channel-gates.ts). CI runs this per channel.
+// them: pages a `module:` or `rampProvider:` tag leaves out do not exist, and
+// generated blocks link only to published pages (src/lib/docs-blocks.ts). CI runs
+// this per channel.
 const releaseChannel = publicSurface.releaseChannel;
 const excludedSlugs = new Set<string>();
 
@@ -249,9 +250,7 @@ async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]
   const perPage = await Promise.all(
     [...pages].map(async ([slug, filePath]) => {
       const raw = await fs.readFile(filePath, "utf8");
-      const source = stripMarkdownSource(
-        resolveChannelGates(raw, filePath, { preserveLines: true })
-      );
+      const source = stripMarkdownSource(expandDocsBlocks(raw, filePath));
       return extractMarkdownLinks(source).map((link) => ({
         sourcePath: filePath,
         sourceSlug: slug,

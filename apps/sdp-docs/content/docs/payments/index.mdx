@@ -3,9 +3,9 @@ title: Overview
 description: Build payments on Solana with SDP — concepts, sending, and accepting payments.
 ---
 
-SDP provides a Solana-native payments stack: stablecoin transfers, <InChannel module="ramps">fiat on-ramps and off-ramps, </InChannel>and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP provides a Solana-native payments stack: stablecoin transfers, batched payouts, recurring payments, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets)<InChannel module="issuance"> and [Tokenize an Asset](/docs/tokens/tokenize-an-asset)</InChannel>.
+If you have not yet provisioned a custody wallet, start with [Set Up Wallets](/docs/guides/setup-wallets).
 
 ## What's in this section
 
@@ -19,19 +19,11 @@ If you have not yet provisioned a custody wallet or token, start with [Set Up Wa
   - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
   - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
 
-<InChannel module="ramps">
-
-- **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
-  - [Ramp providers](/docs/payments/ramps-providers): capability matrix and configuration for all six ramp providers.
-
-</InChannel>
-
 Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
 
 ## Underlying API
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into `transfers`, <InChannel module="ramps">`ramps`, </InChannel>and `wallets/.../balances`.
+Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and covers transfers, transfer batches, recurring payments, and `wallets/.../balances`.
 
 ## Related
 

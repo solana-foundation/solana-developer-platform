@@ -1,7 +1,7 @@
-import type { RampProviderId } from "@sdp/types";
 import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins";
 import { defineConfig, defineDocs, frontmatterSchema } from "fumadocs-mdx/config";
-import { remarkChannelGates } from "./src/lib/channel-gates";
+import { remarkDocsBlocks } from "./src/lib/docs-blocks";
+import { publishedRampProviderIds, ROTATE_PROVIDERS_TOKEN } from "./src/lib/docs-catalog";
 import { publicSurface } from "./src/lib/release-channel";
 
 type ShikiTransformer = NonNullable<typeof rehypeCodeDefaultOptions.transformers>[number];
@@ -15,18 +15,6 @@ export const docs = defineDocs({
   },
 });
 
-/**
- * Mirrors RAMP_PROVIDERS from @sdp/types (typed against it), duplicated as a
- * literal because fumadocs-mdx loads this config in a plain Node context that
- * cannot resolve the workspace package's TS source at runtime.
- */
-const ROTATOR_PROVIDERS = [
-  "moonpay",
-  "bvnk",
-  "coinbase",
-  "stripe",
-] as const satisfies readonly RampProviderId[];
-
 type Rotation = { flag: string; token: string; prefix: string; values: readonly string[] };
 
 /**
@@ -39,12 +27,12 @@ type Rotation = { flag: string; token: string; prefix: string; values: readonly 
 const ROTATIONS = [
   {
     flag: "rotate-providers",
-    token: '"moonpay"',
+    token: ROTATE_PROVIDERS_TOKEN,
     prefix: "",
     // Only the ramp providers this build's release channel publishes rotate.
-    values: ROTATOR_PROVIDERS.filter((provider) =>
-      publicSurface.rampProviders.includes(provider)
-    ).map((provider) => `"${provider}"`),
+    values: publishedRampProviderIds(publicSurface.rampProviders).map(
+      (provider) => `"${provider}"`
+    ),
   },
   {
     flag: "rotate-token-ops",
@@ -137,9 +125,9 @@ if (!defaultTransformers) {
 
 export default defineConfig({
   mdxOptions: {
-    // Release-channel gates first, so hidden content never reaches the table of
-    // contents or the search index (src/lib/channel-gates.ts).
-    remarkPlugins: (defaults) => [remarkChannelGates, ...defaults],
+    // Generated blocks first, so headings and search text see what the build
+    // publishes (src/lib/docs-blocks.ts).
+    remarkPlugins: (defaults) => [remarkDocsBlocks, ...defaults],
     rehypeCodeOptions: {
       ...rehypeCodeDefaultOptions,
       transformers: [...defaultTransformers, rampProviderRotator],

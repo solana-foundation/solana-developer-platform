@@ -15,6 +15,7 @@ export type PublicSurface = {
   releaseChannel: string;
   modules: readonly string[];
   rampProviders: readonly string[];
+  allowedOperations: readonly { family: string; types: readonly string[] }[];
   allModules: readonly string[];
   allRampProviders: readonly string[];
 };
@@ -66,17 +67,38 @@ export function frontmatterOf(source: string): { raw: string; data: Record<strin
   return { raw, data };
 }
 
-/** The `module:` frontmatter tag of a page, validated. */
-export function pageModuleOf(data: { module?: unknown }, where: string): string | undefined {
-  if (data.module === undefined || data.module === null) return undefined;
-  if (typeof data.module !== "string") {
-    throw new Error(`${where}: module must be a string`);
+/**
+ * A page's gate from its frontmatter: `module: <module>` for a page about one
+ * module, `rampProvider: <provider>` for a page about one ramp provider (which
+ * implies Ramps). Undefined for a page every channel publishes.
+ */
+export function pageGateOf(
+  data: { module?: unknown; rampProvider?: unknown },
+  where: string
+): ChannelGate | undefined {
+  if (data.module !== undefined && data.rampProvider !== undefined) {
+    throw new Error(`${where}: a page takes module or rampProvider, not both`);
   }
-  checkGate({ module: data.module }, where);
-  return data.module;
+  for (const key of ["module", "rampProvider"] as const) {
+    const value = data[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") throw new Error(`${where}: ${key} must be a string`);
+    return checkGate(key === "module" ? { module: value } : { rampProvider: value }, where);
+  }
+  return undefined;
+}
+
+/** Whether the build publishes a page with this frontmatter. */
+export function isPagePublished(
+  data: { module?: unknown; rampProvider?: unknown },
+  where: string,
+  surface = publicSurface
+): boolean {
+  const gate = pageGateOf(data, where);
+  return gate === undefined || isGatePublished(gate, surface);
 }
 
 /** Whether a raw MDX page is published by this build. */
 export function isPageSourcePublished(source: string, where: string): boolean {
-  return isModulePublished(pageModuleOf(frontmatterOf(source).data, where));
+  return isPagePublished(frontmatterOf(source).data, where);
 }

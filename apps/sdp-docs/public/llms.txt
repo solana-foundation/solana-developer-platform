@@ -10,10 +10,9 @@
 - AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
 ## Supported surfaces
-- Wallets and custody
-- API key management
-- Projects
 - Token issuance and lifecycle operations
+- Wallets and custody
+- API key management and projects
 - Payments, transfers, and recurring payments
 - Fiat on-ramps and off-ramps
 - Compliance screening

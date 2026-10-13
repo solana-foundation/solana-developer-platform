@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SdpModule } from "@sdp/types";
-import { resolveChannelGates } from "../src/lib/channel-gates";
+import { expandDocsBlocks } from "../src/lib/docs-blocks";
+import { DOCS_MODULES } from "../src/lib/docs-catalog";
 import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";
 import { canonicalSite } from "../src/lib/site";
 
@@ -47,22 +48,11 @@ type Section = {
 
 // The llms files describe only what this build's release channel publishes.
 
-type Feature = { summary: string; module?: SdpModule };
-
-const FEATURES: Feature[] = [
-  { summary: "Wallets and custody" },
-  { summary: "API key management" },
-  { summary: "Projects" },
-  { summary: "Token issuance and lifecycle operations", module: "issuance" },
-  { summary: "Payments, transfers, and recurring payments" },
-  { summary: "Fiat on-ramps and off-ramps", module: "ramps" },
-  { summary: "Compliance screening" },
-  { summary: "Asset profiles and public token metadata", module: "issuance" },
-];
-
-const FEATURE_SUMMARY = FEATURES.filter((feature) => isModulePublished(feature.module)).map(
-  (feature) => feature.summary
-);
+// One capability line per published module, from the same catalog as the
+// AI guide's <ModuleCapabilities /> block.
+const FEATURE_SUMMARY = DOCS_MODULES.filter(
+  (entry) => entry.module === "core" || isModulePublished(entry.module)
+).map((entry) => entry.capability);
 
 /**
  * Generated API reference pages carry no frontmatter; their family exists only
@@ -163,7 +153,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       excludedSlugs.add(slug);
       continue;
     }
-    const source = resolveChannelGates(raw, filePath);
+    const source = expandDocsBlocks(raw, filePath);
     const { title, description } = parseFrontmatter(source);
 
     pages.set(slug, {

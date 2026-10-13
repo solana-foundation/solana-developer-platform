@@ -1,6 +1,9 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import {
   DEFAULT_SDP_API_URL,
+  OPERATION_FAMILIES,
+  OPERATION_FAMILY_BY_TYPE,
+  OPERATION_TYPES,
   RAMP_PROVIDERS,
   SDP_MODULES,
   SDP_RELEASE_CHANNELS,
@@ -318,13 +321,15 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
- * providers the public document publishes, Earn's hold included, and the full
- * vocabularies to validate tags against.
+ * providers the public document publishes, Earn's hold included, the API-key
+ * operation families and types it documents, and the full vocabularies to
+ * validate tags against.
  */
 export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
   modules: string[];
   rampProviders: string[];
+  allowedOperations: { family: string; types: string[] }[];
   allModules: string[];
   allRampProviders: string[];
 };
@@ -333,12 +338,17 @@ export function createPublicSurfaceManifest(
   releaseChannel: SdpReleaseChannel
 ): PublicSurfaceManifest {
   const modules = publishedModules(releaseChannel, EARN_PUBLIC_SURFACE_PUBLISHED);
+  const published = (value: string) => isValuePublished(value, modules, releaseChannel);
   return {
     releaseChannel,
     modules: SDP_MODULES.filter((module) => modules.has(module)),
-    rampProviders: RAMP_PROVIDERS.filter((provider) =>
-      isValuePublished(provider, modules, releaseChannel)
-    ),
+    rampProviders: RAMP_PROVIDERS.filter(published),
+    allowedOperations: OPERATION_FAMILIES.filter(published).map((family) => ({
+      family,
+      types: OPERATION_TYPES.filter(
+        (type) => OPERATION_FAMILY_BY_TYPE[type] === family && published(type)
+      ),
+    })),
     allModules: [...SDP_MODULES],
     allRampProviders: [...RAMP_PROVIDERS],
   };
