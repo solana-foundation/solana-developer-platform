@@ -26,17 +26,23 @@ import {
   generateSecret,
   isFieldVisible,
   parseList,
+  RPC_ENDPOINT_SLOTS,
+  type RpcProvidersKey,
   SECTIONS,
   type SelectOption,
   type Values,
   validateValues,
 } from "@sdp/env-config";
 
+const RPC_PROVIDERS_KEYS: RpcProvidersKey[] = ["RPC_DEVNET_PROVIDERS", "RPC_MAINNET_PROVIDERS"];
+
 /**
  * Build values from the process environment (non-interactive path).
  *
  * Starts from the field defaults, copies in any field whose key is present in
- * `env`, then fills every still-empty auto-secret with a fresh random value.
+ * `env`, derives each cluster's RPC provider list from the RPC URLs present when
+ * the list itself is absent, then fills every still-empty auto-secret with a
+ * fresh random value.
  * Pure apart from the secret RNG.
  */
 export function collectFromEnv(env: Record<string, string | undefined>): Values {
@@ -60,6 +66,16 @@ export function collectFromEnv(env: Record<string, string | undefined>): Values 
     if (list.length > 0) {
       values.SIGNING_PROVIDER = list[0];
     }
+  }
+  // The RPC URL slots are visible only for providers picked in their cluster's
+  // UI-only list, so derive each list from the URLs the environment provides.
+  for (const providersKey of RPC_PROVIDERS_KEYS) {
+    if (env[providersKey] !== undefined) continue;
+    values[providersKey] = RPC_ENDPOINT_SLOTS.filter(
+      (slot) => slot.providersKey === providersKey && Boolean(env[slot.key]?.trim())
+    )
+      .map((slot) => slot.provider)
+      .join(",");
   }
   for (const key of autoSecretKeys(values)) {
     if (!values[key]) values[key] = generateSecret(key);

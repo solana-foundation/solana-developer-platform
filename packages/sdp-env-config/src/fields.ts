@@ -47,6 +47,138 @@ const SIGNING_PROVIDER_OPTIONS: SelectOption[] = [
   { value: "utila", label: "Utila" },
 ];
 
+/** RPC providers the API's per-cluster managed pool reads, keyed as @sdp/rpc names them. */
+const RPC_PROVIDER_OPTIONS: SelectOption[] = [
+  { value: "triton", label: "Triton" },
+  { value: "helius", label: "Helius" },
+  { value: "alchemy", label: "Alchemy" },
+  { value: "quicknode", label: "QuickNode" },
+  { value: "validationcloud", label: "Validation Cloud" },
+  { value: "nodit", label: "Nodit" },
+  { value: "default", label: "Other provider" },
+];
+
+/** The UI-only provider lists that pick which cluster's RPC URL slots the form asks for. */
+export type RpcProvidersKey = "RPC_DEVNET_PROVIDERS" | "RPC_MAINNET_PROVIDERS";
+
+/** One provider's URL slot in one cluster's RPC pool. */
+export interface RpcEndpointSlot {
+  key: string;
+  providersKey: RpcProvidersKey;
+  provider: string;
+  label: string;
+}
+
+/**
+ * Every `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` the API reads (see @sdp/rpc
+ * `MANAGED_RPC_ENV_KEYS`). Keys stay literal so the configurator drift check sees them.
+ */
+export const RPC_ENDPOINT_SLOTS: RpcEndpointSlot[] = [
+  {
+    key: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "triton",
+    label: "Triton devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "helius",
+    label: "Helius devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "alchemy",
+    label: "Alchemy devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "quicknode",
+    label: "QuickNode devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "validationcloud",
+    label: "Validation Cloud devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "nodit",
+    label: "Nodit devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
+    providersKey: "RPC_DEVNET_PROVIDERS",
+    provider: "default",
+    label: "Other provider devnet URL",
+  },
+  {
+    key: "SOLANA_RPC_TRITON_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "triton",
+    label: "Triton mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "helius",
+    label: "Helius mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "alchemy",
+    label: "Alchemy mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "quicknode",
+    label: "QuickNode mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "validationcloud",
+    label: "Validation Cloud mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_NODIT_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "nodit",
+    label: "Nodit mainnet URL",
+  },
+  {
+    key: "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL",
+    providersKey: "RPC_MAINNET_PROVIDERS",
+    provider: "default",
+    label: "Other provider mainnet URL",
+  },
+];
+
+/**
+ * The form field for one RPC URL slot: shown, and required, once its provider is picked for that cluster.
+ *
+ * @param slot - The provider's URL slot in one cluster's pool.
+ * @returns A secret-masked URL field keyed by the slot's env var.
+ */
+function rpcEndpointField(slot: RpcEndpointSlot): EnvField {
+  return {
+    key: slot.key,
+    section: "rpc",
+    kind: "password",
+    label: slot.label,
+    required: true,
+    pattern: /^https:\/\//,
+    visibleWhen: listIncludes(slot.providersKey, slot.provider),
+    help: "Complete HTTPS URL with the API key embedded.",
+  };
+}
+
 export const FIELDS: EnvField[] = [
   // Basic
   {
@@ -161,32 +293,28 @@ export const FIELDS: EnvField[] = [
 
   // Solana RPC
   {
-    key: "SOLANA_NETWORK",
+    key: "RPC_DEVNET_PROVIDERS",
     section: "rpc",
-    kind: "select",
-    label: "Network",
-    defaultValue: "devnet",
-    options: [
-      { value: "devnet", label: "devnet" },
-      { value: "mainnet-beta", label: "mainnet-beta" },
-    ],
-  },
-  {
-    key: "SOLANA_RPC_URL",
-    section: "rpc",
-    kind: "url",
-    label: "RPC URL",
-    defaultValue: "https://api.devnet.solana.com",
+    kind: "multiselect",
+    label: "Devnet RPC providers",
     required: true,
-    pattern: /^https:\/\//,
+    options: RPC_PROVIDER_OPTIONS,
+    help: "Providers in the devnet pool that Sandbox projects use. Pick at least one; each one asks for its URL below.",
   },
+  ...RPC_ENDPOINT_SLOTS.filter((slot) => slot.providersKey === "RPC_DEVNET_PROVIDERS").map(
+    rpcEndpointField
+  ),
   {
-    key: "SOLANA_RPC_HELIUS_API_KEY",
+    key: "RPC_MAINNET_PROVIDERS",
     section: "rpc",
-    kind: "password",
-    label: "Helius API key",
-    visibleWhen: (v) => v.SOLANA_RPC_URL?.includes("helius") ?? false,
+    kind: "multiselect",
+    label: "Mainnet RPC providers",
+    options: RPC_PROVIDER_OPTIONS,
+    help: "Optional. Providers in the mainnet pool that Production projects use. Without one, every chain request for a Production project fails with 503 RPC_NOT_CONFIGURED.",
   },
+  ...RPC_ENDPOINT_SLOTS.filter((slot) => slot.providersKey === "RPC_MAINNET_PROVIDERS").map(
+    rpcEndpointField
+  ),
 
   // Clerk
   {
@@ -486,18 +614,54 @@ export const FIELDS: EnvField[] = [
     help: "Base58 keypair that pays transaction fees. Required because a managed signing provider is selected; with local signing the signing key is used instead.",
   },
   {
-    key: "KORA_RPC_URL",
+    key: "KORA_RPC_URL_DEVNET",
     section: "fee",
     kind: "url",
-    label: "Kora RPC URL",
+    label: "Devnet Kora RPC URL",
+    required: true,
     pattern: /^https?:\/\//,
     visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Kora node that sponsors fees for Sandbox projects.",
   },
   {
-    key: "KORA_CLOUD_RUN_AUDIENCE",
+    key: "KORA_API_KEY_DEVNET",
+    section: "fee",
+    kind: "password",
+    label: "Devnet Kora API key",
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Set when the devnet Kora node requires API-key authentication.",
+  },
+  {
+    key: "KORA_CLOUD_RUN_AUDIENCE_DEVNET",
     section: "fee",
     kind: "url",
-    label: "Private Kora Cloud Run audience",
+    label: "Devnet private Kora Cloud Run audience",
+    pattern: /^https?:\/\//,
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+  },
+  {
+    key: "KORA_RPC_URL_MAINNET",
+    section: "fee",
+    kind: "url",
+    label: "Mainnet Kora RPC URL",
+    pattern: /^https?:\/\//,
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Kora node that sponsors fees for Production projects. Without it, Production projects cannot submit fee-sponsored transactions.",
+  },
+  {
+    key: "KORA_API_KEY_MAINNET",
+    section: "fee",
+    kind: "password",
+    label: "Mainnet Kora API key",
+    visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
+    help: "Optional. Set when the mainnet Kora node requires API-key authentication.",
+  },
+  {
+    key: "KORA_CLOUD_RUN_AUDIENCE_MAINNET",
+    section: "fee",
+    kind: "url",
+    label: "Mainnet private Kora Cloud Run audience",
     pattern: /^https?:\/\//,
     visibleWhen: isProvider("FEE_PAYMENT_PROVIDER", "kora"),
     help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
@@ -601,13 +765,6 @@ export const FIELDS: EnvField[] = [
     defaultValue: "http://localhost:3001",
   },
   {
-    key: "NEXT_PUBLIC_SOLANA_NETWORK",
-    section: "advanced",
-    kind: "text",
-    label: "Public Solana network",
-    derive: (v) => v.SOLANA_NETWORK ?? "devnet",
-  },
-  {
     key: "TRUST_PROXY_HEADERS",
     section: "advanced",
     kind: "select",
@@ -707,6 +864,8 @@ export const UI_ONLY_KEYS = new Set([
   "CACHE_MODE",
   "SIGNING_PROVIDERS",
   "POSTGRES_PASSWORD_MODE",
+  "RPC_DEVNET_PROVIDERS",
+  "RPC_MAINNET_PROVIDERS",
 ]);
 
 /** A field is visible unless its visibleWhen predicate returns false. */

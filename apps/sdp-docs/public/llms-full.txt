@@ -4564,7 +4564,8 @@ after dashboard signup.
 Open the [configurator](/docs/self-hosting/configurator), keep the defaults for
 the first deployment, and fill in:
 
-- `SOLANA_RPC_URL` with a devnet RPC endpoint.
+- At least one devnet RPC provider and its URL, with the API key embedded.
+  Leave mainnet empty for this deployment.
 - Clerk publishable key, secret key, issuer, and webhook secret.
 - Local signing with native fee payment.
 
@@ -4709,10 +4710,10 @@ The configurator groups variables into sections:
 | Basic | Core runtime — environment, deployment mode, Transactional Email sender and Resend key. |
 | Database | Bundled Postgres or an external database. |
 | Cache | Bundled Redis or an external cache. |
-| Solana RPC | Network and RPC endpoint. |
+| Solana RPC | One RPC pool per cluster: devnet (required) and mainnet (optional). |
 | Authentication (Clerk) | Required Clerk keys and JWT settings. |
 | Signing provider | Which signer(s) to enable and their credentials. |
-| Fee payment | How transaction fees are paid. |
+| Fee payment | How transaction fees are paid, with one Kora node per cluster when you use Kora. |
 | Secrets | App secrets, generated locally. |
 | Advanced | Image source, ports, and internal service URLs. |
 
@@ -4728,7 +4729,6 @@ These must be set or the stack will refuse to start:
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the web app. |
 | `CLERK_SECRET_KEY` | Clerk secret key for the API. |
 | `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |
-| `SOLANA_RPC_URL` | Solana RPC endpoint the API calls. |
 | `SIGNING_PROVIDER` | The default signing provider. Each non-local provider adds its own required credentials. |
 
 The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
@@ -4756,6 +4756,45 @@ container needs one to start even when nothing connects to it.
 Like `DATABASE_MODE`, `CACHE_MODE` is a configurator-only selector and is not
 written to `.env`. To use an external cache, set `REDIS_URL` to your own
 `redis://…` endpoint; the bundled `redis` container still starts but goes unused.
+
+## Solana RPC
+
+One deployment serves both kinds of project: Sandbox projects run on devnet and
+Production projects on mainnet. Each cluster has its own RPC pool, and a project
+only ever reads the pool for its own cluster. Every pool entry is one complete
+URL with the provider's API key embedded:
+
+```bash title=".env"
+SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL=https://…
+```
+
+`<PROVIDER>` is one of `TRITON`, `HELIUS`, `ALCHEMY`, `QUICKNODE`,
+`VALIDATIONCLOUD`, `NODIT`, or `DEFAULT` (any other provider), and `<CLUSTER>` is
+`DEVNET` or `MAINNET`. There are no separate API key variables. When a cluster
+has several URLs, the API tries them in that provider order and fails over
+between them. Helius-specific reads use the cluster's `HELIUS` entry.
+
+The configurator requires at least one devnet URL. Mainnet is optional: without
+a mainnet URL, every request that touches the chain for a Production project
+fails with `503 RPC_NOT_CONFIGURED` and background jobs skip mainnet, the same
+rule the managed platform applies.
+The configurator tracks `RPC_DEVNET_PROVIDERS` and `RPC_MAINNET_PROVIDERS` to
+decide which URL fields to show; both are configurator-only and are not written
+to `.env`.
+
+## Fee payment
+
+`FEE_PAYMENT_PROVIDER` selects how transaction fees are paid. With `native`, the
+API pays from `FEE_PAYER_PRIVATE_KEY` (or the local signer's key) on whichever
+cluster the project uses, so fund that key on every cluster you configure. With
+`kora`, each cluster uses its own Kora node:
+
+| Variable | Description |
+|---|---|
+| `KORA_RPC_URL_DEVNET` | Kora node for Sandbox projects. Required with `kora`. |
+| `KORA_RPC_URL_MAINNET` | Kora node for Production projects. Optional; without it, Production projects cannot submit fee-sponsored transactions. |
+| `KORA_API_KEY_DEVNET`, `KORA_API_KEY_MAINNET` | Only for Kora nodes that require API-key authentication. |
+| `KORA_CLOUD_RUN_AUDIENCE_DEVNET`, `KORA_CLOUD_RUN_AUDIENCE_MAINNET` | Only for a private Kora Cloud Run service; the API fetches a Google identity token for it. |
 
 ## Signing providers
 
@@ -4965,6 +5004,16 @@ Sign-in problems point at the Clerk configuration. Re-check
 `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER`
 against your Clerk application, and confirm the keys match the environment
 (development vs production) you intend to run.
+
+## Requests fail with `503 RPC_NOT_CONFIGURED`
+
+The project's cluster has no RPC URL. Sandbox projects read the devnet pool and
+Production projects the mainnet pool, so a Production project on a deployment
+with only devnet URLs gets this error for every request that touches the chain.
+Add at least one `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` (or
+`SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` for Sandbox projects) to `.env` and
+run `docker compose up -d` again. See
+[Solana RPC](/docs/self-hosting/env-reference#solana-rpc).
 
 ## Still stuck?
 
