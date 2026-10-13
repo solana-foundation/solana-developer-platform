@@ -1,5 +1,4 @@
 import type { CustodyProvider } from "@sdp/custody";
-import { type FeePaymentEnv, isFeePaymentConfigured } from "@sdp/payments/fee-payment";
 import {
   type CustodyMode,
   isModuleInReleaseChannel,
@@ -174,31 +173,22 @@ export function isEarnHastraDexExitConfigured(
 }
 
 /**
- * Whether Kora sponsors an Earn vault movement on the open cluster scope's cluster: both the
- * network fee and the share-ATA rent a first deposit needs.
+ * Whether SDP sponsors Earn vault movements: both the network fee and the share-ATA rent a first
+ * deposit needs. Flag off answers wallet-pays everywhere. Flag on means every movement is
+ * sponsored, and a movement on a cluster with no Kora is refused with 503 at fee-payer
+ * construction (`resolveVaultSponsorship`), never silently downgraded to wallet-pays.
  *
- * Answered PER CLUSTER on purpose. One API process serves both clusters at once (a sandbox
- * project is devnet, a production project is mainnet-beta), deposits are environment-gated but
- * WITHDRAWALS DELIBERATELY ARE NOT (ADR 0002 forbids money-out inheriting a money-in gate), and
- * both directions share one fee decision. The flag is deployment-global, so the flag alone would
- * flip mainnet withdrawals to sponsored the instant devnet deposits were enabled, against a
- * paymaster that may not exist for that cluster: a 503 on a customer's exit path.
+ * Operator constraint: the flag is deployment-global and withdrawals are not environment-gated
+ * (ADR 0002), so turning it on before EVERY cluster has its Kora (`KORA_RPC_URL_DEVNET` and
+ * `KORA_RPC_URL_MAINNET`) refuses withdrawals on the unwired cluster.
  *
- * Which clusters are sponsored is CONFIGURATION, not a list in code: the flag must be on AND the
- * deployment must have a fee payer for the scope's cluster (`isFeePaymentConfigured`:
- * `KORA_RPC_URL_DEVNET` / `KORA_RPC_URL_MAINNET`). Opening mainnet is wiring the mainnet Kora into
- * the deployment, after its `fee_payer_policy` is opened and `sbp_mainnet_global` is enabled
- * (PRO-1738); closing it is removing that wiring, with no code change either way.
- *
- * @param env - Environment carrying the flag and the per-cluster Kora trios.
- * @returns True when the flag is on and the scope's cluster has a fee payer.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope when the flag is on.
+ * @param env - Environment carrying the flag.
+ * @returns True when the flag is on.
  */
 export function isEarnVaultSponsorshipEnabled(
-  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED"> & FeePaymentEnv
+  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
 ): boolean {
-  if (!isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED)) return false;
-  return isFeePaymentConfigured(env);
+  return isTruthyFlag(env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED);
 }
 
 /**
