@@ -1,11 +1,15 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SdpEnvironment } from "@sdp/types";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl } from "@/test/helpers/env";
-import { expectSqlstate, FK_VIOLATION, seedOrgProject } from "@/test/helpers/migration-db";
+import {
+  expectSqlstate,
+  FK_VIOLATION,
+  seedDvpTrade,
+  seedOrgProject,
+} from "@/test/helpers/migration-db";
 
 const migrationSql = readFileSync(
   path.join(
@@ -16,47 +20,10 @@ const migrationSql = readFileSync(
 );
 let client: Client;
 
-interface TradeSeed {
-  id: string;
-  organizationId: string;
-  projectId: string;
-  environment: SdpEnvironment | null;
-}
-
 interface TradeEnvironmentRow {
   id: string;
   project_id: string;
   environment: string | null;
-}
-
-async function insertTrade(trade: TradeSeed): Promise<void> {
-  const environmentColumn = trade.environment === null ? "" : ", environment";
-  const environmentValue = trade.environment === null ? "" : ", $5";
-  const environmentParams = trade.environment === null ? [] : [trade.environment];
-  await client.query(
-    `INSERT INTO dvp_trades (
-       id, organization_id, project_id, swap_dvp, settlement_authority,
-       user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
-       amount_a, amount_b, expiry_timestamp,
-       user_a_settlement_destination, user_b_settlement_destination,
-       escrow_a, escrow_b, status${environmentColumn}
-     ) VALUES (
-       $1, $2, $3, $4, '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
-       '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
-       '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
-       'ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1',
-       'AqTgvZaiZ18ykVvzaQhfB2KQ4SGDw4i1o5rQqBAMsZiE', '42',
-       'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-       'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-       '1000', '2000', '1800003600',
-       '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
-       '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
-       'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
-       '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-       'created'${environmentValue}
-     )`,
-    [trade.id, trade.organizationId, trade.projectId, `swap_${trade.id}`, ...environmentParams]
-  );
 }
 
 async function tradesOf(organizationId: string): Promise<TradeEnvironmentRow[]> {
@@ -90,13 +57,13 @@ describe("0130 dvp_trades environment migration", () => {
     const tenant = await seedOrgProject(client, "0130_backfill");
     const productionProjectId = `${tenant.projectId}_production`;
     await client.query("ALTER TABLE dvp_trades DROP COLUMN environment");
-    await insertTrade({
+    await seedDvpTrade(client, {
       id: "dvp_0130_backfill_production",
       organizationId: tenant.organizationId,
       projectId: productionProjectId,
       environment: null,
     });
-    await insertTrade({
+    await seedDvpTrade(client, {
       id: "dvp_0130_backfill_sandbox",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
@@ -126,7 +93,7 @@ describe("0130 dvp_trades environment migration", () => {
     await expectSqlstate(
       client,
       () =>
-        insertTrade({
+        seedDvpTrade(client, {
           id: "dvp_0130_mismatch_sandbox_project",
           organizationId: tenant.organizationId,
           projectId: tenant.projectId,
@@ -137,7 +104,7 @@ describe("0130 dvp_trades environment migration", () => {
     await expectSqlstate(
       client,
       () =>
-        insertTrade({
+        seedDvpTrade(client, {
           id: "dvp_0130_mismatch_production_project",
           organizationId: tenant.organizationId,
           projectId: productionProjectId,
@@ -145,7 +112,7 @@ describe("0130 dvp_trades environment migration", () => {
         }),
       FK_VIOLATION
     );
-    await insertTrade({
+    await seedDvpTrade(client, {
       id: "dvp_0130_mismatch_matching",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
@@ -178,28 +145,9 @@ describe("0130 dvp_trades environment migration", () => {
     ]);
   });
 
-  it("accepts a trade inserted without an environment", async () => {
-    const tenant = await seedOrgProject(client, "0130_unwritten");
-
-    await insertTrade({
-      id: "dvp_0130_unwritten",
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
-      environment: null,
-    });
-
-    expect(await tradesOf(tenant.organizationId)).toEqual([
-      {
-        id: "dvp_0130_unwritten",
-        project_id: tenant.projectId,
-        environment: null,
-      },
-    ]);
-  });
-
   it("refuses to switch a project that holds a trade to the other environment", async () => {
     const tenant = await seedOrgProject(client, "0130_switch");
-    await insertTrade({
+    await seedDvpTrade(client, {
       id: "dvp_0130_switch",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,

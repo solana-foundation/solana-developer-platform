@@ -109,11 +109,11 @@ async function insertTrade(params: {
        user_a_settlement_destination, user_b_settlement_destination,
        escrow_a, escrow_b, sdp_side, trade_kind, sdp_wallet_id,
        sdp_leg_funding_signature, funding_claim_expiry_height, sdp_leg_funding_tx,
-       status
+       status, environment
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
        '1000', '2000', '1800003600', $6, $7, 'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
-       '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', $13, $14, $15, $16, $17, $18, 'created'
+       '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y', $13, $14, $15, $16, $17, $18, 'created', 'sandbox'
      )`,
     [
       params.id,
@@ -360,7 +360,7 @@ describe("0091_dvp_per_side_parties", () => {
          user_a, user_b, mint_a, mint_b, nonce, token_program_a, token_program_b,
          amount_a, amount_b, expiry_timestamp,
          user_a_settlement_destination, user_b_settlement_destination,
-         escrow_a, escrow_b, status, counterparty_account_id_a
+         escrow_a, escrow_b, status, counterparty_account_id_a, environment
        ) VALUES (
          'trade_cp_test', $1, $2, 'swap_cp_test', '9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY',
          '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn',
@@ -374,7 +374,7 @@ describe("0091_dvp_per_side_parties", () => {
          '7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg',
          'FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU',
          '6yDKQfAMjjnQCgkHJvpDc1CVPx2vPDLhDkhZYQPw7w9y',
-         'created', 'cpa_newcols'
+         'created', 'cpa_newcols', 'sandbox'
        )`,
       [organizationId, projectId]
     );
