@@ -57,7 +57,8 @@ async function seedKey(
     .prepare(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, allowed_operations, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, allowed_operations = excluded.allowed_operations, status = excluded.status`
     )
     .bind(
       key.id,

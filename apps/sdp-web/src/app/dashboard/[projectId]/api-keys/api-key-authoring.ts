@@ -44,7 +44,7 @@ export interface ApiKeyAuthoringExistingKey {
   signingWalletId: string | null;
   signingWalletIds: string[];
   /** Empty means the key is not restricted. */
-  allowedOperations?: AllowedOperation[];
+  allowedOperations: AllowedOperation[];
 }
 
 export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
@@ -91,20 +91,19 @@ function withoutFamily(
 ): AllowedOperation[] {
   return selected.filter(
     (entry) =>
-      entry !== family &&
-      (isOperationFamily(entry) || OPERATION_FAMILY_BY_TYPE[entry as OperationType] !== family)
+      entry !== family && (isOperationFamily(entry) || OPERATION_FAMILY_BY_TYPE[entry] !== family)
   );
 }
 
-/** Ticks a whole family, or clears it and every type under it. */
+/** Ticks a whole family unless it is already fully ticked, then clears it and every type under it. */
 export function toggleFamily(
   selected: readonly AllowedOperation[],
   family: OperationFamily
 ): AllowedOperation[] {
   const cleared = withoutFamily(selected, family);
-  return familyState(selected, family) === "none"
-    ? normalizeAllowedOperations([...cleared, family])
-    : normalizeAllowedOperations(cleared);
+  return familyState(selected, family) === "all"
+    ? normalizeAllowedOperations(cleared)
+    : normalizeAllowedOperations([...cleared, family]);
 }
 
 /**

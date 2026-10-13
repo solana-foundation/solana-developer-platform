@@ -13,32 +13,32 @@ describe("isDefinitiveProviderRejection", () => {
   for (const [name, error, expected] of [
     [
       "400",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 400 }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 400 }),
       true,
     ],
     [
       "409",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 409 }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 409 }),
       false,
     ],
     [
       "408",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 408 }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 408 }),
       false,
     ],
     [
       "499",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 499 }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 499 }),
       true,
     ],
     [
       "500",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 500 }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 500 }),
       false,
     ],
     [
       "details without providerStatus",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural" }),
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe" }),
       false,
     ],
     ["no details", new SdpPaymentsError("BAD_REQUEST", "x"), false],

@@ -29,6 +29,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
+import * as organizationAccess from "@/lib/organization-access";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { rootLogger } from "@/runtime/logger";
@@ -215,6 +216,23 @@ async function deleteTestOrganization() {
     .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
     .bind(TEST_ORG.id)
     .run();
+}
+
+/**
+ * Authentication refuses a deleted organization outright (it reads the status
+ * fresh on every request), so an HTTP handler only meets a deleted organization
+ * when the deletion lands while the request is in flight. This deletes it just
+ * after the next request's authentication read, which is that race.
+ */
+function deleteTestOrganizationAfterAuth() {
+  const authenticate = organizationAccess.enforceApiKeyOrganizationAccess;
+  vi.spyOn(organizationAccess, "enforceApiKeyOrganizationAccess").mockImplementationOnce(
+    async (...args) => {
+      const settings = await authenticate(...args);
+      await deleteTestOrganization();
+      return settings;
+    }
+  );
 }
 
 async function collectionAttempts(subscriptionId: string) {
@@ -2083,7 +2101,8 @@ describe("Payments routes — recurring", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.collect"
     );
     expect(
       new Set(
@@ -3489,7 +3508,7 @@ describe("Payments routes — recurring", () => {
         subscriptionId: recurringPayment.subscriptionId,
         dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
       });
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const response = await app.request(
         `/v1/payments/recurring-payments/${recurringPayment.id}/collect`,
@@ -3508,7 +3527,7 @@ describe("Payments routes — recurring", () => {
         ...DEFAULT_RECURRING_FIXTURE,
         headers: RECURRING_HEADERS,
       });
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const response = await app.request(
         `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -3543,7 +3562,7 @@ describe("Payments routes — recurring", () => {
       );
       expect(cancelRes.status).toBe(200);
       const signaturesBefore = signAndSendMock.mock.calls.length;
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const resumeRes = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/resume`,

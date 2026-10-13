@@ -10,7 +10,7 @@ import {
   isAllowedOperationsWithin,
   type Permission,
 } from "@sdp/types";
-import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, insufficientPermissions } from "@/lib/errors";
 import {
@@ -779,11 +779,7 @@ export async function assertFreshApiKeyActive(
   // The same predicate request authentication applies: exists, active, not
   // past expiry, and not past its rotation grace period — a rotated key stays
   // `active` in the row and is retired by the deadline alone.
-  if (
-    currentKey?.status !== "active" ||
-    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
-    isRotationDeadlineReached(currentKey.rotation_deadline)
-  ) {
+  if (!currentKey || apiKeyRowRefusal(currentKey, Date.now()) !== null) {
     throw new AppError("FORBIDDEN", "API key is no longer active");
   }
 }
@@ -811,34 +807,20 @@ export async function loadFreshApiKeyWalletScope(
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 
+  // Only the signing wallet: whether the key is still usable (active, not
+  // expired, not past its rotation deadline) was read fresh by authentication
+  // on this request (#2262, `enforceApiKeyOrganizationAccess`).
   const currentKey = await db
     .prepare(
-      `SELECT signing_wallet_id, status, expires_at, rotation_deadline
+      `SELECT signing_wallet_id
        FROM api_keys
        WHERE id = ?
          AND organization_id = ?
          AND project_id = ?`
     )
     .bind(auth.apiKeyId, auth.organizationId, auth.projectId)
-    .first<{
-      signing_wallet_id: string | null;
-      status: ApiKeyStatus;
-      expires_at: string | null;
-      rotation_deadline: string | null;
-    }>();
+    .first<{ signing_wallet_id: string | null }>();
   if (!currentKey) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
-  // Re-reading the key's PERMISSIONS while trusting the snapshot's word that
-  // the key still exists leaves the hour-long cache window open for exactly the
-  // key someone just revoked. The predicate request authentication applies:
-  // active, not past expiry, not past its rotation grace period (a rotated key
-  // stays `active` in the row and is retired by the deadline alone).
-  if (
-    currentKey.status !== "active" ||
-    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
-    isRotationDeadlineReached(currentKey.rotation_deadline)
-  ) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

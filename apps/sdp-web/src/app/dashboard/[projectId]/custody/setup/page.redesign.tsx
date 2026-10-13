@@ -1,0 +1,134 @@
+// The Wallets create flow as the 2026 design lays it out. It loads what the previous design's
+// page loads (page.tsx), and differs only in the flow it renders.
+import { auth } from "@clerk/nextjs/server";
+import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
+import { redirect } from "next/navigation";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
+import { createTimedTrace } from "@/lib/request-tracing";
+import {
+  createRequestScopedSdpApiClients,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
+import type { OnboardingStatusResponse } from "../../onboarding-status";
+import { fetchConnectionPickerOptions } from "../connections/connections.data";
+import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
+import { WalletSetupFlow } from "./wallet-setup-flow.redesign";
+
+interface CustodySetupPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function getSearchParamValue(
+  searchParams: Record<string, string | string[] | undefined> | undefined,
+  key: string
+): string | null {
+  const value = searchParams?.[key];
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+}
+
+function parseProvider(value: string | null): KnownCustodyProvider | null {
+  return value && isKnownCustodyProvider(value) ? value : null;
+}
+
+async function getConnectedCustodyProviders(
+  request: SdpApiClient["request"]
+): Promise<KnownCustodyProvider[]> {
+  const res = await request("/v1/wallets/configs");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`SDP API request failed (${res.status}): ${body}`);
+  }
+
+  const json = (await res.json()) as {
+    data: { configs: CustodyConfigSummary[] };
+  };
+
+  return json.data.configs
+    .filter((config) => config.status === "active")
+    .map((config) => config.provider)
+    .filter(isKnownCustodyProvider);
+}
+
+async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
+  const { userId, orgId, orgRole } = await auth();
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const trace = createTimedTrace("dashboard.custody.setup.page");
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
+
+  // The custody reads below are `custody:admin`, so a member would hit a 403 on
+  // each one. Send them to the provider page, which names the role they need.
+  if (!resolveDashboardAccess(orgRole).capabilities.canManageCustody) {
+    redirect(
+      await requestProjectHref(
+        initialProvider === null
+          ? "/dashboard/integrations"
+          : `/dashboard/integrations/${initialProvider}`
+      )
+    );
+  }
+
+  const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
+    createRequestScopedSdpApiClients({
+      organizationTraceContext: trace.childContext("dashboard.custody.setup.org.api"),
+      projectTraceContext: trace.childContext("dashboard.custody.setup.api"),
+    })
+  );
+  const onboarding = await trace.step("fetch_onboarding_status", () =>
+    organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+  );
+
+  if (!onboarding.linked || !onboarding.organization) {
+    redirect(await requestProjectHref("/dashboard/wallets"));
+  }
+  // Connections are BYOK custody, so the flow offers them only for a provider
+  // whose modes include `byok`; they are read alongside availability rather than
+  // after it.
+  const [connectedProviders, providerAvailability, connectionsByProvider] = await Promise.all([
+    trace.step("fetch_custody_configs", () => getConnectedCustodyProviders(projectClient.request)),
+    trace.step("fetch_provider_availability", () =>
+      fetchProjectProviderAvailability(projectClient)
+    ),
+    trace.step("fetch_connection_picker_options", () =>
+      Promise.all(
+        BYOK_CUSTODY_PROVIDERS.map((provider) =>
+          fetchConnectionPickerOptions(projectClient.request, provider)
+        )
+      )
+    ),
+  ]);
+  const custodyAvailability = availableCustodyProviders(providerAvailability);
+  const connections = connectionsByProvider.flat();
+
+  trace.log({
+    ok: true,
+    connectedProviderCount: connectedProviders.length,
+    availableProviderCount: custodyAvailability.length,
+    connectionCount: connections.length,
+  });
+
+  return (
+    <WalletSetupFlow
+      connectedProviders={connectedProviders}
+      custodyAvailability={custodyAvailability}
+      environment={providerAvailability.environment}
+      initialProvider={initialProvider}
+      connections={connections}
+    />
+  );
+}
+
+export default CurrentCustodySetupPage;

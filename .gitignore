@@ -64,3 +64,4 @@ apps/sdp-web/test-results/
 .vercel
 private/
 infra/kora/terraform/
+.claude/*.local.md

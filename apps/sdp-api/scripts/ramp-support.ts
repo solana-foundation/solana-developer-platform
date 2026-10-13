@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
@@ -10,14 +10,12 @@ import {
   type RampDiscoveryResponseDump,
 } from "@sdp/payments/ramps";
 import { isActiveIso4217CurrencyCode } from "@sdp/payments/ramps/shared";
-import { COUNTRY_CODES } from "@sdp/types/countries";
 import {
   type CryptoRailId,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   type RampCountrySupport,
   type RampCurrencyLimit,
-  type RampPayoutAccountSpec,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
@@ -34,25 +32,6 @@ const rawDumpSchema = z.object({
   status: z.number(),
   body: z.unknown(),
 });
-
-const providerOfframpCountriesSchema = z
-  .partialRecord(
-    z.enum(COUNTRY_CODES),
-    z
-      .array(
-        z
-          .string()
-          .regex(/^[A-Z]{3}$/)
-          .refine(isActiveIso4217CurrencyCode, "Currency must be an active ISO 4217 code.")
-      )
-      .nonempty()
-  )
-  .refine((countries) => Object.keys(countries).length > 0, {
-    message: "Provider offramp countries must contain at least one country.",
-  });
-const rampProviderIdSchema = z.enum(RAMP_PROVIDERS);
-
-type ProviderOfframpCountries = z.infer<typeof providerOfframpCountriesSchema>;
 
 interface OnrampRow {
   source: string;
@@ -77,15 +56,6 @@ interface ProviderGenerationSupport {
 
 type CurrencySupportSnapshots = ReadonlyMap<RampProviderId, ProviderRailSupportSnapshot>;
 type ProviderGenerationSupports = ReadonlyMap<RampProviderId, ProviderGenerationSupport>;
-interface ProviderOfframpCoverage {
-  countries: ProviderOfframpCountries;
-  swiftExcluded: readonly string[];
-}
-type OfframpCountriesByProvider = ReadonlyMap<RampProviderId, ProviderOfframpCoverage>;
-type PayoutAccountsByProvider = ReadonlyMap<
-  RampProviderId,
-  Readonly<Record<string, RampPayoutAccountSpec>>
->;
 
 const CURRENCY_DISCOVERY_SUMMARY: Partial<Record<RampProviderId, { ok: number; failed: number }>> =
   {};
@@ -176,31 +146,13 @@ function sortCountrySupport(countrySupport: RampCountrySupport): RampCountrySupp
   }
 }
 
-function sortRecordByKey<TValue>(record: Readonly<Record<string, TValue>>): Record<string, TValue> {
+function _sortRecordByKey<TValue>(
+  record: Readonly<Record<string, TValue>>
+): Record<string, TValue> {
   return Object.fromEntries(
     Object.keys(record)
       .sort()
       .map((key) => [key, record[key]])
-  );
-}
-
-function sortPayoutAccounts(
-  accounts: Readonly<Record<string, RampPayoutAccountSpec>>
-): Record<string, RampPayoutAccountSpec> {
-  return sortRecordByKey(
-    Object.fromEntries(
-      Object.entries(accounts).map(([currency, account]) => [
-        currency,
-        {
-          accountType: account.accountType,
-          rails: sortRecordByKey(
-            Object.fromEntries(
-              Object.entries(account.rails).map(([rail, fields]) => [rail, sortRecordByKey(fields)])
-            )
-          ),
-        },
-      ])
-    )
   );
 }
 
@@ -213,12 +165,6 @@ function sortDirectionSnapshot(
   };
   if (direction.countrySupport !== undefined) {
     base.countrySupport = sortCountrySupport(direction.countrySupport);
-  }
-  if (direction.accounts !== undefined) {
-    base.accounts = sortPayoutAccounts(direction.accounts);
-  }
-  if (direction.swiftAccount !== undefined) {
-    base.swiftAccount = sortPayoutAccounts({ SWIFT: direction.swiftAccount }).SWIFT;
   }
   return base;
 }
@@ -293,66 +239,14 @@ async function readCurrencySupportSnapshots(): Promise<CurrencySupportSnapshots>
   return snapshots;
 }
 
-/**
- * Reads and validates every hand-compiled provider country-rails table.
- *
- * @returns Validated country, currency, and rail mappings keyed by provider.
- */
-async function readOfframpCountriesByProvider(): Promise<OfframpCountriesByProvider> {
-  const entries = await readdir(RAMP_SUPPORT_ROOT_DIR, { withFileTypes: true });
-  const byProvider = new Map<RampProviderId, ProviderOfframpCoverage>();
-  const sortedEntries = entries.sort((left, right) => left.name.localeCompare(right.name));
-  for (const entry of sortedEntries) {
-    if (!entry.isFile() || !entry.name.endsWith(".countries.json")) {
-      continue;
-    }
-    const providerName = entry.name.slice(0, -".countries.json".length);
-    const provider = rampProviderIdSchema.parse(providerName);
-    const text = await readFile(path.join(RAMP_SUPPORT_ROOT_DIR, entry.name), "utf8");
-    const parsed = z
-      .object({
-        $comment: z.string(),
-        swiftExcluded: z.array(z.enum(COUNTRY_CODES)),
-        countries: providerOfframpCountriesSchema,
-      })
-      .parse(JSON.parse(text));
-    byProvider.set(provider, {
-      countries: parsed.countries,
-      swiftExcluded: parsed.swiftExcluded,
-    });
-  }
-  return byProvider;
-}
-
-/**
- * Derives generic offramp country support from a provider's hand-compiled country table.
- *
- * @param offrampCountries - Validated country-to-currencies coverage.
- * @returns Country support for the generic generated provider metadata.
- */
-function compiledOfframpCountrySupport(
-  offrampCountries: ProviderOfframpCountries
-): RampCountrySupport {
-  const countries: Record<string, readonly string[]> = {};
-  for (const countryCode of [...COUNTRY_CODES].sort()) {
-    const currencies = offrampCountries[countryCode];
-    if (currencies === undefined) {
-      continue;
-    }
-    countries[countryCode] = [...currencies].sort();
-  }
-  return { coverage: "by-country", countries };
-}
-
 function mergeDirectionSupport(
   provider: RampProviderId,
   directionName: "onramp" | "offramp",
   snapshot: ProviderRailSupportSnapshot["onramp"],
-  declared: (typeof RAMP_PROVIDER_CLIENTS)[RampProviderId]["declaredRailSupport"]["onramp"],
-  compiledCountrySupport?: RampCountrySupport
+  declared: (typeof RAMP_PROVIDER_CLIENTS)[RampProviderId]["declaredRailSupport"]["onramp"]
 ): ProviderGenerationDirectionSupport {
   const countrySupportSources: Array<{
-    provenance: "compiled" | "declared" | "discovered";
+    provenance: "declared" | "discovered";
     value: RampCountrySupport;
   }> = [];
   if (snapshot.countrySupport !== undefined) {
@@ -360,9 +254,6 @@ function mergeDirectionSupport(
   }
   if (declared.countrySupport !== undefined) {
     countrySupportSources.push({ provenance: "declared", value: declared.countrySupport });
-  }
-  if (compiledCountrySupport !== undefined) {
-    countrySupportSources.push({ provenance: "compiled", value: compiledCountrySupport });
   }
   if (countrySupportSources.length !== 1) {
     const provenances = countrySupportSources.map((source) => source.provenance);
@@ -393,23 +284,12 @@ function mergeDirectionSupport(
 
 function mergeProviderSupport(
   provider: RampProviderId,
-  snapshot: ProviderRailSupportSnapshot,
-  offrampCoverage?: ProviderOfframpCoverage
+  snapshot: ProviderRailSupportSnapshot
 ): ProviderGenerationSupport {
   const declared = RAMP_PROVIDER_CLIENTS[provider].declaredRailSupport;
-  const compiledCountrySupport =
-    offrampCoverage === undefined
-      ? undefined
-      : compiledOfframpCountrySupport(offrampCoverage.countries);
   return {
     onramp: mergeDirectionSupport(provider, "onramp", snapshot.onramp, declared.onramp),
-    offramp: mergeDirectionSupport(
-      provider,
-      "offramp",
-      snapshot.offramp,
-      declared.offramp,
-      compiledCountrySupport
-    ),
+    offramp: mergeDirectionSupport(provider, "offramp", snapshot.offramp, declared.offramp),
   };
 }
 
@@ -449,15 +329,11 @@ function requireProviderSupport(
   return providerSupport;
 }
 
-function buildProviderSupport(
-  snapshots: CurrencySupportSnapshots,
-  offrampCountriesByProvider: OfframpCountriesByProvider
-): ProviderGenerationSupports {
+function buildProviderSupport(snapshots: CurrencySupportSnapshots): ProviderGenerationSupports {
   const support = new Map<RampProviderId, ProviderGenerationSupport>();
   for (const provider of RAMP_PROVIDERS) {
     const snapshot = requireProviderSnapshot(snapshots, provider);
-    const offrampCoverage = offrampCountriesByProvider.get(provider);
-    support.set(provider, mergeProviderSupport(provider, snapshot, offrampCoverage));
+    support.set(provider, mergeProviderSupport(provider, snapshot));
   }
   return support;
 }
@@ -671,63 +547,10 @@ function renderProviderSupportDetails(support: ProviderGenerationSupports): stri
   }).join("\n")}\n}`;
 }
 
-function renderPayoutAccounts(payoutAccountsByProvider: PayoutAccountsByProvider): string {
-  const rows: string[] = [];
-  for (const provider of RAMP_PROVIDERS) {
-    const accounts = payoutAccountsByProvider.get(provider);
-    if (accounts === undefined) {
-      continue;
-    }
-    const rendered = JSON.stringify(accounts, null, 2)
-      .split("\n")
-      .map((line, index) => (index === 0 ? line : `  ${line}`))
-      .join("\n");
-    rows.push(`  ${provider}: ${rendered},`);
-  }
-  if (rows.length === 0) {
-    return "{}";
-  }
-  return `{\n${rows.join("\n")}\n}`;
-}
-
-function renderSwiftSupport(
-  snapshots: CurrencySupportSnapshots,
-  offrampCountriesByProvider: OfframpCountriesByProvider
-): string {
-  const rows: string[] = [];
-  for (const provider of RAMP_PROVIDERS) {
-    const swiftAccount = snapshots.get(provider)?.offramp.swiftAccount;
-    if (swiftAccount === undefined) {
-      continue;
-    }
-    const coverage = offrampCountriesByProvider.get(provider);
-    if (coverage === undefined) {
-      throw new Error(
-        `${provider} snapshot has a SWIFT account but no hand-compiled country coverage to scope it.`
-      );
-    }
-    const entry = {
-      account: swiftAccount,
-      excludedCountries: [...coverage.swiftExcluded].sort(),
-    };
-    const rendered = JSON.stringify(entry, null, 2)
-      .split("\n")
-      .map((line, index) => (index === 0 ? line : `  ${line}`))
-      .join("\n");
-    rows.push(`  ${provider}: ${rendered},`);
-  }
-  if (rows.length === 0) {
-    return "{}";
-  }
-  return `{\n${rows.join("\n")}\n}`;
-}
-
 function renderGeneratedFile(input: {
   support: ProviderGenerationSupports;
   onrampRows: readonly OnrampRow[];
   offrampRows: readonly OfframpRow[];
-  payoutAccountsByProvider: PayoutAccountsByProvider;
-  swiftSupport: string;
 }): string {
   const allFiats = new Set<string>();
   for (const row of input.onrampRows) {
@@ -756,12 +579,10 @@ function renderGeneratedFile(input: {
 // Regenerate support: pnpm --filter @sdp/api ramp-support:generate
 // Raw dumps live in apps/sdp-api/.ramp-support/raw/ (gitignored).
 // Currency-support snapshots live in apps/sdp-api/.ramp-support/*.currency.json (committed).
-// Offramp country coverage lives in apps/sdp-api/.ramp-support/*.countries.json (hand-compiled).
 
 import type {
   OfframpPairSupport,
   OnrampPairSupport,
-  RampPayoutAccountSpec,
   RampProviderDirectionSupport,
 } from "../payment-rails";
 import type { RampProviderId } from "../provider-access";
@@ -786,14 +607,6 @@ export type OnrampSourceCurrency = (typeof ONRAMP_SOURCE_CURRENCIES)[number];
 export const OFFRAMP_DESTINATION_CURRENCIES = ${renderIndentedStringArray(offrampDestinationCurrencies, 0)} as const satisfies readonly RampFiatCurrency[];
 export type OfframpDestinationCurrency = (typeof OFFRAMP_DESTINATION_CURRENCIES)[number];
 
-export const OFFRAMP_PAYOUT_ACCOUNTS = ${renderPayoutAccounts(input.payoutAccountsByProvider)} as const satisfies Partial<
-  Record<RampProviderId, Record<string, RampPayoutAccountSpec>>
->;
-
-export const OFFRAMP_SWIFT_SUPPORT = ${input.swiftSupport} as const satisfies Partial<
-  Record<RampProviderId, { account: RampPayoutAccountSpec; excludedCountries: readonly string[] }>
->;
-
 export const RAMP_PROVIDER_SUPPORT_DETAILS = ${renderProviderSupportDetails(input.support)} as const satisfies Record<
   RampProviderId,
   {
@@ -812,52 +625,13 @@ ${renderRows(input.offrampRows)}
 `;
 }
 
-/**
- * Collects each provider's distilled payout-account table and enforces that
- * every currency named by a hand-compiled country-rails row has an account
- * spec — the contradiction class where the country table advertises a payout
- * the provider cannot address.
- */
-function buildPayoutAccounts(
-  snapshots: CurrencySupportSnapshots,
-  offrampCountriesByProvider: OfframpCountriesByProvider
-): PayoutAccountsByProvider {
-  const byProvider = new Map<RampProviderId, Readonly<Record<string, RampPayoutAccountSpec>>>();
-  for (const provider of RAMP_PROVIDERS) {
-    const accounts = snapshots.get(provider)?.offramp.accounts;
-    if (accounts === undefined) {
-      continue;
-    }
-    byProvider.set(provider, accounts);
-    const offrampCoverage = offrampCountriesByProvider.get(provider);
-    if (offrampCoverage === undefined) {
-      continue;
-    }
-    for (const [countryCode, currencies] of Object.entries(offrampCoverage.countries)) {
-      for (const currency of currencies) {
-        if (accounts[currency] === undefined) {
-          throw new Error(
-            `${provider} offramp countries list ${currency} for ${countryCode}, but the snapshot has no payout account spec for it.`
-          );
-        }
-      }
-    }
-  }
-  return byProvider;
-}
-
 async function renderGeneratedFromSnapshots(): Promise<string> {
-  const [snapshots, offrampCountriesByProvider] = await Promise.all([
-    currencySupport.readSnapshots(),
-    offrampCountries.readByProvider(),
-  ]);
-  const support = buildProviderSupport(snapshots, offrampCountriesByProvider);
+  const snapshots = await currencySupport.readSnapshots();
+  const support = buildProviderSupport(snapshots);
   return renderGeneratedFile({
     support,
     onrampRows: buildOnrampMatrix(support),
     offrampRows: buildOfframpMatrix(support),
-    payoutAccountsByProvider: buildPayoutAccounts(snapshots, offrampCountriesByProvider),
-    swiftSupport: renderSwiftSupport(snapshots, offrampCountriesByProvider),
   });
 }
 
@@ -1004,12 +778,6 @@ const currencySupport = {
 } as const satisfies {
   discover: (args: readonly string[]) => Promise<void>;
   readSnapshots: () => Promise<CurrencySupportSnapshots>;
-};
-
-const offrampCountries = {
-  readByProvider: readOfframpCountriesByProvider,
-} as const satisfies {
-  readByProvider: () => Promise<OfframpCountriesByProvider>;
 };
 
 async function runGenerate(): Promise<void> {

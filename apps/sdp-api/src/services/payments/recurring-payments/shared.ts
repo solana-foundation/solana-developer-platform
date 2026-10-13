@@ -2,7 +2,11 @@ import { getSolanaConfig } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type PreparedPaymentSubscriptionTransaction, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  type MovementId,
+  type PreparedPaymentSubscriptionTransaction,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import {
   type Address,
   addSignersToTransactionMessage,
@@ -217,6 +221,8 @@ export function assertRecurringPaymentSourceWallet(
 
 export async function sendSubscriptionInstructions(input: {
   env: Env;
+  /** The movement these instructions serve; the custody signer decides on it. */
+  movement: MovementId;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -231,7 +237,8 @@ export async function sendSubscriptionInstructions(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      input.movement
     ));
 
   if (signer.address !== input.sourceWallet.publicKey) {
@@ -241,6 +248,7 @@ export async function sendSubscriptionInstructions(input: {
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+    movement: input.movement,
     organizationId: input.organizationId,
     projectId: input.projectId,
     actor: { type: "wallet", id: input.sourceWallet.walletId },

@@ -68,7 +68,6 @@ export async function admitUpdateAuthorityRuntimeExecution(
   extraction: RequestGateExtraction
 ): Promise<void> {
   const resolved = extraction.resolved as UpdateAuthorityResolved;
-  if ("replay" in resolved) return;
   const { auth, tokenService, custodyWalletId } = resolved;
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -228,14 +227,17 @@ export const prepareUpdateAuthority = async (
     ? assertValidAddress(body.authority.newAuthority, "newAuthority")
     : null;
 
-  const { custodyWalletId, signer } = await resolveAuthoritySigner({
+  const authority = await resolveAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+  const { signer, custodyWalletId } = authority;
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -395,13 +397,16 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     },
   } = gate;
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+
+  const signer = authority.signer;
 
   const idempotencyMetadata = updateAuthorityIdempotencyMetadata(
     c.req.header("Idempotency-Key"),
@@ -446,7 +451,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "update_authority",
     resourceType: "token_transaction",

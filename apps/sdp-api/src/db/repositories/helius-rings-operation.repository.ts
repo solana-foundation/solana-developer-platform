@@ -307,6 +307,17 @@ export interface HeliusRingsOperationRepository {
 }
 
 /**
+ * What a stored `approval_required` row reads as (ADR 0006). The approval it
+ * waited on no longer exists and nothing moves the row, so reads report it as
+ * a failure that cannot be retried. No migration rewrites the stored row.
+ */
+export const RETIRED_APPROVAL_FAILURE = {
+  code: "invalid_input",
+  message: "This operation was waiting for an approval that no longer exists.",
+  retryable: false,
+} as const;
+
+/**
  * Row to the list-shaped domain projection. The activity table renders this;
  * the full `PrivateOperation` needs the event feed joined in, which the service
  * assembles.
@@ -314,19 +325,20 @@ export interface HeliusRingsOperationRepository {
 export function mapHeliusRingsOperationSummaryRow(
   row: HeliusRingsOperationRow
 ): PrivateOperationSummary {
+  const retired = row.state === "approval_required";
   return {
     id: row.id,
     walletId: row.wallet_id,
     opType: row.op_type,
-    state: row.state,
+    state: retired ? "failed" : row.state,
     assetMint: row.asset_mint ?? null,
     amountRaw: row.amount_raw ?? null,
     ringProgramId: row.ring_program_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    failureCode: row.failure_code ?? null,
+    failureCode: retired ? RETIRED_APPROVAL_FAILURE.code : (row.failure_code ?? null),
     outerTxSignature: row.outer_tx_signature ?? null,
-    retryable: row.retryable ?? null,
+    retryable: retired ? RETIRED_APPROVAL_FAILURE.retryable : (row.retryable ?? null),
     retryOfOperationId: row.retry_of_operation_id ?? null,
   };
 }

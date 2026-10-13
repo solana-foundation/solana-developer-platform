@@ -24,6 +24,7 @@ import {
 } from "@sdp/custody/dfns";
 import type { SigningPort } from "@sdp/custody/signing";
 import { SigningError } from "@sdp/custody/signing";
+import type { MovementId } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
@@ -70,8 +71,6 @@ import {
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-
-export { createAdapterFromEncryptedConfig };
 
 const base58 = getBase58Codec();
 
@@ -1238,12 +1237,14 @@ export class SigningService {
   async getTransactionSignerForWalletRecord(
     orgId: string,
     projectId: string,
-    custodyWalletId: string
+    custodyWalletId: string,
+    movement: MovementId
   ): Promise<TransactionSigner> {
     return this.runtimeTargets.getTransactionSignerForWalletRecord(
       orgId,
       projectId,
       custodyWalletId,
+      movement,
       (organizationId, config) => this.getAdapterForConfig(organizationId, config)
     );
   }

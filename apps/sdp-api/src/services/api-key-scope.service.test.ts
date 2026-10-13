@@ -274,7 +274,7 @@ describe("api key scope service", () => {
    * A db whose wallet-authorization reads GRANT `cwlt_exact`, so a refusal can
    * only have come from the key row itself.
    */
-  function grantingDb(keyRow: Record<string, unknown>) {
+  function grantingDb(keyRow: Record<string, unknown> | null) {
     const allResponses = [
       {
         results: [
@@ -294,36 +294,8 @@ describe("api key scope service", () => {
     } as unknown as Parameters<typeof assertFreshApiKeyCustodyWalletAccess>[0];
   }
 
-  // The whole point of a FRESH check is that the request auth context may be a
-  // one-hour KV snapshot. A key deactivated inside that hour must stop moving
-  // money on the very next request, not when its cache entry happens to expire.
-  // Every non-active status, because "active" is the only one that grants.
-  it.each(["deactivated", "revoked", "expired"] as const)(
-    "refuses a %s key even though its cached snapshot still grants the wallet",
-    async (status) => {
-      const auth = createApiKeyAuth({
-        projectId: "prj_scope_test",
-        walletScope: "selected",
-        signingWalletId: "wal_exact",
-        signingWalletIds: ["wal_exact"],
-        walletBindings: [
-          { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:write"] },
-        ],
-      });
-      // The fresh authorization GRANTS the wallet, so status is the only thing
-      // that can refuse. An empty grant would pass this test without the fix.
-      const db = grantingDb({ signing_wallet_id: "wal_exact", status, expires_at: null });
-
-      await expect(
-        assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
-      ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    }
-  );
-
-  // An expiry that has passed is a revocation the clock performed, and the
-  // status column will not have caught up until something writes to it.
-  it("refuses an active key whose expiry has passed", async () => {
-    const auth = createApiKeyAuth({
+  const selectedExactAuth = () =>
+    createApiKeyAuth({
       projectId: "prj_scope_test",
       walletScope: "selected",
       signingWalletId: "wal_exact",
@@ -332,14 +304,27 @@ describe("api key scope service", () => {
         { walletId: "wal_exact", custodyWalletId: "cwlt_exact", permissions: ["payments:write"] },
       ],
     });
-    const db = grantingDb({
-      signing_wallet_id: "wal_exact",
-      status: "active",
-      expires_at: "2020-01-01T00:00:00.000Z",
-    });
+
+  // Whether the key is still usable (status, expiry, rotation deadline) is read
+  // fresh by authentication on every request (#2262), so a revoked key never
+  // reaches this check. It reads only the key's signing wallet and bindings.
+  it("grants from the fresh bindings without re-judging the key's status", async () => {
+    const db = grantingDb({ signing_wallet_id: "wal_exact" });
 
     await expect(
-      assertFreshApiKeyCustodyWalletAccess(db, auth, "cwlt_exact", ["payments:write"])
+      assertFreshApiKeyCustodyWalletAccess(db, selectedExactAuth(), "cwlt_exact", [
+        "payments:write",
+      ])
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses a key whose row is no longer in its project", async () => {
+    const db = grantingDb(null);
+
+    await expect(
+      assertFreshApiKeyCustodyWalletAccess(db, selectedExactAuth(), "cwlt_exact", [
+        "payments:write",
+      ])
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 

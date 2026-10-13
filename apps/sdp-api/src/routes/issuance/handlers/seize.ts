@@ -72,19 +72,22 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     throw badRequest("Provided delegate authority does not match the on-chain authority");
   }
 
-  const { signer, custodyWalletId } = await resolveAuthoritySigner({
+  const authority = await resolveAuthoritySigner({
+    movement: "issuance.seize",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+
+  const { signer, custodyWalletId } = authority;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.seize.source, "source");
   const destination = assertValidAddress(body.seize.destination, "destination");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const prepared = await mosaic.prepareForceTransfer({
     mint: mintAddress,
     source,
@@ -263,14 +266,17 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
+    movement: "issuance.seize",
     env: c.env,
     auth,
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+  const signer = authority.signer;
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "seize",
     resourceType: "token_transaction",

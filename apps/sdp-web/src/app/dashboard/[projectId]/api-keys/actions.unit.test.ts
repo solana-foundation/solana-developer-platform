@@ -1,3 +1,4 @@
+import type { AllowedOperation } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
@@ -116,6 +117,7 @@ describe("saveApiKeyAuthoringAction: edit", () => {
       mode: "edit",
       keyId: "key_1",
       draft: draft({ operationsScope: "selected", selectedOperations: ["payment"] }),
+      operationsTouched: true,
     });
 
     expect(result.ok).toBe(true);
@@ -126,9 +128,28 @@ describe("saveApiKeyAuthoringAction: edit", () => {
   });
 
   it("clears the restriction with null when the key is back on All operations", async () => {
-    await saveApiKeyAuthoringAction({ mode: "edit", keyId: "key_1", draft: draft() });
+    await saveApiKeyAuthoringAction({
+      mode: "edit",
+      keyId: "key_1",
+      draft: draft(),
+      operationsTouched: true,
+    });
 
     expect(lastBody()).toMatchObject({ allowedOperations: null });
+  });
+
+  it("sends no allowedOperations when the operations section was not touched", async () => {
+    await saveApiKeyAuthoringAction({
+      mode: "edit",
+      keyId: "key_1",
+      draft: draft({
+        operationsScope: "selected",
+        selectedOperations: ["gone_operation"] as unknown as AllowedOperation[],
+      }),
+      operationsTouched: false,
+    });
+
+    expect(lastBody()).not.toHaveProperty("allowedOperations");
   });
 
   it("resets an all-wallets key with walletScope alone, as the API requires", async () => {

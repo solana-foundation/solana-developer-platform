@@ -1,4 +1,4 @@
-import { address } from "@solana/kit";
+import { address, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, SolanaError } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { getChannelTokenBalance } from "./gateway";
 
@@ -6,9 +6,14 @@ import { getChannelTokenBalance } from "./gateway";
 const USDC = address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 const OWNER = address("7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz");
 
-/** A `@solana/kit` HTTP-transport error carries the status on `error.context`. */
-function httpError(statusCode: number) {
-  return { context: { statusCode }, message: `HTTP error (${statusCode})` };
+function httpError(
+  statusCode: number
+): SolanaError<typeof SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR> {
+  return new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+    headers: new Headers(),
+    message: `HTTP error (${statusCode})`,
+    statusCode,
+  });
 }
 
 /** Minimal fake of the Kit RPC surface the gateway helper touches. Either call can

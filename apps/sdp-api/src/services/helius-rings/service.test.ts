@@ -36,6 +36,7 @@ import {
 import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
@@ -1376,6 +1377,26 @@ describe("HeliusRingsService", () => {
       expect(sign).toHaveBeenCalledOnce();
     });
 
+    it("surfaces a money-admission refusal as itself and submits nothing", async () => {
+      const submit = vi.fn(async () => OUTER_TX.signature);
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      const refusal = await service({
+        gateway,
+        signOuterTransaction: async () => {
+          throw new MoneyMovementRefusedError("organization_inactive");
+        },
+        submitOuterTransaction: submit,
+      })
+        .prepareOperation(operationInput({ clientNonce: "nonce-admission-refused" }))
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+      expect(submit).not.toHaveBeenCalled();
+    });
+
     it("rejects changed signer message bytes before signed-byte persistence", async () => {
       const sign = vi.fn(async () => CHANGED_OUTER_TX.signedTxBase64);
       const submit = vi.fn(async () => OUTER_TX.signature);
@@ -1662,6 +1683,61 @@ describe("HeliusRingsService", () => {
       const resumed = await liveishService().executeOperation(reserved.operation.id);
 
       expect(resumed.state).toBe("indexing");
+    });
+
+    describe("a stored approval_required row (retired, ADR 0006)", () => {
+      async function strandedApprovalRow() {
+        const operations = createPostgresHeliusRingsOperationRepository(getDb(env));
+        const reserved = await operations.reserveIntent({
+          ...tenant,
+          ringsConnectionId: TEST_CONNECTION_ID,
+          walletId,
+          opType: "merge",
+          intentKey: "sha256:stranded-approval",
+          assetMint: "So11111111111111111111111111111111111111112",
+          amountRaw: null,
+          fromAddr: null,
+          toAddr: null,
+          zoneId: null,
+          transferMode: null,
+          retryOfOperationId: null,
+          timelock: null,
+        });
+        await getDb(env)
+          .prepare("UPDATE helius_rings_operations SET state = 'approval_required' WHERE id = ?")
+          .bind(reserved.operation.id)
+          .run();
+        return reserved.operation.id;
+      }
+
+      it("reads as failed and not retryable, with a clear message", async () => {
+        const id = await strandedApprovalRow();
+
+        const operation = await liveishService().getOperation(id);
+
+        expect(operation.state).toBe("failed");
+        expect(operation.failure).toEqual({
+          code: "invalid_input",
+          message: "This operation was waiting for an approval that no longer exists.",
+          retryable: false,
+        });
+      });
+
+      it("is neither retried nor advanced, and the stored row is left alone", async () => {
+        const id = await strandedApprovalRow();
+        const svc = liveishService();
+
+        await expect(svc.retryOperation(id, "nonce-retry-approval")).rejects.toBeInstanceOf(
+          AppError
+        );
+        const executed = await svc.executeOperation(id);
+
+        expect(executed.state).toBe("failed");
+        const stored = await createPostgresHeliusRingsOperationRepository(
+          getDb(env)
+        ).getOperationById({ ...tenant, id });
+        expect(stored?.state).toBe("approval_required");
+      });
     });
 
     it("polls indexing idempotently and completes on the Photon hit", async () => {

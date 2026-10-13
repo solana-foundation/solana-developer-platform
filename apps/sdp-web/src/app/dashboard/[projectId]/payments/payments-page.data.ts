@@ -167,7 +167,6 @@ function normalizePaymentTransfer(
     fiatCurrency,
     fiatAmount,
     settlement,
-    moneygram,
     createdAt,
     updatedAt,
   } = transfer;
@@ -197,7 +196,6 @@ function normalizePaymentTransfer(
       fiatCurrency,
       fiatAmount,
       settlement,
-      moneygram,
       createdAt,
       updatedAt,
     }).filter(([, value]) => value !== undefined)
@@ -210,6 +208,8 @@ export async function fetchPaymentTransfers(
   options: {
     custodyWalletId?: string;
     includeObserved?: boolean;
+    /** The 1-based page of `pageSize` rows to read; the first page when omitted. */
+    page?: number;
     signal?: AbortSignal;
     /** Only these transfer types; omitted lists every type. */
     types?: readonly PaymentTransferType[];
@@ -217,7 +217,7 @@ export async function fetchPaymentTransfers(
 ): Promise<FetchResult<PaymentTransferSummary[]>> {
   try {
     const query = new URLSearchParams({
-      page: "1",
+      page: String(options.page ?? 1),
       pageSize: String(pageSize),
       ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
       ...(options.types && options.types.length > 0 ? { type: options.types.join(",") } : {}),
