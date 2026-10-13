@@ -429,5 +429,75 @@ describe("Custody wallet owner contract", () => {
         expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       }
     });
+
+    it("answers a Managed provider failure with a stored 503, not a 400", async () => {
+      provisionPrivyWalletMock.mockRejectedValueOnce(
+        new SigningError("Privy API error: 500 - upstream", "NETWORK_ERROR")
+      );
+
+      const response = await createWallet({ provider: "privy", label: "Treasury" }, KEY);
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_UNAVAILABLE" } });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT status, response_status FROM idempotency_keys WHERE idempotency_key = ?",
+          [KEY]
+        )
+      ).toEqual({ status: "completed", response_status: 503 });
+    });
+
+    it.each([
+      ["Managed", { provider: "privy", label: "Treasury" }, { custodyConfigId: CONFIG_ID }],
+      [
+        "BYOK",
+        { connectionId: CONNECTION_ID, label: "Settlement" },
+        { custodyConnectionId: CONNECTION_ID },
+      ],
+    ])(
+      "answers a %s create that loses the race for its request id from the row that won",
+      async (_kind, body, owner) => {
+        provisionPrivyWalletMock.mockImplementationOnce(async () => {
+          // A concurrent attempt under the same key recorded its wallet first.
+          const claim = await getDb(env).queryOne<{ fingerprint: string }>(
+            "SELECT fingerprint FROM idempotency_keys WHERE idempotency_key = ?",
+            [KEY]
+          );
+          await seedTestCustodyRows(env, {
+            configs: [],
+            wallets: [
+              {
+                id: "cwlt_raced_winner",
+                owner:
+                  "custodyConfigId" in owner
+                    ? { kind: "config", custodyConfigId: owner.custodyConfigId }
+                    : { kind: "connection", custodyConnectionId: owner.custodyConnectionId },
+                walletId: "privy_raced_winner",
+                publicKey: CREATED_PUBLIC_KEY,
+                label: body.label,
+                purpose: null,
+                status: "active",
+              },
+            ],
+          });
+          await getDb(env).execute(
+            `UPDATE custody_wallets SET idempotency_request_id = ?, idempotency_fingerprint = ?
+              WHERE id = 'cwlt_raced_winner'`,
+            [requestId(KEY), claim?.fingerprint ?? null]
+          );
+          return { walletId: "raced_loser", address: CREATED_PUBLIC_KEY };
+        });
+
+        const response = await createWallet(body, KEY);
+
+        expect(response.status).toBe(201);
+        expect(await response.json()).toMatchObject({
+          data: { wallet: { id: "cwlt_raced_winner", walletId: "privy_raced_winner", ...owner } },
+        });
+        expect(
+          (await readWalletRows()).filter((row) => row.wallet_id === "privy_raced_loser")
+        ).toEqual([]);
+      }
+    );
   });
 });

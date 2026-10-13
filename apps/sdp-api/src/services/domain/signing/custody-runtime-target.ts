@@ -14,6 +14,7 @@ import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db";
+import { isCustodyWalletIdempotencyViolation } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
@@ -583,6 +584,11 @@ export class CustodyRuntimeTargets {
       });
     } catch (error) {
       // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
+      if (isCustodyWalletIdempotencyViolation(error)) {
+        // Another attempt under this key recorded the same Privy wallet (Privy
+        // dedupes on the request id); the route answers from that row.
+        throw error;
+      }
       this.logWalletOrphanRisk(target, "persistence_failed", intent.id, providerWalletId);
       if (error instanceof AppError && error.code === "CONFLICT") {
         throw error;

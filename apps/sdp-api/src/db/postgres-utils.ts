@@ -17,6 +17,17 @@ export function isPostgresUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * A keyed custody wallet create lost the race for its request id (migration
+ * 0131): another attempt under the same key already recorded the wallet.
+ */
+export function isCustodyWalletIdempotencyViolation(error: unknown): boolean {
+  return (
+    isPostgresUniqueViolation(error) &&
+    (error as { constraint?: unknown }).constraint === "custody_wallets_idempotency_request_id_idx"
+  );
+}
+
 export function parsePostgresJson<T>(value: unknown): T {
   if (typeof value === "string") {
     return JSON.parse(value) as T;
