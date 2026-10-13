@@ -93,7 +93,7 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
         {t("DashboardPayments.requestDetail.paymentLink")}
       </span>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="min-w-0 flex-1 truncate text-body text-primary">
+        <span className="min-w-0 flex-1 truncate font-mono text-body text-primary">
           {origin ? payLink : null}
         </span>
         <Button
@@ -217,18 +217,18 @@ function PaymentRequestRecord({
                 {walletName ? (
                   <>
                     {walletName}
-                    <span className="ms-2 text-secondary">
+                    <span className="ms-2 font-mono text-secondary">
                       {shortenAddress(request.destinationAddress)}
                     </span>
                   </>
                 ) : (
-                  <span>{shortenAddress(request.destinationAddress)}</span>
+                  <span className="font-mono">{shortenAddress(request.destinationAddress)}</span>
                 )}
               </RecordRow>
             </RecordList>
             <RecordList>
               <RecordRow label={t("DashboardPayments.requests.reference")}>
-                <span>{request.reference}</span>
+                <span className="font-mono">{request.reference}</span>
               </RecordRow>
               <RecordRow label={t("DashboardPayments.requests.expires")}>
                 {expires ?? t("DashboardPayments.requests.noExpiry")}

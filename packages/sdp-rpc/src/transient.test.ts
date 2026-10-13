@@ -91,16 +91,13 @@ test("does not retry a persistent error", async () => {
   assert.equal(calls, 1);
 });
 
-test("stops retrying once the elapsed budget is spent", async (context) => {
+test("stops retrying once the elapsed budget is spent", async () => {
   let calls = 0;
-  let elapsedMs = 0;
-  // Keep the elapsed budget independent of workspace scheduler delays.
-  context.mock.method(Date, "now", () => elapsedMs);
   await assert.rejects(
     withTransientRpcRetry(
       async () => {
         calls += 1;
-        elapsedMs += 40;
+        await new Promise((resolve) => setTimeout(resolve, 40));
         throw new Error("fetch failed");
       },
       [0, 0, 0, 0],

@@ -398,7 +398,7 @@ function CreateRequestModal({
             {selectedCounterpartyId && !accountsLoading && primaryCryptoAccount && (
               <p className="text-xs text-tertiary">
                 {t("DashboardPayments.requests.paysFrom")}{" "}
-                <span className="text-secondary">
+                <span className="font-mono text-secondary">
                   {resolveAccountAddress(primaryCryptoAccount)}
                 </span>
               </p>
@@ -668,7 +668,7 @@ export function PaymentRequestsWorkspace({
                                     {fromLabel(request.counterpartyId)}
                                   </span>
                                 </TableCell>
-                                <TableCell className="text-sm text-secondary">
+                                <TableCell className="font-mono text-sm text-secondary">
                                   <span className="block truncate">
                                     {shortenAddress(request.destinationAddress)}
                                   </span>
@@ -734,7 +734,9 @@ export function PaymentRequestsWorkspace({
             </div>
 
             <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
-              <span className="min-w-0 flex-1 truncate text-sm text-secondary">{payLink}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
+                {payLink}
+              </span>
               <Button
                 type="button"
                 variant="secondary"
@@ -758,7 +760,7 @@ export function PaymentRequestsWorkspace({
                   {selectedWalletName ? (
                     <span className="block font-medium text-primary">{selectedWalletName}</span>
                   ) : null}
-                  <span className="block text-sm font-normal text-secondary">
+                  <span className="block font-mono text-xs font-normal text-secondary">
                     {selected.destinationAddress}
                   </span>
                 </DetailRow>
