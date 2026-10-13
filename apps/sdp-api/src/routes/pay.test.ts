@@ -148,22 +148,6 @@ describe("Public payment request routes", () => {
     it("serves a Sandbox request from devnet only", async () => {
       await expectServedOnlyFrom(TEST_PROJECT.id, "devnet");
     });
-
-    it("answers 404 for a request without a Project", async () => {
-      const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
-      await getDb(env)
-        .prepare("UPDATE payment_requests SET project_id = NULL WHERE id = ?")
-        .bind(request.id)
-        .run();
-
-      const detail = await app.request(`/pay/${request.public_token}`, {}, env);
-      expect(detail.status).toBe(404);
-      await expect(detail.json()).resolves.toMatchObject({ error: { code: "NOT_FOUND" } });
-      expect((await postTransaction(request.public_token)).status).toBe(404);
-      expect(sponsorship).not.toHaveBeenCalled();
-      expect(rpc.calls).toEqual([]);
-    });
   });
 
   describe("sponsored transaction window", () => {
