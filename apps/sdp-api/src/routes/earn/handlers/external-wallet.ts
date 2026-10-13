@@ -27,7 +27,6 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
-  SdpEnvironment,
 } from "@sdp/types";
 import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
@@ -171,12 +170,7 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const portfolio = await observeExternalWalletPortfolio(
-    c,
-    auth.organizationId,
-    projectId,
-    environment
-  );
+  const portfolio = await observeExternalWalletPortfolio(c, auth.organizationId, projectId);
   const summary = summarizeExternalWalletPositions(portfolio.holdings, portfolio.live, {
     includeOwnerAddresses,
     includePositions,
@@ -203,10 +197,9 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
 function observeExternalWalletPortfolio(
   c: AppContext,
   organizationId: string,
-  projectId: string,
-  environment: SdpEnvironment
+  projectId: string
 ): Promise<ExternalWalletPortfolioObservation> {
-  const key = JSON.stringify([organizationId, projectId, environment]);
+  const key = JSON.stringify([organizationId, projectId, currentClusterScope().environment]);
   const existing = inFlightExternalWalletPortfolios.get(key);
   if (existing) return existing;
 
