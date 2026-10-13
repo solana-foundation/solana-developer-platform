@@ -150,7 +150,7 @@ test.describe
 
     async function countTransfers(page: Page, amount: string): Promise<number> {
       const transfers = await apiFor(page, fx.projectId).get<{ amount?: string }[]>(
-        `/v1/payments/transfers?counterpartyId=${fx.counterpartyId}&pageSize=100`
+        `/v1/payments/transfers?custodyWalletId=${fx.walletId}&pageSize=100`
       );
       return transfers.filter((t) => Number(t.amount) === Number(amount)).length;
     }
