@@ -63,7 +63,7 @@ let originalPrivyAppId: string | undefined;
 let originalPrivyAppSecret: string | undefined;
 let originalCustodyEncryptionKey: string | undefined;
 
-async function initializeProvider(body: { provider: "para" }): Promise<Response> {
+async function initializeProvider(body: Readonly<Record<string, string>>): Promise<Response> {
   return app.request(
     "/v1/wallets/initialize",
     {
@@ -276,6 +276,27 @@ describe("Custody multi-provider routes", () => {
       await getDb(env).queryMany(
         "SELECT id FROM custody_wallets WHERE wallet_id = 'para_wallet_initialized'"
       )
+    ).toEqual([]);
+    expect(await readAuditActions()).toEqual([]);
+  });
+
+  it("rejects an initialize request that still names a custody network", async () => {
+    const providerFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", providerFetch);
+
+    const response = await initializeProvider({ provider: "dfns", network: "Solana" });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message: 'Invalid request body:\n✖ Unrecognized key: "network"',
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany("SELECT id FROM custody_configs WHERE provider = 'dfns'")
     ).toEqual([]);
     expect(await readAuditActions()).toEqual([]);
   });
