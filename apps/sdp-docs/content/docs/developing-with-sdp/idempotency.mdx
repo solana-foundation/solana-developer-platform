@@ -1,6 +1,6 @@
 ---
 title: Idempotency
-description: Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, accepted on every other payments, recurring payments, wallets, counterparties and compliance mutation.
+description: Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, accepted on every other payments, wallets, counterparties and compliance mutation.
 ---
 
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
@@ -20,6 +20,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 - `POST /v1/payments/transfers`
 - `POST /v1/payments/transfer-batches`
 - `POST /v1/payments/recurring-payments`
+- `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
 - `POST /v1/payments/recurring-payments/{id}/activate`
 - `POST /v1/payments/recurring-payments/{id}/cancel`
 - `POST /v1/payments/recurring-payments/{id}/collect`
@@ -28,7 +29,6 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 **Accepted.** The key is optional, and honored when sent.
 
 - Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
-- Recurring payments: `PATCH /v1/payments/recurring-payments/{id}`
 - Subscription plans and subscriptions: `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
@@ -56,8 +56,8 @@ Access is checked before the key on every request, so a retry passes exactly the
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
-| A recurring-payment action failed | Not stored. A failed attempt leaves the schedule as it was, so a same-key retry runs the action again. |
-| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money, and `PATCH /v1/payments/recurring-payments/{id}`, are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer carries no `Idempotent-Replayed` header. |
+| A recurring-payment action failed | A failed attempt leaves the schedule as it was. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
+| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer carries no `Idempotent-Replayed` header. |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 

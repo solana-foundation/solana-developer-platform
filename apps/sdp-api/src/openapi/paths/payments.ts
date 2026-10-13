@@ -74,10 +74,6 @@ const keyRequiredRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "required",
   serverErrors: "rerun",
 });
-const keyAcceptedRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
-  key: "accepted",
-  serverErrors: "rerun",
-});
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
@@ -339,10 +335,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update recurring payment",
     operationId: "updatePaymentRecurringPayment",
     description:
-      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records. Requires an Idempotency-Key, because an edit can sign and broadcast a replacement subscription: a retry with the same key and request returns the recurring payment instead of broadcasting again.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: keyAcceptedRerunHeaders,
+      headers: keyRequiredRerunHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
       body: {
         required: true,
