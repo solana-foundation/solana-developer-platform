@@ -15,6 +15,40 @@ const STRIPE_SESSION_STATUS = {
   rejected: "failed",
 } as const satisfies Record<string, RampSettlementEvent["kind"]>;
 
+type DeliveredAssetRail = NonNullable<
+  Extract<RampSettlementEvent, { kind: "settled" }>["deliveredAssetRail"]
+>;
+
+/** The rail each Stripe destination currency settles on, on Solana. */
+const STRIPE_SOLANA_RAILS = {
+  usdc: "usdc.solana",
+  sol: "sol.solana",
+} as const satisfies Record<string, DeliveredAssetRail>;
+
+function isStripeSolanaCurrency(currency: string): currency is keyof typeof STRIPE_SOLANA_RAILS {
+  return Object.hasOwn(STRIPE_SOLANA_RAILS, currency);
+}
+
+/**
+ * The rail a completed Stripe session reports delivering, or null when it names
+ * no asset SDP sells on Solana. A completed session always reports one, so a
+ * missing currency is null too.
+ */
+function stripeDeliveredAssetRail(
+  transactionDetails: Record<string, unknown> | undefined
+): DeliveredAssetRail | null {
+  const currency = transactionDetails
+    ? readString(transactionDetails.destination_currency)
+    : undefined;
+  const network = transactionDetails
+    ? readString(transactionDetails.destination_network)
+    : undefined;
+  if (network !== "solana" || currency === undefined || !isStripeSolanaCurrency(currency)) {
+    return null;
+  }
+  return STRIPE_SOLANA_RAILS[currency];
+}
+
 interface StripeSignatureHeader {
   timestamp: string;
   signatures: string[];
@@ -170,6 +204,7 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
         provider: this.provider,
         kind,
         reference,
+        deliveredAssetRail: stripeDeliveredAssetRail(transactionDetails),
         ...(receivedAmount ? { receivedAmount } : {}),
       };
     }

@@ -37,6 +37,32 @@ describe("StripeWebhookProcessor", () => {
     });
   });
 
+  it("reports the rail a completed session delivered, null when it is not one SDP sells", () => {
+    const processor = new StripeWebhookProcessor();
+    const completed = (transactionDetails: Record<string, unknown>) =>
+      processor.parse({
+        type: "crypto.onramp_session.updated",
+        data: {
+          object: {
+            id: "cos_1",
+            status: "fulfillment_complete",
+            transaction_details: transactionDetails,
+          },
+        },
+      });
+
+    expect(
+      completed({ destination_currency: "usdc", destination_network: "solana" })
+    ).toMatchObject({ kind: "settled", deliveredAssetRail: "usdc.solana" });
+    expect(completed({ destination_currency: "sol", destination_network: "solana" })).toMatchObject(
+      { deliveredAssetRail: "sol.solana" }
+    );
+    expect(
+      completed({ destination_currency: "eth", destination_network: "ethereum" })
+    ).toMatchObject({ deliveredAssetRail: null });
+    expect(completed({ destination_amount: "0.5" })).toMatchObject({ deliveredAssetRail: null });
+  });
+
   it("throws on a known event type with a malformed envelope", () => {
     const processor = new StripeWebhookProcessor();
     expect(() => processor.parse({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
