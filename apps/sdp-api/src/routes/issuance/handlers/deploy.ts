@@ -3,12 +3,8 @@ import {
   MintMetadataUpdateError,
   PACKET_DATA_SIZE,
 } from "@sdp/issuance/mosaic";
-import {
-  createRpc,
-  getAccountInfo,
-  type ParsedTransaction,
-  simulateTransaction,
-} from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getAccountInfo, type ParsedTransaction, simulateTransaction } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
@@ -62,8 +58,8 @@ const MIN_WALLET_PAID_DEPLOY_LAMPORTS = 10_000_000n;
  * raw Solana debit failure mid-transaction. A missing account means the wallet
  * has never been funded, i.e. zero balance.
  */
-async function assertWalletCanPayDeployFees(env: Env, address: Address): Promise<void> {
-  const account = await getAccountInfo(createRpc(env), address);
+async function assertWalletCanPayDeployFees(address: Address): Promise<void> {
+  const account = await getAccountInfo(createClusterRpc(), address);
   const lamports = account === null ? 0n : account.lamports;
   if (lamports < MIN_WALLET_PAID_DEPLOY_LAMPORTS) {
     throw badRequest(
@@ -589,7 +585,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     }
 
     if (feePayment === "wallet") {
-      await assertWalletCanPayDeployFees(c.env, signer.address);
+      await assertWalletCanPayDeployFees(signer.address);
     }
 
     // Create Mosaic service for template-based token deployment
@@ -835,7 +831,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     metadataUriFollowUp = { required: true, uri: resolvedUri };
   }
 
-  const rpc = createRpc(c.env);
+  const rpc = createClusterRpc();
   const txBytes = Buffer.from(prepared.serializedTx, "base64");
   const simulation = await simulateTransaction(rpc, txBytes);
 
@@ -967,7 +963,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // public metadata.json. See verifyTransactionLanded for why each of the
     // three checks exists; the caller-side check below (findMintInitialization)
     // is the third leg — it links the signature to THIS mint.
-    const rpc = createRpc(c.env);
+    const rpc = createClusterRpc();
     const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
 
     if (!verified.ok) {
@@ -1162,7 +1158,7 @@ export const prepareDeployMetadata = async (
     return success(c, { transaction: null, uri: resolvedUri });
   }
 
-  const rpc = createRpc(c.env);
+  const rpc = createClusterRpc();
   const simulation = await simulateTransaction(rpc, Buffer.from(prepared.serializedTx, "base64"));
 
   const auditService = new AuditService(getDb(c.env));
