@@ -3,8 +3,6 @@ import { type ManagedRpcEndpoint, managedRpcEndpoints } from "./factory";
 import { currentClusterScope } from "./scope";
 import type { KVStore } from "./types";
 
-export { withHeliusApiKey } from "./config";
-
 export interface ResolveRpcTargetInput {
   cache: KVStore;
 }

@@ -126,7 +126,7 @@ function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
     localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
     koraApiKey: getLocalDevVar("KORA_API_KEY_DEVNET"),
     koraRpcUrl: getLocalDevVar("KORA_RPC_URL_DEVNET") ?? DEFAULT_KORA_RPC_URL,
-    solanaRpcUrl: getLocalDevVar("SOLANA_RPC_URL") ?? DEFAULT_SOLANA_RPC_URL,
+    solanaRpcUrl: getLocalDevVar("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL") ?? DEFAULT_SOLANA_RPC_URL,
   };
 }
 

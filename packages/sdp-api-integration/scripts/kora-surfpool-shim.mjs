@@ -13,7 +13,7 @@ import {
 
 const host = process.env.KORA_SHIM_HOST ?? "127.0.0.1";
 const port = Number.parseInt(process.env.KORA_SHIM_PORT ?? "8080", 10);
-const solanaRpcUrl = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
+const solanaRpcUrl = process.env.SURFPOOL_RPC_URL ?? "http://127.0.0.1:8899";
 const solanaRpcTimeoutMs = Number.parseInt(process.env.KORA_SHIM_RPC_TIMEOUT_MS ?? "120000", 10);
 const sendTransactionTimeoutMs = Number.parseInt(
   process.env.KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS ?? "30000",

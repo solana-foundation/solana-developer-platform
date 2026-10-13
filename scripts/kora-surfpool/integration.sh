@@ -64,7 +64,6 @@ trap cleanup EXIT
 export FEE_PAYMENT_PROVIDER="${FEE_PAYMENT_PROVIDER:-kora}"
 export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"
 export KORA_SURFPOOL_SHIM="${KORA_SURFPOOL_SHIM:-true}"
-export SOLANA_RPC_DEFAULT_PROVIDER=default
 export SDP_INTEGRATION_CUSTODY_PROVIDER="${SDP_INTEGRATION_CUSTODY_PROVIDER:-local}"
 configure_local_custody
 export TEST_DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}"
@@ -80,7 +79,6 @@ fi
 
 # Re-derive DB bindings after runtime.env is sourced; up.sh may write a
 # KORA_SURFPOOL_DATABASE_URL override for the active harness.
-export SOLANA_RPC_DEFAULT_PROVIDER=default
 export TEST_DATABASE_URL="${KORA_SURFPOOL_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}"
 export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
 

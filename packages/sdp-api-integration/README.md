@@ -66,7 +66,7 @@ Use Doppler (team members) or export manually:
 
 **Required for live Kora/devnet smoke:**
 
-- `SOLANA_RPC_URL` — Example: `https://api.devnet.solana.com`
+- `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` — the devnet managed pool, at least one provider. Example: `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://api.devnet.solana.com`
 - `KORA_RPC_URL_DEVNET` — Example: `https://your-kora-devnet-instance.us-central1.run.app`
 - `PRIVY_APP_ID`
 - `PRIVY_APP_SECRET`
@@ -84,8 +84,8 @@ Use Doppler (team members) or export manually:
 - `SOLANA_RPC_CI_PREFERRED_PROVIDER` — Selects the managed RPC provider used as Surfpool's upstream.
 
 ```bash
-# Solana RPC
-SOLANA_RPC_URL=https://api.devnet.solana.com
+# Solana RPC (the lane cluster's managed pool)
+SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://api.devnet.solana.com
 
 # Fee-payer service (devnet)
 KORA_RPC_URL_DEVNET=https://your-kora-devnet-instance.us-central1.run.app
@@ -142,7 +142,7 @@ import { getEnv } from "../helpers/env";
 describe("Example", () => {
   it("reads env", () => {
     const env = getEnv();
-    expect(env.SOLANA_RPC_URL).toBeDefined();
+    expect(env.KORA_RPC_URL_DEVNET).toBeDefined();
   });
 });
 ```

@@ -22,7 +22,6 @@ import type {
   PrivateChannelWithdrawalRepository,
   PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
-import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 
 /**
@@ -32,7 +31,6 @@ import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
  *  - transport/auth/timeout error → no change (stays `submitted`); returns `null`.
  */
 export async function confirmAndPersistWithdrawal(
-  env: Env,
   repo: PrivateChannelWithdrawalRepository,
   input: {
     withdrawalId: string;
@@ -43,11 +41,8 @@ export async function confirmAndPersistWithdrawal(
   }
 ): Promise<PrivateChannelWithdrawalRow | null> {
   try {
-    const confirmation = await withGatewayRpc(
-      env,
-      input.gatewayUrl,
-      input.gatewayAuth,
-      (gatewayRpc) => confirmTransaction(gatewayRpc, input.signature, { commitment: "confirmed" })
+    const confirmation = await withGatewayRpc(input.gatewayUrl, input.gatewayAuth, (gatewayRpc) =>
+      confirmTransaction(gatewayRpc, input.signature, { commitment: "confirmed" })
     );
     if (confirmation.err) {
       return repo.updateWithdrawal({

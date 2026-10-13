@@ -186,8 +186,6 @@ async function configureIntegrationSolanaRpc(env) {
     return;
   }
 
-  env.SOLANA_RPC_URL = selected.url;
-  env.SOLANA_RPC_DEFAULT_PROVIDER = "default";
   useSolanaRpcCandidateAsDefault(env, selected);
   console.log(`Using ${selected.id} Solana RPC for integration (${safeHostname(selected.url)}).`);
 }

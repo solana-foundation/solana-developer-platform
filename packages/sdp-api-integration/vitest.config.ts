@@ -36,7 +36,6 @@ process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
 process.env.RUN_INTEGRATION_TESTS = "true";
 process.env.SOLANA_MOCK = "false";
 process.env.API_KEY_PEPPER ??= "test-pepper-for-integration";
-process.env.SOLANA_NETWORK ??= "devnet";
 process.env.CUSTODY_ENCRYPTION_KEY ??= Buffer.alloc(32).toString("base64");
 
 export default defineConfig({
