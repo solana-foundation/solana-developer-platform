@@ -24,7 +24,6 @@ vi.mock("./manual-instructions-quote", () => ({
 vi.mock("./coinbase/quote-summary", () => ({ CoinbaseQuoteSummary: () => null }));
 vi.mock("./coinbase/ramp-frame", () => ({ CoinbaseRampFrame: () => null }));
 vi.mock("./memo-step-content", () => ({ MemoStepContent: () => null }));
-vi.mock("./moneygram-ramp-widget", () => ({ MoneygramRampWidget: () => null }));
 vi.mock("./moonpay-ramp-frame", () => ({ MoonpayRampFrame: () => null }));
 vi.mock("./ramp-complete-screen", () => ({ RampCompleteScreen: () => null }));
 vi.mock("./ramp-onboarding-panel", () => ({ RampOnboardingPanel: () => null }));
@@ -118,7 +117,6 @@ function sharedWizard<TId extends string>(
     quoteTransferId: "xfr_manual",
     memoRows: [],
     setMemoRows: noop,
-    refreshQuote: asyncNoop,
     quoteCreationError: null,
     quoteCreationRetrying: false,
     retryQuoteCreation: noop,

@@ -285,7 +285,6 @@ export const DEMO_RAMP_PROVIDERS: Record<
   bvnk: { deliveryMode: "manual_instructions", reference: "BVNK" },
   moonpay: { deliveryMode: "hosted", reference: "MP" },
   coinbase: { deliveryMode: "hosted", reference: "CB" },
-  moneygram: { deliveryMode: "session_widget", reference: "MG" },
   stripe: { deliveryMode: "session_widget", reference: "STR" },
 };
 

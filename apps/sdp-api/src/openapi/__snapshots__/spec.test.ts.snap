@@ -24,7 +24,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "enum": [
                       "moonpay",
                       "bvnk",
-                      "moneygram",
                       "coinbase",
                       "stripe",
                     ],
@@ -1003,7 +1002,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "moonpay",
                       "lightspark",
                       "bvnk",
-                      "moneygram",
                       "coinbase",
                       "stripe",
                     ],
@@ -2865,7 +2863,6 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                       "moonpay",
                       "lightspark",
                       "bvnk",
-                      "moneygram",
                       "coinbase",
                       "stripe",
                     ],

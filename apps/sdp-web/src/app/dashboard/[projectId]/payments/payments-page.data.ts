@@ -167,7 +167,6 @@ function normalizePaymentTransfer(
     fiatCurrency,
     fiatAmount,
     settlement,
-    moneygram,
     createdAt,
     updatedAt,
   } = transfer;
@@ -197,7 +196,6 @@ function normalizePaymentTransfer(
       fiatCurrency,
       fiatAmount,
       settlement,
-      moneygram,
       createdAt,
       updatedAt,
     }).filter(([, value]) => value !== undefined)

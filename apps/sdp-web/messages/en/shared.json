@@ -417,7 +417,6 @@
     "rampMoonpayDescription": "Card and bank fiat onramp and offramp.",
     "rampLightsparkDescription": "Fiat settlement rails over the Lightning Network.",
     "rampBvnkDescription": "Business payments between fiat and stablecoins.",
-    "rampMoneygramDescription": "Cash and bank transfers through the MoneyGram network.",
     "rampCoinbaseDescription": "Fiat onramp and offramp through Coinbase accounts.",
     "rampStripeDescription": "Fiat onramp through Stripe checkout.",
     "complianceRangeDescription": "Transaction screening and risk monitoring for Solana.",

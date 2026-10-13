@@ -289,7 +289,6 @@ export function defineDashboardFlags({
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
-  const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
   const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
@@ -312,7 +311,6 @@ export function defineDashboardFlags({
     rampProviderMoonpay,
     rampProviderLightspark,
     rampProviderBvnk,
-    rampProviderMoneygram,
     rampProviderCoinbase,
     rampProviderStripe,
   };

@@ -383,20 +383,6 @@ export interface RampCryptoDeposit {
   amount: string;
 }
 
-export interface MoneygramTransferDetails {
-  /** MoneyGram's profile id for the counterparty, the same reference stored on its `customer_link` provider account. */
-  customerId?: string;
-  transactionId?: string;
-  /** MoneyGram-side transaction id; the correlation key for MoneyGram status webhooks. */
-  mgiTransactionId?: string;
-  referenceNumber?: string;
-  payoutAmount?: number;
-  payoutStatus?: string;
-  cryptoTransferId?: string;
-  solanaTxSignature?: string;
-  lastWidgetError?: string;
-}
-
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
@@ -423,7 +409,6 @@ export interface PaymentTransferSummary {
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
-  moneygram?: MoneygramTransferDetails;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1388,16 +1373,6 @@ export type PaymentRampQuote =
       fees: CoinbaseRampFee[];
     })
   | (BasePaymentRampQuote & {
-      provider: "moneygram";
-      deliveryMode: "session_widget";
-      /** Short-lived (1h) widget session JWT minted from the MoneyGram session API. */
-      sessionToken: string;
-      sessionId: string;
-      widgetUrl: string;
-      /** ISO timestamp when the widget session expires (decoded from the session JWT). */
-      expiresAt?: string;
-    })
-  | (BasePaymentRampQuote & {
       provider: "stripe";
       deliveryMode: "session_widget";
       clientSecret: string;
@@ -1406,7 +1381,7 @@ export type PaymentRampQuote =
       redirectUrl?: string;
     });
 
-export const RAMP_EVENT_PROVIDERS = ["moneygram", "coinbase"] as const;
+export const RAMP_EVENT_PROVIDERS = ["coinbase"] as const;
 export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 
 /**
@@ -1418,38 +1393,3 @@ export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
 export type CoinbaseRampEvent =
   | { kind: "committed"; orderId: string }
   | { kind: "errored"; orderId: string; reason: string };
-
-export type MoneygramRampEvent =
-  | {
-      kind: "transaction_created";
-      sessionId: string;
-      transactionId: string;
-      mgiTransactionId?: string;
-    }
-  | { kind: "deposit_address"; sessionId: string }
-  | { kind: "signed"; sessionId: string; cryptoTransferId: string }
-  | {
-      kind: "onramp_completed";
-      sessionId: string;
-      transactionId: string;
-      status: string;
-      amount: number;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "completed";
-      sessionId: string;
-      cryptoTransferId: string;
-      transactionId: string;
-      payoutAmount: number;
-      payoutStatus: string;
-      referenceNumber?: string;
-    }
-  | {
-      kind: "errored";
-      sessionId: string;
-      reason: string;
-      cryptoTransferId?: string;
-      transactionId?: string;
-    }
-  | { kind: "closed"; sessionId: string };

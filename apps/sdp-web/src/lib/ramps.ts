@@ -25,7 +25,6 @@ export const RAMP_PROVIDER_LOGOS = {
   moonpay: "/provider-logos/moonpay.svg",
   lightspark: "/provider-logos/lightspark.svg",
   bvnk: "/provider-logos/bvnk.svg",
-  moneygram: "/provider-logos/moneygram.svg",
   coinbase: "/provider-logos/coinbase-cdp.png",
   stripe: "/provider-logos/stripe.svg",
 } as const satisfies Record<RampProviderId, string>;
@@ -34,7 +33,6 @@ export const RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS = {
   moonpay: false,
   lightspark: true,
   bvnk: false,
-  moneygram: false,
   coinbase: false,
   stripe: false,
 } as const satisfies Record<RampProviderId, boolean>;
@@ -43,7 +41,6 @@ export const RAMP_PROVIDER_WEBSITES = {
   moonpay: "https://www.moonpay.com",
   lightspark: "https://www.lightspark.com",
   bvnk: "https://www.bvnk.com",
-  moneygram: "https://www.moneygram.com",
   coinbase: "https://www.coinbase.com/developer-platform",
   stripe: "https://stripe.com",
 } as const satisfies Record<RampProviderId, string>;
@@ -52,7 +49,6 @@ export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "moonpay", title: "MoonPay" },
   { id: "lightspark", title: "Lightspark" },
   { id: "bvnk", title: "BVNK" },
-  { id: "moneygram", title: "MoneyGram" },
   { id: "coinbase", title: "Coinbase" },
   { id: "stripe", title: "Stripe" },
 ];

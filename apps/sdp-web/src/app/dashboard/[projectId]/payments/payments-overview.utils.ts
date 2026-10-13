@@ -416,14 +416,9 @@ export function resolveTransferFlow(transfer: TransferRecord): {
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
-  const moneygramPayoutLabel =
-    transfer.moneygram?.payoutAmount !== undefined && transfer.fiatCurrency
-      ? formatDisplayAmount(String(transfer.moneygram.payoutAmount), transfer.fiatCurrency)
-      : null;
-  const receiveLabel = fiatLabel ?? moneygramPayoutLabel;
   return isInbound
     ? { send: fiatLabel, receive: cryptoLabel }
-    : { send: cryptoLabel, receive: receiveLabel };
+    : { send: cryptoLabel, receive: fiatLabel };
 }
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {

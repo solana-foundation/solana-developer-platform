@@ -153,7 +153,6 @@ export async function simulateSandboxTransfer(
       break;
     }
     case "moonpay":
-    case "moneygram":
     case "coinbase":
     case "stripe":
       throw badRequest(`Sandbox simulation is not available for provider: ${provider}.`);

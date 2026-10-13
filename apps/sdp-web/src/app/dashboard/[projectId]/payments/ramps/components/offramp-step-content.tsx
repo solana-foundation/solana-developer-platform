@@ -13,7 +13,6 @@ import { walletComboboxOptions } from "../wallet-options";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
@@ -91,8 +90,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
-    sourceTokenMint,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
@@ -261,32 +258,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
         src={quote.hostedUrl}
       />
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <div className="space-y-6">
-        <MoneygramRampWidget
-          direction="offramp"
-          quote={quote}
-          transferId={wizard.quoteTransferId}
-          sourceWalletId={selectedWallet.id}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-          sourceWalletAddress={selectedWallet.publicKey}
-          sourceTokenMint={sourceTokenMint}
-          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-          cryptoAmount={fields.amount.trim()}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          onSessionExpiring={refreshQuote}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
     );
   }
 

@@ -120,7 +120,7 @@ describe("ramp requirements", () => {
   });
 
   it("is ready at once with providers that run no onboarding", () => {
-    for (const provider of ["moonpay", "coinbase", "moneygram", "stripe"]) {
+    for (const provider of ["moonpay", "coinbase", "stripe"]) {
       expect(
         read(`/v1/counterparties/demo_cpty_jane/requirements?provider=${provider}`).body.data.status
       ).toBe("ready");

@@ -138,3 +138,10 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   and SQL predicates alone. The fixtures in
   `../../routes/payments.retired-ramp-providers.test.ts` run over every
   retired id.
+- **Delete its `.ramp-support/<id>.currency.json`, then run
+  `ramp-support:generate` only** (not `currencies:discover`, which needs
+  Doppler and re-pulls live provider snapshots). Fiat currencies only it
+  offered leave `RAMP_FIAT_CURRENCIES`, so request validation narrows with it.
+- **Merge only after an operator count shows no open transfers for it in stage
+  and prod.** A merge to main deploys to prod in the same run, so the drain
+  check gates the merge, not a later deploy.

@@ -302,10 +302,6 @@ export interface Env extends ManagedRpcEnv {
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
-  // MoneyGram ramps configuration
-  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
-  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
-
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
   COINBASE_CDP_RAMPS_WEBHOOK_SECRET?: string;

@@ -217,7 +217,6 @@ function mapCustomerLink(
       return mapBvnkCustomerLink(row);
     case "moonpay":
     case "lightspark":
-    case "moneygram":
     case "coinbase":
     case "stripe":
       return mapGenericCustomerLink(row, row.provider);

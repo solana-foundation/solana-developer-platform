@@ -61,7 +61,6 @@ export const {
   rampProviderMoonpay,
   rampProviderLightspark,
   rampProviderBvnk,
-  rampProviderMoneygram,
   rampProviderCoinbase,
   rampProviderStripe,
 } = flags;

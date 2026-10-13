@@ -584,38 +584,6 @@ describe("every ramp provider", () => {
     }
   );
 
-  it("runs a MoneyGram deposit and pays out through MoneyGram", async () => {
-    const deposit = await onrampQuote("moneygram", "usdc.solana");
-    expect(deposit.body.data.quote.deliveryMode).toBe("session_widget");
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      transferId: deposit.body.data.transferId,
-    });
-    expect((await statusAfterSettling(deposit.body.data.transferId)).status).toBe("completed");
-
-    const payout = await call("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "moneygram",
-      counterpartyId: "demo_cpty_jane",
-      sourceCustodyWalletId: "demo_cwlt_treasury",
-      assetRail: "usdc.solana",
-      cryptoAmount: "100",
-      fiatCurrency: "USD",
-    });
-    const { transferId } = payout.body.data;
-    const waiting = await data<{
-      transfer: { cryptoDeposit: { destinationAddress: string; amount: string } };
-    }>(`/v1/payments/transfers/${transferId}`);
-    expect(waiting.transfer.cryptoDeposit.amount).toBe("100");
-    const funded = await call("POST", "/v1/payments/transfers", {
-      transferId,
-      sourceCustodyWalletId: "demo_cwlt_treasury",
-      destination: waiting.transfer.cryptoDeposit.destinationAddress,
-      token: USDC,
-      amount: "100",
-    });
-    expect(funded.status).toBe(201);
-    expect((await statusAfterSettling(transferId)).status).toBe("completed");
-  });
-
   it("runs BVNK's onboarding: agreements, a simulated identity check, review, then the deposit", async () => {
     const path =
       "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=EUR";

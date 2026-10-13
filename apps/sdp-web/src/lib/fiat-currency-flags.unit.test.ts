@@ -39,8 +39,8 @@ describe("regionFlagEmoji", () => {
 
 describe("fiatCurrencyFlagEmoji", () => {
   it("flags currencies by their issuing region", () => {
-    expect(fiatCurrencyFlagEmoji("AMD")).toBe("🇦🇲");
-    expect(fiatCurrencyFlagEmoji("AOA")).toBe("🇦🇴");
+    expect(fiatCurrencyFlagEmoji("AED")).toBe("🇦🇪");
+    expect(fiatCurrencyFlagEmoji("BRL")).toBe("🇧🇷");
     expect(fiatCurrencyFlagEmoji("EUR")).toBe("🇪🇺");
   });
 
@@ -48,7 +48,7 @@ describe("fiatCurrencyFlagEmoji", () => {
     // Shared currencies get an X-prefixed code, so there is no issuing region to
     // read a flag from. They stay in the picker — the CFA francs alone are legal
     // tender in fourteen countries — and render as a bare code.
-    for (const supranational of ["XAF", "XCD", "XOF", "XPF"] as const) {
+    for (const supranational of ["XAF", "XOF"] as const) {
       expect(fiatCurrencyFlagEmoji(supranational)).toBeNull();
     }
   });

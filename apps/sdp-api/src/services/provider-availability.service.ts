@@ -275,17 +275,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         return prod || sandbox;
       },
     },
-    moneygram: {
-      label: "MoneyGram",
-      isConfigured: (env, testMode) => {
-        const sandbox = hasAllEnv(env, [
-          "MONEYGRAM_SANDBOX_PUBLIC_KEY",
-          "MONEYGRAM_SANDBOX_SECRET_KEY",
-        ]);
-        if (testMode === false) return false;
-        return sandbox;
-      },
-    },
     coinbase: {
       label: "Coinbase Onramp",
       // Onramp uses the account-wide CDP Secret API Key (same key across environments).

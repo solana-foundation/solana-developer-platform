@@ -108,7 +108,6 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     quoteTransferId: "xfr_offramp",
     memoRows: [],
     setMemoRows: noop,
-    refreshQuote: asyncNoop,
     quoteCreationError: null,
     quoteCreationRetrying: false,
     retryQuoteCreation: noop,
