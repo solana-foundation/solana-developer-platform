@@ -140,11 +140,9 @@ async function seedActiveConnectionWallet(params: {
   ]);
 }
 
-async function seedRampEventTransfer(params: {
+async function seedCoinbaseOnrampTransfer(params: {
   id: string;
-  provider: "coinbase";
   providerReference: string;
-  type: "onramp" | "offramp";
   amount: string;
   providerData: Record<string, unknown>;
 }): Promise<string> {
@@ -165,15 +163,15 @@ async function seedRampEventTransfer(params: {
       TEST_ORG.id,
       TEST_PROJECT.id,
       TEST_WALLET_ID,
-      params.type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet1 : null,
-      params.type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
+      null,
+      TEST_SOLANA_ADDRESSES.wallet2,
       "USDC",
       params.amount,
       null,
-      params.type,
-      params.type === "onramp" ? "inbound" : "outbound",
+      "onramp",
+      "inbound",
       status,
-      params.provider,
+      "coinbase",
       params.providerReference,
       "hosted",
       "USD",
@@ -2345,11 +2343,9 @@ describe("Payments routes — ramps", () => {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
     };
-    await seedRampEventTransfer({
+    await seedCoinbaseOnrampTransfer({
       id: "xfr_coinbase_advisory",
-      provider: "coinbase",
       providerReference: "coinbase_order_advisory",
-      type: "onramp",
       amount: "25",
       providerData: {},
     });

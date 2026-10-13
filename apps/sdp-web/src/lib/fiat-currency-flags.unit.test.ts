@@ -1,5 +1,10 @@
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
-import { fiatCurrencyFlagEmoji, regionFlagEmoji } from "@sdp/types/payment-rails";
+import {
+  FIAT_PEG_CURRENCIES,
+  type FiatCurrencyCode,
+  fiatCurrencyFlagEmoji,
+  regionFlagEmoji,
+} from "@sdp/types/payment-rails";
 import { describe, expect, it } from "vitest";
 
 // The helpers live in @sdp/types, which carries no test runner of its own. They
@@ -39,8 +44,8 @@ describe("regionFlagEmoji", () => {
 
 describe("fiatCurrencyFlagEmoji", () => {
   it("flags currencies by their issuing region", () => {
-    expect(fiatCurrencyFlagEmoji("AED")).toBe("🇦🇪");
-    expect(fiatCurrencyFlagEmoji("BRL")).toBe("🇧🇷");
+    expect(fiatCurrencyFlagEmoji("AMD")).toBe("🇦🇲");
+    expect(fiatCurrencyFlagEmoji("AOA")).toBe("🇦🇴");
     expect(fiatCurrencyFlagEmoji("EUR")).toBe("🇪🇺");
   });
 
@@ -48,7 +53,7 @@ describe("fiatCurrencyFlagEmoji", () => {
     // Shared currencies get an X-prefixed code, so there is no issuing region to
     // read a flag from. They stay in the picker — the CFA francs alone are legal
     // tender in fourteen countries — and render as a bare code.
-    for (const supranational of ["XAF", "XOF"] as const) {
+    for (const supranational of ["XAF", "XCD", "XOF", "XPF"] as const) {
       expect(fiatCurrencyFlagEmoji(supranational)).toBeNull();
     }
   });
@@ -57,7 +62,8 @@ describe("fiatCurrencyFlagEmoji", () => {
     // Independent of the allowlist: CLDR canonicalisation rewrites a withdrawn
     // code to its successor, so region === canonical(region) only holds for
     // codes still in use — the ones vendors ship flags for.
-    for (const currency of RAMP_FIAT_CURRENCIES) {
+    const rendered = new Set<FiatCurrencyCode>([...RAMP_FIAT_CURRENCIES, ...FIAT_PEG_CURRENCIES]);
+    for (const currency of rendered) {
       const flag = fiatCurrencyFlagEmoji(currency);
       if (flag === null) {
         continue;
