@@ -3,13 +3,18 @@ import type { Client } from "pg";
 /** The migration that records each DvP trade's environment, pinned to its project by a composite foreign key. */
 export const DVP_TRADES_ENVIRONMENT_MIGRATION = "0130_dvp_trades_environment.sql";
 
+/** The contract step for 0130 that backfills and sets `dvp_trades.environment` NOT NULL. */
+export const DVP_TRADES_ENVIRONMENT_NOT_NULL_MIGRATION = "0131_dvp_trades_environment_not_null.sql";
+
 /**
  * Removes the `dvp_trades.environment` column and the
  * `dvp_trades_project_environment_fkey` foreign key that
- * `0130_dvp_trades_environment.sql` adds. The 0130 `schema_migrations` row is
- * left in place, so a caller that re-runs migrations deletes it to re-apply
- * 0130, and a caller rewinding an earlier migration runs this first, since the
- * foreign key depends on `projects_id_environment_unique`.
+ * `0130_dvp_trades_environment.sql` adds, which also drops the NOT NULL that
+ * `0131_dvp_trades_environment_not_null.sql` sets. The 0130 and 0131
+ * `schema_migrations` rows are left in place, so a caller that re-runs
+ * migrations deletes both to re-apply them, and a caller rewinding an earlier
+ * migration runs this first, since the foreign key depends on
+ * `projects_id_environment_unique`.
  *
  * @param client - Admin connection the DDL runs on.
  * @returns Resolves once the pre-0130 schema is back.

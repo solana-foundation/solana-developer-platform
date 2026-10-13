@@ -27,6 +27,7 @@ import {
 } from "./custody-defaults-schema";
 import {
   DVP_TRADES_ENVIRONMENT_MIGRATION,
+  DVP_TRADES_ENVIRONMENT_NOT_NULL_MIGRATION,
   restorePreDvpTradesEnvironmentSchema,
 } from "./dvp-trades-environment-schema";
 import {
@@ -240,7 +241,11 @@ describe("0126 drop custody defaults migration", () => {
   afterEach(async () => {
     await seedTestDatabase(env);
     await client.query("DELETE FROM schema_migrations WHERE version = ANY($1)", [
-      [PROJECT_ID_NOT_NULL_MIGRATION, DVP_TRADES_ENVIRONMENT_MIGRATION],
+      [
+        PROJECT_ID_NOT_NULL_MIGRATION,
+        DVP_TRADES_ENVIRONMENT_MIGRATION,
+        DVP_TRADES_ENVIRONMENT_NOT_NULL_MIGRATION,
+      ],
     ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });

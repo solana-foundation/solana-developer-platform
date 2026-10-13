@@ -19,6 +19,7 @@ import {
 } from "./custody-defaults-schema";
 import {
   DVP_TRADES_ENVIRONMENT_MIGRATION,
+  DVP_TRADES_ENVIRONMENT_NOT_NULL_MIGRATION,
   restorePreDvpTradesEnvironmentSchema,
 } from "./dvp-trades-environment-schema";
 import {
@@ -268,6 +269,7 @@ describe("0125 custody project-only migration", () => {
         CUSTODY_DEFAULTS_DROP_MIGRATION,
         PROJECT_ID_NOT_NULL_MIGRATION,
         DVP_TRADES_ENVIRONMENT_MIGRATION,
+        DVP_TRADES_ENVIRONMENT_NOT_NULL_MIGRATION,
       ],
     ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
