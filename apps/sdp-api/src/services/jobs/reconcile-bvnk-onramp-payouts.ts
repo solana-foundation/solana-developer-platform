@@ -398,8 +398,7 @@ async function translateUnclaimedFailure(
       transfer_id: candidate.id,
       counterparty_id: candidate.counterparty_id,
       funding_wallet_reference: candidate.fundingWalletReference,
-      error: errorMessage(error),
-      error_diagnostics: paymentsErrorDiagnostics(error),
+      ...failureLogFields(error),
     },
     "[bvnk onramp] unclaimed payout reconcile failed"
   );
@@ -458,8 +457,7 @@ async function adjudicateRecoveryLookup(
       {
         transfer_id: candidate.id,
         payout_id: row.uuid,
-        error: errorMessage(error),
-        error_diagnostics: paymentsErrorDiagnostics(error),
+        ...failureLogFields(error),
       },
       "[bvnk onramp] recovery adoption failed; the payout claim stays ambiguous"
     );
@@ -535,9 +533,8 @@ async function reissueRecoveryPayout(
       logger.warn(
         {
           transfer_id: candidate.id,
-          error: error.message,
+          ...failureLogFields(error),
           error_code: error.bvnkCode,
-          error_diagnostics: paymentsErrorDiagnostics(error),
         },
         "[bvnk onramp] recovery reissue rejected; the payout claim stays ambiguous"
       );
@@ -639,8 +636,7 @@ async function reconcileRecoverablePayout(
         transfer_id: candidate.id,
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
-        error: errorMessage(error),
-        error_diagnostics: paymentsErrorDiagnostics(error),
+        ...failureLogFields(error),
       },
       "[bvnk onramp] recoverable payout reconcile failed"
     );
@@ -721,8 +717,7 @@ async function reconcilePollablePayout(
         transfer_id: candidate.id,
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
-        error: errorMessage(error),
-        error_diagnostics: paymentsErrorDiagnostics(error),
+        ...failureLogFields(error),
       },
       "[bvnk onramp] pollable payout reconcile failed"
     );
@@ -799,4 +794,12 @@ function resolveBvnkOnrampAsset(token: string): string | null {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** What every provider-failure log in this job carries about the failure. */
+function failureLogFields(cause: unknown): {
+  error: string;
+  error_diagnostics: Record<string, unknown> | undefined;
+} {
+  return { error: errorMessage(cause), error_diagnostics: paymentsErrorDiagnostics(cause) };
 }

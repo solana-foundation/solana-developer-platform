@@ -30,8 +30,8 @@ export function describeError(error: unknown): { error_name: string; error_code?
  * @param error - The thrown value.
  * @returns The scrubbed diagnostics, or undefined when the error carries none.
  */
-export function paymentsErrorDiagnostics(error: unknown): Record<string, unknown> | undefined {
-  return error instanceof SdpPaymentsError && error.diagnostics !== undefined
-    ? scrubTelemetry(error.diagnostics)
+export function paymentsErrorDiagnostics(cause: unknown): Record<string, unknown> | undefined {
+  return cause instanceof SdpPaymentsError && cause.diagnostics !== undefined
+    ? scrubTelemetry(cause.diagnostics)
     : undefined;
 }
