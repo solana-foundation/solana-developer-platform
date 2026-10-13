@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Context } from "hono";
 import {
   createPrivateChannelDepositRepository,
@@ -70,6 +71,6 @@ export function loadPrivateChannelProjectRpcClient(c: AppContext) {
     env: c.env,
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
-    environment: c.get("projectEnvironment"),
+    environment: currentClusterScope().environment,
   });
 }

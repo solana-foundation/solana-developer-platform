@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { createRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
@@ -5,15 +6,11 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import {
-  assertClusterEndpoint,
-  earnClusterFor,
-  resolveClusterRpcUrl,
-} from "@/services/earn/execution-registry";
+import { assertClusterEndpoint, resolveClusterRpcUrl } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
 import type { AppContext } from "../context";
-import { getEarnRepository, resolveSdpEnvironment } from "../context";
+import { getEarnRepository } from "../context";
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**
@@ -46,7 +43,7 @@ import { listReadableEarnVaultWallets } from "./vault";
  * never how long the request runs.
  */
 export async function getEarnVaultShareReconciliation(c: AppContext) {
-  const environment = resolveSdpEnvironment(c);
+  const { environment, cluster } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -67,7 +64,6 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     });
   }
 
-  const cluster = earnClusterFor(environment);
   const [claims, strategies] = await Promise.all([
     createPostgresEarnMovementsRepository(getDb(c.env)).listVaultClaimsForReconciliation({
       organizationId: auth.organizationId,

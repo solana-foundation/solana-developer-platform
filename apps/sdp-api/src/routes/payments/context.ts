@@ -1,4 +1,5 @@
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import {
@@ -9,19 +10,16 @@ import {
   createPaymentsRepository,
   createPaymentTransferBatchesRepository,
 } from "@/db/repositories";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createRequestSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
-export { resolveSdpEnvironment } from "@/lib/sdp-environment";
-
 export function rampRuntime(c: AppContext): RampRuntimeContext {
   return {
     env: c.env as unknown as Record<string, string | undefined>,
-    mode: resolveSdpEnvironment(c),
+    mode: currentClusterScope().environment,
   };
 }
 

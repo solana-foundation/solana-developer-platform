@@ -1,6 +1,6 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
   type EarnProviderId,
   type EarnStrategy,
   type EarnStrategyResponse,
@@ -128,16 +128,21 @@ export function mapToEarnStrategy(
  * Loads a strategy and applies the same environment and visibility policy as
  * the list route. The catalogue is platform-global: a tenant caller sees its
  * project's environment, an anonymous caller sees the shelf the id names.
+ *
+ * @param c - The request context, inside the cluster scope.
+ * @param strategyId - The catalogue strategy id the request names.
+ * @returns The visible strategy row.
+ * @throws AppError `NOT_FOUND` when the row is absent, in another environment, or hidden.
  */
 export async function requireEarnStrategy(
   c: AppContext,
   strategyId: string
-): Promise<{ strategy: EarnStrategyRow; environment: SdpEnvironment }> {
-  const resolved = await requireEarnStrategyForCaller(c, strategyId);
-  if (isHiddenStrategy(resolved.strategy)) {
+): Promise<EarnStrategyRow> {
+  const strategy = await requireEarnStrategyForCaller(c, strategyId);
+  if (isHiddenStrategy(strategy)) {
     throw notFound("Earn strategy");
   }
-  return resolved;
+  return strategy;
 }
 
 export const listEarnStrategies = async (c: AppContext) => {
@@ -153,7 +158,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   // changes what is LISTED, never what can take a deposit: a foreign-cluster
   // row still arrives `fundable: false` and every provider mutation re-asserts
   // the same predicate.
-  const cluster = query.cluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  const cluster = query.cluster ?? currentClusterScope().cluster;
   const { rows, total } = await repo.listStrategies({
     environment,
     hostCluster: cluster,
@@ -180,10 +185,10 @@ export const listEarnStrategies = async (c: AppContext) => {
 export const getEarnStrategy = async (c: AppContext) => {
   const { strategyId } = parseParams(c, earnStrategyIdParamsSchema);
 
-  const { strategy, environment } = await requireEarnStrategy(c, strategyId);
+  const strategy = await requireEarnStrategy(c, strategyId);
 
   const response: EarnStrategyResponse = {
-    strategy: mapToEarnStrategy(strategy, environment, c.env),
+    strategy: mapToEarnStrategy(strategy, currentClusterScope().environment, c.env),
   };
   return success(c, response);
 };

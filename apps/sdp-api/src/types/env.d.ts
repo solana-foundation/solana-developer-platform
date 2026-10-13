@@ -353,7 +353,6 @@ declare module "hono" {
     rampProviderStages: SdpRampProviderStages;
     // API key auth context set by middleware
     projectId?: string;
-    projectEnvironment?: ApiKeyEnvironment;
     // Loaded once by authentication for every actor; see lib/production-entitlement.ts
     organizationEntitlements: OrganizationEntitlements;
     // Set by requestGate middleware for gated routes

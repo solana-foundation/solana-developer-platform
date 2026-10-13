@@ -23,7 +23,6 @@ interface AuthContextBase {
   projectId: string | null;
   role: string;
   permissions: Permission[];
-  environment: string;
   /** Operation families/types the key may perform; null or [] is unrestricted. Always null for non-key actors. */
   allowedOperations?: AllowedOperation[] | null;
   walletScope?: ApiKeyWalletScope | null;
@@ -74,7 +73,6 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       projectId: apiKey.projectId,
       role: apiKey.role,
       permissions: apiKey.permissions,
-      environment: apiKey.environment,
       allowedOperations: apiKey.allowedOperations ?? null,
       walletScope:
         apiKey.walletScope ??
@@ -98,7 +96,6 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       projectId,
       role: clerk.role,
       permissions: clerk.permissions,
-      environment: c.get("projectEnvironment") ?? "dashboard",
       allowedOperations: null,
       walletScope: null,
       signingWalletId: null,
