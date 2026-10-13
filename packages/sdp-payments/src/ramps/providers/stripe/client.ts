@@ -3,7 +3,7 @@ import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/t
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { addDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
+import { addDecimalAmounts, compareDecimalAmounts, divideDecimalAmounts } from "../../../decimal";
 import {
   badRequest,
   estimateNotAvailable,
@@ -28,7 +28,6 @@ import type {
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com";
 const STRIPE_API_VERSION = "2026-05-27.dahlia";
-const STRIPE_ONRAMP_DESTINATION_CURRENCIES = ["usdc", "sol"] as const;
 const STRIPE_ONRAMP_NETWORK = "solana";
 
 export const STRIPE_DECLARED_RAIL_SUPPORT = {
@@ -77,12 +76,67 @@ interface StripeForm {
 /** A string that is not blank: Stripe's session id and client secret. */
 const stripeSessionFieldSchema = z.string().regex(/\S/);
 
-/** The fields `createOnrampQuote` reads from a Stripe onramp session. */
+/**
+ * The fields `createOnrampQuote` reads from a Stripe onramp session, including
+ * the terms Stripe echoes back so the quote can refuse a session that differs.
+ */
 const stripeOnrampSessionSchema = z.object({
   id: stripeSessionFieldSchema,
   client_secret: stripeSessionFieldSchema,
   redirect_url: z.string().nullable().optional(),
+  transaction_details: z.object({
+    destination_currencies: z.array(z.string()).nullable(),
+    destination_networks: z.array(z.string()).nullable(),
+    lock_wallet_address: z.boolean().nullable(),
+    source_amount: z.string().nullable(),
+    source_currency: z.string().nullable(),
+    wallet_addresses: z.object({ solana: z.string().nullable().optional() }).nullable(),
+  }),
 });
+
+type StripeOnrampSessionTerms = z.output<typeof stripeOnrampSessionSchema>["transaction_details"];
+
+interface StripeQuotedTerms {
+  currency: string;
+  network: string;
+  walletAddress: string;
+  sourceCurrency: string;
+  sourceAmount: string;
+}
+
+/** Names the echoed session terms that differ from the quote; empty when the session matches. */
+function mismatchedStripeSessionTerms(
+  terms: StripeOnrampSessionTerms,
+  quoted: StripeQuotedTerms
+): string[] {
+  const mismatched: string[] = [];
+  const isOnly = (values: string[] | null, expected: string) =>
+    values !== null && values.length === 1 && values[0] === expected;
+  if (!isOnly(terms.destination_currencies, quoted.currency)) {
+    mismatched.push("destination_currencies");
+  }
+  if (!isOnly(terms.destination_networks, quoted.network)) {
+    mismatched.push("destination_networks");
+  }
+  if (terms.lock_wallet_address !== true) {
+    mismatched.push("lock_wallet_address");
+  }
+  if (terms.wallet_addresses?.solana !== quoted.walletAddress) {
+    mismatched.push("wallet_addresses.solana");
+  }
+  if (terms.source_currency !== quoted.sourceCurrency) {
+    mismatched.push("source_currency");
+  }
+  // Stripe normalizes amounts ("100" comes back as "100.00"), so compare values.
+  if (
+    terms.source_amount === null ||
+    !isDecimalString(terms.source_amount) ||
+    compareDecimalAmounts(terms.source_amount, quoted.sourceAmount) !== 0
+  ) {
+    mismatched.push("source_amount");
+  }
+  return mismatched;
+}
 
 /** The fields `estimateOnramp` reads from Stripe's onramp quotes. */
 /**
@@ -384,13 +438,29 @@ export class StripeRampClient implements RampProvider {
         source_amount: input.fiatAmount,
         destination_currency: currency,
         destination_network: network,
-        destination_currencies: [...STRIPE_ONRAMP_DESTINATION_CURRENCIES],
-        destination_networks: [STRIPE_ONRAMP_NETWORK],
+        // A single-value list locks the choice: the buyer cannot switch asset or network.
+        destination_currencies: [currency],
+        destination_networks: [network],
         metadata: { externalCustomerId: input.externalCustomerId },
         customer_information: buildCustomerInformation(input.stripeCustomerInfo),
       },
       stripeOnrampSessionSchema
     );
+
+    const mismatched = mismatchedStripeSessionTerms(session.transaction_details, {
+      currency,
+      network,
+      walletAddress: input.destinationWalletAddress,
+      sourceCurrency: input.fiatCurrency.toLowerCase(),
+      sourceAmount: input.fiatAmount,
+    });
+    if (mismatched.length > 0) {
+      throw providerUnavailable(
+        "Stripe returned a session that does not match the quote.",
+        { provider: this.id },
+        { mismatched }
+      );
+    }
 
     const id = session.id;
     // The redirect URL is Stripe-account-configured (we never set it), so its
