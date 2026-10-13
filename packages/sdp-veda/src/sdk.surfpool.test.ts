@@ -321,7 +321,10 @@ async function accountExists(account: string): Promise<boolean> {
 
 describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () => {
   let providerRpcUrl = RPC_URL ?? "";
-  const runtime = (): VedaRuntime => ({ cluster: "devnet", rpcUrl: providerRpcUrl });
+  const runtime = (): VedaRuntime => {
+    const rpc = createSolanaRpc(providerRpcUrl);
+    return { cluster: "devnet", rpc, readRpc: rpc };
+  };
   const config = vedaClusterConfig("devnet");
   const vault = config.vaultStateAddresses[0];
   let owner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
