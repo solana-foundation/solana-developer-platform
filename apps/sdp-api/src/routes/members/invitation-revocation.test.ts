@@ -1,10 +1,16 @@
 import { hashString } from "@sdp/payments/hash";
+import type { InvitationStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { invitationWasRevoked } from "@/lib/invitations";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { createUser } from "@/test/helpers/factories";
+import {
+  readMemberships,
+  seedOrganizationsAndUsers,
+} from "@/test/helpers/organization-invitations";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -215,13 +221,33 @@ async function revoke(): Promise<Response> {
   );
 }
 
-async function invitationStatus(): Promise<string | undefined> {
+async function seedActiveInvitee(): Promise<void> {
+  const invitee = createUser({ id: "usr_revocation_invitee", email: INVITEE_EMAIL });
+  await seedOrganizationsAndUsers(getDb(env), { organizations: [], users: [invitee] });
+  await getDb(env)
+    .prepare(
+      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+       VALUES ('mem_revocation_invitee', ?, ?, 'member', 'active')`
+    )
+    .bind(ORGANIZATION_ID, invitee.id)
+    .run();
+}
+
+async function removeInvitee(): Promise<Response> {
+  return app.request(
+    "/v1/members/mem_revocation_invitee",
+    { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+    env
+  );
+}
+
+async function invitationStatus(): Promise<InvitationStatus> {
   const row = await getDb(env)
     .prepare("SELECT status FROM invitations WHERE id = ?")
     .bind(LOCAL_INVITATION_ID)
-    .first<{ status: string }>();
+    .first<{ status: InvitationStatus }>();
 
-  return row?.status;
+  return required(row).status;
 }
 
 describe("invitation revocation identity", () => {
@@ -306,29 +332,17 @@ describe("invitation revocation identity", () => {
     expect(await invitationStatus()).toBe("revoked");
   });
 
-  it("locks the invitation rows so a revocation cannot commit mid-check", async () => {
+  it("revokes a removed member's pending invitation in the same removal", async () => {
     await seedInvitation(OUR_CLERK_INVITATION_ID);
-    const db = getDb(env);
+    await seedActiveInvitee();
 
-    await db.transaction(async (tx) => {
-      expect(await invitationWasRevoked(tx, ORGANIZATION_ID, INVITEE_EMAIL, { lock: true })).toBe(
-        false
-      );
+    const response = await removeInvitee();
 
-      // NOWAIT fails outright rather than blocking, so this asserts the rows are
-      // genuinely locked without depending on a timeout. Without the lock the
-      // revocation would commit between the check and the membership write.
-      await expect(
-        db
-          .prepare(
-            `SELECT id FROM invitations
-              WHERE organization_id = ? AND email = ?
-              FOR UPDATE NOWAIT`
-          )
-          .bind(ORGANIZATION_ID, INVITEE_EMAIL)
-          .all()
-      ).rejects.toThrow();
-    });
+    expect(response.status).toBe(204);
+    expect(await invitationStatus()).toBe("revoked");
+    expect(await readMemberships(getDb(env), ORGANIZATION_ID)).toEqual([
+      { role: "member", status: "removed" },
+    ]);
   });
 
   it("revokes every invitation for the address when the row predates the stored id", async () => {

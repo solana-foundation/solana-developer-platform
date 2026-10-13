@@ -5,11 +5,7 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import {
-  getPermissionsForOrgRole,
-  normalizeOrganizationRole,
-  type OrganizationRole,
-} from "@sdp/types";
+import { getPermissionsForOrgRole, normalizeOrganizationRole } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
@@ -21,8 +17,7 @@ import {
   resolveClerkOrganizationClaims,
   verifyClerkJwtForRequest,
 } from "@/lib/clerk-token";
-import { AppError, unauthorized } from "@/lib/errors";
-import { invitationWasRevoked } from "@/lib/invitations";
+import { AppError, forbidden, unauthorized } from "@/lib/errors";
 import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
 import {
   loadOrganizationEntitlements,
@@ -34,6 +29,10 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
+import {
+  admitOrganizationMember,
+  type MembershipAdmission,
+} from "@/services/organization-membership-admission.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
@@ -133,17 +132,6 @@ async function resolveExistingClerkContext(
       has_default_sandbox: boolean | number;
       has_default_production: boolean | number;
     }>();
-}
-
-async function resolveOrgMembership(db: DatabaseClient, userId: string, organizationId: string) {
-  return db
-    .prepare(
-      `SELECT role, status
-       FROM organization_members
-       WHERE user_id = ? AND organization_id = ?`
-    )
-    .bind(userId, organizationId)
-    .first<{ role: string; status: string }>();
 }
 
 /**
@@ -265,129 +253,29 @@ async function ensureClerkUser(
   return { userId: user.id, email: user.email };
 }
 
-async function ensureMembership(
-  db: DatabaseClient,
-  params: {
-    organizationId: string;
-    userId: string;
-    email: string;
-    clerkRole?: string | null;
-  }
-): Promise<OrganizationRole> {
-  const existing = await resolveOrgMembership(db, params.userId, params.organizationId);
-  if (existing && existing.status !== "active") {
-    throw unauthorized("Organization membership is inactive");
-  }
-  if (existing) {
-    const normalizedRole = normalizeOrganizationRole(existing.role);
-    if (normalizedRole !== existing.role) {
-      await db
-        .prepare(
-          `UPDATE organization_members
-           SET role = ?
-           WHERE user_id = ? AND organization_id = ? AND status = 'active'`
-        )
-        .bind(normalizedRole, params.userId, params.organizationId)
-        .run();
-    }
-    return normalizedRole;
-  }
-
-  const pendingInvite = await db
-    .prepare(
-      `SELECT id, role, expires_at
-       FROM invitations
-       WHERE organization_id = ? AND email = ? AND status = 'pending'
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .bind(params.organizationId, params.email.toLowerCase())
-    .first<{ id: string; role: string; expires_at: string }>();
-
-  let invitedRole: OrganizationRole | null = null;
-
-  if (pendingInvite) {
-    if (new Date(pendingInvite.expires_at) >= new Date()) {
-      invitedRole = normalizeOrganizationRole(pendingInvite.role);
-    } else {
-      await db
-        .prepare("UPDATE invitations SET status = 'expired' WHERE id = ?")
-        .bind(pendingInvite.id)
-        .run();
+/**
+ * Maps a refused admission to the error the caller sees.
+ *
+ * @param reason - Why the admission was refused
+ * @returns 403 for a deleted organization, 401 otherwise
+ */
+function membershipRefusal(
+  reason: Extract<MembershipAdmission, { admitted: false }>["reason"]
+): AppError {
+  switch (reason) {
+    case "organization_deleted":
+      return forbidden("Organization was deleted");
+    case "user_deleted":
+      return unauthorized("User account was deleted");
+    case "membership_removed":
+      return unauthorized("Organization membership is inactive");
+    case "invitation_revoked":
+      return unauthorized("Invitation to this organization was revoked");
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
     }
   }
-
-  const role = invitedRole ?? mapClerkRoleToOrgRole(params.clerkRole);
-  const memberId = `mem_${crypto.randomUUID()}`;
-
-  try {
-    // The claim and the membership insert have to commit together. Claiming
-    // first alone would let a failing insert consume the invitation without
-    // granting access, and inserting first would let a concurrent revocation
-    // win the invitation transition after access was already persisted.
-    await db.transaction(async (tx) => {
-      // Reached only when the caller holds no membership row at all — an
-      // existing member returned above — so this declines a join and never
-      // revokes access someone already has.
-      //
-      // Without it, revoking an invitation stopped the local token while
-      // Clerk's acceptance link stayed live: signing in through that link fell
-      // through to the Clerk role and provisioned the membership anyway. Inside
-      // the transaction and holding the invitation locks, so a revocation
-      // cannot land between this check and the insert below.
-      if (
-        !invitedRole &&
-        (await invitationWasRevoked(tx, params.organizationId, params.email, { lock: true }))
-      ) {
-        throw unauthorized("Invitation to this organization was revoked");
-      }
-
-      if (pendingInvite && invitedRole) {
-        // Role normalization folds in here, so there is one transition rather
-        // than a read, a role fixup and a later accept.
-        const claimed = await tx
-          .prepare(
-            `UPDATE invitations
-                SET status = 'accepted', accepted_at = datetime('now'), role = ?
-              WHERE id = ? AND status = 'pending'`
-          )
-          .bind(invitedRole, pendingInvite.id)
-          .run();
-
-        // Zero rows means it stopped being pending between the read and here.
-        // Revocation is the case that matters, and granting access off a
-        // just-revoked invitation is the failure worth refusing.
-        if (claimed === 0) {
-          throw unauthorized("Invitation is no longer valid");
-        }
-      }
-
-      await tx
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-             VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(memberId, params.organizationId, params.userId, role)
-        .run();
-    });
-  } catch (error) {
-    // A concurrent sign-in may have created the membership first; the rollback
-    // released our claim, so deferring to the row that won is correct.
-    const existingAfterInsert = await resolveOrgMembership(
-      db,
-      params.userId,
-      params.organizationId
-    );
-    if (existingAfterInsert?.status === "active") {
-      return normalizeOrganizationRole(existingAfterInsert.role);
-    }
-    if (existingAfterInsert) {
-      throw unauthorized("Organization membership is inactive");
-    }
-    throw error;
-  }
-
-  return role;
 }
 
 async function ensureDefaultProjects(
@@ -511,12 +399,16 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     };
   }
 
-  const role = await ensureMembership(getDb(c.env), {
+  const admission = await admitOrganizationMember(getDb(c.env), {
     organizationId: resolvedOrgIdentity.organization_id,
     userId: userIdentity.userId,
     email: userIdentity.email,
-    clerkRole: organizationClaims.organizationRole,
+    clerkRole: mapClerkRoleToOrgRole(organizationClaims.organizationRole),
   });
+  if (!admission.admitted) {
+    throw membershipRefusal(admission.reason);
+  }
+  const { role } = admission;
   await ensureDefaultProjects(
     getDb(c.env),
     resolvedOrgIdentity.organization_id,

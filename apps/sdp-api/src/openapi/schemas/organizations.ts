@@ -1,8 +1,5 @@
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
-import {
-  acceptSchema as acceptSchemaBase,
-  inviteSchema as inviteSchemaBase,
-} from "../../routes/members/schemas";
+import { inviteSchema as inviteSchemaBase } from "../../routes/members/schemas";
 import { updateOrgSchema as updateOrgSchemaBase } from "../../routes/organizations/schemas";
 import {
   invitationIdSchema,
@@ -234,16 +231,3 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
-
-export const acceptInvitationRequestSchema = acceptSchemaBase
-  .extend({
-    token: withOpenApi(acceptSchemaBase.shape.token, {
-      description: "Invitation token from email.",
-      example: "invitation_token",
-    }),
-    name: withOpenApi(acceptSchemaBase.shape.name, {
-      description: "Optional name to set for the user.",
-      example: "Example User",
-    }),
-  })
-  .openapi({ description: "Accept invitation request body." });

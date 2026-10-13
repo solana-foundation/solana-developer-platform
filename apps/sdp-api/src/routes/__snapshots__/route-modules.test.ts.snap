@@ -37,7 +37,6 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "core POST /internal/playground/api-key/verify",
   "core POST /v1/api-keys",
   "core POST /v1/api-keys/:keyId/rotate",
-  "core POST /v1/members/accept",
   "core POST /v1/members/invite",
   "core POST /v1/onboarding/complete",
   "core POST /v1/places/autocomplete",

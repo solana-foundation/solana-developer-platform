@@ -1,24 +1,25 @@
 /**
  * Regression test for the Hacktron finding: an API key created concurrently
  * with organization deletion — after the handler snapshots the org's key
- * hashes but before the revocation batch commits — is revoked in Postgres by
- * the batch, yet its hash is missing from the snapshot, so its cached
+ * hashes but before the revocation transaction commits — is revoked in Postgres by
+ * the transaction, yet its hash is missing from the snapshot, so its cached
  * "active" auth entry is never refreshed and keeps authenticating for the
  * full cache TTL.
  *
  * The interleaving is made deterministic by mocking @/db: getDb returns a
- * proxy whose batch() runs a one-shot hook (insert the "concurrent" key and
+ * proxy whose transaction() runs a one-shot hook (insert the "concurrent" key and
  * seed its cache, exactly what a fill from a pre-revocation DB read does)
- * before delegating to the real batch. On unpatched code (hash snapshot
- * taken before the batch) the key survives with a warm active cache; on
- * patched code (snapshot taken after the batch) it is refreshed to revoked.
+ * before delegating to the real transaction. On unpatched code (hash snapshot
+ * taken before the transaction) the key survives with a warm active cache; on
+ * patched code (snapshot taken after the transaction) it is refreshed to revoked.
  */
 
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DatabaseExecutor } from "@/db";
 
 const raceState = vi.hoisted(() => ({
-  onBatch: null as null | (() => Promise<void>),
+  onTransaction: null as null | (() => Promise<void>),
 }));
 
 vi.mock("@/db", async (importOriginal) => {
@@ -29,14 +30,14 @@ vi.mock("@/db", async (importOriginal) => {
       const db = original.getDb(bindings);
       return new Proxy(db, {
         get(target, prop, receiver) {
-          if (prop === "batch") {
-            return async (statements: unknown[]) => {
-              const hook = raceState.onBatch;
-              raceState.onBatch = null;
+          if (prop === "transaction") {
+            return async <T>(callback: (tx: DatabaseExecutor) => Promise<T>): Promise<T> => {
+              const hook = raceState.onTransaction;
+              raceState.onTransaction = null;
               if (hook) {
                 await hook();
               }
-              return target.batch(statements as never);
+              return target.transaction(callback);
             };
           }
           const value = Reflect.get(target, prop, receiver);
@@ -137,15 +138,15 @@ describe("organization deletion vs concurrent API key creation", () => {
   });
 
   afterEach(async () => {
-    raceState.onBatch = null;
+    raceState.onTransaction = null;
     await clearKVStores(env);
   });
 
-  it("refreshes the cache of a key created between the hash snapshot and the revocation batch", async () => {
-    // The "concurrent" creation lands right before the deletion batch
-    // commits: the row exists (so the batch revokes it) and its cache entry
+  it("refreshes the cache of a key created between the hash snapshot and the revocation transaction", async () => {
+    // The "concurrent" creation lands right before the deletion transaction
+    // commits: the row exists (so the transaction revokes it) and its cache entry
     // is active (as a fill from a pre-revocation DB read would leave it).
-    raceState.onBatch = async () => {
+    raceState.onTransaction = async () => {
       await seedKeyRow(CONCURRENT_KEY.id, concurrentHash);
       await seedCachedApiKey(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
     };
@@ -160,7 +161,7 @@ describe("organization deletion vs concurrent API key creation", () => {
     );
     expect(res.status).toBe(204);
 
-    // The batch revoked the concurrent key in Postgres…
+    // The transaction revoked the concurrent key in Postgres…
     const row = await getDb(env)
       .prepare("SELECT status FROM api_keys WHERE id = ?")
       .bind(CONCURRENT_KEY.id)
@@ -178,7 +179,7 @@ describe("organization deletion vs concurrent API key creation", () => {
 
   it("rejects a key that commits after the deletion's hash snapshot", async () => {
     // A key whose INSERT lands after the deletion handler snapshotted the
-    // org's hashes is neither revoked by the batch's WHERE nor covered by the
+    // org's hashes is neither revoked by the transaction's WHERE nor covered by the
     // refresh set. Authentication must reject it on the organization's status
     // rather than trusting the key's own row.
     const res = await app.request(

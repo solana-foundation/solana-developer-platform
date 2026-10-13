@@ -1,11 +1,17 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Organization } from "@sdp/types";
+import type { MemberStatus, Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { createOrganization } from "@/test/helpers/factories";
+import {
+  readInvitations,
+  seedInvitations,
+  seedOrganizationsAndUsers,
+} from "@/test/helpers/organization-invitations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -344,11 +350,56 @@ describe("Organizations routes", () => {
         .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
-          status: string;
+          status: MemberStatus;
         }>();
       for (const member of members.results) {
         expect(member.status).toBe("removed");
       }
+    });
+    it("revokes the organization's pending invitations and leaves other organizations' pending", async () => {
+      const otherOrganization = createOrganization({
+        id: "org_test_organizations_other",
+        slug: "test-organizations-other",
+      });
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await seedOrganizationsAndUsers(getDb(env), {
+        organizations: [otherOrganization],
+        users: [],
+      });
+      await seedInvitations(getDb(env), [
+        {
+          id: "inv_test_organizations_deleted",
+          organizationId: TEST_ORG.id,
+          email: "deleted-org-invitee@example.com",
+          role: "member",
+          invitedBy: TEST_USER.id,
+          status: "pending",
+          expiresAt,
+          createdAt: "2026-01-01 00:00:00",
+        },
+        {
+          id: "inv_test_organizations_other",
+          organizationId: otherOrganization.id,
+          email: "deleted-org-invitee@example.com",
+          role: "member",
+          invitedBy: TEST_USER.id,
+          status: "pending",
+          expiresAt,
+          createdAt: "2026-01-01 00:00:00",
+        },
+      ]);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(204);
+      expect(await readInvitations(getDb(env))).toEqual([
+        { id: "inv_test_organizations_deleted", role: "member", status: "revoked" },
+        { id: "inv_test_organizations_other", role: "member", status: "pending" },
+      ]);
     });
     it("requires org:admin permission", async () => {
       await clearKVStores(env);

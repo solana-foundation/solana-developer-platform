@@ -61,7 +61,6 @@ describe("OpenAPI spec", () => {
         { clerkBearerAuth: [] },
       ]);
     }
-    expect(doc.paths?.["/v1/members/accept"]?.post?.security).toEqual([{ clerkBearerAuth: [] }]);
   });
 
   it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {

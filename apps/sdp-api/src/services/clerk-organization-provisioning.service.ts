@@ -75,6 +75,28 @@ export async function ensureClerkOrganizationMapping(params: {
   db: DatabaseClient;
   organization: ClerkOrganization;
 }): Promise<ClerkOrganizationMapping> {
+  return insertClerkOrganizationMapping(params, true);
+}
+
+/**
+ * Inserts the SDP organization and its Clerk mapping unless the mapping already exists.
+ *
+ * A unique violation is either a concurrent provisioning of the same Clerk
+ * organization (its mapping is returned) or another organization taking the
+ * same slug between the slug check and the insert (retried once, which picks a
+ * fresh slug).
+ *
+ * @param params - Database and Clerk organization to provision
+ * @param params.env - Worker environment
+ * @param params.db - Database client
+ * @param params.organization - Clerk organization to mirror
+ * @param retrySlugCollision - Whether a slug collision may still be retried
+ * @returns The organization mapping
+ */
+async function insertClerkOrganizationMapping(
+  params: { env: Env; db: DatabaseClient; organization: ClerkOrganization },
+  retrySlugCollision: boolean
+): Promise<ClerkOrganizationMapping> {
   const existing = await findClerkOrganizationMapping(params.db, params.organization.id);
   if (existing) return existing;
 
@@ -114,6 +136,7 @@ export async function ensureClerkOrganizationMapping(params: {
     if (isPostgresUniqueViolation(error)) {
       const concurrent = await findClerkOrganizationMapping(params.db, params.organization.id);
       if (concurrent) return concurrent;
+      if (retrySlugCollision) return insertClerkOrganizationMapping(params, false);
     }
     throw error;
   }

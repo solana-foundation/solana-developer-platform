@@ -13,6 +13,7 @@ import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { getAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequest, notFound } from "@/lib/errors";
+import { revokePendingInvitationsForOrganization } from "@/lib/invitations";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -238,21 +239,25 @@ export const deleteOrganization = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  await db.batch([
-    db
+  await db.transaction(async (tx) => {
+    await tx
       .prepare(
         `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
       )
-      .bind(orgId),
-    db
+      .bind(orgId)
+      .run();
+    await revokePendingInvitationsForOrganization(tx, orgId);
+    await tx
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
-      .bind(orgId),
-    db
+      .bind(orgId)
+      .run();
+    await tx
       .prepare(
         `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
       )
-      .bind(orgId),
-  ]);
+      .bind(orgId)
+      .run();
+  });
 
   // Everything below is post-commit: the organization is deleted, its
   // memberships are removed and its keys are revoked in Postgres. Each
