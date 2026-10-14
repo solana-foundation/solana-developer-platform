@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 describe("0084 Provider Credential container scans", () => {
@@ -11,10 +12,19 @@ describe("0084 Provider Credential container scans", () => {
        VALUES ('org_scans', 'Scans', 'scans', 'enterprise', 'active')`
     );
     await getDb(env).execute(
+      "INSERT INTO users (id, email) VALUES ('usr_scans', 'scans@example.test')"
+    );
+    await seedDefaultProjects(getDb(env), {
+      organizationId: "org_scans",
+      createdBy: "usr_scans",
+      members: [],
+      ids: { sandbox: "prj_scans", production: "prj_scans_production" },
+    });
+    await getDb(env).execute(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, secret_version_ref, status, secret_next_scan_at
-       ) VALUES ('pcred_scan_owner', 'org_scans', 'privy', 'Privy', 'organization', 'stored',
+       ) VALUES ('pcred_scan_owner', 'org_scans', 'prj_scans', 'privy', 'Privy', 'project', 'stored',
          'gcp_secret_manager', 'projects/p/secrets/shared', 'projects/p/secrets/shared/versions/1',
          'pending', clock_timestamp())`
     );
@@ -23,9 +33,9 @@ describe("0084 Provider Credential container scans", () => {
   it("permits shared versions but only one schedule owner per container", async () => {
     await getDb(env).execute(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, secret_version_ref, status
-       ) VALUES ('pcred_scan_child', 'org_scans', 'privy', 'Privy', 'organization', 'stored',
+       ) VALUES ('pcred_scan_child', 'org_scans', 'prj_scans', 'privy', 'Privy', 'project', 'stored',
          'gcp_secret_manager', 'projects/p/secrets/shared', 'projects/p/secrets/shared/versions/2', 'pending')`
     );
     await expect(

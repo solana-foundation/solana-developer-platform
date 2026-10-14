@@ -162,9 +162,10 @@ export type RampSettlementEvent =
       receivedAmount?: string;
       settlement?: RampTransferSettlement;
       /**
-       * On-ramp: the rail the provider reports delivering. `null` when it names
-       * an asset SDP has no rail for; absent when the provider never reports
-       * one. Settlement refuses the event unless it is the transfer's own asset.
+       * The crypto rail the provider reports: delivered on-ramp, sold off-ramp.
+       * `null` when it names an asset SDP has no rail for; absent when the
+       * provider never reports one. Settlement refuses the event unless it is
+       * the transfer's own asset.
        */
       deliveredAssetRail?: CryptoRailId | null;
     })

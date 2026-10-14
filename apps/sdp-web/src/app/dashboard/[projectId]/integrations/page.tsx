@@ -3,7 +3,7 @@ import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { custody, privateChannels } from "@/flags";
+import { privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
@@ -79,7 +79,7 @@ export default async function IntegrationsPage() {
   }
   const [t, custodyEnabled, rampProviders, privateChannelsEnabled] = await Promise.all([
     getTranslations(),
-    custody(),
+    isModuleInDeploymentReleaseChannel("custody"),
     getOfferedRampProviders(),
     privateChannels(),
   ]);

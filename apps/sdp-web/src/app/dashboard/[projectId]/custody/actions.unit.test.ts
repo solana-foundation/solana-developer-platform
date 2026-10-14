@@ -72,6 +72,26 @@ describe("initializeCustodySetupAction", () => {
     });
   });
 
+  // Greptile (#2333): the first setup still running answered the retry with a
+  // 409 that read as "already set up", so the user was sent to add a wallet.
+  it("reports a setup still in flight as a retryable error, not as set up", async () => {
+    client.fetch.mockRejectedValue(
+      new SdpApiResponseError(
+        409,
+        JSON.stringify({ error: { code: "IDEMPOTENCY_KEY_IN_FLIGHT", message: "In progress" } })
+      )
+    );
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_IN_FLIGHT" },
+    });
+  });
+
   it("reports an already set up provider and makes no other API call", async () => {
     client.fetch.mockRejectedValue(
       new Error('SDP API request failed (409): {"error":{"message":"Signing already initialized"}}')

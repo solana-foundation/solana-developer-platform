@@ -237,7 +237,7 @@ export function OfframpRail({
       }
       secondaryLabel={cancelable ? t("DashboardPayments.counterparty.cancel") : undefined}
       confirmSecondary={cancelable}
-      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading || wizard.quoteInFlight}
       hideSecondary={liveTransferState !== null && !liveTransferState.cancelable}
       footerActions={
         footerAction === null ? undefined : (

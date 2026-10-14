@@ -103,6 +103,7 @@ function sharedWizard<TId extends string>(
     setMemoRows: noop,
     quoteCreationError: null,
     quoteCreationRetrying: false,
+    quoteInFlight: false,
     retryQuoteCreation: noop,
     onboarding: null,
     isAdvancing: false,

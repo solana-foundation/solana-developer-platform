@@ -229,7 +229,7 @@ describe("server-side Idempotency-Key (HOO-1918)", () => {
 
     const failure = await client
       .fetch("/v1/wallets", { method: "POST", body: "{}" })
-      .catch((error: unknown) => error);
+      .catch((cause: unknown) => cause);
 
     expect(failure).toMatchObject({ status: 422, replayed: true });
     expect(sdpApiAnswer(failure)).toEqual({ status: 422, replayed: true, code: null });

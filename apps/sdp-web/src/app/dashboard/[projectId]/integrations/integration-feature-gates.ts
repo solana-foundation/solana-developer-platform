@@ -1,6 +1,8 @@
 import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import type { IntegrationFamily } from "./integrations-filter";
+import type { DashboardFlags } from "@/flags/dashboard";
+import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
 export type IntegrationFeatureFlags = {
   custody: boolean;
@@ -54,4 +56,40 @@ export function isIntegrationProviderEnabled(
   if (flags.rampProviders.some((offered) => offered === provider)) return true;
   if ((COMPLIANCE_PROVIDERS as readonly string[]).includes(provider)) return flags.compliance;
   return false;
+}
+
+/** What the catalog will render, so its loading placeholder reserves exactly that. */
+export interface IntegrationsSkeletonLayout {
+  families: readonly IntegrationFamily[];
+  /** Ramp provider cards the catalog lists. */
+  rampCards: number;
+}
+
+export type IntegrationsSkeletonFlags = Pick<
+  DashboardFlags,
+  "compliance" | "custody" | "privateChannels" | "ramps" | "releaseChannel"
+>;
+
+/**
+ * The families and ramp cards the catalog renders for these flags. Ramp cards count the
+ * providers the release channel runs; per-provider Vercel flags can only trim that.
+ *
+ * @param flags - The dashboard's flag snapshot, or the channel alone on the server.
+ * @returns The skeleton's layout.
+ */
+export function integrationsSkeletonLayout(
+  flags: IntegrationsSkeletonFlags
+): IntegrationsSkeletonLayout {
+  const integrationFlags: IntegrationFeatureFlags = {
+    custody: flags.custody,
+    rampProviders: flags.ramps ? rampProvidersInReleaseChannel(flags.releaseChannel) : [],
+    compliance: flags.compliance,
+    privateChannels: flags.privateChannels,
+  };
+  return {
+    families: INTEGRATION_FAMILIES.filter((family) =>
+      isIntegrationFamilyEnabled(family, integrationFlags)
+    ),
+    rampCards: integrationFlags.rampProviders.length,
+  };
 }
