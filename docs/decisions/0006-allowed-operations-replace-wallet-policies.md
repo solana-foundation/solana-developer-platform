@@ -1,10 +1,15 @@
 # ADR 0006: Allowed operations replace wallet policies
 
-- **Status:** Accepted
+- **Status:** Accepted; Allowed Operations superseded by grants by module (HOO-2099)
 - **Date:** 2026-10-08
 - **Deciders:** SDP engineering (HOO-1889)
 - **Related:** `CONTEXT.md`; `packages/sdp-types/src/api-keys.ts`;
   `apps/sdp-api/src/routes/api-keys/`; `docs/decisions/0005-release-channels.md`
+
+> **Superseded in part (HOO-2099).** Allowed Operations are gone: every route
+> declares one action (`module.verb`, `packages/sdp-types/src/actions.ts`)
+> with `requireAction`, and an API key holds an explicit list of grants. The
+> wallet-policy removal below still stands.
 
 ## Context
 

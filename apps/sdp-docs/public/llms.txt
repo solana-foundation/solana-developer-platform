@@ -22,7 +22,7 @@
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API in front of interchangeable providers for building on Solana.
 - [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Set up your SDP organization and see how projects scope work within it.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
-- [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
+- [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with explicit grants by module, wallet bindings, and zero-downtime rotation.
 - [Tokenize an Asset](https://platform.solana.com/docs/tokens/tokenize-an-asset): Map a real-world asset to the right SDP token model, authorities, and implementation flow.
 - [Create a Token](https://platform.solana.com/docs/tokens/create-a-token): Define a new token using a template or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/tokens/deploy-a-token): Deploy a created token to the Solana blockchain.

@@ -493,7 +493,7 @@ Minting is how new supply enters circulation. For a regulated stablecoin, every 
 
 ### 1. Send the mint call
 
-Minting requires the `tokens:write` permission, so the Developer key (`sdp`) is the right credential:
+Minting requires the `issuance.execute` grant, so the key (`sdp`) must hold it:
 
 ```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
@@ -578,7 +578,7 @@ Section 5's compliance controls only matter if they enforce. This section moves 
 
 ### 1. The clean transfer
 
-Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The required permissions are `payments:write` and `wallets:read`, both of which the Developer key (`sdp`) carries:
+Transfers run on the `/v1/payments/transfers` endpoint family, separate from the issuance family that Section 4 used. The route needs the `transfers.execute` action, so the key (`sdp`) must hold that grant:
 
 ```javascript title="transfer-tokens.js"
 const sourceCustodyWalletId = signingCustodyWalletId;
@@ -771,7 +771,7 @@ You have a deployed regulated stablecoin, the compliance controls configured, an
     The design and issuance pattern for a tokenized money market fund or treasury bond product under the `tokenized-security` template. Compliance posture differs from the stablecoin pattern in three ways: allowlist on by default, accounts open frozen, and an additional `scaledUiAmount` extension for accrued yield. Most of the Section 5 controls work identically; the differences sit in Sections 3 and 4.
   </Card>
   <Card title="Run Enterprise Stablecoin Payments">
-    Picks up after Section 7. Covers transfer rails for institutional payment flows: bulk transfers, scheduled payments, on-ramp and off-ramp integration with custody bank settlement, and per-key allowed operations for transfers at scale.
+    Picks up after Section 7. Covers transfer rails for institutional payment flows: bulk transfers, scheduled payments, on-ramp and off-ramp integration with custody bank settlement, and per-key grants for transfers at scale.
   </Card>
 </Cards>
 
