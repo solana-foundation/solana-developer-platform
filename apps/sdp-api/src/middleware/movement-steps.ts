@@ -7,6 +7,7 @@ import {
   getIdempotencyRecordKey,
   IDEMPOTENT_REPLAYED_HEADER,
   markIdempotencyCommitted,
+  markIdempotencyRecordMismatch,
 } from "./idempotency";
 
 /**
@@ -75,6 +76,7 @@ export function replayFromRecord<TAuthorized>(
       const answer = await find(c, stepInput<TAuthorized>(c), recordKey);
       if (answer !== null) {
         if (answer.fingerprint !== null && answer.fingerprint !== getIdempotencyFingerprint(c)) {
+          markIdempotencyRecordMismatch(c);
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }
         // The row is the request's recorded answer, success or failure: stored
