@@ -123,20 +123,13 @@ Look for Clerk webhook errors, session token claim mismatches, or missing
 In the dashboard, open **Wallets**, choose the local provider, and create a wallet
 named `Devnet local wallet`.
 
-If you prefer the API path, use an admin key from the dashboard:
+There is no API-key path for this step. Initializing custody is provider setup
+(`wallets.configure`), which no API key can hold, so it is done signed in as an
+organization admin. Once the provider is initialized, keys that hold
+`wallets.manage` can create more wallets with `POST /v1/wallets`.
 
-```bash title="Terminal"
-curl -X POST http://localhost:8787/v1/wallets/initialize \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "local",
-    "walletLabel": "Devnet local wallet"
-  }'
-```
-
-Copy the returned `walletId`. You will bind the API key to this wallet in the
-next step.
+Copy the new wallet's ID from its card on the **Wallets** page. You will bind
+the API key to this wallet in the next step.
 
 </Step>
 
