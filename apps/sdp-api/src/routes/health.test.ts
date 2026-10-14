@@ -2,11 +2,15 @@
  * Health route tests
  */
 
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import {
+  EGRESS_READINESS_SERVES_TRAFFIC,
+  EGRESS_READINESS_STATES,
+  type EgressReadiness,
+  SDP_RAMP_PROVIDER_STAGES,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import app from "@/index";
-import type { EgressReadiness } from "@/runtime/egress-gate";
 import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
 
@@ -83,7 +87,7 @@ describe("Health routes", () => {
       });
     });
 
-    it.each<EgressReadiness>(["ok", "unverified"])(
+    it.each(EGRESS_READINESS_STATES.filter((state) => EGRESS_READINESS_SERVES_TRAFFIC[state]))(
       "reports ready once egress is %s",
       async (egress) => {
         const res = await appWithEgress(egress).request("/health/ready", {}, env);

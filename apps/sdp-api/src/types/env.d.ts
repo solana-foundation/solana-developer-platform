@@ -4,6 +4,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
   AllowedOperation,
   ApiKeyEnvironment,
+  EgressReadiness,
   OrganizationEntitlements,
   OrganizationRpcProvider,
   Permission,
@@ -11,7 +12,6 @@ import type {
 } from "@sdp/types";
 import type { ManagedRpcEnv } from "@sdp/rpc";
 import type { RequestGateContext } from "@/middleware/request-gate";
-import type { EgressReadiness } from "@/runtime/egress-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
 

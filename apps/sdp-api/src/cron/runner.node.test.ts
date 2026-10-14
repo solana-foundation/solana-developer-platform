@@ -203,10 +203,10 @@ describe("startCron", () => {
   });
 
   it("validates DISABLE_CRON up front without scheduling anything", () => {
-    expect(() => assertCronConfig({ ...CHANNEL, DISABLE_CRON: "treu" } as Env)).toThrow(
+    expect(() => assertCronConfig({ DISABLE_CRON: "treu" })).toThrow(
       'Invalid DISABLE_CRON: "treu"'
     );
-    expect(() => assertCronConfig({ ...CHANNEL, DISABLE_CRON: "false" } as Env)).not.toThrow();
+    expect(() => assertCronConfig({ DISABLE_CRON: "false" })).not.toThrow();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 

@@ -48,6 +48,43 @@ describe("startEgressGate", () => {
     );
   });
 
+  it("reports unverified at the deadline while a probe is still in flight", async () => {
+    vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
+    const gate = startEgressGate({
+      probe: () => new Promise<void>(() => undefined),
+      deadlineMs: 20,
+      intervalMs: 0,
+    });
+
+    await gate.settled;
+
+    expect(gate.state()).toBe("unverified");
+  });
+
+  it("reports ok when the probe in flight at the deadline succeeds later", async () => {
+    vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
+    const info = vi.spyOn(getLogger(), "info").mockImplementation(() => undefined);
+    let succeed: () => void = () => undefined;
+    const gate = startEgressGate({
+      probe: () =>
+        new Promise<void>((resolve) => {
+          succeed = resolve;
+        }),
+      deadlineMs: 20,
+      intervalMs: 0,
+    });
+
+    await gate.settled;
+    expect(gate.state()).toBe("unverified");
+
+    succeed();
+    await vi.waitFor(() => expect(gate.state()).toBe("ok"));
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "sdp_api_egress_ready", attempts: 1 }),
+      "egress ready"
+    );
+  });
+
   it("settles when the probe throws synchronously", async () => {
     vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
     const gate = startEgressGate({

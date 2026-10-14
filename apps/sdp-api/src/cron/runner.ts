@@ -76,7 +76,7 @@ const FALSY_DISABLE_CRON: ReadonlySet<string> = new Set(["false", "0"]);
 
 // Strict whitelist so a typo (`DISABLE_CRON=treu`) fails loudly instead of
 // silently enabling cron and double-firing across replicas.
-function isCronDisabled(env: Env): boolean {
+function isCronDisabled(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): boolean {
   const raw = env.DISABLE_CRON;
   if (raw === undefined) {
     return Boolean(env.K_SERVICE);
@@ -94,7 +94,7 @@ function isCronDisabled(env: Env): boolean {
 }
 
 /** Throws on an invalid DISABLE_CRON, so the entrypoint fails before it opens sockets. */
-export function assertCronConfig(env: Env): void {
+export function assertCronConfig(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): void {
   isCronDisabled(env);
 }
 

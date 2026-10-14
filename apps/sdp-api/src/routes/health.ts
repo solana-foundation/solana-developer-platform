@@ -2,7 +2,7 @@
  * Health Check Route
  */
 
-import { resolveSdpReleaseChannel } from "@sdp/types";
+import { EGRESS_READINESS_SERVES_TRAFFIC, resolveSdpReleaseChannel } from "@sdp/types";
 import { Hono } from "hono";
 import { getDb } from "@/db";
 import { pingRedis } from "@/runtime/kv-redis";
@@ -39,7 +39,9 @@ health.get("/ready", async (c) => {
   };
   const body = {
     status:
-      checks.database === "ok" && checks.redis === "ok" && checks.egress !== "pending"
+      checks.database === "ok" &&
+      checks.redis === "ok" &&
+      (checks.egress === undefined || EGRESS_READINESS_SERVES_TRAFFIC[checks.egress])
         ? ("ready" as const)
         : ("not_ready" as const),
     timestamp: new Date().toISOString(),

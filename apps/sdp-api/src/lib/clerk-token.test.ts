@@ -76,10 +76,13 @@ describe("Clerk signing key resolution", () => {
     return { ...testEnv, CLERK_ISSUER: issuer, CLERK_JWKS_URL: jwksUrl };
   }
 
-  async function verificationError(token: string, env: Env): Promise<unknown> {
+  async function verificationError(token: string, env: Env): Promise<Error> {
     return verifyClerkJwt(token, env).then(
       () => assert.fail("expected verification to fail"),
-      (cause: unknown) => cause
+      (cause: unknown) => {
+        assert(cause instanceof Error);
+        return cause;
+      }
     );
   }
 

@@ -1,4 +1,4 @@
-import type { SdpRampProviderStages } from "@sdp/types";
+import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -62,7 +62,6 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
-import type { EgressReadiness } from "@/runtime/egress-gate";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
