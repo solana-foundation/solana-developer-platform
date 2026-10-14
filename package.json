@@ -52,6 +52,7 @@
   },
   "scripts": {
     "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose --continue=always",
+    "dev:kora": "scripts/doppler/run-with-config.sh scripts/kora-local/dev.sh",
     "dev:webhooks": "scripts/doppler/run-with-config.sh turbo run dev:webhook --env-mode=loose",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "turbo run dev --filter=sdp-docs",
@@ -86,6 +87,8 @@
     "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
     "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
     "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
+    "kora:local:up": "scripts/doppler/run-with-config.sh scripts/kora-local/up.sh",
+    "kora:local:down": "scripts/kora-local/down.sh",
     "kora:surfpool:up": "scripts/kora-surfpool/up.sh",
     "kora:surfpool:down": "scripts/kora-surfpool/down.sh",
     "kora:surfpool:run": "scripts/kora-surfpool/run.sh",
