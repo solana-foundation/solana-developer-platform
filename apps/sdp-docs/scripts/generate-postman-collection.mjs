@@ -222,6 +222,9 @@ const SAVED_KEY_VARIABLE = [
  * replay, or any status below 500 other than 409 and 429 (the rule the
  * dashboard uses). A timeout runs no test script and a 5xx keeps the key, so
  * pressing Send again retries the same operation instead of starting another.
+ * Each send remembers the key it used (a request-local variable) and retires
+ * only that key, so a late answer to an earlier send never clears the key a
+ * newer send saved.
  */
 function idempotencyKeyEvents() {
   return [
@@ -234,6 +237,7 @@ function idempotencyKeyEvents() {
           "if (variable && !pm.collectionVariables.get(variable)) {",
           '  pm.collectionVariables.set(variable, pm.variables.replaceIn("{{$guid}}"));',
           "}",
+          'if (variable) pm.variables.set("idempotencyKeySent", pm.collectionVariables.get(variable));',
         ],
       },
     },
@@ -243,7 +247,8 @@ function idempotencyKeyEvents() {
         type: "text/javascript",
         exec: [
           ...SAVED_KEY_VARIABLE,
-          "if (variable) {",
+          'const sent = pm.variables.get("idempotencyKeySent");',
+          "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
           "  const status = pm.response.code;",
           '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
           "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",

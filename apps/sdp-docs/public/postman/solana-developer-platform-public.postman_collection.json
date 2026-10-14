@@ -25,7 +25,8 @@
           "const variable = saved && saved[1];",
           "if (variable && !pm.collectionVariables.get(variable)) {",
           "  pm.collectionVariables.set(variable, pm.variables.replaceIn(\"{{$guid}}\"));",
-          "}"
+          "}",
+          "if (variable) pm.variables.set(\"idempotencyKeySent\", pm.collectionVariables.get(variable));"
         ]
       }
     },
@@ -37,7 +38,8 @@
           "const header = pm.request.headers.find((h) => h.key.toLowerCase() === \"idempotency-key\");",
           "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
           "const variable = saved && saved[1];",
-          "if (variable) {",
+          "const sent = pm.variables.get(\"idempotencyKeySent\");",
+          "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
           "  const status = pm.response.code;",
           "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
           "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
