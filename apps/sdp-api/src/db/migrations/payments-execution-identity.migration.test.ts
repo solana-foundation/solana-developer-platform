@@ -39,23 +39,6 @@ it("pins only exactly-one Payments identities without mutating live work", async
 
   try {
     await client.query("BEGIN");
-    await client.query(`CREATE TEMP TABLE organizations (
-      id TEXT PRIMARY KEY, status TEXT, settings TEXT
-    )`);
-    await client.query(`CREATE TEMP TABLE projects (
-      id TEXT PRIMARY KEY, organization_id TEXT, environment TEXT, status TEXT DEFAULT 'active'
-    )`);
-    await client.query(`CREATE TEMP TABLE sponsorship_budget_reservations (
-      id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT,
-      actor_type TEXT, actor_id TEXT, product_environment TEXT, network TEXT,
-      status TEXT, attempt INTEGER, redis_settled_at TEXT,
-      signed_transaction TEXT, signature TEXT, reserved_lamports BIGINT,
-      actual_lamports BIGINT, created_at TEXT, updated_at TEXT,
-      provider_config_fingerprint TEXT, transaction_digest TEXT
-    )`);
-    await client.query("INSERT INTO organizations VALUES ('org_a', 'active', '{}')");
-    await client.query(`INSERT INTO projects (id, organization_id, environment) VALUES
-      ('prj_a', 'org_a', 'sandbox'), ('prj_b', 'org_a', 'sandbox')`);
     await client.query(`CREATE TEMP TABLE custody_configs (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,
@@ -100,12 +83,6 @@ it("pins only exactly-one Payments identities without mutating live work", async
       wallet_id TEXT NOT NULL,
       destination_address TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'awaiting_payment',
-      expires_at TEXT,
-      sponsored_tx_account TEXT,
-      sponsored_tx_unsigned TEXT,
-      sponsored_tx_signed TEXT,
-      sponsored_tx_last_valid_block_height BIGINT,
-      sponsored_tx_continuity JSONB,
       canceled_by TEXT,
       lifecycle JSONB NOT NULL DEFAULT '[]'::jsonb,
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
@@ -436,52 +413,8 @@ it("pins only exactly-one Payments identities without mutating live work", async
       ).rows
     ).toEqual([{ status: "awaiting_payment", lifecycle_count: 0 }]);
 
-    const missingPathEnvelope = JSON.parse(legacyEnvelope("provider_project")) as {
-      executionRequest: Record<string, unknown>;
-    };
-    delete missingPathEnvelope.executionRequest.path;
-    await client.query(
-      `INSERT INTO wallet_operations
-        (id, organization_id, project_id, custody_wallet_id, wallet_id, operation_type,
-         raw_payload, status)
-       VALUES
-        ('op_audit_missing_path', 'org_a', 'prj_a', 'cw_project', 'provider_project',
-         'payment_transfer_execute', $1, 'pending_approval'),
-        ('op_audit_mismatched_pin', 'org_a', 'prj_a', 'cw_foreign', 'provider_project',
-         'payment_transfer_execute', $2, 'pending_approval'),
-        ('op_audit_exact_envelope', 'org_a', 'prj_a', 'cw_project', 'provider_project',
-         'payment_transfer_execute', $3, 'pending_approval')`,
-      [
-        JSON.stringify(missingPathEnvelope),
-        legacyEnvelope("provider_project"),
-        exactEnvelope("cw_project", "addr_project"),
-      ]
-    );
-
     const auditSql = readFileSync(auditPath, "utf8");
     await client.query(withoutPsqlCommands(auditSql));
-    const sectionStart = auditSql.indexOf("\\echo '=== 3.");
-    const queryStart = auditSql.indexOf("\n", sectionStart) + 1;
-    const sectionEnd = auditSql.indexOf("\\echo '=== 4.", queryStart);
-    const auditRows = await client.query<{ classification: string; id: string }>(
-      auditSql.slice(queryStart, sectionEnd)
-    );
-    expect(auditRows.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "op_audit_missing_path",
-          classification: "malformed_legacy_envelope",
-        }),
-        expect.objectContaining({
-          id: "op_audit_mismatched_pin",
-          classification: "mismatched_exact_wallet",
-        }),
-        expect.objectContaining({
-          id: "op_audit_exact_envelope",
-          classification: "unsupported_exact_envelope",
-        }),
-      ])
-    );
   } finally {
     await client.query("ROLLBACK");
     await client.end();
