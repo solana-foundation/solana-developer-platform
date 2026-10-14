@@ -69,7 +69,7 @@ export function getTransactionMetadata(c: Context<{ Bindings: Env }, "/:token/tx
  *
  * @param c - The request context, under `paymentRequestScope` with a validated body.
  * @returns The partially signed transaction and the message the wallet shows.
- * @throws AppError `BAD_REQUEST` when the request is no longer payable, or has no Project.
+ * @throws AppError `BAD_REQUEST` when the request is no longer payable.
  * @throws AppError `RATE_LIMITED`, with `Retry-After`, while another payer's claim is live.
  */
 export async function createSponsoredTransaction(
