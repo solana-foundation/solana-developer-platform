@@ -21,7 +21,7 @@ export function isPostgresUniqueViolation(error: unknown): boolean {
 
 /**
  * A keyed custody wallet create lost the race for its request id (migration
- * 0131): another attempt under the same key already recorded the wallet. The
+ * 0135): another attempt under the same key already recorded the wallet. The
  * losing insert can fail on either unique constraint: the request id's, or the
  * owner-and-wallet one when the provider deduped on the id and returned the
  * winner's own wallet. So the row is looked up by the request id instead of
