@@ -4,6 +4,7 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type Counterparty,
   type PaymentRequest,
+  type PaymentRequestLink,
   type PaymentRequestStatus,
 } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
@@ -22,6 +23,7 @@ import { StatusText } from "@/components/ui/status-text";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -438,13 +440,25 @@ export function PaymentRequestsWorkspace({
   };
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
-  const copyLink = (request: PaymentRequest) => {
+  const copyLink = async (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
     if (demo) {
       toast.info(t("DashboardPayments.demo.noPayLink"));
       return;
     }
-    void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
+    // Reads never carry the pay link (APE-849); the link read returns it only to a
+    // member whose role may manage payment requests.
+    const res = await dashboardFetch<{ data: PaymentRequestLink }>(
+      `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
+    );
+    if (!res.ok) {
+      toast.error(
+        res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error
+      );
+      return;
+    }
+    const { publicToken } = res.data.data;
+    await navigator.clipboard.writeText(`${window.location.origin}/pay/${publicToken}`);
     toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
   };
 
@@ -499,7 +513,7 @@ export function PaymentRequestsWorkspace({
               amountLabel={amountLabel}
               fromLabel={fromLabel}
               onSelect={(request) => router.push(projectHref(paymentRequestHref(request.id)))}
-              onCopyLink={copyLink}
+              onCopyLink={(request) => void copyLink(request)}
             />
           )}
           <PaymentRequestsPagination

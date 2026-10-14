@@ -1329,7 +1329,8 @@
       "noPaymentRequests": "No payment requests yet",
       "noPaymentRequestsDescription": "Create a payment link to request a fixed payment.",
       "paymentRequestDetails": "Payment request details",
-      "copy": "Copy"
+      "copy": "Copy",
+      "paymentLinkNotPermitted": "Only members who can manage payment requests can copy their links."
     },
     "depositMethod": {
       "address": "Solana address",

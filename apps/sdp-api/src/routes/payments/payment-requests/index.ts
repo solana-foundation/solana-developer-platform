@@ -5,12 +5,27 @@ import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { authorizePaymentRequest } from "../access";
-import { createPaymentRequest, listPaymentRequests } from "./handlers";
+import {
+  createPaymentRequest,
+  getPaymentRequest,
+  getPaymentRequestLink,
+  listPaymentRequests,
+} from "./handlers";
 import { createPaymentRequestSchema } from "./schemas";
 
 const paymentRequests = new Hono<{ Bindings: Env }>();
 
 paymentRequests.get("/", requireAction("payment_requests.read"), listPaymentRequests);
+paymentRequests.get(
+  "/:paymentRequestId",
+  requireAction("payment_requests.read"),
+  getPaymentRequest
+);
+paymentRequests.get(
+  "/:paymentRequestId/link",
+  requireAction("payment_requests.manage"),
+  getPaymentRequestLink
+);
 paymentRequests.post(
   "/",
   requireAction("payment_requests.manage"),

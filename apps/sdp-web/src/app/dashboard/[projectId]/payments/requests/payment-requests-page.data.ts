@@ -2,6 +2,7 @@ import {
   type ListPaymentRequestsResponse,
   type PaginatedResponse,
   type PaymentRequest,
+  type PaymentRequestLink,
   type SolanaCluster,
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
@@ -247,9 +248,8 @@ export type PaymentRequestDetailResult =
   | { status: "error"; error: string | undefined };
 
 /**
- * One payment request by id. The API reads requests only as a list, so this pages through it
- * newest first and stops at the match, or once the pages run out; a request just created is on
- * the first page.
+ * One payment request by id. Reads never carry the pay link's token (APE-849); see
+ * {@link fetchPaymentRequestLinkToken}.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param requestId - The request's id.
@@ -259,16 +259,36 @@ export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
-  // TODO(api): read the request by id once the API has GET /v1/payments/requests/{id}. Until then
-  // this pages through the list, so an older request costs one read per 100 newer ones. Known
-  // limitation of the API, not of this page.
-  for (let page = 1; ; page += 1) {
-    const result = await fetchPaymentRequests(request, { page });
-    if (!result.ok) return { status: "error", error: result.error };
-    const match = result.data.find((candidate) => candidate.id === requestId);
-    if (match) return { status: "found", request: match };
-    if (result.data.length === 0 || page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) {
-      return { status: "not_found" };
-    }
+  try {
+    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}`);
+    if (response.status === 404) return { status: "not_found" };
+    if (!response.ok) return { status: "error", error: await response.text() };
+    const json = (await response.json()) as { data: PaymentRequest };
+    return { status: "found", request: json.data };
+  } catch (error) {
+    return { status: "error", error: error instanceof Error ? error.message : undefined };
+  }
+}
+
+/**
+ * The pay link's token, or null when the member's role does not hold
+ * `payment_requests.manage` (a 403): the token is a bearer credential (APE-849).
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param requestId - The request's id.
+ * @returns The token, null when refused, or the load error; never throws.
+ */
+export async function fetchPaymentRequestLinkToken(
+  request: SdpApiClient["request"],
+  requestId: string
+): Promise<{ ok: true; publicToken: string | null } | { ok: false; error: string | undefined }> {
+  try {
+    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}/link`);
+    if (response.status === 403) return { ok: true, publicToken: null };
+    if (!response.ok) return { ok: false, error: await response.text() };
+    const json = (await response.json()) as { data: PaymentRequestLink };
+    return { ok: true, publicToken: json.data.publicToken };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : undefined };
   }
 }
