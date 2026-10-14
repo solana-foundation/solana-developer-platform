@@ -43,6 +43,11 @@ export const IDEMPOTENCY_ERROR_CODES = [
 
 export type IdempotencyErrorCode = (typeof IDEMPOTENCY_ERROR_CODES)[number];
 
+/** Whether an error code is the Idempotency-Key's own refusal, not the route's. */
+export function isIdempotencyErrorCode(code: string | null): code is IdempotencyErrorCode {
+  return IDEMPOTENCY_ERROR_CODES.some((known) => known === code);
+}
+
 /**
  * Whether a refusal ends its key: a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`
  * means the original request never recorded its outcome, and every retry under

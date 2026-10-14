@@ -39,4 +39,15 @@ describe("expiresAtForAction", () => {
     vi.setSystemTime(new Date("2026-10-13T12:30:00.000Z"));
     expect(expiresAtForAction("seven-days", inAnHour)).toBe("2026-10-13T13:30:00.000Z");
   });
+
+  // Greptile (#2333): an unreadable 422 kept the request's key but dropped its
+  // expiry, so the retry was a new body under a new key.
+  it("keeps the expiry when the answer could not be read, as the key is kept", () => {
+    const first = "2026-10-13T13:00:00.000Z";
+    expect(expiresAtForAction("unreadable", inAnHour)).toBe(first);
+    settleExpiresAt("unreadable", first, { ok: false, status: 422, unreadable: true });
+
+    vi.setSystemTime(new Date("2026-10-13T12:30:00.000Z"));
+    expect(expiresAtForAction("unreadable", inAnHour)).toBe(first);
+  });
 });

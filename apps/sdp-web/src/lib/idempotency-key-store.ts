@@ -51,6 +51,11 @@ export function setIdempotencyKeyScope(scope: string): void {
   keyScope = scope;
 }
 
+/** The signed-in user and org the stores are scoped to now (`setIdempotencyKeyScope`). */
+export function idempotencyKeyScope(): string {
+  return keyScope;
+}
+
 function scopedKey(storeKey: string): string {
   return keyScope ? `${storeKey}:${keyScope}` : storeKey;
 }
