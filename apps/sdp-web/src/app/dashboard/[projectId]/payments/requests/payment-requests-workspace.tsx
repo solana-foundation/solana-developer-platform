@@ -29,6 +29,7 @@ import {
   type ReactNode,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -518,8 +519,15 @@ export function PaymentRequestsWorkspace({
   );
   const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
-  // The selected request's pay link token: from the create response, or read on open.
-  const [selectedToken, setSelectedToken] = useState<string | null>(null);
+  // A request's pay link token, from the create response or read on open, kept
+  // with the request it belongs to so it is never shown on another one.
+  const [selectedLink, setSelectedLink] = useState<{
+    requestId: string;
+    token: string | null;
+  } | null>(null);
+  // The request opened last: a link read that lands after the user opened
+  // another row, or closed the details, is dropped.
+  const openingRequestId = useRef<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const requests = initialPaymentRequests;
 
@@ -533,16 +541,22 @@ export function PaymentRequestsWorkspace({
   );
   // Reads never carry the pay link (APE-849): opening a row reads its token, which the
   // API returns only to a member whose role may manage payment requests.
+  const selectedToken =
+    selected && selectedLink?.requestId === selected.id ? selectedLink.token : null;
   const payLink = selectedToken ? `${window.location.origin}/pay/${selectedToken}` : null;
   const openRequest = async (row: PaymentRequest) => {
+    openingRequestId.current = row.id;
     const res = await dashboardFetch<{ data: PaymentRequestLink }>(
       `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
     );
+    if (openingRequestId.current !== row.id) {
+      return;
+    }
     if (!res.ok && res.status !== 403) {
       toast.error(res.error);
       return;
     }
-    setSelectedToken(res.ok ? res.data.data.publicToken : null);
+    setSelectedLink({ requestId: row.id, token: res.ok ? res.data.data.publicToken : null });
     setSelected(row);
   };
 
@@ -747,8 +761,9 @@ export function PaymentRequestsWorkspace({
           isOpen
           ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
           onClose={() => {
+            openingRequestId.current = null;
             setSelected(null);
-            setSelectedToken(null);
+            setSelectedLink(null);
           }}
           size="lg"
         >
@@ -839,7 +854,8 @@ export function PaymentRequestsWorkspace({
             // Swap the create form for the details view and let the table repopulate
             // behind it, rather than closing and making the user find the new row.
             setCreateOpen(false);
-            setSelectedToken(request?.publicToken ?? null);
+            openingRequestId.current = request ? request.id : null;
+            setSelectedLink(request ? { requestId: request.id, token: request.publicToken } : null);
             setSelected(request);
             router.refresh();
           }}
