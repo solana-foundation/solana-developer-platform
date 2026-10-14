@@ -1,6 +1,6 @@
 /**
  * The API routes that refuse a request without an Idempotency-Key: the ones
- * that move money (HOO-1918, ADR 0008). One list, mapped by the dashboard,
+ * that move money (HOO-1918, ADR 0009). One list, mapped by the dashboard,
  * which refuses to send on these when it cannot persist the key. The routes PR
  * adds the assertion that the API's route inventory matches it; until then the
  * API does not check it.
