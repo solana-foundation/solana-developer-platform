@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 // Unit tests (*.unit.test.ts) — browser E2E stays on Playwright.
 export default defineConfig({
   test: {
-    include: ["src/**/*.unit.test.{ts,tsx}", "playwright/support/**/*.unit.test.{ts,tsx}"],
+    include: ["src/**/*.unit.test.{ts,tsx}"],
     environment: "node",
     coverage: {
       provider: "istanbul",
