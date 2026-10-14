@@ -274,11 +274,8 @@ async function seedCustodyWallets(): Promise<void> {
 }
 
 /**
- * Re-seeds the cached key as wallet-scoped, bound to one custody wallet.
- *
- * The binding row goes in the DATABASE as well as the cache, because the guard
- * deliberately re-reads it rather than trusting the request's auth context —
- * that context can be an hour-old KV snapshot.
+ * Re-seeds the key as wallet-scoped, bound to one custody wallet: its row and
+ * its binding row, which authentication reads fresh on every request.
  */
 async function seedWalletScopedKey(
   wallet: { id: string; walletId: string },

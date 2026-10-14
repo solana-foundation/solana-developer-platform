@@ -900,7 +900,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
-  it("denies revoked API keys even when their cached permissions allow replay", async () => {
+  it("denies revoked API keys even when their stored permissions would allow replay", async () => {
     await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
       .prepare("UPDATE api_keys SET status = 'revoked', permissions = NULL WHERE id = ?")
@@ -915,7 +915,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   // Authentication reads the key's row, and its wallet bindings, fresh on every
   // request; the route checks that snapshot rather than re-reading it later.
-  it("rejects recovery for a key revoked since its cache entry was written", async () => {
+  it("rejects recovery for a key revoked since its last request", async () => {
     const original = await abandonedWithdrawal();
     await getDb(env)
       .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")

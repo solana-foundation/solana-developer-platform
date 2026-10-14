@@ -38,7 +38,7 @@ const resolveVaultWithdrawClient = vi.hoisted(() =>
 );
 const surfacingEnabled = vi.hoisted(() => ({ value: true }));
 // Flip to simulate a rate-limit counter-store outage for the requests that
-// follow. Only the rateLimits store breaks: auth still reads its key cache.
+// follow. Only the rateLimits store breaks; auth reads the key's rows from Postgres.
 const rateLimitStoreDown = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({

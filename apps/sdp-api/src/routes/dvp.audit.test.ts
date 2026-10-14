@@ -129,7 +129,7 @@ async function seedAuth(): Promise<void> {
 /**
  * The party wallet funding and reclaiming side A, and the settlement authority
  * the close signs with. Both are re-read from the database by the handlers, so
- * neither can be faked in the cached key alone.
+ * neither can be faked in the request's auth context alone.
  */
 async function seedCustody(): Promise<void> {
   const db = getDb(env);

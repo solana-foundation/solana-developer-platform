@@ -54,9 +54,9 @@ interface MovementJson {
 }
 
 /**
- * `walletScope` is resolved from the CACHED key, not from a DB row — so a test
- * that only inserts into `api_key_wallet_permissions` changes nothing. Seeding a
- * `selected` key is the only way to exercise the binding, and the ids it carries
+ * `walletScope` follows from the key's stored bindings, which authentication
+ * reads fresh on every request. Seeding a `selected` key is the way to
+ * exercise the binding, and the ids it carries
  * are PROVIDER wallet ids (`privy_…`), not `custody_wallets` row ids (`cwlt_…`).
  */
 function cachedKey(
@@ -81,11 +81,9 @@ function cachedKey(
 /**
  * Bind the key to specific wallets, which takes BOTH halves.
  *
- * `hasSelectedWalletScope` reads the CACHED key, while the allowed set is built
- * from `walletBindings`, which the auth middleware loads from
- * `api_key_wallet_permissions`. Seeding only the cache leaves the allowed set
- * empty and hides every vault movement; seeding only the rows leaves the scope
- * `all` and hides nothing. Either half alone is a test that proves nothing.
+ * Both the scope and the allowed set come from the key's binding rows, which
+ * the auth middleware loads from `api_key_wallet_permissions` on every request:
+ * a key with no binding rows is `all` and hides nothing.
  */
 async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
