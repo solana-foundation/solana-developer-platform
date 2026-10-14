@@ -5081,5 +5081,226 @@ describe("Payments routes — recurring", () => {
         .first<{ count: number }>();
       expect(schedules).toEqual({ count: 1 });
     });
+
+    const storedKeyCount = async (key: string) =>
+      (
+        await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
+          )
+          .bind(key)
+          .first<{ count: number }>()
+      )?.count;
+
+    const recurringMetadataUri = async (id: string) =>
+      (
+        await getDb(env)
+          .prepare("SELECT metadata_uri FROM payment_recurring_payments WHERE id = ?")
+          .bind(id)
+          .first<{ metadata_uri: string | null }>()
+      )?.metadata_uri;
+
+    it("refuses a keyed cancel that would finish another key's stale cancel, unstored", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const firstKey = crypto.randomUUID();
+      expect(
+        (
+          await app.request(
+            actionPath(activated.id, "cancel"),
+            { method: "POST", headers: keyed(firstKey), body: "{}" },
+            env
+          )
+        ).status
+      ).toBe(200);
+      // The first cancel crashed mid-transition long enough ago to be recoverable.
+      const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'canceling', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, activated.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payment_lifecycle_attempts
+              SET status = 'processing', stage = 'claim', signature = NULL, updated_at = ?
+            WHERE idempotency_key = ?`
+        )
+        .bind(staleAt, recordKey(firstKey))
+        .run();
+      const sendsBefore = send.mock.calls.length;
+
+      const otherKey = crypto.randomUUID();
+      const other = await app.request(
+        actionPath(activated.id, "cancel"),
+        { method: "POST", headers: keyed(otherKey), body: "{}" },
+        env
+      );
+
+      expect(other.status).toBe(409);
+      expect(await storedKeyCount(otherKey)).toBe(0);
+      const attempts = await getDb(env)
+        .prepare(
+          `SELECT idempotency_key, status
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ? AND operation = 'cancel'`
+        )
+        .bind(activated.id)
+        .all<{ idempotency_key: string | null; status: string }>();
+      expect(attempts.results).toEqual([
+        { idempotency_key: recordKey(firstKey), status: "processing" },
+      ]);
+      // The claim rolled back with the refusal: the schedule is still the stale cancel.
+      expect(await recurringPaymentDueAt(activated.id)).toMatchObject({ status: "canceling" });
+      const schedule = await getDb(env)
+        .prepare("SELECT updated_at FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ updated_at: string }>();
+      expect(schedule?.updated_at).toBe(staleAt);
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a keyed cancel of a canceled schedule from an attempt, so its retry never cancels a later resume", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const lifecycle = (action: "cancel" | "resume", key: string) =>
+        app.request(
+          actionPath(activated.id, action),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await lifecycle("cancel", crypto.randomUUID())).status).toBe(200);
+      const noOpKey = crypto.randomUUID();
+      expect((await lifecycle("cancel", noOpKey)).status).toBe(200);
+      expect((await lifecycle("resume", crypto.randomUUID())).status).toBe(200);
+      await forgetIdempotencyKey(noOpKey);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await lifecycle("cancel", noOpKey);
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("active");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a pending schedule's no-change PATCH from an attempt, so its retry never overwrites a later edit", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const patch = (key: string, amount: string) =>
+        app.request(
+          actionPath(created.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount }) },
+          env
+        );
+      const noOpKey = crypto.randomUUID();
+      expect((await patch(noOpKey, DEFAULT_RECURRING_FIXTURE.amount)).status).toBe(200);
+      expect((await patch(crypto.randomUUID(), "30.00")).status).toBe(200);
+      await forgetIdempotencyKey(noOpKey);
+
+      const retry = await patch(noOpKey, DEFAULT_RECURRING_FIXTURE.amount);
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.amount).toBe("30.00");
+      const row = await getDb(env)
+        .prepare("SELECT amount FROM payment_recurring_payments WHERE id = ?")
+        .bind(created.id)
+        .first<{ amount: string }>();
+      expect(row?.amount).toBe("30.00");
+    });
+
+    it("answers an active schedule's no-change PATCH from an attempt, so its retry never overwrites a later edit", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const patch = (key: string, metadataUri: string) =>
+        app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+          env
+        );
+      const first = "https://example.com/recurring/first.json";
+      const later = "https://example.com/recurring/later.json";
+      expect((await patch(crypto.randomUUID(), first)).status).toBe(200);
+      const noOpKey = crypto.randomUUID();
+      expect((await patch(noOpKey, first)).status).toBe(200);
+      expect((await patch(crypto.randomUUID(), later)).status).toBe(200);
+      await forgetIdempotencyKey(noOpKey);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await patch(noOpKey, first);
+
+      expect(retry.status).toBe(200);
+      expect(await recurringMetadataUri(activated.id)).toBe(later);
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a PATCH that finished another key's stale update under its own key too", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const recovered = "https://example.com/recurring/recovered.json";
+      const later = "https://example.com/recurring/later.json";
+      const snapshot = {
+        sourceCustodyWalletId: activated.sourceCustodyWalletId,
+        counterpartyId: activated.counterpartyId,
+        counterpartyAccountId: activated.counterpartyAccountId,
+        token: activated.token,
+        amount: activated.amount,
+        periodHours: activated.periodHours,
+        firstCollectionAt: activated.firstCollectionAt,
+        nextCollectionDueAt: activated.nextCollectionDueAt,
+        metadataUri: activated.metadataUri,
+      };
+      // Another key's PATCH to the same terms crashed after its claim.
+      const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, activated.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+             old_plan_id, old_subscription_id, changed_fields, before_values, after_values,
+             idempotency_key, idempotency_fingerprint, created_at, updated_at
+           ) VALUES (
+             ?, ?, ?, ?, 'metadata_schedule', 'processing', 'claim', ?, ?,
+             ARRAY['metadataUri']::text[], ?::jsonb, ?::jsonb, ?, 'fingerprint_of_another_key', ?, ?
+           )`
+        )
+        .bind(
+          `prpu_${crypto.randomUUID()}`,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          activated.planId,
+          activated.subscriptionId,
+          JSON.stringify(snapshot),
+          JSON.stringify({ ...snapshot, metadataUri: recovered }),
+          recordKey(crypto.randomUUID()),
+          staleAt,
+          staleAt
+        )
+        .run();
+      const patch = (key: string, metadataUri: string) =>
+        app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+          env
+        );
+      const recoveringKey = crypto.randomUUID();
+      const recovering = await patch(recoveringKey, recovered);
+      expect(recovering.status).toBe(200);
+      expect(await recurringMetadataUri(activated.id)).toBe(recovered);
+      expect((await patch(crypto.randomUUID(), later)).status).toBe(200);
+      await forgetIdempotencyKey(recoveringKey);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await patch(recoveringKey, recovered);
+
+      expect(retry.status).toBe(200);
+      expect(await recurringMetadataUri(activated.id)).toBe(later);
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
   });
 });

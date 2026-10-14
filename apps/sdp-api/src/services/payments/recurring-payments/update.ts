@@ -375,6 +375,62 @@ async function recordRecurringPaymentUpdateEvent(input: {
 }
 
 /**
+ * Records that a keyed PATCH was answered without an attempt of its own: a
+ * request that changes nothing, or one that finished a stale attempt another
+ * key claimed. The confirmed attempt carries this request's key and
+ * fingerprint and changes nothing, so a retry once the key's shared record has
+ * expired is answered from it instead of applying its terms again over a newer
+ * edit. The fingerprint check is the key step's, as for any update attempt.
+ * An unkeyed request, or one whose own attempt carries its key, records nothing.
+ */
+async function recordAnsweredUpdate(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
+  /** The key on the attempt this request ran; null when it ran none. */
+  ranAttemptKey: string | null;
+}): Promise<void> {
+  if (input.idempotency === null || input.idempotency.key === input.ranAttemptKey) {
+    return;
+  }
+  const answeredAt = new Date().toISOString();
+  const attempt = await input.recurringRepo.createUpdateAttempt({
+    id: `prpu_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    mode: "metadata_schedule",
+    status: "confirmed",
+    stage: "finalize",
+    oldPlanId: null,
+    oldSubscriptionId: null,
+    newPlanId: null,
+    newSubscriptionId: null,
+    newSourceCustodyWalletId: null,
+    planUpdateSignature: null,
+    planCreationSignature: null,
+    authorizationSetupSignature: null,
+    authorizationSignature: null,
+    oldCancelSignature: null,
+    changedFields: [],
+    beforeValues: {},
+    afterValues: {},
+    error: null,
+    createdBy: input.createdBy,
+    createdAt: answeredAt,
+    updatedAt: answeredAt,
+    idempotencyKey: input.idempotency.key,
+    idempotencyFingerprint: input.idempotency.fingerprint,
+  });
+  if (!attempt) {
+    throw internalError("Failed to journal recurring payment update");
+  }
+}
+
+/**
  * Updates a schedule that never went on chain. The row, a confirmed update
  * attempt carrying the request's key and fingerprint, and the update event
  * commit together, so a retry of the same request is answered from the attempt
@@ -390,6 +446,11 @@ async function updatePendingRecurringPayment(input: {
   idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo: createPaymentRecurringPaymentsRepository(input.env, createTenantScope(input)),
+      ranAttemptKey: null,
+    });
     return input.recurringPayment;
   }
 
@@ -1753,6 +1814,12 @@ export async function updateRecurringPayment(input: {
   }
 
   if (resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo,
+      recurringPayment: settled.recurringPayment,
+      ranAttemptKey: null,
+    });
     return settled.recurringPayment;
   }
 
@@ -1801,9 +1868,10 @@ export async function updateRecurringPayment(input: {
   }
   const { attempt, claimed } = claimResult;
 
+  let updated: PaymentRecurringPaymentRow;
   try {
     if (mode === "metadata_schedule") {
-      return await runMetadataScheduleUpdate({
+      updated = await runMetadataScheduleUpdate({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -1815,20 +1883,20 @@ export async function updateRecurringPayment(input: {
         request: input.request,
         createdBy: input.createdBy,
       });
+    } else {
+      updated = await runReplacementUpdate({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        oldSourceWallet: input.sourceWallet,
+        claimed,
+        subscription: settled.subscription,
+        attempt,
+        resolved,
+        request: input.request,
+        createdBy: input.createdBy,
+      });
     }
-
-    return await runReplacementUpdate({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      oldSourceWallet: input.sourceWallet,
-      claimed,
-      subscription: settled.subscription,
-      attempt,
-      resolved,
-      request: input.request,
-      createdBy: input.createdBy,
-    });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     getLogger().error(
@@ -1885,4 +1953,14 @@ export async function updateRecurringPayment(input: {
 
     throw error;
   }
+
+  // When this request finished a stale attempt another key claimed (the
+  // attempt keeps that key), it is answered under its own key too.
+  await recordAnsweredUpdate({
+    ...input,
+    recurringRepo,
+    recurringPayment: updated,
+    ranAttemptKey: attempt.idempotency_key,
+  });
+  return updated;
 }

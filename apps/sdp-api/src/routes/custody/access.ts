@@ -125,6 +125,8 @@ export async function authorizeCreateWallet(c: AppContext, input: AuthorizeInput
 
 /** Wallet update: the wallet the path names. */
 export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
+  // SAFETY: this route mounts no validateParams (HOO-2046), so params is
+  // Hono's c.req.param(), a string record of the path's parameters.
   const walletId = (input.params as { walletId?: string }).walletId?.trim();
   if (!walletId) {
     throw badRequest("Invalid wallet ID");

@@ -13,7 +13,7 @@ export function isPostgresUniqueViolation(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: unknown }).code === POSTGRES_UNIQUE_VIOLATION
+    error.code === POSTGRES_UNIQUE_VIOLATION
   );
 }
 
@@ -24,7 +24,10 @@ export function isPostgresUniqueViolation(error: unknown): boolean {
 export function isCustodyWalletIdempotencyViolation(error: unknown): boolean {
   return (
     isPostgresUniqueViolation(error) &&
-    (error as { constraint?: unknown }).constraint === "custody_wallets_idempotency_request_id_idx"
+    typeof error === "object" &&
+    error !== null &&
+    "constraint" in error &&
+    error.constraint === "custody_wallets_idempotency_request_id_idx"
   );
 }
 

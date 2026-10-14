@@ -1,4 +1,5 @@
 import {
+  COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
   PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES,
@@ -572,11 +573,13 @@ export function createPostgresPaymentSubscriptionsRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND idempotency_key = ?
-              AND status IN ('pending', 'processing', 'confirmed')
+              AND status = ANY(?::text[])
             ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
-        .bind(organizationId, projectId, idempotencyKey)
+        .bind(organizationId, projectId, idempotencyKey, [
+          ...COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
         .first<Record<string, unknown>>();
 
       return row ? mapAttemptRow(row) : null;

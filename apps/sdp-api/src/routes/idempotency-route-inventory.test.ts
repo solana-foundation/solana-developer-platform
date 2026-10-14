@@ -2,6 +2,7 @@ import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { declaredAuthorization } from "@/middleware/authorize";
 import { declaredIdempotency } from "@/middleware/idempotency";
+import { declaredValidation } from "@/middleware/validate";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 
 /**
@@ -11,7 +12,9 @@ import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
  * - declares `idempotent()`, or is exempt below with a reason;
  * - runs `authorize(fn)` or `authorizeNone(reason)` before it, so a replay
  *   passes exactly the access checks a new request does; every
- *   `authorizeNone` is pinned below with its reason.
+ *   `authorizeNone` is pinned below with its reason;
+ * - validates its params, query and body before `authorize`, which reads them
+ *   as validated, so an invalid request claims nothing.
  *
  * The module comes from the route-ownership table and the stage from the
  * `stable` release channel, so promoting a module to `stable` fails this test
@@ -64,6 +67,8 @@ interface RouteSteps {
   idempotentAt: number;
   authorizeAt: number;
   authorization: ReturnType<typeof declaredAuthorization>;
+  /** Positions of the route-level validators. */
+  validateAt: number[];
 }
 
 function stableMutatingRoutes(): Map<string, RouteSteps> {
@@ -74,6 +79,7 @@ function stableMutatingRoutes(): Map<string, RouteSteps> {
       idempotentAt: -1,
       authorizeAt: -1,
       authorization: undefined,
+      validateAt: [],
     };
     const idempotency = declaredIdempotency(handler);
     if (idempotency !== undefined) {
@@ -84,6 +90,9 @@ function stableMutatingRoutes(): Map<string, RouteSteps> {
     if (authorization !== undefined) {
       steps.authorization = authorization;
       steps.authorizeAt = position;
+    }
+    if (declaredValidation(handler) !== undefined) {
+      steps.validateAt.push(position);
     }
     routes.set(route, steps);
   }
@@ -116,6 +125,14 @@ describe("idempotency route inventory", () => {
       .map(([route]) => route)
       .sort();
     expect(unchecked).toEqual([]);
+  });
+
+  it("validates the request before the access check on every idempotent route", () => {
+    const lateValidation = idempotent
+      .filter(([, steps]) => steps.validateAt.some((at) => at > steps.authorizeAt))
+      .map(([route]) => route)
+      .sort();
+    expect(lateValidation).toEqual([]);
   });
 
   it("pins every route that names no resource, with its reason", () => {

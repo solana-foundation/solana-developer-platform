@@ -137,19 +137,14 @@ async function createWallet(
   body: Record<string, unknown>,
   idempotencyKey?: string
 ): Promise<Response> {
-  return app.request(
-    "/v1/wallets",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${API_KEY.raw}`,
-        "Content-Type": "application/json",
-        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-      },
-      body: JSON.stringify(body),
-    },
-    env
-  );
+  const headers = new Headers({
+    Authorization: `Bearer ${API_KEY.raw}`,
+    "Content-Type": "application/json",
+  });
+  if (idempotencyKey) {
+    headers.set("Idempotency-Key", idempotencyKey);
+  }
+  return app.request("/v1/wallets", { method: "POST", headers, body: JSON.stringify(body) }, env);
 }
 
 /**
