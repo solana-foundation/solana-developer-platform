@@ -381,7 +381,7 @@ export function useRampWizard<TId extends string>(
       finish();
       return;
     }
-    // Leaving the transaction stage before a quote exists drops the request in
+    // Leaving the transaction stage before a quote exists abandons the request in
     // flight, so the quote that commits is for the selection the user returns with.
     if (isLastStep) {
       invalidateQuote();

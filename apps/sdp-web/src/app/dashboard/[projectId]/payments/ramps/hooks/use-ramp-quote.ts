@@ -2,7 +2,10 @@
 
 import type { PaymentRampQuote } from "@sdp/types";
 import { useEffect, useRef, useState } from "react";
-import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import {
+  cancelRampTransfer,
+  getApiError,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -17,12 +20,11 @@ interface CreatedRampQuote {
 async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
-  signal: AbortSignal,
   t: Translate
 ): Promise<CreatedRampQuote> {
   const result = await dashboardFetch<{
     data?: { quote?: PaymentRampQuote; transferId?: string };
-  } | null>(endpoint, { method: "POST", body: payload, signal });
+  } | null>(endpoint, { method: "POST", body: payload });
 
   if (!result.ok) {
     throw new Error(
@@ -58,10 +60,11 @@ interface UseRampQuoteOptions {
  * transfer-status poll owns the flow from there. A failed attempt surfaces
  * through `quoteCreationError` with an explicit retry.
  *
- * A response commits only while its request is still the pending one, so a
+ * A response commits only while its request is still the latest one, so a
  * request the user navigated away from never becomes the quote, and
- * `invalidateQuote` (Previous from the transaction stage) aborts it and lets
- * the next arrival quote the edited selection.
+ * `invalidateQuote` (Previous from the transaction stage) abandons it and lets
+ * the next arrival quote the edited selection. The server persisted the
+ * abandoned request's transfer, so it is canceled when the response lands.
  */
 export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: UseRampQuoteOptions) {
   const t = useTranslations();
@@ -69,30 +72,32 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const attempted = useRef(false);
-  const pending = useRef<AbortController | null>(null);
+  const latestRequest = useRef(0);
 
   const runQuoteCreation = async () => {
     if (payload === null) {
       return;
     }
-    pending.current?.abort();
-    const request = new AbortController();
-    pending.current = request;
+    const request = ++latestRequest.current;
     setQuoteCreationRetrying(true);
     try {
-      const next = await createRampQuote(endpoint, payload, request.signal, t);
-      if (pending.current === request) {
-        setCreated(next);
-        setQuoteCreationError(null);
-        onCreated?.(next.quote);
+      const next = await createRampQuote(endpoint, payload, t);
+      if (request !== latestRequest.current) {
+        // Nobody will see this transfer. A cancel that fails leaves it to expiry (HOO-2040).
+        void cancelRampTransfer({ transferId: next.transferId }, t).catch((cause: unknown) => {
+          console.error("Failed to cancel the transfer of an abandoned ramp quote", cause);
+        });
+        return;
       }
+      setCreated(next);
+      setQuoteCreationError(null);
+      onCreated?.(next.quote);
     } catch (error) {
-      if (pending.current === request) {
+      if (request === latestRequest.current) {
         setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
       }
     } finally {
-      if (pending.current === request) {
-        pending.current = null;
+      if (request === latestRequest.current) {
         setQuoteCreationRetrying(false);
       }
     }
@@ -111,8 +116,7 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
   });
 
   const invalidateQuote = () => {
-    pending.current?.abort();
-    pending.current = null;
+    latestRequest.current += 1;
     attempted.current = false;
     setCreated(null);
     setQuoteCreationError(null);

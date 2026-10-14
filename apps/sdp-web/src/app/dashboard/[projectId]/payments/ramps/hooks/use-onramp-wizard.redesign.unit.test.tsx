@@ -472,15 +472,16 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
 
   interface QuoteCall {
     body: unknown;
-    signal: AbortSignal | null | undefined;
     respond: (response: Response) => void;
   }
   let quoteCalls: QuoteCall[] = [];
-  let honorAbort = true;
+  let cancelBodies: unknown[] = [];
+  let cancelResponse: () => Response;
 
   beforeEach(() => {
     quoteCalls = [];
-    honorAbort = true;
+    cancelBodies = [];
+    cancelResponse = () => Response.json({ data: {} });
     const base = fetchMock.getMockImplementation();
     if (base === undefined) {
       throw new Error("The file's beforeEach must install the default fetch mock first");
@@ -491,18 +492,13 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
         return Promise.resolve(Response.json({ data: { wallets: [WALLET, WALLET_B] } }));
       }
       if (url === "/api/dashboard/payments/ramps/onramp/quote" && init?.method === "POST") {
-        return new Promise<Response>((resolve, reject) => {
-          if (honorAbort) {
-            init.signal?.addEventListener("abort", () =>
-              reject(new DOMException("The operation was aborted.", "AbortError"))
-            );
-          }
-          quoteCalls.push({
-            body: JSON.parse(String(init.body)),
-            signal: init.signal,
-            respond: resolve,
-          });
+        return new Promise<Response>((resolve) => {
+          quoteCalls.push({ body: JSON.parse(String(init.body)), respond: resolve });
         });
+      }
+      if (url === "/api/dashboard/payments/ramps/transfers/cancel" && init?.method === "POST") {
+        cancelBodies.push(JSON.parse(String(init.body)));
+        return Promise.resolve(cancelResponse());
       }
       return base(input, init);
     });
@@ -534,15 +530,13 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
     return rendered;
   }
 
-  it("quotes the edited selection and drops the late quote for the previous one", async () => {
-    honorAbort = false;
+  it("quotes the edited selection and cancels the transfer of the late quote", async () => {
     const rendered = await renderWithQuoteInFlight();
 
     for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE; press += 1) {
       act(() => rendered.result.current.handleSecondary());
     }
     expect(rendered.result.current.stepIndex).toBe(0);
-    expect(quoteCalls[0]?.signal?.aborted).toBe(true);
     await enterTransactionStage(rendered, WALLET_B.id, "200");
     await waitFor(() => expect(quoteCalls).toHaveLength(2));
     expect(quoteCalls[1]?.body).toMatchObject({
@@ -550,12 +544,13 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
       fiatAmount: "200",
     });
 
-    // Wallet A's quote lands after the edit, so it must never become the quote.
+    // Wallet A's quote lands after the edit: it never commits, and its transfer is canceled.
     await act(async () => {
       quoteCalls[0]?.respond(
         Response.json({ data: { quote: BVNK_QUOTE, transferId: STALE_TRANSFER_ID } })
       );
     });
+    await waitFor(() => expect(cancelBodies).toEqual([{ transferId: STALE_TRANSFER_ID }]));
     expect(rendered.result.current.quote).toBeNull();
     expect(rendered.result.current.quoteCreationError).toBeNull();
 
@@ -566,17 +561,35 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
     });
     await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
     expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);
+    expect(cancelBodies).toEqual([{ transferId: STALE_TRANSFER_ID }]);
   });
 
-  it("reports nothing for the request Previous aborted", async () => {
+  it("shows nothing for the request Previous abandoned, even when its cancel fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    cancelResponse = () =>
+      Response.json(
+        { error: { message: "Transfer status changed before it could be canceled." } },
+        { status: 409 }
+      );
     const rendered = await renderWithQuoteInFlight();
 
     act(() => rendered.result.current.handleSecondary());
-    await act(async () => {});
+    await act(async () => {
+      quoteCalls[0]?.respond(
+        Response.json({ data: { quote: BVNK_QUOTE, transferId: STALE_TRANSFER_ID } })
+      );
+    });
 
-    expect(quoteCalls[0]?.signal?.aborted).toBe(true);
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to cancel the transfer of an abandoned ramp quote",
+        expect.objectContaining({ message: "Transfer status changed before it could be canceled." })
+      )
+    );
+    expect(cancelBodies).toEqual([{ transferId: STALE_TRANSFER_ID }]);
     expect(rendered.result.current.quote).toBeNull();
     expect(rendered.result.current.quoteCreationError).toBeNull();
     expect(rendered.result.current.quoteCreationRetrying).toBe(false);
+    consoleError.mockRestore();
   });
 });
