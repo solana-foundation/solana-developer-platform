@@ -23,6 +23,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { transferBatchListResponse } from "@/openapi/paths/responses";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
@@ -997,10 +998,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: Array<{ id: string }>;
-      meta: { total: number };
-    };
+    const body = transferBatchListResponse.parse(await response.json());
     expect(body.data.map((batch) => batch.id).sort()).toEqual([
       "xbatch_exact_authorized",
       "xbatch_legacy_authorized",
@@ -1079,7 +1077,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(res.status).toBe(200);
-    const response = (await res.json()) as { data: Array<{ id: string }> };
+    const response = transferBatchListResponse.parse(await res.json());
     expect(response.data.map((batch) => batch.id)).toEqual(["xbatch_inactive_wallet_history"]);
   });
 

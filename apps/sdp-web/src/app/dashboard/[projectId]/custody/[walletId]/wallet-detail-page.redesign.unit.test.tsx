@@ -210,22 +210,32 @@ describe("WalletDetailPage", () => {
     expect(requested("/payments/")).toBe(false);
   });
 
-  it.each([404, "wrong-wallet", "missing-identity", "invalid-balance"])(
+  it.each([404, "wrong-wallet", "missing-identity", "invalid-balance"] as const)(
     "reports an unavailable balance for %s instead of an empty wallet",
     async (failure) => {
       const base = mockRequest.getMockImplementation();
+      if (!base) throw new Error("Wallet detail request fixture is missing");
       mockRequest.mockImplementation(async (path: string) => {
-        if (!path.includes("/balances")) return base?.(path);
+        if (!path.includes("/balances")) return base(path);
         if (failure === 404) return new Response(null, { status: 404 });
+        const custodyWalletId = (() => {
+          switch (failure) {
+            case "missing-identity":
+              return undefined;
+            case "wrong-wallet":
+              return "wrong_wallet";
+            case "invalid-balance":
+              return "wallet_record";
+            default: {
+              const exhaustive: never = failure;
+              throw new Error(`Unsupported balance failure: ${exhaustive}`);
+            }
+          }
+        })();
         return Response.json({
           data: {
             walletBalances: {
-              custodyWalletId:
-                failure === "missing-identity"
-                  ? undefined
-                  : failure === "wrong-wallet"
-                    ? "wrong_wallet"
-                    : "wallet_record",
+              custodyWalletId,
               address: "11111111111111111111111111111111",
               balances: failure === "invalid-balance" ? [{}] : [],
             },

@@ -36,7 +36,10 @@ import {
 } from "@/lib/compliance";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
+import {
+  getWalletBalanceApiError,
+  parseWalletBalanceResponse,
+} from "@/lib/wallet-balance-response";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -244,21 +247,6 @@ interface TransferListEnvelope {
   };
 }
 
-interface WalletBalancesEnvelope {
-  data?:
-    | {
-        walletBalances?: PaymentWalletBalancesSnapshot;
-      }
-    | {
-        walletId?: string;
-        address?: string;
-        balances?: PaymentWalletBalance[];
-      };
-  error?: {
-    message?: string;
-  };
-}
-
 export async function fetchTransfers(
   options: {
     pageSize: number;
@@ -416,10 +404,10 @@ export async function fetchWalletBalances(
       signal,
     }
   );
-  const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
+  const body: unknown = await response.json();
   if (!response.ok) {
     throw new Error(
-      getApiError(
+      getWalletBalanceApiError(
         body,
         t("DashboardPayments.workspace.walletBalancesRequestFailed", { status: response.status })
       )

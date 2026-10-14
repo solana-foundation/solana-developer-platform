@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   type CreateSponsorshipReservationInput,
@@ -50,6 +51,18 @@ describe("SponsorshipBudgetRepository", () => {
     await db.execute(
       "TRUNCATE sponsorship_budget_policy_revisions, sponsorship_budget_reservations, sponsorship_budget_policies, sponsorship_reconciliation_state"
     );
+    await db.execute(
+      "INSERT INTO organizations (id, name, slug) VALUES ('org_1', 'org_1', 'sponsorship-budget-org') ON CONFLICT (id) DO NOTHING"
+    );
+    await db.execute(
+      "INSERT INTO users (id, email) VALUES ('usr_sponsorship_budget', 'sponsorship-budget@example.test') ON CONFLICT (id) DO NOTHING"
+    );
+    await seedDefaultProjects(db, {
+      organizationId: "org_1",
+      createdBy: "usr_sponsorship_budget",
+      members: [],
+      ids: { sandbox: "project_1", production: "project_1_production" },
+    });
     await insertPolicy({ id: "global", scopeType: "global", scopeId: null });
     await insertPolicy({ id: "org_default", scopeType: "organization", scopeId: null });
     await insertPolicy({ id: "project_default", scopeType: "project", scopeId: null });

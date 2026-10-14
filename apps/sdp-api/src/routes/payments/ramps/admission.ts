@@ -1,6 +1,13 @@
-import type { PaymentTransferType, PersistedRampProviderId, RampProviderId } from "@sdp/types";
-import { getAuth } from "@/lib/auth";
+import type {
+  MovementOf,
+  PaymentTransferType,
+  PersistedRampProviderId,
+  RampDirection,
+  RampProviderId,
+} from "@sdp/types";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import {
   assertRampProviderInChannel,
   assertTransferRampProviderInChannel,
@@ -16,7 +23,17 @@ import type { AppContext } from "../context";
 import { assertPaymentWalletExactAccess } from "../wallets";
 
 export type RampAdmission =
-  | { need: "quote" | "read"; provider: RampProviderId }
+  | { need: "read"; provider: RampProviderId }
+  | {
+      need: "quote";
+      provider: RampProviderId;
+      direction: RampDirection;
+      /**
+       * The custody wallet the request names for the quote's crypto leg, for
+       * the refusal event. The quote resolves and scope-checks it afterwards.
+       */
+      custodyWalletId: string;
+    }
   | {
       need: "cancel";
       transfer: {
@@ -26,11 +43,18 @@ export type RampAdmission =
       };
     };
 
+const RAMP_QUOTE_MOVEMENT = {
+  onramp: "ramps.onramp_quote",
+  offramp: "ramps.offramp_quote",
+} as const satisfies Record<RampDirection, MovementOf<"ramps">>;
+
 /**
  * The one access check ramp routes make. `quote` and `read` apply the project
  * provider rule (release channel, surfacing, entitlement, credentials) before
  * any provider call; `read` first refuses an out-of-channel provider before
- * any database read, as reads always have. `cancel` keeps a stored transfer's
+ * any database read, as reads always have. `quote` then admits the money
+ * start (HOO-1955): a provider quote or session never reaches the custody
+ * signer, so it is admitted here instead. `cancel` keeps a stored transfer's
  * provider in the release channel and its wallet inside the key's wallet
  * scope, for every provider.
  */
@@ -44,6 +68,17 @@ export async function admitRamp(c: AppContext, admission: RampAdmission): Promis
     assertRampProviderInChannel(c, admission.provider);
   }
   await assertProviderAvailable(c, { family: "ramps", provider: admission.provider });
+  if (admission.need === "quote") {
+    await assertMoneyStartAdmitted(
+      c.env,
+      { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+      {
+        surface: "http",
+        movement: RAMP_QUOTE_MOVEMENT[admission.direction],
+        subjectId: admission.custodyWalletId,
+      }
+    );
+  }
 }
 
 /**

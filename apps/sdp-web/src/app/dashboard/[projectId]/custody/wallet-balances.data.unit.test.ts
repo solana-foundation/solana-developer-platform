@@ -1,5 +1,6 @@
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { setWindowPathname } from "@/test/window-location";
 import { fetchWalletBalance, fetchWalletBalances } from "./wallet-balances.data";
@@ -126,6 +127,122 @@ describe("exact wallet balance reads", () => {
     );
     await expect(fetchWalletBalance("wallet-a")).resolves.toEqual(balances);
   });
+  it("keeps a successful wallet when another batch row is null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: { wallets: [null, { id: "wallet-a", balances: [usdcBalance] }] },
+        })
+      )
+    );
+
+    await expect(fetchWalletBalances()).resolves.toEqual({ "wallet-a": [usdcBalance] });
+  });
+
+  it("uses only parsed balance fields from a successful batch row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            wallets: [{ id: "wallet-a", balances: [{ ...usdcBalance, unexpected: "discard" }] }],
+          },
+        })
+      )
+    );
+
+    await expect(fetchWalletBalances()).resolves.toEqual({ "wallet-a": [usdcBalance] });
+  });
+
+  it.each([
+    { balances: [usdcBalance] },
+    { id: "", balances: [usdcBalance] },
+    { id: 42, balances: [usdcBalance] },
+    { id: "unavailable" },
+    { id: "malformed", balances: "0" },
+  ])(
+    "omits an invalid or unavailable batch row %j without discarding successful wallets",
+    async (row) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          Response.json({ data: { wallets: [row, { id: "wallet-a", balances: [usdcBalance] }] } })
+        )
+      );
+
+      await expect(fetchWalletBalances()).resolves.toEqual({ "wallet-a": [usdcBalance] });
+    }
+  );
+
+  it.each([null, {}, { data: {} }, { data: { wallets: null } }, { data: { wallets: {} } }])(
+    "rejects a malformed batch envelope %j instead of returning an empty balance map",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body))
+      );
+
+      await expect(fetchWalletBalances()).rejects.toThrow(
+        "Wallet balances response did not include wallets."
+      );
+    }
+  );
+
+  it.each([
+    ["batch", fetchWalletBalances],
+    ["single", () => fetchWalletBalance("wallet-a")],
+  ] as const)("rejects malformed JSON at the %s read boundary", async (_read, readBalances) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{", { headers: { "Content-Type": "application/json" } }))
+    );
+
+    await expect(readBalances()).rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it.each([
+    { error: { message: "RPC unavailable" } },
+    { error: "RPC unavailable" },
+    { message: "RPC unavailable" },
+  ])("preserves a validated API error message from %j", async (body) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(body, { status: 503 }))
+    );
+
+    await expect(fetchWalletBalance("wallet-a")).rejects.toThrow("RPC unavailable");
+    await expect(fetchWalletBalances()).rejects.toThrow("RPC unavailable");
+  });
+
+  it.each([{}, { error: {} }, { error: "" }])(
+    "reports HTTP failure when a valid error envelope %j has no message",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body, { status: 503 }))
+      );
+
+      await expect(fetchWalletBalance("wallet-a")).rejects.toThrow(
+        "Wallet balance request failed (503)."
+      );
+      await expect(fetchWalletBalances()).rejects.toThrow("Wallet balances request failed (503).");
+    }
+  );
+
+  it.each([null, { error: { message: 42 } }, { message: 42 }])(
+    "rejects a malformed API error envelope %j at the boundary",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body, { status: 503 }))
+      );
+
+      await expect(fetchWalletBalance("wallet-a")).rejects.toBeInstanceOf(ZodError);
+      await expect(fetchWalletBalances()).rejects.toBeInstanceOf(ZodError);
+    }
+  );
+
   it("excludes an invalid batch balance without fabricating zero or dropping a valid wallet", async () => {
     vi.stubGlobal(
       "fetch",

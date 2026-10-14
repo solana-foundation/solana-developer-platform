@@ -1,5 +1,6 @@
 import { isDecimalString } from "@sdp/solana/amount";
 import { z } from "zod";
+import { readApiErrorMessage } from "@/lib/api-error";
 
 export const walletTokenBalanceSchema = z.object({
   token: z.string().min(1),
@@ -32,4 +33,15 @@ export function parseWalletBalanceResponse(body: unknown, custodyWalletId: strin
     throw new Error("Wallet balance response did not identify the requested wallet.");
   }
   return parsed.data.data.walletBalances;
+}
+
+const walletBalanceApiErrorSchema = z.object({
+  error: z.union([z.string(), z.object({ message: z.string().optional() })]).optional(),
+  message: z.string().optional(),
+});
+
+export function getWalletBalanceApiError(body: unknown, httpFailure: string): string {
+  const parsed = walletBalanceApiErrorSchema.parse(body);
+  const message = readApiErrorMessage(parsed);
+  return message ? message : httpFailure;
 }
