@@ -19,6 +19,7 @@ import {
 import type { Address } from "@solana/addresses";
 import type { RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
@@ -742,6 +743,55 @@ describe("Payments routes — ramps", () => {
       provider_reference: null,
     });
   });
+
+  it("quotes MoonPay USDC on Solana in both directions", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_usdc_quotes" });
+    const hostedQuoteSchema = z.object({
+      data: z.object({ quote: z.object({ hostedUrl: z.string() }) }),
+    });
+    const quoteUsdc = async (
+      direction: "onramp" | "offramp",
+      body: Record<string, string>
+    ): Promise<URL> => {
+      const response = await app.request(
+        `/v1/payments/ramps/${direction}/quote`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            ...body,
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      return new URL(hostedQuoteSchema.parse(await response.json()).data.quote.hostedUrl);
+    };
+
+    const onrampUrl = await quoteUsdc("onramp", {
+      destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      fiatAmount: "50",
+    });
+    expect(onrampUrl.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(onrampUrl.searchParams.get("baseCurrencyCode")).toBe("usd");
+    assertMoonPaySignature(onrampUrl);
+
+    const offrampUrl = await quoteUsdc("offramp", {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      cryptoAmount: "75.25",
+    });
+    expect(offrampUrl.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
+    expect(offrampUrl.searchParams.get("quoteCurrencyCode")).toBe("usd");
+    assertMoonPaySignature(offrampUrl);
+  });
+
   it("rejects a ramp quote memo with more than 20 fields", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_memo_limit" });
     const rampsMemo = Object.fromEntries(
