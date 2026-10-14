@@ -509,6 +509,9 @@ interface AuditActor {
   requestId: string | null;
 }
 
+/** Longest a row-lock wait inside audited work may hold the ledger lock. */
+const AUDITED_WORK_LOCK_TIMEOUT = "5s";
+
 /** The identity every ledger read and write runs under. */
 const AUDIT_LEDGER_DATABASE_IDENTITY = { kind: "system", component: "audit-ledger" } as const;
 
@@ -594,7 +597,11 @@ export class AuditService {
         // The ledger reads span every organization, so its transaction opens
         // under the system identity; the work itself runs as the request.
         await stampTransactionIdentity(tx, requestIdentity);
+        // The work runs while the global ledger lock is held: a row-lock wait
+        // inside it must fail rather than stall every audit write.
+        await tx.execute(`SET LOCAL lock_timeout = '${AUDITED_WORK_LOCK_TIMEOUT}'`);
         const done = await work(asTransactionalClient(tx));
+        await tx.execute("SET LOCAL lock_timeout TO DEFAULT");
         await stampTransactionIdentity(tx, AUDIT_LEDGER_DATABASE_IDENTITY);
         return done;
       },

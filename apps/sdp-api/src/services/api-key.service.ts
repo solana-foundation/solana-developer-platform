@@ -505,10 +505,25 @@ export class ApiKeyService {
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
 
+    // Lock order, shared by every writer of keys: the organization row first,
+    // then key rows. Organization deletion updates the organization and then
+    // its keys; createApiKey takes the organization share lock and then
+    // inserts; revoke and update touch only the key row. Taking them in two
+    // statements here keeps rotation in that order, so it can never hold a key
+    // row while waiting on an organization a deletion holds.
+    //
     // The organization share lock is createApiKey's: a replacement can't
     // commit under an organization a concurrent deletion has already revoked
-    // (APE-358). The target's own row lock serializes every lifecycle change
-    // of this key behind this rotation.
+    // (APE-358).
+    const organization = await this.db.queryOne<{ id: string }>(
+      `SELECT id FROM organizations WHERE id = $1 AND status = 'active' FOR SHARE`,
+      [organizationId]
+    );
+    if (!organization) {
+      return null;
+    }
+    // The target's own row lock serializes every lifecycle change of this key
+    // behind this rotation.
     const target = await this.db.queryOne<RotationTargetRow>(
       `SELECT ak.id, ak.name, ak.description, ak.role, ak.permissions,
               p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
@@ -516,11 +531,9 @@ export class ApiKeyService {
               ak.status, ak.rotation_deadline
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
-         JOIN organizations o ON o.id = ak.organization_id
         WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
-          AND p.status = 'active' AND o.status = 'active'
-        FOR UPDATE OF ak
-        FOR SHARE OF o`,
+          AND p.status = 'active'
+        FOR UPDATE OF ak`,
       [keyId, organizationId, projectId]
     );
     if (target?.status !== "active") {
