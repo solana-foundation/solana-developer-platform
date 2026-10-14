@@ -45,7 +45,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import { error as errorResponse, paginated, success } from "@/lib/response";
+import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -667,7 +667,7 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   // transaction failure.
   const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
   // Returned, not thrown: replayFromRecord marks the Response the finder builds.
-  return errorResponse(
+  return appErrorResponse(
     c,
     new AppError(
       code,

@@ -254,7 +254,11 @@ describe("Payments routes — signed submission", () => {
     });
 
     async function errorBody(response: Response) {
-      return (await response.json()) as { error: { code: string; message: string } };
+      // SAFETY: the app's error envelope; the tests read these fields only.
+      return (await response.json()) as {
+        error: { code: string; message: string };
+        meta?: { requestId?: string };
+      };
     }
 
     async function expireIdempotencyKey(key: string) {
@@ -293,6 +297,9 @@ describe("Payments routes — signed submission", () => {
       const lateBody = await errorBody(late);
       expect(lateBody.error.code).toBe("TRANSACTION_FAILED");
       expect(lateBody.error.message).toContain("new Idempotency-Key");
+      // The same envelope as a fresh error: the request id and trace header.
+      expect(lateBody.meta?.requestId).toMatch(/^req_/);
+      expect(late.headers.get("X-SDP-Trace-ID")).toBeTruthy();
       // The row's answer is marked a replay, so a client retires the key, and is
       // stored under the key again.
       expect(late.headers.get("Idempotent-Replayed")).toBe("true");

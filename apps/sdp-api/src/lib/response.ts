@@ -3,6 +3,7 @@
  */
 
 import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { AppError, type ErrorResponse } from "./errors";
@@ -65,6 +66,43 @@ export function paginated<T>(
     },
   };
   return c.json(jsonSafe(response), 200);
+}
+
+/** An error status Hono can send with a body; anything else is a 500. */
+export function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
+  switch (statusCode) {
+    case 202:
+    case 400:
+    case 401:
+    case 403:
+    case 404:
+    case 409:
+    case 413:
+    case 422:
+    case 429:
+    case 500:
+    case 501:
+    case 502:
+    case 503:
+    case 504:
+      return statusCode;
+    default:
+      return 500;
+  }
+}
+
+/**
+ * The app's envelope for an `AppError`: the error, the request id and the
+ * trace header. `app.onError` sends every thrown `AppError` through it, and a
+ * handler that returns an error instead of throwing it (a replayed failed row)
+ * uses it too, so both look the same.
+ */
+export function appErrorResponse(c: Context<{ Bindings: Env }>, err: AppError): Response {
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    { error: err.toResponse().error, meta: { requestId: c.get("requestId") } },
+    mapErrorStatusCode(err.statusCode)
+  );
 }
 
 /**
