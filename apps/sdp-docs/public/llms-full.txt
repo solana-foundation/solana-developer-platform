@@ -3591,14 +3591,15 @@ Source: https://platform.solana.com/docs/payments/ramps-stripe
 
 Stripe is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "stripe"`.
 
-Stripe has no separate sandbox credentials — supply a Stripe test-mode secret key.
+SDP holds Stripe test-mode keys only, so Stripe runs for sandbox projects. Production projects will bring their own Stripe account; until then, Stripe answers `PROVIDER_NOT_CONFIGURED` for them.
 
 ## Configuration
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `STRIPE_SECRET_KEY` | conditional | Secret key, sent as the username on HTTP Basic auth. A single key serves both modes — use a `sk_test_…` key to sandbox it, `sk_live_…` for production. |
-| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, echoed back on the quote for the client to mount the onramp session. |
+| `STRIPE_SANDBOX_SECRET_KEY` | conditional | Test-mode secret key (`sk_test_…`, or a restricted `rk_test_…`), sent as the username on HTTP Basic auth. A live key is refused before any request. |
+| `STRIPE_SANDBOX_PUBLISHABLE_KEY` | conditional | Test-mode publishable key (`pk_test_…`), echoed back on the quote for the client to mount the onramp session. |
+| `STRIPE_SANDBOX_WEBHOOK_SECRET` | conditional | Signing secret of the endpoint Stripe calls at `/webhooks/payments/ramps/sandbox/stripe`. A signed event with `livemode: true` is refused. |
 
 Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.
 

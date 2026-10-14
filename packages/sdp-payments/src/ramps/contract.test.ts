@@ -188,6 +188,23 @@ describe("ramp provider contract", () => {
           continue;
         }
         for (const mode of SDP_ENVIRONMENTS) {
+          if (!kit.managedModes.includes(mode)) {
+            it(`refuses an ${direction} in ${mode} before any request`, async () => {
+              const runs: ReadonlyArray<() => Promise<unknown>> = [
+                () => runEstimate(client, kit, direction, mode),
+                () => runQuote(client, kit, direction, mode),
+              ];
+              for (const run of runs) {
+                await assert.rejects(replayed([], run), (cause: unknown) => {
+                  assert.ok(cause instanceof SdpPaymentsError);
+                  assert.equal(cause.code, "PROVIDER_NOT_CONFIGURED");
+                  return true;
+                });
+              }
+            });
+            continue;
+          }
+
           it(`estimates an ${direction} in ${mode} to the contract`, async () => {
             const { result, replay } = await replayed(cases.estimate.exchanges, () =>
               runEstimate(client, kit, direction, mode)

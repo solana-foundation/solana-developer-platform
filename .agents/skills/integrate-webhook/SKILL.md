@@ -33,7 +33,7 @@ Signature variety across the four registered webhook providers:
 | MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_WEBHOOK_KEY` / `MOONPAY_SANDBOX_WEBHOOK_KEY` |
 | BVNK | `x-signature` | HMAC-SHA256 (base64) | `BVNK_WEBHOOK_SECRET` / `BVNK_SANDBOX_WEBHOOK_SECRET` |
 | Coinbase | `x-hook0-signature` | HMAC-SHA256 (hex, `t=…,v0=…`) | `COINBASE_CDP_RAMPS_WEBHOOK_SECRET` |
-| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_WEBHOOK_SECRET` |
+| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_SANDBOX_WEBHOOK_SECRET` (sandbox only; events must carry `livemode: false`) |
 
 ## parse
 

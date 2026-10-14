@@ -42,10 +42,22 @@ interface StripeSignatureHeader {
   signatures: string[];
 }
 
-function readStripeWebhookSecret(env: Record<string, string | undefined>): string {
-  const secret = env.STRIPE_WEBHOOK_SECRET?.trim();
+/**
+ * The secret that signs `environment`'s Stripe events. SDP holds the sandbox
+ * secret only: production projects bring their own Stripe account (HOO-1943).
+ */
+function readStripeWebhookSecret(
+  env: Record<string, string | undefined>,
+  environment: SdpEnvironment
+): string {
+  if (environment === "production") {
+    throw providerNotConfigured("Stripe webhooks are not configured for production.");
+  }
+  const secret = env.STRIPE_SANDBOX_WEBHOOK_SECRET?.trim();
   if (!secret) {
-    throw providerNotConfigured("Stripe webhook secret is not configured (STRIPE_WEBHOOK_SECRET).");
+    throw providerNotConfigured(
+      "Stripe sandbox webhook secret is not configured (STRIPE_SANDBOX_WEBHOOK_SECRET)."
+    );
   }
   return secret;
 }
@@ -112,8 +124,13 @@ async function verifyStripeSignatures(input: {
 export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {
   readonly provider = "stripe";
 
-  async verify({ env, headers, rawBody }: RampWebhookValidationContext): Promise<unknown> {
-    const secret = readStripeWebhookSecret(env);
+  async verify({
+    env,
+    environment,
+    headers,
+    rawBody,
+  }: RampWebhookValidationContext): Promise<unknown> {
+    const secret = readStripeWebhookSecret(env, environment);
     const signatureHeader = headers.get("stripe-signature")?.trim();
     if (!signatureHeader) {
       throw unauthorized("Stripe webhook is missing the Stripe-Signature header");
@@ -132,11 +149,23 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
       signatures: parsed.signatures,
     });
 
+    let payload: unknown;
     try {
-      return JSON.parse(rawBody);
+      payload = JSON.parse(rawBody);
     } catch {
       throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
     }
+    const livemode = readRecord(payload)?.livemode;
+    if (typeof livemode !== "boolean") {
+      throw badRequest("Stripe webhook is missing livemode", { provider: this.provider });
+    }
+    if (livemode !== (environment === "production")) {
+      throw badRequest(
+        `Stripe ${livemode ? "live" : "test"} event sent to the ${environment} webhook`,
+        { provider: this.provider }
+      );
+    }
+    return payload;
   }
 
   parse(payload: unknown): RampSettlementEvent {

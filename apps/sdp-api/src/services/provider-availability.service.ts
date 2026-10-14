@@ -270,8 +270,15 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
     stripe: {
       label: "Stripe",
-      isConfigured: (env) =>
-        hasAllEnv(env, ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"]),
+      // Sandbox keys only: production projects bring their own Stripe account
+      // (HOO-1943), so production reports unconfigured until they can.
+      isConfigured: (env, testMode) =>
+        testMode !== false &&
+        hasAllEnv(env, [
+          "STRIPE_SANDBOX_SECRET_KEY",
+          "STRIPE_SANDBOX_PUBLISHABLE_KEY",
+          "STRIPE_SANDBOX_WEBHOOK_SECRET",
+        ]),
     },
   },
   earn: {

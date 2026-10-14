@@ -297,9 +297,10 @@ export interface Env extends ManagedRpcEnv {
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
   COINBASE_CDP_RAMPS_WEBHOOK_SECRET?: string;
-  STRIPE_SECRET_KEY?: string;
-  STRIPE_PUBLISHABLE_KEY?: string;
-  STRIPE_WEBHOOK_SECRET?: string;
+  // Stripe sandbox only: production projects bring their own Stripe account.
+  STRIPE_SANDBOX_SECRET_KEY?: string;
+  STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
+  STRIPE_SANDBOX_WEBHOOK_SECRET?: string;
 
   // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;

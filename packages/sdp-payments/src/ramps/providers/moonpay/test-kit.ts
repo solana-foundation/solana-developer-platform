@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { SdpEnvironment } from "@sdp/types";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
 
 const API_KEYS = {
@@ -86,6 +86,7 @@ export const MOONPAY_TEST_KIT: RampProviderTestKit = {
     MOONPAY_API_KEY: API_KEYS.production,
     MOONPAY_SECRET_KEY: SECRET_KEYS.production,
   },
+  managedModes: SDP_ENVIRONMENTS,
   onramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "50" },

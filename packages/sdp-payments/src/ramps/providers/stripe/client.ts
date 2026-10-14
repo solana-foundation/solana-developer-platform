@@ -1,5 +1,10 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
+import type {
+  Counterparty,
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  SdpEnvironment,
+} from "@sdp/types";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -143,13 +148,35 @@ const stripeOnrampQuotesSchema = z.object({
   ),
 });
 
-function readStripeConfig(env: Record<string, string | undefined>): StripeConfig {
-  const secretKey = env.STRIPE_SECRET_KEY?.trim();
-  const publishableKey = env.STRIPE_PUBLISHABLE_KEY?.trim();
+/** A test-mode Stripe secret key: standard (`sk_`) or restricted (`rk_`). */
+const STRIPE_TEST_SECRET_KEY = /^(sk|rk)_test_/;
+const STRIPE_TEST_PUBLISHABLE_KEY = /^pk_test_/;
+
+/**
+ * The managed Stripe keys for `mode`. SDP holds sandbox keys only; a production
+ * project brings its own (HOO-1943), so production fails closed until it can.
+ * Both keys must be test-mode keys, checked before any request, so a live key
+ * mounted under the sandbox names can never reach Stripe.
+ */
+function readStripeConfig(
+  env: Record<string, string | undefined>,
+  mode: SdpEnvironment
+): StripeConfig {
+  if (mode === "production") {
+    throw providerNotConfigured("Stripe is not configured for production projects.");
+  }
+  const secretKey = env.STRIPE_SANDBOX_SECRET_KEY?.trim();
+  const publishableKey = env.STRIPE_SANDBOX_PUBLISHABLE_KEY?.trim();
   if (!secretKey || !publishableKey) {
     throw providerNotConfigured(
-      "Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY."
+      "Stripe sandbox is not configured. Set STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_PUBLISHABLE_KEY."
     );
+  }
+  if (
+    !STRIPE_TEST_SECRET_KEY.test(secretKey) ||
+    !STRIPE_TEST_PUBLISHABLE_KEY.test(publishableKey)
+  ) {
+    throw providerNotConfigured("Stripe sandbox keys must be test-mode keys.");
   }
   return { secretKey, publishableKey };
 }
@@ -332,10 +359,10 @@ export class StripeRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    { env }: RampRuntimeContext,
+    { env, mode }: RampRuntimeContext,
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const config = readStripeConfig(env);
+    const config = readStripeConfig(env, mode);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
 
     const quotes = await stripeGet(
@@ -405,10 +432,10 @@ export class StripeRampClient implements RampProvider {
   }
 
   async createOnrampQuote(
-    { env }: RampRuntimeContext,
+    { env, mode }: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    const config = readStripeConfig(env);
+    const config = readStripeConfig(env, mode);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
     if (!input.fiatCurrency) {
       throw badRequest("Stripe on-ramp requires a fiat currency.", { provider: this.id });
