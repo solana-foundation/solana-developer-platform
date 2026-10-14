@@ -5060,7 +5060,17 @@ describe("Payments routes — recurring", () => {
       const key = crypto.randomUUID();
       const body = { ...createBody(first), periodHours: 48 };
 
-      const responses = await Promise.all([postCreate(key, body), postCreate(key, body)]);
+      // Hold new schedules back so the request that claims the key is still
+      // running when the other arrives; two unblocked requests can run one
+      // after the other, and the second is then a plain replay.
+      const pending = await getDb(env).transaction(async (tx) => {
+        await tx.execute("LOCK TABLE payment_recurring_payments IN EXCLUSIVE MODE");
+        const both = [postCreate(key, body), postCreate(key, body)];
+        // The loser answers without writing a schedule, so it settles while the lock is held.
+        expect((await Promise.race(both)).status).toBe(409);
+        return both;
+      });
+      const responses = await Promise.all(pending);
 
       const winner = responses.find((response) => response.status === 201);
       const loser = responses.find((response) => response.status === 409);
