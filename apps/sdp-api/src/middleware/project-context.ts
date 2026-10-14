@@ -14,6 +14,12 @@ export interface ProjectContextOptions {
    * the production entitlement. Only for exits that must stay open for money
    * already deployed (Earn withdrawals and reads, ADR 0002); never for anything
    * that starts new exposure.
+   *
+   * The entitlement is `enableProductionProject` in the organization's Clerk
+   * `private_metadata.sdp`, synced into `organizations.settings` by
+   * `provider-availability.service.ts`. Turning it off is a management
+   * decision, not something the product does; this keeps funds already in a
+   * production project withdrawable if that ever happens.
    */
   allowUnentitledProduction?: (c: Context<{ Bindings: Env }>) => boolean | Promise<boolean>;
   /**
