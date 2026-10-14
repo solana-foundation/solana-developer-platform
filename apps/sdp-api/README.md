@@ -341,6 +341,13 @@ image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
 outside the migrations directory except test files.
 
+Migrations run while the previous revision serves traffic, so the runner gives
+each transaction a 5 s `lock_timeout` and retries it a few times, and the same
+CI check rejects DDL that holds a blocking lock on an existing table (an index
+without `CONCURRENTLY`, a foreign key without `NOT VALID`, an unproven
+`SET NOT NULL`). Rules and the `-- sdp:migration-locks: blocking` escape hatch:
+`docs/ops/release-operations.md`, "Schema compatibility".
+
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and
 the environment's GCP deployment identity under the release operations runbook.
