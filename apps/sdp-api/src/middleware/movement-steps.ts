@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
-import { type AuthorizeInput, getAuthorized, validatedInput } from "./authorize";
+import { type AuthorizeInput, getAuthorized, type RouteHandler, validatedInput } from "./authorize";
 import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
@@ -91,7 +91,7 @@ export function replayFromRecord<TAuthorized>(
 }
 
 /** Whether a route step is {@link replayFromRecord}, for route inventory tests. */
-export function declaresRecordReplay(handler: object): boolean {
+export function declaresRecordReplay(handler: RouteHandler): boolean {
   return RECORD_REPLAY_MARKER in handler;
 }
 
