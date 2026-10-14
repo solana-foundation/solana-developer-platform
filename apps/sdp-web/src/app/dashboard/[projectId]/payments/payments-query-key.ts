@@ -27,6 +27,13 @@ export const paymentsQueryKeys = {
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  /** The counterparty lists a new counterparty or account appears in. */
+  isCounterpartyListKey: (key: unknown) =>
+    key === paymentsQueryKeys.actionCounterparties() ||
+    (Array.isArray(key) &&
+      (key[0] === "counterparty-accounts" ||
+        key[0] === "counterparty-provider-accounts" ||
+        key[0] === "payment-request-counterparty-accounts")),
   isCounterpartyRequirementsKey: (key: unknown) =>
     Array.isArray(key) && key[0] === "counterparty-requirements",
   counterpartyRequirements: ({

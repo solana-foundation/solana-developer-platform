@@ -459,8 +459,11 @@ export async function runIdempotency(
     }
     // Once the handler has written its domain row (markIdempotencyCommitted),
     // any status is stored: the request changed something, so its retry gets
-    // the same answer.
-    if (isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true) {
+    // the same answer. A record mismatch is never stored: binding the key to
+    // this other request would refuse the original request's own retry.
+    const refusedUnchanged =
+      isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true;
+    if (refusedUnchanged || c.get("idempotencyRecordMismatch") === true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
@@ -594,6 +597,15 @@ export function deriveIdempotencyRecordKey(
  */
 export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
   c.set("idempotencyCommitted", true);
+}
+
+/**
+ * Marks that the key's domain row belongs to another request (its fingerprint
+ * differs), so the 422 is not stored and the key is released: a retry of the
+ * request that made the row is still answered from it.
+ */
+export function markIdempotencyRecordMismatch(c: Context<{ Bindings: Env }>): void {
+  c.set("idempotencyRecordMismatch", true);
 }
 
 /**

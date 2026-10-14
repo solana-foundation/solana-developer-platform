@@ -24,6 +24,7 @@ import {
   initializeCustodySetupAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
 import type { CustodyConnectionListItem } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
@@ -846,7 +847,7 @@ function useCreateWallet({
   const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const submissionInFlightRef = useRef(false);
-  const setupKey = useActionIdempotencyKey();
+  const setupKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
 
   const createWallet = (form: HTMLFormElement) => {
     if (submissionInFlightRef.current || !form.reportValidity() || !canSubmit || isPending) {

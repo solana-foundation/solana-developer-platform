@@ -5,6 +5,7 @@ import { CheckIcon, Loader2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react"
 import { AnimatePresence } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { HeightReveal } from "@/components/ui/height-reveal";
@@ -45,7 +46,7 @@ export function CryptoAccountForm({
   footerStart,
 }: CryptoAccountFormProps) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice();
+  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
   const [address, setAddress] = useState("");

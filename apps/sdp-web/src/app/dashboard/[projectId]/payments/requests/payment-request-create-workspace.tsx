@@ -395,7 +395,7 @@ function PaymentRequestCreateForm({
   counterparties,
 }: PaymentRequestCreateWorkspaceProps) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice();
+  const notice = useOutcomeUnknownNotice(null);
   const locale = useLocale();
   const router = useRouter();
   const projectHref = useProjectHref();
