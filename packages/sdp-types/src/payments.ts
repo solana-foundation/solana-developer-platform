@@ -770,7 +770,7 @@ export const COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE = [
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
 /**
  * The collection attempts that answer a keyed collect (HOO-1918): a live one,
- * as migration 0130's unique index covers. A failed or skipped attempt answers
+ * as migration 0134's unique index covers. A failed or skipped attempt answers
  * nothing, so the same key runs again.
  */
 export const COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY =

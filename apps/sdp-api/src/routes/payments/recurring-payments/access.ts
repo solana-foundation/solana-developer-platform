@@ -22,7 +22,7 @@ import {
 } from "../wallets";
 
 /**
- * Access checks for the recurring-payment routes (HOO-1918, ADR 0008). They
+ * Access checks for the recurring-payment routes (HOO-1918, ADR 0009). They
  * run before the Idempotency-Key step, so a replay passes exactly these checks:
  * every id the request names, in the caller's project, and the credential's
  * wallet bindings read fresh (never the cached snapshot, which drops a binding

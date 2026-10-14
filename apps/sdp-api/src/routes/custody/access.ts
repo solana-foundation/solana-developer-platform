@@ -11,7 +11,7 @@ import {
 import type { AppContext } from "./context";
 
 /**
- * Access checks for custody wallet routes (HOO-1918, ADR 0008). They run
+ * Access checks for custody wallet routes (HOO-1918, ADR 0009). They run
  * before the Idempotency-Key step, so a replay passes exactly these checks.
  * They check the credential's access, never a wallet's status: a wallet
  * deactivated or deleted since a request ran still lets that request be

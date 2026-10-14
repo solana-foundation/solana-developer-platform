@@ -45,7 +45,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import { paginated, success } from "@/lib/response";
+import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -280,7 +280,7 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
- * The create-transfer access check (HOO-1918, ADR 0008): the caller may move
+ * The create-transfer access check (HOO-1918, ADR 0009): the caller may move
  * money from the named source wallet, read fresh, in its own project. It runs
  * before the Idempotency-Key is claimed, so a replay passes exactly these
  * checks. A wallet deactivated since a request ran still passes here (a replay
@@ -666,10 +666,14 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   // A row the reconciler failed from the chain records no code: it is a
   // transaction failure.
   const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
-  throw new AppError(
-    code,
-    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
-    { transferId: row.id, status: row.status }
+  // Returned, not thrown: replayFromRecord marks the Response the finder builds.
+  return appErrorResponse(
+    c,
+    new AppError(
+      code,
+      `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+      { transferId: row.id, status: row.status }
+    )
   );
 }
 
@@ -726,7 +730,7 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  // The credential-bound record key (ADR 0008), never the raw client key.
+  // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
   const idempotency =

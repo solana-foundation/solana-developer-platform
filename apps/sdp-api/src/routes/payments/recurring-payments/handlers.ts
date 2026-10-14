@@ -98,7 +98,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
 
 /**
  * The Idempotency-Key and fingerprint the key step claimed for this request,
- * recorded on the domain row (migrations 0129, 0130) so a retry past the key's
+ * recorded on the domain row (migrations 0133, 0134) so a retry past the key's
  * 24 hours is matched by the same request identity. Every recurring mutation
  * requires the key, so a handler reached without a claim is a wiring bug.
  */
@@ -108,7 +108,7 @@ function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
   if (claim === undefined || recordKey === undefined) {
     throw internalError("Recurring payment request reached the handler without an Idempotency-Key");
   }
-  // The credential-bound record key (ADR 0008), never the raw client key.
+  // The credential-bound record key (ADR 0009), never the raw client key.
   return { key: recordKey, fingerprint: claim.fingerprint };
 }
 

@@ -6,7 +6,7 @@ import { noopObservability } from "@/runtime/observability";
 
 /**
  * The Idempotency-Key step stores response bodies for 24 hours (HOO-1918,
- * ADR 0008), so a route whose response carries a secret must never use it:
+ * ADR 0009), so a route whose response carries a secret must never use it:
  * API key creation and rotation return the plaintext key, and provider
  * credential routes take or return credential material.
  */

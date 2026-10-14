@@ -4431,7 +4431,7 @@ describe("Payments routes — recurring", () => {
 
   describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
     const keyed = (key: string) => ({ ...RECURRING_HEADERS, "Idempotency-Key": key });
-    /** What the domain rows store for a key: bound to the test API key (ADR 0008). */
+    /** What the domain rows store for a key: bound to the test API key (ADR 0009). */
     const recordKey = (key: string) =>
       deriveIdempotencyRecordKey(
         { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, principal: TEST_API_KEY.id },
@@ -4452,6 +4452,8 @@ describe("Payments routes — recurring", () => {
               SET status = 'in_progress',
                   claim_token = 'crashed',
                   locked_until = now() - interval '1 minute',
+                  -- Past the renewal cap plus the lease too, so the claim counts as dead.
+                  claimed_at = now() - interval '1 hour',
                   response_status = NULL,
                   response_headers = NULL,
                   response_body = NULL

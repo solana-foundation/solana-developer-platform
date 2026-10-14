@@ -30,6 +30,13 @@ export interface IdempotencyKeyClaimInput {
    * answers `outcome_unknown` until it expires.
    */
   takeOverLapsed: boolean;
+  /**
+   * How long after it was claimed a request may still be running although its
+   * lease lapsed (its renewals failing through a database blip): the renewal
+   * cap plus the lease. Until then a lapsed, unreleased claim answers
+   * `in_flight`, never a takeover or `outcome_unknown`.
+   */
+  presumedLiveSeconds: number;
   leaseSeconds: number;
   retentionSeconds: number;
 }
@@ -105,6 +112,8 @@ const existingRowSchema = z.discriminatedUnion("status", [
     retry_after_seconds: z.number().int(),
     lapsed: z.boolean(),
     released: z.boolean(),
+    presumed_live: z.boolean(),
+    presumed_live_seconds: z.number().int(),
   }),
   z.object({
     status: z.literal("completed"),
@@ -115,6 +124,12 @@ const existingRowSchema = z.discriminatedUnion("status", [
     response_body: z.string().nullable(),
   }),
 ]);
+
+/**
+ * The longest Retry-After for a lapsed claim that may still be running: the
+ * window can be many minutes, and a retry a minute later learns more.
+ */
+const MAX_PRESUMED_LIVE_RETRY_AFTER = 60;
 
 /** The scope predicate, matching the scope unique constraint. */
 function scopeMatch(input: IdempotencyKeyClaimInput): { sql: string; params: unknown[] } {
@@ -142,9 +157,9 @@ export function createPostgresIdempotencyKeyRepository(
          )
          INSERT INTO idempotency_keys
            (id, organization_id, project_id, operation, idempotency_key, principal, fingerprint,
-            status, claim_token, locked_until, expires_at)
+            status, claim_token, locked_until, claimed_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?,
-                 now() + make_interval(secs => ?), now() + make_interval(secs => ?))
+                 now() + make_interval(secs => ?), now(), now() + make_interval(secs => ?))
          ON CONFLICT ON CONSTRAINT idempotency_keys_scope_key DO UPDATE
            SET id = EXCLUDED.id,
                principal = EXCLUDED.principal,
@@ -152,6 +167,7 @@ export function createPostgresIdempotencyKeyRepository(
                status = 'in_progress',
                claim_token = EXCLUDED.claim_token,
                locked_until = EXCLUDED.locked_until,
+               claimed_at = EXCLUDED.claimed_at,
                released = false,
                response_status = NULL,
                response_headers = NULL,
@@ -186,17 +202,17 @@ export function createPostgresIdempotencyKeyRepository(
     }
 
     // An earlier attempt with this request failed (released) or, on a route
-    // that allows it, crashed, and its lease is over: this request takes the
-    // row over and runs again.
+    // that allows it, crashed (its lease lapsed and it is past the time it
+    // could still be running): this request takes the row over and runs again.
     const takenOver = await db
       .prepare(
         `UPDATE idempotency_keys
             SET id = ?, claim_token = ?, locked_until = now() + make_interval(secs => ?),
-                released = false, updated_at = sdp_iso_now()
+                claimed_at = now(), released = false, updated_at = sdp_iso_now()
           WHERE ${scope.sql}
             AND status = 'in_progress' AND principal = ? AND fingerprint = ?
             AND locked_until <= now() AND expires_at > now()
-            AND (released OR ?::boolean)
+            AND (released OR (?::boolean AND claimed_at + make_interval(secs => ?) <= now()))
           RETURNING id`
       )
       .bind(
@@ -206,7 +222,8 @@ export function createPostgresIdempotencyKeyRepository(
         ...scope.params,
         input.principal,
         input.fingerprint,
-        input.takeOverLapsed
+        input.takeOverLapsed,
+        input.presumedLiveSeconds
       )
       .first<{ id: string }>();
     if (takenOver !== null) {
@@ -218,11 +235,14 @@ export function createPostgresIdempotencyKeyRepository(
         `SELECT principal, fingerprint, status, response_status, response_headers, response_body,
                 GREATEST(1, CEIL(EXTRACT(EPOCH FROM (locked_until - now()))))::int
                   AS retry_after_seconds,
-                locked_until <= now() AS lapsed, released
+                locked_until <= now() AS lapsed, released,
+                claimed_at + make_interval(secs => ?) > now() AS presumed_live,
+                GREATEST(1, CEIL(EXTRACT(EPOCH FROM
+                  (claimed_at + make_interval(secs => ?) - now()))))::int AS presumed_live_seconds
            FROM idempotency_keys
           WHERE ${scope.sql} AND expires_at > now()`
       )
-      .bind(...scope.params)
+      .bind(input.presumedLiveSeconds, input.presumedLiveSeconds, ...scope.params)
       .first<Record<string, unknown>>();
     if (existing === null) {
       // Pruned or expired between the statements above.
@@ -243,9 +263,19 @@ export function createPostgresIdempotencyKeyRepository(
       };
     }
     if (row.lapsed) {
-      if (row.released || input.takeOverLapsed) {
-        // The lease ran out (or was released) after the takeover above saw it
-        // live: this request may take it over, so claim again.
+      if (row.released) {
+        // Released after the takeover above saw it live: claim again.
+        return null;
+      }
+      if (row.presumed_live) {
+        // Its renewals may only be failing: the request can still be running.
+        return {
+          kind: "in_flight",
+          retryAfterSeconds: Math.min(row.presumed_live_seconds, MAX_PRESUMED_LIVE_RETRY_AFTER),
+        };
+      }
+      if (input.takeOverLapsed) {
+        // Its window ended after the takeover above ran: claim again.
         return null;
       }
       return { kind: "outcome_unknown" };

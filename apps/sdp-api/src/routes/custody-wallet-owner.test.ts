@@ -156,6 +156,8 @@ async function crashBeforeKeyStored(idempotencyKey: string): Promise<number> {
   return getDb(env).execute(
     `UPDATE idempotency_keys
      SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second',
+         -- Past the renewal cap plus the lease too, so the claim counts as dead.
+         claimed_at = now() - interval '1 hour',
          response_status = NULL, response_headers = NULL, response_body = NULL
      WHERE idempotency_key = ?`,
     [idempotencyKey]

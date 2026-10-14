@@ -68,7 +68,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
   and never state, so a replay passes the same checks as a new request. Wallet bindings come from
   authentication (`getAuth(c)`, read fresh per request); `authorize` never re-reads them. No per-module key handling,
   never on a route whose response carries a secret, and the domain row stays the recovery point.
-  See `docs/decisions/0008-idempotency-keys.md`.
+  See `docs/decisions/0009-idempotency-keys.md`.
 - **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
   `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
   wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter

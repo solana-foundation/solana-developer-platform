@@ -48,6 +48,7 @@ function claimInput(overrides: Partial<IdempotencyKeyClaimInput> = {}): Idempote
     principal: "key_api_1",
     fingerprint: "fp-1",
     takeOverLapsed: true,
+    presumedLiveSeconds: 0,
     leaseSeconds: 60,
     retentionSeconds: 86_400,
     ...overrides,
@@ -119,6 +120,46 @@ describe("idempotency keys repository", () => {
       fresh: false,
       replacedUnfinished: false,
     });
+  });
+
+  it.each([true, false])(
+    "answers a lapsed claim in flight until the renewal cap plus lease has passed (takeOverLapsed %s)",
+    async (takeOverLapsed) => {
+      const lapsed = claimInput();
+      await repository().claim(lapsed);
+      await getDb(env).execute(
+        `UPDATE idempotency_keys SET locked_until = now() - interval '1 second' WHERE id = ?`,
+        [lapsed.id]
+      );
+
+      const within = await repository().claim(
+        claimInput({ takeOverLapsed, presumedLiveSeconds: 900 })
+      );
+      expect(within).toMatchObject({ kind: "in_flight" });
+      expect(within.kind === "in_flight" && within.retryAfterSeconds).toBe(60);
+
+      await getDb(env).execute(
+        `UPDATE idempotency_keys SET claimed_at = now() - interval '901 seconds' WHERE id = ?`,
+        [lapsed.id]
+      );
+      expect(
+        await repository().claim(claimInput({ takeOverLapsed, presumedLiveSeconds: 900 }))
+      ).toEqual(
+        takeOverLapsed
+          ? { kind: "claimed", fresh: false, replacedUnfinished: false }
+          : { kind: "outcome_unknown" }
+      );
+    }
+  );
+
+  it("takes over a released claim at once, whatever the window", async () => {
+    const released = claimInput();
+    await repository().claim(released);
+    await repository().unlock(released.id, released.claimToken);
+
+    expect(
+      await repository().claim(claimInput({ takeOverLapsed: false, presumedLiveSeconds: 900 }))
+    ).toEqual({ kind: "claimed", fresh: false, replacedUnfinished: false });
   });
 
   it("takes over a released claim even when lapsed claims stay in flight", async () => {

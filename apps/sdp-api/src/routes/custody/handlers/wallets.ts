@@ -244,7 +244,7 @@ export function deriveCustodyWalletCreateRequestId(
 }
 
 /**
- * A keyed create's recovery point (migration 0131): only when the shared step
+ * A keyed create's recovery point (migration 0135): only when the shared step
  * claimed a key for this request; null without one.
  */
 function custodyWalletIdempotency(c: AppContext): CustodyWalletIdempotency | null {

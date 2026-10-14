@@ -11,7 +11,7 @@ import {
 
 /**
  * The steps between `idempotent()` and a money-moving handler (HOO-1918, ADR
- * 0008), in their fixed order:
+ * 0009), in their fixed order:
  *
  *   authorize → idempotent → replayFromRecord → admit → handler
  *
@@ -81,8 +81,11 @@ export function replayFromRecord<TAuthorized>(
         // under the key like any answer after the row exists, and marked as a
         // replay, so a client retires the key on it.
         markIdempotencyCommitted(c);
-        c.header(IDEMPOTENT_REPLAYED_HEADER, "true");
-        return answer.respond();
+        // Copied, so the header lands on whatever Response the finder built.
+        const answered = await answer.respond();
+        const replayed = new Response(answered.body, answered);
+        replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
+        return replayed;
       }
     }
     await next();
