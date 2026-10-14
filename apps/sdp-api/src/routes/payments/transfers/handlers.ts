@@ -45,7 +45,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import { paginated, success } from "@/lib/response";
+import { error as errorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -666,10 +666,14 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   // A row the reconciler failed from the chain records no code: it is a
   // transaction failure.
   const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
-  throw new AppError(
-    code,
-    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
-    { transferId: row.id, status: row.status }
+  // Returned, not thrown: replayFromRecord marks the Response the finder builds.
+  return errorResponse(
+    c,
+    new AppError(
+      code,
+      `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+      { transferId: row.id, status: row.status }
+    )
   );
 }
 
