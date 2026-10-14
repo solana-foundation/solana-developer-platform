@@ -1,7 +1,9 @@
 import {
   ACTIONS,
   actionOwnerOf,
+  actionsInModule,
   type CustodyWalletPurpose,
+  HIDDEN_ACTION_MODULES,
   isRampProviderInReleaseChannel,
   type Permission,
   RAMP_PROVIDERS,
@@ -113,6 +115,9 @@ function buildOwners(): ReadonlyMap<string, Owner> {
 
 const VALUE_OWNERS = buildOwners();
 
+/** Values no public document names in any channel: the hidden families' actions. */
+const HIDDEN_VALUES: ReadonlySet<string> = new Set(HIDDEN_ACTION_MODULES.flatMap(actionsInModule));
+
 /**
  * The modules a public document publishes: those in the release channel, less
  * Earn while its publication hold is on. Markets follows its sub-modules.
@@ -128,12 +133,16 @@ export function publishedModules(
   return modules;
 }
 
-/** Whether a public document for `modules` may name `value`. Unclassified values are core. */
+/**
+ * Whether a public document for `modules` may name `value`. A hidden family's
+ * action never is; other unclassified values are core.
+ */
 export function isValuePublished(
   value: string,
   modules: ReadonlySet<SdpModule>,
   releaseChannel: SdpReleaseChannel
 ): boolean {
+  if (HIDDEN_VALUES.has(value)) return false;
   const owner = VALUE_OWNERS.get(value);
   if (!owner) return true;
   if ("module" in owner) return modules.has(owner.module);
@@ -146,6 +155,11 @@ export function isValuePublished(
 /** Every classified value, for tests that scan a document for leaks. */
 export function classifiedValues(): readonly string[] {
   return [...VALUE_OWNERS.keys()];
+}
+
+/** The values no public document names, for tests that scan a document for leaks. */
+export function hiddenValues(): readonly string[] {
+  return [...HIDDEN_VALUES];
 }
 
 /** The module or ramp provider that owns a value, for consumers that filter by channel. */

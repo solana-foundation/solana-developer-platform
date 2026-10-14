@@ -175,10 +175,36 @@ function isApiKeyForbiddenAction(action: Action): boolean {
  */
 export const API_KEY_FORBIDDEN_ACTIONS: readonly Action[] = ACTIONS.filter(isApiKeyForbiddenAction);
 
-/** Every action an API key may hold: what "Everything" expands to. */
+/** Every action an API key may hold. */
 export const API_KEY_GRANTABLE_ACTIONS: readonly Action[] = ACTIONS.filter(
   (action) => !isApiKeyForbiddenAction(action)
 );
+
+/**
+ * Action modules of the families kept out of every public surface (the RPC
+ * relay and organization administration; see AGENTS.md, "Public vs internal
+ * surfaces"): the public OpenAPI document, its grant enum, the docs and the
+ * AI resources never name their actions. Keys may still hold them.
+ */
+export const HIDDEN_ACTION_MODULES = [
+  "rpc",
+  "organizations",
+] as const satisfies readonly ActionModule[];
+
+const HIDDEN_ACTION_MODULE_SET: ReadonlySet<ActionModule> = new Set(HIDDEN_ACTION_MODULES);
+
+export function isHiddenAction(action: Action): boolean {
+  return HIDDEN_ACTION_MODULE_SET.has(actionModuleOf(action));
+}
+
+/**
+ * Whether the dashboard's "Everything" includes an action. The metered RPC
+ * relay never rides along: a key gets `rpc.execute` only when it is granted
+ * explicitly.
+ */
+export function isInEverythingGrant(action: Action): boolean {
+  return actionModuleOf(action) !== "rpc";
+}
 
 export function isApiKeyGrantableAction(action: Action): boolean {
   return !isApiKeyForbiddenAction(action);

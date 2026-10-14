@@ -51,14 +51,6 @@
       "verbs": ["read"]
     },
     {
-      "module": "organizations",
-      "verbs": ["read"]
-    },
-    {
-      "module": "rpc",
-      "verbs": ["execute"]
-    },
-    {
       "module": "onramp",
       "verbs": ["read", "execute"]
     },

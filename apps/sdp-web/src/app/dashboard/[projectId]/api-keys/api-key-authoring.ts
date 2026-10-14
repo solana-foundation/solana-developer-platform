@@ -9,6 +9,7 @@ import {
   actionOwnerOf,
   actionVerbOf,
   grantsCoverAction,
+  isInEverythingGrant,
   normalizeGrants,
   type SdpModule,
 } from "@sdp/types";
@@ -117,11 +118,13 @@ export function clearModuleGrants(grants: readonly Action[], module: ActionModul
 }
 
 /**
- * "Everything": every offered action, written out. What is stored is this
- * explicit list, so an action added to SDP later reaches no existing key.
+ * "Everything": every offered action, written out, except the metered RPC
+ * relay, which a key gets only when it is ticked on its own. What is stored
+ * is this explicit list, so an action added to SDP later reaches no existing
+ * key.
  */
 export function everythingGrants(offered: readonly Action[]): Action[] {
-  return normalizeGrants([...offered]);
+  return normalizeGrants(offered.filter(isInEverythingGrant));
 }
 
 /** The verbs held on each module, an included read listed too, for summaries. */

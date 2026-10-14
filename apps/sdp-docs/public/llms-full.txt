@@ -420,8 +420,6 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 | `wallets` | `wallets.read`, `wallets.manage`, `wallets.execute` | Custody wallets and their balances |
 | `compliance` | `compliance.execute` | Address screening |
 | `projects` | `projects.read` | Projects and provider availability |
-| `organizations` | `organizations.read` | Organization settings and provider access |
-| `rpc` | `rpc.execute` | The managed Solana RPC relay |
 | `onramp` | `onramp.read`, `onramp.execute` | On-ramp currencies, estimates and quotes |
 | `offramp` | `offramp.read`, `offramp.execute` | Off-ramp currencies, estimates and quotes |
 | `ramp_transfers` | `ramp_transfers.manage` | Ramp transfer cancellation and sandbox simulation |

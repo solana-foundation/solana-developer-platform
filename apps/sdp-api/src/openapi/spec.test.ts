@@ -9,8 +9,17 @@ import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
-import { classifiedValues, isValuePublished, publishedModules } from "./release-channel-values";
-import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
+import {
+  classifiedValues,
+  hiddenValues,
+  isValuePublished,
+  publishedModules,
+} from "./release-channel-values";
+import {
+  createOpenApiDocument,
+  createPublicOpenApiDocument,
+  createPublicSurfaceManifest,
+} from "./spec";
 
 /** The widest public document: every module's routes, as dev serves it. */
 const EXPERIMENTAL = { releaseChannel: "experimental" } as const;
@@ -851,6 +860,23 @@ describe("OpenAPI spec", () => {
     expect(read).toContain('"purpose"');
     expect(read).not.toContain('"mint_authority"');
     expect(read).not.toContain('"fee_payer"');
+  });
+
+  it("names the hidden families' actions in no channel's document or surface manifest", () => {
+    expect([...hiddenValues()].sort()).toEqual([
+      "organizations.manage",
+      "organizations.read",
+      "rpc.execute",
+    ]);
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      const published = JSON.stringify(createPublicOpenApiDocument({ releaseChannel }));
+      const manifest = createPublicSurfaceManifest(releaseChannel);
+      for (const value of hiddenValues()) {
+        expect(published).not.toContain(`"${value}"`);
+      }
+      expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("rpc");
+      expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
+    }
   });
 
   it("names Earn nowhere in any channel's document while the hold is on", () => {

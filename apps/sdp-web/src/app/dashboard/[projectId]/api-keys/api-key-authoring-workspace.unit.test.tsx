@@ -115,7 +115,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(continueButton.hasAttribute("disabled")).toBe(false);
   });
 
-  it("saves Everything as the explicit list of offered actions", async () => {
+  it("saves Everything as the explicit list of offered actions, less the RPC relay", async () => {
     vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "saved" });
     const user = await openPermissionsStep();
     await user.click(screen.getByRole("button", { name: "Everything" }));
@@ -124,7 +124,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     expect(vi.mocked(saveApiKeyAuthoringAction).mock.calls[0]?.[0].draft.grants).toEqual(
-      STABLE_ACTIONS
+      STABLE_ACTIONS.filter((action) => action !== "rpc.execute")
     );
   });
 

@@ -110,9 +110,10 @@ describe("API-key authoring: grant toggles", () => {
     ).toEqual(["wallets.read"]);
   });
 
-  it("writes Everything out as the explicit offered list", () => {
+  it("writes Everything out as the explicit offered list, the RPC relay left to its own tick", () => {
     const offered = grantableActionsInChannel(inStable);
-    expect(everythingGrants(offered)).toEqual(offered);
+    expect(offered).toContain("rpc.execute");
+    expect(everythingGrants(offered)).toEqual(offered.filter((action) => action !== "rpc.execute"));
   });
 
   it("summarizes held verbs by module, the included read listed", () => {
