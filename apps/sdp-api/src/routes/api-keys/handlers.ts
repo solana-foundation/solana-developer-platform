@@ -1,10 +1,9 @@
 import { SigningError } from "@sdp/custody/signing";
-import {
-  type CreateApiKeyResponse,
-  type ListApiKeysResponse,
-  type OrganizationRole,
-  organizationRoleMayPerform,
-  type RotateApiKeyResponse,
+import type {
+  CreateApiKeyResponse,
+  ListApiKeysResponse,
+  OrganizationRole,
+  RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -13,6 +12,7 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
@@ -156,7 +156,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
 
   if (provisionWalletRequested) {
     // Provisioning creates a custody wallet, which is wallet lifecycle.
-    if (!organizationRoleMayPerform(actor.role, "wallets.manage")) {
+    if (!callerMayPerform(c, "wallets.manage")) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: wallets.manage", {
         action: "wallets.manage",
       });

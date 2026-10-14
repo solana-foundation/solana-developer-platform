@@ -3,8 +3,11 @@ import path from "node:path";
 import { hashString } from "@sdp/payments/hash";
 import {
   ACTIONS,
+  type Action,
   API_KEY_FORBIDDEN_ACTIONS,
+  actionModuleOf,
   actionOwnerOf,
+  actionVerbOf,
   COARSE_ACTION_MODULES,
   isAction,
   isModuleInReleaseChannel,
@@ -12,8 +15,11 @@ import {
   SDP_RELEASE_CHANNEL_NAMES,
 } from "@sdp/types";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "@/app";
+import { z } from "zod";
+import { createApp, type SdpPlugin } from "@/app";
 import { getDb } from "@/db";
+import { publicRoute, requireAction } from "@/middleware/require-action";
+import type { RegisteredRouteAuthorization } from "@/routes/route-actions";
 import { registeredRouteAuthorizations } from "@/routes/route-actions";
 import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
@@ -21,7 +27,7 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fi
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { seedApiKeyRow } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 
 /**
  * Every route declares exactly one action, or is public with a reason
@@ -131,31 +137,88 @@ function concretePath(routePath: string): string {
     .replace(/\*/g, "unused_id");
 }
 
+/** Every flag-gated module on, so each route reaches its action check. */
+const ALL_MODULES_ENV = {
+  ...env,
+  PRIVATE_CHANNELS_ENABLED: "true",
+  HELIUS_RINGS_ENABLED: "true",
+  MARKETS_ENABLED: "true",
+  EARN_ENABLED: "true",
+};
+
+/** A request to a route as the test key, with a body for non-GET methods. */
+function requestRoute(route: RegisteredRouteAuthorization, attempt: string) {
+  const method = route.method === "ALL" ? "GET" : route.method;
+  return app.request(
+    concretePath(route.path),
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `route-actions-${attempt}-${route.method}-${route.path}`,
+      },
+      body: method === "GET" ? undefined : "{}",
+    },
+    ALL_MODULES_ENV
+  );
+}
+
+const refusalSchema = z.object({
+  error: z.object({ message: z.string(), details: z.object({ action: z.string() }) }),
+});
+
+/** The action a 403 names, or null for any other answer. */
+async function refusedAction(res: Response): Promise<string | null> {
+  if (res.status !== 403) return null;
+  const body = refusalSchema.safeParse(await res.json());
+  return body.success ? body.data.error.details.action : null;
+}
+
+async function seedTestKey(): Promise<void> {
+  await seedTestDatabase(env);
+  await getDb(env)
+    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+    .run();
+  await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...TEST_CACHED_API_KEY,
+    grants: ALL_API_KEY_GRANTS,
+    rateLimitTier: "unlimited",
+  });
+}
+
+async function setTestKeyGrants(grants: readonly string[]): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
+    .bind([...grants], TEST_CACHED_API_KEY.id)
+    .run();
+}
+
+function declaredAction(route: RegisteredRouteAuthorization): Action | null {
+  const [declaration] = route.declarations;
+  return declaration?.kind === "action" && isAction(declaration.action) ? declaration.action : null;
+}
+
+/**
+ * Routes on which a key holding every action, the forbidden ones included, is
+ * refused before its action is checked: they admit a signed-in person only
+ * (`requireHumanSession`), or a Clerk session only (the playground). Each is
+ * still refused; the test pins that it never answers 2xx.
+ */
+const REFUSED_BEFORE_THE_ACTION =
+  /^(\/v1\/(api-keys|members|organizations)|\/v1\/projects\/:projectId\/(api-keys|members)|\/internal\/(playground|dashboard\/custody|dashboard\/helius-rings))(\/|$)/;
+
 describe("actions no API key may hold", () => {
   const forbiddenRoutes = routes.filter((route) => {
-    const [declaration] = route.declarations;
-    return (
-      declaration?.kind === "action" &&
-      isAction(declaration.action) &&
-      API_KEY_FORBIDDEN_ACTIONS.includes(declaration.action)
-    );
+    const action = declaredAction(route);
+    return action !== null && API_KEY_FORBIDDEN_ACTIONS.includes(action);
   });
 
   beforeAll(async () => {
-    await seedTestDatabase(env);
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-      .run();
-    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
-      grants: ALL_API_KEY_GRANTS,
-    });
+    await seedTestKey();
     // A stored row naming forbidden actions must still authorize none of them.
-    await getDb(env)
-      .prepare("UPDATE api_keys SET grants = ? WHERE id = ?")
-      .bind([...ALL_API_KEY_GRANTS, ...API_KEY_FORBIDDEN_ACTIONS], TEST_CACHED_API_KEY.id)
-      .run();
+    await setTestKeyGrants([...ALL_API_KEY_GRANTS, ...API_KEY_FORBIDDEN_ACTIONS]);
   });
 
   it("covers key, member, organization and project administration and every configure", () => {
@@ -165,24 +228,94 @@ describe("actions no API key may hold", () => {
   it.each(forbiddenRoutes.map((route) => [`${route.method} ${route.path}`, route]))(
     "refuses a key holding every action, forbidden ones included, on %s",
     async (_name, route) => {
-      const method = route.method === "ALL" ? "GET" : route.method;
-      const res = await app.request(
-        concretePath(route.path),
-        {
-          method,
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            "Content-Type": "application/json",
-            "Idempotency-Key": `route-actions-${route.method}-${route.path}`,
-          },
-          body: method === "GET" ? undefined : "{}",
-        },
-        env
-      );
-      // 401 where the route admits only a Clerk session at all (the playground).
-      expect([401, 403]).toContain(res.status);
+      const res = await requestRoute(route, "forbidden");
+      if (REFUSED_BEFORE_THE_ACTION.test(route.path)) {
+        expect([401, 403]).toContain(res.status);
+        return;
+      }
+      expect(res.status).toBe(403);
+      const body = refusalSchema.parse(await res.json());
+      expect(body.error.details.action).toBe(declaredAction(route));
+      expect(body.error.message).toBe(`API keys cannot perform ${declaredAction(route)}`);
     }
   );
+});
+
+/**
+ * Every grant except the route's action: for a `read`, its module's `manage`
+ * and `execute` go too, since each covers the read.
+ */
+function grantsWithout(action: Action): Action[] {
+  const module = actionModuleOf(action);
+  const covering =
+    actionVerbOf(action) === "read"
+      ? (grant: Action) =>
+          grant === action ||
+          (actionModuleOf(grant) === module &&
+            (actionVerbOf(grant) === "manage" || actionVerbOf(grant) === "execute"))
+      : (grant: Action) => grant === action;
+  return ALL_API_KEY_GRANTS.filter((grant) => !covering(grant));
+}
+
+describe("each route enforces its own action", () => {
+  const actionRoutes = routes.filter((route) => {
+    const action = declaredAction(route);
+    return action !== null && !API_KEY_FORBIDDEN_ACTIONS.includes(action);
+  });
+
+  beforeAll(seedTestKey);
+
+  it("covers every route a key may call", () => {
+    expect(actionRoutes.length).toBeGreaterThan(200);
+  });
+
+  it.each(
+    actionRoutes.map((route) => [`${declaredAction(route)} ${route.method} ${route.path}`, route])
+  )(
+    "%s: refuses a key holding every other grant, and lets one holding it past the check",
+    async (_name, route) => {
+      const action = declaredAction(route);
+      if (!action) throw new Error("filtered to action routes");
+      await clearKVStores(env);
+
+      await setTestKeyGrants(grantsWithout(action));
+      expect(await refusedAction(await requestRoute(route, "without"))).toBe(action);
+
+      await setTestKeyGrants([...grantsWithout(action), action]);
+      expect(await refusedAction(await requestRoute(route, "with"))).not.toBe(action);
+    }
+  );
+});
+
+describe("plugin routes", () => {
+  // The repository registers no plugin: an embedder passes them to createApp.
+  // The inventory reads whatever app it is handed, so a plugin's routes are
+  // checked by the same rules wherever that app is built.
+  it("inventories a plugin's routes with their declarations", () => {
+    const plugin: SdpPlugin = {
+      name: "route-actions-test",
+      register: (v1) => {
+        v1.get("/plugin-test/declared", requireAction("wallets.read"), (c) => c.json({}));
+        v1.get("/plugin-test/public", publicRoute("plugin test"), (c) => c.json({}));
+        v1.get("/plugin-test/undeclared", (c) => c.json({}));
+      },
+    };
+    const withPlugin = registeredRouteAuthorizations(
+      createApp({
+        observability: noopObservability,
+        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        plugins: [plugin],
+      })
+    );
+    const byPath = new Map(withPlugin.map((route) => [route.path, route.declarations]));
+    expect(byPath.get("/v1/plugin-test/declared")).toEqual([
+      { kind: "action", action: "wallets.read" },
+    ]);
+    expect(byPath.get("/v1/plugin-test/public")).toEqual([
+      { kind: "public", reason: "plugin test" },
+    ]);
+    expect(byPath.get("/v1/plugin-test/undeclared")).toEqual([]);
+  });
 });
 
 /** Every non-test source file under a directory. */
@@ -208,18 +341,42 @@ describe("caller authorization goes through actions only", () => {
     /\b(auth|actor|clerk|apiKey)\.permissions\b/,
     /\bgetPermissionsFor(OrgRole|ApiKeyRole)\b/,
   ];
+  // Route code judges the caller only through callerMayPerform or its route's
+  // declaration: never its role, and never the decision functions behind them.
+  const BANNED_IN_ROUTES = [
+    /\bauthMayPerform\(/,
+    /\borganizationRoleMayPerform\(/,
+    /\bapiKeyMayPerform\(/,
+    /\bgrantsCoverAction\(/,
+    /\b(auth|actor|clerk|apiKey|caller|member)\.role\s*(===|!==|==|!=)/,
+  ];
+  // Checks that are not a tenant's authorization at all.
+  const ROUTE_EXEMPTIONS: Record<string, string> = {
+    "routes/allowlist/middleware.ts":
+      "operator: an admin of the platform's own admin organization, not a tenant grant",
+  };
   const root = path.resolve(__dirname, "..");
 
-  it("has no permission-string check of the caller in API source", () => {
-    const offenders = sourceFiles(root).flatMap((file) =>
+  function offendersOf(files: string[], patterns: RegExp[]): string[] {
+    return files.flatMap((file) =>
       readFileSync(file, "utf8")
         .split("\n")
         .flatMap((line, index) =>
-          BANNED.some((pattern) => pattern.test(line))
+          patterns.some((pattern) => pattern.test(line))
             ? [`${path.relative(root, file)}:${index + 1}: ${line.trim()}`]
             : []
         )
     );
-    expect(offenders).toEqual([]);
+  }
+
+  it("has no permission-string check of the caller in API source", () => {
+    expect(offendersOf(sourceFiles(root), BANNED)).toEqual([]);
+  });
+
+  it("has no role or decision-function check of the caller in route code", () => {
+    const files = sourceFiles(path.join(root, "routes")).filter(
+      (file) => !(path.relative(root, file) in ROUTE_EXEMPTIONS)
+    );
+    expect(offendersOf(files, BANNED_IN_ROUTES)).toEqual([]);
   });
 });

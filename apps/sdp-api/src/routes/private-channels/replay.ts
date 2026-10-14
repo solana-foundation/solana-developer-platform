@@ -3,13 +3,14 @@ import type {
   PrivateChannelTransferRow,
   PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
-import { authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelTransferFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
+import { callerMayPerform } from "@/middleware/require-action";
 import { refreshPrivateChannelAuth } from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
@@ -22,7 +23,7 @@ export async function requireMovementWrite(c: AppContext): Promise<void> {
     const key = c.get("apiKey");
     if (key && current.grants) c.set("apiKey", { ...key, grants: current.grants });
   }
-  if (!authMayPerform(getAuth(c), "private_channels.execute")) {
+  if (!callerMayPerform(c, "private_channels.execute")) {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
       action: "private_channels.execute",
     });

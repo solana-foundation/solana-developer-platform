@@ -1,5 +1,6 @@
-import { type ApiKeyContext, authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { AppContext } from "./context";
 import { getPrivateChannelUserRepository } from "./context";
 
@@ -19,7 +20,9 @@ interface EventViewerResolverDependencies {
 export async function resolveEventViewerForAuth(
   auth: ApiKeyContext,
   projectId: string,
-  dependencies: EventViewerResolverDependencies
+  dependencies: EventViewerResolverDependencies,
+  /** Whether the caller may perform `projects.manage` (`callerMayPerform`): it then sees every event. */
+  callerManagesProject: boolean
 ): Promise<EventViewer> {
   if (auth.authType === "api_key") {
     if (auth.projectId !== projectId) {
@@ -27,7 +30,7 @@ export async function resolveEventViewerForAuth(
     }
     return { scope: "all" };
   }
-  if (authMayPerform(auth, "projects.manage")) {
+  if (callerManagesProject) {
     return { scope: "all" };
   }
   if (!auth.userId) {
@@ -53,9 +56,14 @@ export async function resolveEventViewer(c: AppContext): Promise<EventViewer> {
   const projectId = requireProjectId(c);
   const userRepository = getPrivateChannelUserRepository(c);
 
-  return resolveEventViewerForAuth(auth, projectId, {
-    findPrivateChannelUser: (scope) => userRepository.findDefaultPrincipalByProject(scope),
-    listMemberships: (privateChannelUserId) =>
-      userRepository.listMembershipsForUser(privateChannelUserId),
-  });
+  return resolveEventViewerForAuth(
+    auth,
+    projectId,
+    {
+      findPrivateChannelUser: (scope) => userRepository.findDefaultPrincipalByProject(scope),
+      listMemberships: (privateChannelUserId) =>
+        userRepository.listMembershipsForUser(privateChannelUserId),
+    },
+    callerMayPerform(c, "projects.manage")
+  );
 }

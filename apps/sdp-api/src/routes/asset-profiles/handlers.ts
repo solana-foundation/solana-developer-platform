@@ -11,7 +11,7 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
-import { authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -27,6 +27,7 @@ import {
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
+import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import { type AppContext, getAssetProfilesRepository } from "./context";
@@ -250,7 +251,7 @@ export const updateAssetProfile = async (
   if (
     body.issuanceMetadata !== undefined &&
     compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata) &&
-    !authMayPerform(auth, "issuance.enforce")
+    !callerMayPerform(c, "issuance.enforce")
   ) {
     throw new AppError(
       "INSUFFICIENT_PERMISSIONS",
