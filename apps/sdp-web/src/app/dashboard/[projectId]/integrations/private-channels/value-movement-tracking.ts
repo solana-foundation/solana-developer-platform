@@ -2,6 +2,9 @@
 
 import type { ApiAnswer } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
+import type { CreateDepositResult } from "./deposit/actions";
+import type { CreateTransferResult } from "./transfer/actions";
+import type { CreateWithdrawalResult } from "./withdraw/actions";
 
 /**
  * Idempotency-key stores for the three Private Channels value movements.
@@ -30,17 +33,15 @@ export const privateChannelTransferIdempotencyKeyStore = createIdempotencyKeySto
   "sdp:private-channels:transfer:idempotency:v1"
 );
 
-/** What a movement's server action reports, as far as its key is concerned. */
-export type MovementActionResult =
-  | { ok: true }
-  | { ok: false; kind: "validation" }
-  | { ok: false; kind: "server"; answer: ApiAnswer };
-
 /**
  * What sdp-api answered a movement, for the retire rule (`answerRetiresKey`).
  * A validation refusal never reached the API, so it is no answer.
+ *
+ * @param result - What the movement's server action returned.
  */
-export function movementAnswer(result: MovementActionResult): ApiAnswer {
+export function movementAnswer(
+  result: CreateDepositResult | CreateWithdrawalResult | CreateTransferResult
+): ApiAnswer {
   if (result.ok) return { status: 200, replayed: false, code: null };
   switch (result.kind) {
     case "server":

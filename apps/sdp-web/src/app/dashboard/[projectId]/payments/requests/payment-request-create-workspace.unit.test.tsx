@@ -178,8 +178,14 @@ describe("New request page", () => {
   });
 
   /** Records each create's body and key; the answers are given in order. */
+  /** One create the page sent: its body and Idempotency-Key. */
+  interface RecordedSend {
+    body: { amount: string; expiresAt: string | null };
+    key: string | null;
+  }
+
   function recordSends(...answers: ("lost" | number)[]) {
-    const sends: { body: { amount: string; expiresAt: string | null }; key: string | null }[] = [];
+    const sends: RecordedSend[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       sends.push({
         body: JSON.parse(String(init?.body)),
@@ -214,7 +220,7 @@ describe("New request page", () => {
   /** Presses create at a later minute, so a re-read clock would show, and waits for the answer. */
   async function createLater(
     user: ReturnType<typeof userEvent.setup>,
-    sends: readonly unknown[],
+    sends: readonly RecordedSend[],
     minutes: number
   ) {
     const create = () => screen.getByRole("button", { name: "Create and copy link" });
