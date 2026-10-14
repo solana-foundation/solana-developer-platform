@@ -220,7 +220,8 @@ const SAVED_KEY_VARIABLE = [
  * its own `idempotencyKey.<operationId>` variable, minted only when none is
  * saved. The key is retired once the operation has a definitive answer: a
  * replay, a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below 500
- * other than 409 and 429 (the rule the dashboard uses). A timeout runs no test
+ * other than 409 and 429 (the dashboard's rule, except that on money routes it
+ * keeps the key on `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`). A timeout runs no test
  * script and a 5xx keeps the key, so pressing Send again retries the same
  * operation instead of starting another.
  * Each send remembers the key it used (a request-local variable) and retires
