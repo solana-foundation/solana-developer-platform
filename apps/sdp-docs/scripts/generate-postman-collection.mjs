@@ -219,9 +219,10 @@ const SAVED_KEY_VARIABLE = [
  * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
  * its own `idempotencyKey.<operationId>` variable, minted only when none is
  * saved. The key is retired once the operation has a definitive answer: a
- * replay, or any status below 500 other than 409 and 429 (the rule the
- * dashboard uses). A timeout runs no test script and a 5xx keeps the key, so
- * pressing Send again retries the same operation instead of starting another.
+ * replay, a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below 500
+ * other than 409 and 429 (the rule the dashboard uses). A timeout runs no test
+ * script and a 5xx keeps the key, so pressing Send again retries the same
+ * operation instead of starting another.
  * Each send remembers the key it used (a request-local variable) and retires
  * only that key, so a late answer to an earlier send never clears the key a
  * newer send saved.
@@ -251,7 +252,10 @@ function idempotencyKeyEvents() {
           "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
           "  const status = pm.response.code;",
           '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
-          "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
+          "  let code;",
+          "  try { code = pm.response.json().error.code; } catch (e) {}",
+          '  const outcomeUnknown = status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";',
+          "  if (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429)) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}",

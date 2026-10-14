@@ -86,7 +86,7 @@ With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a 
 
 The dashboard sends a key on every request to the routes that require one, and keeps it until it gets a definitive answer, so a retried click never moves money twice.
 
-The [Postman collection](/docs/reference/postman-collection) saves one key per operation for the required routes (the `idempotencyKey.<operationId>` collection variable). It mints the key only when the variable is unset and clears it after a definitive answer: a replay, or any status below `500` other than `409` and `429`. Resending after a timeout or a `5xx` reuses the key. Clear the variable yourself to start a new operation with an identical body.
+The [Postman collection](/docs/reference/postman-collection) saves one key per operation for the required routes (the `idempotencyKey.<operationId>` collection variable). It mints the key only when the variable is unset and clears it after a definitive answer: a replay, `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below `500` other than `409` and `429`. Resending after a timeout or a `5xx` reuses the key. Clear the variable yourself to start a new operation with an identical body.
 
 ## Recommendations
 

@@ -42,7 +42,10 @@
           "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
           "  const status = pm.response.code;",
           "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
-          "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
+          "  let code;",
+          "  try { code = pm.response.json().error.code; } catch (e) {}",
+          "  const outcomeUnknown = status === 409 && code === \"IDEMPOTENCY_KEY_OUTCOME_UNKNOWN\";",
+          "  if (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429)) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}"
