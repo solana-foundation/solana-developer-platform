@@ -80,26 +80,6 @@ $$;
 
 DROP TABLE custody_scope_defaults;
 
--- Deletes every custody config that belongs to a Production project, since the
--- project_environment foreign key below counts archived configs too. Stage and
--- Production applied this file while it still failed on such a config, and
--- held none; only dev drifted. It runs after custody_scope_defaults is dropped,
--- whose config foreign key is ON DELETE NO ACTION. The delete cascades to the
--- config's custody_wallets, and fails with 23503 if a payments, earn, dvp, or
--- issuance row still references one of those wallets. The cascade queues
--- checks for the deferred custody_configs_default_wallet_fkey (0056), and
--- dropping that key below fails while they are pending, so they fire here.
-DELETE FROM custody_configs config
- USING projects project
- WHERE project.id = config.project_id
-   AND project.environment <> 'sandbox';
-
-SET CONSTRAINTS custody_configs_default_wallet_fkey IMMEDIATE;
-
-ALTER TABLE custody_configs
-    DROP CONSTRAINT custody_configs_default_wallet_fkey,
-    DROP COLUMN default_wallet_id;
-
 -- Every clause except the default wallet is 0051's, unchanged.
 ALTER TABLE custody_connections
     DROP CONSTRAINT custody_connections_default_wallet_owner_fkey,
@@ -114,6 +94,93 @@ ALTER TABLE custody_connections
                 AND activated_at IS NOT NULL
             )
         );
+
+-- Deletes every custody config that belongs to a Production project, since the
+-- project_environment foreign key below counts archived configs too. Stage and
+-- Production applied this file while it still failed on such a config, and
+-- held none; only dev drifted. Every row that references the configs' wallets
+-- through a NO ACTION or RESTRICT foreign key (or a SET NULL one a CHECK
+-- forbids) is deleted first, children before parents. It runs after
+-- custody_scope_defaults is dropped, whose config foreign key is ON DELETE NO
+-- ACTION, and after the custody_connections block above, whose active-lifecycle
+-- CHECK no longer requires the default wallet. The cascade queues checks for
+-- the deferred custody_configs_default_wallet_fkey (0056), and dropping that
+-- key below fails while they are pending, so they fire here.
+CREATE TEMP TABLE drifted_custody_wallets ON COMMIT DROP AS
+SELECT wallet.id
+  FROM custody_wallets wallet
+  JOIN custody_configs config ON config.id = wallet.custody_config_id
+  JOIN projects project ON project.id = config.project_id
+ WHERE project.environment <> 'sandbox';
+
+CREATE TEMP TABLE drifted_earn_positions ON COMMIT DROP AS
+SELECT id FROM earn_positions WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+
+CREATE TEMP TABLE drifted_earn_withdrawal_requests ON COMMIT DROP AS
+SELECT id FROM earn_vault_withdrawal_requests
+ WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets)
+    OR position_id IN (SELECT id FROM drifted_earn_positions);
+
+CREATE TEMP TABLE drifted_earn_movements ON COMMIT DROP AS
+SELECT id FROM earn_movements
+ WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets)
+    OR position_id IN (SELECT id FROM drifted_earn_positions)
+    OR withdrawal_request_id IN (SELECT id FROM drifted_earn_withdrawal_requests);
+
+CREATE TEMP TABLE drifted_payment_transfers ON COMMIT DROP AS
+SELECT id FROM payment_transfers WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+
+DELETE FROM earn_external_wallet_withdrawal_request_transactions
+ WHERE position_id IN (SELECT id FROM drifted_earn_positions)
+    OR withdrawal_request_id IN (SELECT id FROM drifted_earn_withdrawal_requests)
+    OR consumed_action_id IN (
+        SELECT id FROM earn_vault_withdrawal_request_actions
+         WHERE withdrawal_request_id IN (SELECT id FROM drifted_earn_withdrawal_requests)
+    );
+
+DELETE FROM earn_external_wallet_transactions
+ WHERE position_id IN (SELECT id FROM drifted_earn_positions)
+    OR movement_id IN (SELECT id FROM drifted_earn_movements);
+
+DELETE FROM earn_split_swap_advisories
+ WHERE resolving_movement_id IN (SELECT id FROM drifted_earn_movements);
+
+DELETE FROM earn_movements WHERE id IN (SELECT id FROM drifted_earn_movements);
+DELETE FROM earn_vault_withdrawal_requests WHERE id IN (SELECT id FROM drifted_earn_withdrawal_requests);
+DELETE FROM earn_positions WHERE id IN (SELECT id FROM drifted_earn_positions);
+
+DELETE FROM payment_requests
+ WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets)
+    OR fulfilled_by_transfer_id IN (SELECT id FROM drifted_payment_transfers);
+DELETE FROM payment_transfer_recipients
+ WHERE transfer_id IN (SELECT id FROM drifted_payment_transfers);
+DELETE FROM payment_transfers WHERE id IN (SELECT id FROM drifted_payment_transfers);
+DELETE FROM payment_transfer_batches WHERE source_custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM payment_recurring_payment_update_attempts WHERE new_source_custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM payment_recurring_payments WHERE source_custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+
+DELETE FROM wallet_operations WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM issuance_transactions WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM issued_tokens WHERE signing_custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM helius_rings_wallets WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM dvp_leg_funding_claims WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM dvp_settlement_wallets WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+DELETE FROM api_key_wallet_policy_bindings WHERE custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+
+UPDATE custody_connections
+   SET default_custody_wallet_id = NULL
+ WHERE default_custody_wallet_id IN (SELECT id FROM drifted_custody_wallets);
+
+DELETE FROM custody_configs config
+ USING projects project
+ WHERE project.id = config.project_id
+   AND project.environment <> 'sandbox';
+
+SET CONSTRAINTS custody_configs_default_wallet_fkey IMMEDIATE;
+
+ALTER TABLE custody_configs
+    DROP CONSTRAINT custody_configs_default_wallet_fkey,
+    DROP COLUMN default_wallet_id;
 
 -- custody_connections_scope_check makes project_id NOT NULL whenever scope is
 -- 'project', so the equality below cannot pass on NULL.
