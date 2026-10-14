@@ -17,6 +17,9 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+  requestApiKeyGrantChannel,
   resolveCreateWalletScope,
   resolveUpdateWalletScope,
   resolveWalletBindingsInScope,
@@ -132,6 +135,10 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     walletPurpose,
   } = c.req.valid("json");
 
+  // Refused before any wallet is provisioned; the service refuses them again.
+  assertGrantableApiKeyGrants(actor.role, grants);
+  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), grants);
+
   const provisionWalletRequested = provisionWallet !== undefined;
 
   const projectId = requireProjectId(c);
@@ -195,6 +202,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       projectId,
       createdByUserId: actor.userId,
       actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
       name,
       description,
       grants,
@@ -323,6 +331,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       organizationId: actor.organizationId,
       projectId,
       actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
       name: body.name,
       description: body.description,
       grants: body.grants,

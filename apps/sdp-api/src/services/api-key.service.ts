@@ -21,7 +21,11 @@ import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import { assertGrantableApiKeyGrants } from "./api-key-scope.service";
+import {
+  type ApiKeyGrantChannel,
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+} from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -54,6 +58,8 @@ export interface CreateApiKeyInput {
   createdByUserId: string;
   /** The signed-in person's organization role: a key holds only actions they hold. */
   actorRole: OrganizationRole;
+  /** The deployment's release channel: a key holds only actions it runs. */
+  grantChannel: ApiKeyGrantChannel;
   name: string;
   description?: string | null;
   grants: Action[];
@@ -68,6 +74,8 @@ export interface UpdateApiKeyInput {
   organizationId: string;
   projectId: string;
   actorRole: OrganizationRole;
+  /** The deployment's release channel: new grants must be actions it runs. */
+  grantChannel: ApiKeyGrantChannel;
   name?: string;
   description?: string | null;
   grants?: Action[];
@@ -318,6 +326,7 @@ export class ApiKeyService {
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
     assertGrantableApiKeyGrants(input.actorRole, input.grants);
+    assertApiKeyGrantsInReleaseChannel(input.grantChannel, input.grants);
 
     // The organization must still be active, and the share lock holds that
     // until this transaction commits: a concurrent deletion's
@@ -413,6 +422,19 @@ export class ApiKeyService {
     assertTenantClaim(this.scope, input, "ApiKeyService.updateApiKey");
     if (input.grants !== undefined) {
       assertGrantableApiKeyGrants(input.actorRole, input.grants);
+      // Only a grant the key does not hold yet is being given now: one it kept
+      // from before a channel change survives an edit that sends it back.
+      const current = await this.db.queryOne<{ grants: unknown }>(
+        `SELECT grants FROM api_keys
+          WHERE id = $1 AND organization_id = $2 AND project_id = $3
+          FOR UPDATE`,
+        [input.keyId, input.organizationId, input.projectId]
+      );
+      const held = current ? parseGrantsColumn(current.grants) : [];
+      assertApiKeyGrantsInReleaseChannel(
+        input.grantChannel,
+        input.grants.filter((grant) => !held.includes(grant))
+      );
     }
 
     const updates: string[] = [];

@@ -1,10 +1,20 @@
 import { hashString } from "@sdp/payments/hash";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { DatabaseClient, PreparedStatement, QueryManyResult } from "@/db/client";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { ApiKeyService } from "./api-key.service";
+import type { ApiKeyGrantChannel } from "./api-key-scope.service";
 
 const TEST_SCOPE = createTenantScope({ organizationId: "org_1", projectId: "prj_1" });
+const EXPERIMENTAL: ApiKeyGrantChannel = {
+  releaseChannel: "experimental",
+  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+};
+const STABLE: ApiKeyGrantChannel = {
+  releaseChannel: "stable",
+  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+};
 
 type RunCall = { sql: string; values: unknown[] };
 
@@ -36,12 +46,16 @@ class RecordingStatement implements PreparedStatement {
 class RecordingDb implements DatabaseClient {
   readonly runs: RunCall[] = [];
 
+  /** @param heldGrants - The grants the key row stores, for an update's read. */
+  constructor(private readonly heldGrants: string[] = []) {}
+
   prepare(query: string): PreparedStatement {
     return new RecordingStatement(this.runs, query);
   }
 
-  queryOne<T = Record<string, unknown>>(): Promise<T | null> {
-    throw new Error("not implemented");
+  async queryOne<T = Record<string, unknown>>(): Promise<T | null> {
+    // SAFETY: the only queryOne an update issues reads the key's grants column.
+    return { grants: this.heldGrants } as T;
   }
 
   queryMany<T = Record<string, unknown>>(): Promise<T[]> {
@@ -195,6 +209,7 @@ describe("ApiKeyService.createApiKey grant guard", () => {
         organizationId: "org_1",
         projectId: "prj_1",
         actorRole: "admin",
+        grantChannel: EXPERIMENTAL,
         createdByUserId: "usr_1",
         name: "escalated",
         grants: ["api_keys.manage"],
@@ -213,6 +228,7 @@ describe("ApiKeyService.createApiKey grant guard", () => {
         organizationId: "org_1",
         projectId: "prj_1",
         actorRole: "member",
+        grantChannel: EXPERIMENTAL,
         createdByUserId: "usr_1",
         name: "escalated",
         grants: ["issuance.authority"],
@@ -223,11 +239,72 @@ describe("ApiKeyService.createApiKey grant guard", () => {
   });
 });
 
+describe("ApiKeyService grants outside the release channel", () => {
+  it("refuses a create granting a module the channel does not run, naming it", async () => {
+    const db = new RecordingDb();
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await expect(
+      service.createApiKey({
+        organizationId: "org_1",
+        projectId: "prj_1",
+        actorRole: "admin",
+        grantChannel: STABLE,
+        createdByUserId: "usr_1",
+        name: "out of channel",
+        grants: ["transfers.read", "issuance.execute", "earn.execute"],
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message:
+        "Grants outside this deployment's stable release channel: issuance.execute, earn.execute",
+    });
+
+    expect(db.runs).toHaveLength(0);
+  });
+
+  it("refuses an update adding one, and writes nothing", async () => {
+    const db = new RecordingDb(["transfers.read"]);
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await expect(
+      service.updateApiKey({
+        keyId: "key_1",
+        organizationId: "org_1",
+        projectId: "prj_1",
+        actorRole: "admin",
+        grantChannel: STABLE,
+        grants: ["transfers.read", "dvp.read"],
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", details: { actions: ["dvp.read"] } });
+
+    expect(db.runs).toHaveLength(0);
+  });
+
+  it("keeps one the key already held when an edit sends it back", async () => {
+    const db = new RecordingDb(["transfers.read", "dvp.read"]);
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await service.updateApiKey({
+      keyId: "key_1",
+      organizationId: "org_1",
+      projectId: "prj_1",
+      actorRole: "admin",
+      grantChannel: STABLE,
+      grants: ["transfers.read", "transfers.execute", "dvp.read"],
+    });
+
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0].values[0]).toEqual(["transfers.read", "transfers.execute", "dvp.read"]);
+  });
+});
+
 describe("ApiKeyService.updateApiKey", () => {
   const base = {
     keyId: "key_1",
     organizationId: "org_1",
     projectId: "prj_1",
+    grantChannel: EXPERIMENTAL,
   };
 
   it("refuses a grant no API key may hold", async () => {

@@ -32,7 +32,7 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 
 <ApiKeyGrantsTable />
 
-Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization and project administration, and every provider, credential or connection setup (`configure`). A create or update naming one is refused with `400`.
+Some actions are never granted to a key, because keys are credentials, not administrators: key, member, organization and project administration, and every provider, credential or connection setup (`configure`). A create or update naming one is refused with `400`. So is a grant on a module this deployment does not run; a key that already holds one keeps it when an update sends it back.
 
 A request without the route's action is refused with `403 INSUFFICIENT_PERMISSIONS`, and `error.details.action` names the missing action. Nothing runs or is recorded on refusal. Grants are read on every request, so a change applies to the key's next request.
 

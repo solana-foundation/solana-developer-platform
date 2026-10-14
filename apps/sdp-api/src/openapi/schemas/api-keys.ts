@@ -238,7 +238,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     }),
     grants: withOpenApi(apiKeyGrantsSchema, {
       description:
-        "The actions the key holds, `module.verb`. Required; an empty list grants nothing. Unknown actions, and actions no API key may hold (`api_keys.*`, `members.*`, `organizations.manage`, `projects.manage`, any `*.configure`), are refused with 400. You can grant only actions you hold yourself.",
+        "The actions the key holds, `module.verb`. Required; an empty list grants nothing. Unknown actions, and actions no API key may hold (`api_keys.*`, `members.*`, `organizations.manage`, `projects.manage`, any `*.configure`), are refused with 400, as are actions of a module this deployment's release channel does not run. You can grant only actions you hold yourself.",
       example: ["transfers.execute", "counterparties.read", "wallets.read"],
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
@@ -315,7 +315,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     }),
     grants: withOpenApi(apiKeyGrantsSchema.optional(), {
       description:
-        "Replaces the key's grants. Omit to keep them. The same rules as on create apply.",
+        "Replaces the key's grants. Omit to keep them. The same rules as on create apply, except that an action the key already holds may be sent back even when this deployment's release channel no longer runs its module.",
       example: ["transfers.read", "transfers.execute"],
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {

@@ -1,3 +1,4 @@
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   asTransactionalClient,
@@ -26,6 +27,7 @@ const INPUT: CreateApiKeyInput = {
   projectId: TEST_PROJECT.id,
   createdByUserId: TEST_USER.id,
   actorRole: "admin",
+  grantChannel: { releaseChannel: "experimental", rampProviderStages: SDP_RAMP_PROVIDER_STAGES },
   name: "Racing key",
   grants: ["transfers.read"],
 };

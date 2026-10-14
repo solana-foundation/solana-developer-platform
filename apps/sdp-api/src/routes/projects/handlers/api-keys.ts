@@ -11,6 +11,9 @@ import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+  requestApiKeyGrantChannel,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
@@ -113,6 +116,10 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     walletPurpose,
   } = body;
 
+  // Refused before any wallet is provisioned; the service refuses them again.
+  assertGrantableApiKeyGrants(actor.role, grants);
+  assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), grants);
+
   const provisionWalletRequested = provisionWallet !== undefined;
 
   const walletSelection = resolveCreateWalletScope({
@@ -178,6 +185,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       projectId,
       createdByUserId: actor.userId,
       actorRole: actor.role,
+      grantChannel: requestApiKeyGrantChannel(c),
       name,
       description,
       grants,
