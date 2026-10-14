@@ -787,8 +787,8 @@ jobs:
           SERVICE: sdp-api
           ENV: production
           STATUS: >-
-            ${{ needs.deploy.result == 'success' && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
-                needs.deploy.result == 'success' && 'web-held' ||
+            ${{ needs.deploy.result == 'success' && (needs.rollback.result == 'success' || needs.rollback.result == 'skipped') && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
+                needs.deploy.result == 'success' && (needs.rollback.result == 'success' || needs.rollback.result == 'skipped') && 'web-held' ||
                 needs.rollback.outputs.rolled_back == 'true' && 'rolled-back' ||
                 needs.deploy.result == 'cancelled' && 'cancelled' ||
                 'failure' }}

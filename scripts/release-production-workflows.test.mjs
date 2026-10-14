@@ -187,7 +187,7 @@ test("a deploy whose web release did not succeed reports web-held", () => {
   assertLine(notifyResult, "    needs: [deploy, rollback, release-web]");
   assert.match(
     notifyResult,
-    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.rollback\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
+    /needs\.deploy\.result == 'success' && \(needs\.rollback\.result == 'success' \|\| needs\.rollback\.result == 'skipped'\) && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && \(needs\.rollback\.result == 'success' \|\| needs\.rollback\.result == 'skipped'\) && 'web-held' \|\|\n\s+needs\.rollback\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
   );
   assert.match(
     fs.readFileSync(path.join(here, "notify-slack.sh"), "utf8"),
