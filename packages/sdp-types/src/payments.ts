@@ -791,6 +791,11 @@ export type PaymentSubscriptionCollectionAttemptInitialStatus =
 export const IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+export function isInFlightRecurringPaymentAttemptStatus(
+  status: PaymentRecurringPaymentAttemptStatus
+): boolean {
+  return IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES.some((candidate) => candidate === status);
+}
 export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
   "canceling",
   "resuming",

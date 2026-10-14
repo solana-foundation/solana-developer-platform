@@ -1,9 +1,11 @@
+import { decideRecurringPaymentUpdateTransition } from "@sdp/payments/recurring-payment-lifecycle";
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
   PaymentRecurringPaymentCollectionResponse,
   PaymentRecurringPaymentResponse,
 } from "@sdp/types";
+import { isInFlightRecurringPaymentAttemptStatus } from "@sdp/types";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -18,7 +20,11 @@ import {
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
-import { getIdempotencyClaim, getIdempotencyRecordKey } from "@/middleware/idempotency";
+import {
+  getIdempotencyClaim,
+  getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
+} from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -197,7 +203,13 @@ export const findRecurringPaymentCancelReplay = findLifecycleReplay("cancel");
 /** Resume, answered from its resume attempt, before money admission runs. */
 export const findRecurringPaymentResumeReplay = findLifecycleReplay("resume");
 
-/** PATCH, answered from its update attempt; the same key with other terms is a 422. */
+/**
+ * PATCH, answered from its update attempt; the same key with other terms is a
+ * 422. The cron never recovers an `updating` schedule, so a stale in-flight
+ * attempt of this same request (it crashed after its claim) is not answered:
+ * the handler runs and resumes it under the same key, as another key with the
+ * same terms would.
+ */
 export async function findRecurringPaymentUpdateReplay(
   c: AppContext,
   input: MovementStepInput<AuthorizedRecurringPaymentUpdate>,
@@ -207,8 +219,22 @@ export async function findRecurringPaymentUpdateReplay(
     ...tenant(c),
     idempotencyKey,
   });
+  const { recurringPayment } = input.authorized;
+  if (
+    attempt !== null &&
+    attempt.recurring_payment_id === recurringPayment.id &&
+    attempt.idempotency_fingerprint === getIdempotencyFingerprint(c) &&
+    isInFlightRecurringPaymentAttemptStatus(attempt.status) &&
+    decideRecurringPaymentUpdateTransition({
+      status: recurringPayment.status,
+      updatedAt: recurringPayment.updated_at,
+      nowIso: new Date().toISOString(),
+    }) === "recoverable"
+  ) {
+    return null;
+  }
   // The update attempt records the key layer's fingerprint; the step compares it.
-  return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
+  return answerFromAttempt(c, recurringPayment, attempt);
 }
 
 /**

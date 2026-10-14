@@ -1,3 +1,5 @@
+import type { DatabaseExecutor } from "./client";
+
 const POSTGRES_UNIQUE_VIOLATION = "23505";
 
 export function buildInClause(length: number): string {
@@ -19,16 +21,23 @@ export function isPostgresUniqueViolation(error: unknown): boolean {
 
 /**
  * A keyed custody wallet create lost the race for its request id (migration
- * 0131): another attempt under the same key already recorded the wallet.
+ * 0131): another attempt under the same key already recorded the wallet. The
+ * losing insert can fail on either unique constraint: the request id's, or the
+ * owner-and-wallet one when the provider deduped on the id and returned the
+ * winner's own wallet. So the row is looked up by the request id instead of
+ * judging the error by its constraint name.
  */
-export function isCustodyWalletIdempotencyViolation(error: unknown): boolean {
-  return (
-    isPostgresUniqueViolation(error) &&
-    typeof error === "object" &&
-    error !== null &&
-    "constraint" in error &&
-    error.constraint === "custody_wallets_idempotency_request_id_idx"
+export async function isCustodyWalletRequestRecorded(
+  db: DatabaseExecutor,
+  error: unknown,
+  requestId: string | null
+): Promise<boolean> {
+  if (requestId === null || !isPostgresUniqueViolation(error)) return false;
+  const row = await db.queryOne<{ id: string }>(
+    "SELECT id FROM custody_wallets WHERE idempotency_request_id = ?",
+    [requestId]
   );
+  return row !== null;
 }
 
 export function parsePostgresJson<T>(value: unknown): T {
