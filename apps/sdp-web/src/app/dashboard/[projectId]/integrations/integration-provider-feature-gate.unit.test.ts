@@ -15,13 +15,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/flags", () => ({
-  custody: mocks.custody,
-  payments: mocks.payments,
-}));
+// Custody and Payments have no flag of their own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({
-  isModuleInDeploymentReleaseChannel: (module: string) =>
-    module === "compliance" && mocks.complianceInChannel(),
+  isModuleInDeploymentReleaseChannel: (module: string) => {
+    if (module === "custody") return mocks.custody();
+    if (module === "payments") return mocks.payments();
+    return module === "compliance" && mocks.complianceInChannel();
+  },
 }));
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -43,9 +43,9 @@ describe("integration provider route feature gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ userId: null, orgId: null, orgRole: null });
-    mocks.custody.mockResolvedValue(false);
+    mocks.custody.mockReturnValue(false);
     mocks.rampProviders.mockResolvedValue([]);
-    mocks.payments.mockResolvedValue(false);
+    mocks.payments.mockReturnValue(false);
     mocks.complianceInChannel.mockReturnValue(false);
   });
 
@@ -70,9 +70,9 @@ describe("integration provider route availability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
-    mocks.custody.mockResolvedValue(true);
+    mocks.custody.mockReturnValue(true);
     mocks.rampProviders.mockResolvedValue(["moonpay", "bvnk"]);
-    mocks.payments.mockResolvedValue(true);
+    mocks.payments.mockReturnValue(true);
     mocks.complianceInChannel.mockReturnValue(true);
     mocks.organizationFetch.mockResolvedValue({
       linked: true,
