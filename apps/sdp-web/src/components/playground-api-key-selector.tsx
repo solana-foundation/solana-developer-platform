@@ -63,12 +63,6 @@ async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: 
   }
 }
 
-const ROLE_LABEL_KEYS = {
-  api_admin: "DashboardCustody.admin",
-  api_readonly: "DashboardCustody.readOnly",
-  api_developer: "DashboardCustody.developer",
-} as const;
-
 // The key line names the environment in lower case, as part of the key's label ("Server · production").
 const KEY_ENVIRONMENT_LABEL_KEYS = {
   production: "Shared.SharedComponents.apiKeyProduction",
@@ -244,7 +238,6 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
   const fieldId = useId();
   const [open, setOpen] = useState(false);
   const { attached, resolution } = pasted;
-  const roleKey = attached ? labelKeyFor(ROLE_LABEL_KEYS, attached.role) : null;
   const environmentKey = attached
     ? labelKeyFor(KEY_ENVIRONMENT_LABEL_KEYS, attached.environment)
     : null;
@@ -315,12 +308,6 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
       ) : null}
       {resolution.kind !== "checking" && resolution.kind !== "rejected" ? (
         <>
-          {roleKey ? (
-            <>
-              <Separator />
-              <span className="text-secondary">{t(roleKey)}</span>
-            </>
-          ) : null}
           <Separator />
           <span className="text-primary">{SOLANA_CLUSTER_LABELS[cluster]}</span>
         </>

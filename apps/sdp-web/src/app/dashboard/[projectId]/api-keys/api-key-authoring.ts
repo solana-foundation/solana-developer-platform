@@ -1,16 +1,16 @@
 import {
-  type AllowedOperation,
+  type Action,
+  type ActionModule,
+  type ActionVerb,
+  API_KEY_GRANTABLE_ACTIONS,
   type ApiKeyEnvironment,
-  type ApiKeyRole,
   type ApiKeyWalletScope,
-  isOperationFamily,
-  normalizeAllowedOperations,
-  OPERATION_FAMILIES,
-  OPERATION_FAMILY_BY_TYPE,
-  type OperationFamily,
-  type OperationType,
-  operationTypesInFamily,
-  type Permission,
+  actionModuleOf,
+  actionOwnerOf,
+  actionVerbOf,
+  grantsCoverAction,
+  normalizeGrants,
+  type SdpModule,
 } from "@sdp/types";
 
 export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "review"] as const;
@@ -18,139 +18,126 @@ export const API_KEY_AUTHORING_STEPS = ["details", "permissions", "wallets", "re
 export type ApiKeyAuthoringStep = (typeof API_KEY_AUTHORING_STEPS)[number];
 export type ApiKeyAuthoringMode = "create" | "edit";
 
-/** Whether a key may perform every operation, or only the ones ticked. */
-export type OperationsScope = "all" | "selected";
-
 export interface ApiKeyAuthoringDraft {
   name: string;
-  role: ApiKeyRole;
   expiresAt: string;
   walletScope: ApiKeyWalletScope;
   selectedWalletIds: string[];
   defaultWalletId: string;
-  operationsScope: OperationsScope;
-  /** Ticked operations. A family entry covers every type in it. */
-  selectedOperations: AllowedOperation[];
+  /** The key's explicit grants, in registry order. */
+  grants: Action[];
 }
 
 export interface ApiKeyAuthoringExistingKey {
   id: string;
   name: string;
-  role: ApiKeyRole;
   environment: ApiKeyEnvironment;
-  permissions: Permission[] | null;
+  grants: Action[];
   expiresAt: string | null;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
   signingWalletIds: string[];
-  /** Empty means the key is not restricted. */
-  allowedOperations: AllowedOperation[];
 }
 
 export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
   return {
     name: "",
-    role: "api_developer",
     expiresAt: "",
     walletScope: "all",
     selectedWalletIds: [],
     defaultWalletId: "",
-    operationsScope: "all",
-    selectedOperations: [],
+    grants: [],
   };
 }
 
-/** How much of a family is ticked: every type, some of them, or none. */
-export type FamilyState = "all" | "some" | "none";
+/**
+ * The actions this deployment lets a key be granted: every grantable action
+ * whose routes run in its release channel (`core` always does). Computed on
+ * the server, where the channel is known, and passed to the picker.
+ */
+export function grantableActionsInChannel(
+  isModuleInChannel: (module: SdpModule) => boolean
+): Action[] {
+  return API_KEY_GRANTABLE_ACTIONS.filter((action) => {
+    const owner = actionOwnerOf(action);
+    return owner === "core" || isModuleInChannel(owner);
+  });
+}
 
-export function familyState(
-  selected: readonly AllowedOperation[],
-  family: OperationFamily
-): FamilyState {
-  if (selected.includes(family)) {
-    return "all";
+/** One picker row: a module and the verbs a key may be granted on it here. */
+export interface GrantModuleRow {
+  module: ActionModule;
+  actions: Action[];
+}
+
+/** The offered actions grouped by module, in registry order. */
+export function grantModuleRows(offered: readonly Action[]): GrantModuleRow[] {
+  const rows: GrantModuleRow[] = [];
+  for (const action of offered) {
+    const module = actionModuleOf(action);
+    const row = rows.find((candidate) => candidate.module === module);
+    if (row) row.actions.push(action);
+    else rows.push({ module, actions: [action] });
   }
-  const types = operationTypesInFamily(family);
-  const ticked = types.filter((type) => selected.includes(type));
-  if (ticked.length === 0) {
-    return "none";
-  }
-  return ticked.length === types.length ? "all" : "some";
+  return rows;
 }
 
-export function isOperationTypeTicked(
-  selected: readonly AllowedOperation[],
-  type: OperationType
-): boolean {
-  return selected.includes(type) || selected.includes(OPERATION_FAMILY_BY_TYPE[type]);
-}
+/** A verb toggle's state: held, included by the module's manage or execute, or off. */
+export type GrantToggleState = "on" | "implied" | "off";
 
-function withoutFamily(
-  selected: readonly AllowedOperation[],
-  family: OperationFamily
-): AllowedOperation[] {
-  return selected.filter(
-    (entry) =>
-      entry !== family && (isOperationFamily(entry) || OPERATION_FAMILY_BY_TYPE[entry] !== family)
-  );
-}
-
-/** Ticks a whole family unless it is already fully ticked, then clears it and every type under it. */
-export function toggleFamily(
-  selected: readonly AllowedOperation[],
-  family: OperationFamily
-): AllowedOperation[] {
-  const cleared = withoutFamily(selected, family);
-  return familyState(selected, family) === "all"
-    ? normalizeAllowedOperations(cleared)
-    : normalizeAllowedOperations([...cleared, family]);
+export function grantToggleState(grants: readonly Action[], action: Action): GrantToggleState {
+  if (grants.includes(action)) return "on";
+  return grantsCoverAction(grants, action) ? "implied" : "off";
 }
 
 /**
- * Ticks or clears one type. A fully ticked family is stored as the family, and
- * unticking one of its types turns it into the remaining types.
+ * Turns one action on or off. Each verb is its own toggle, so a module can
+ * hold both `manage` and `execute`. `read` is never stored next to the
+ * module's `manage` or `execute`, which include it; an included read cannot
+ * be turned off on its own.
  */
-export function toggleOperationType(
-  selected: readonly AllowedOperation[],
-  type: OperationType
-): AllowedOperation[] {
-  const family = OPERATION_FAMILY_BY_TYPE[type];
-  const familyTypes = operationTypesInFamily(family);
-  const tickedTypes = new Set(familyTypes.filter((item) => isOperationTypeTicked(selected, item)));
-
-  if (tickedTypes.has(type)) {
-    tickedTypes.delete(type);
-  } else {
-    tickedTypes.add(type);
+export function toggleGrant(grants: readonly Action[], action: Action): Action[] {
+  if (grants.includes(action)) {
+    return grants.filter((grant) => grant !== action);
   }
-
-  const rest = withoutFamily(selected, family);
-  if (tickedTypes.size === familyTypes.length) {
-    return normalizeAllowedOperations([...rest, family]);
+  const next = [...grants, action];
+  const verb = actionVerbOf(action);
+  if (verb === "manage" || verb === "execute") {
+    const module = actionModuleOf(action);
+    return normalizeGrants(
+      next.filter((grant) => !(actionModuleOf(grant) === module && actionVerbOf(grant) === "read"))
+    );
   }
-  return normalizeAllowedOperations([...rest, ...tickedTypes]);
+  return normalizeGrants(next);
 }
 
-/** The list sent to the API. Empty means the key is not restricted. */
-export function buildAllowedOperations(draft: ApiKeyAuthoringDraft): AllowedOperation[] {
-  if (draft.operationsScope === "all") {
-    return [];
-  }
-  return normalizeAllowedOperations(draft.selectedOperations);
+/** Clears every grant on one module. */
+export function clearModuleGrants(grants: readonly Action[], module: ActionModule): Action[] {
+  return grants.filter((grant) => actionModuleOf(grant) !== module);
 }
 
-/** One line for the review step and the keys table. */
-export function summarizeAllowedOperations(allowedOperations: readonly AllowedOperation[]): {
-  kind: "unrestricted" | "families" | "mixed";
-  families: OperationFamily[];
-  typeCount: number;
-} {
-  if (allowedOperations.length === 0) {
-    return { kind: "unrestricted", families: [], typeCount: 0 };
+/**
+ * "Everything": every offered action, written out. What is stored is this
+ * explicit list, so an action added to SDP later reaches no existing key.
+ */
+export function everythingGrants(offered: readonly Action[]): Action[] {
+  return normalizeGrants([...offered]);
+}
+
+/** The verbs held on each module, an included read listed too, for summaries. */
+export function summarizeGrants(
+  grants: readonly Action[]
+): { module: ActionModule; verbs: ActionVerb[] }[] {
+  const held = normalizeGrants(grants);
+  const rows: { module: ActionModule; verbs: ActionVerb[] }[] = [];
+  for (const action of API_KEY_GRANTABLE_ACTIONS) {
+    if (!grantsCoverAction(held, action)) continue;
+    const module = actionModuleOf(action);
+    const row = rows.find((candidate) => candidate.module === module);
+    if (row) row.verbs.push(actionVerbOf(action));
+    else rows.push({ module, verbs: [actionVerbOf(action)] });
   }
-  const families = OPERATION_FAMILIES.filter((family) => allowedOperations.includes(family));
-  const typeCount = allowedOperations.filter((entry) => !isOperationFamily(entry)).length;
-  return { kind: typeCount > 0 ? "mixed" : "families", families, typeCount };
+  return rows;
 }
 
 export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): {

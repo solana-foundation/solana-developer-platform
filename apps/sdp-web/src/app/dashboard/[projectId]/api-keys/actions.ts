@@ -9,7 +9,6 @@ import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/
 import {
   type ApiKeyAuthoringDraft,
   type ApiKeyAuthoringMode,
-  buildAllowedOperations,
   buildEndpointWalletPayload,
 } from "./api-key-authoring";
 import {
@@ -59,10 +58,10 @@ export interface SaveApiKeyAuthoringInput {
   keyId?: string;
   draft: ApiKeyAuthoringDraft;
   /**
-   * Edit only: whether the user changed the operations section. A key can hold a stored
-   * value the API no longer accepts, so an untouched list is never sent back.
+   * Edit only: whether the user changed the permissions step. An untouched key keeps
+   * its stored grants, so a grant this deployment does not offer is never dropped.
    */
-  operationsTouched?: boolean;
+  grantsTouched?: boolean;
 }
 
 export type SaveApiKeyAuthoringResult =
@@ -80,17 +79,15 @@ function parseOptionalExpiration(value: string): string | null {
   return parsed.toISOString();
 }
 
-function validateAuthoringDraft(
-  draft: ApiKeyAuthoringDraft
-): "name" | "wallet" | "operations" | null {
+function validateAuthoringDraft(draft: ApiKeyAuthoringDraft): "name" | "wallet" | "grants" | null {
   if (!draft.name.trim()) {
     return "name";
   }
   if (draft.walletScope === "selected" && draft.selectedWalletIds.length === 0) {
     return "wallet";
   }
-  if (draft.operationsScope === "selected" && draft.selectedOperations.length === 0) {
-    return "operations";
+  if (draft.grants.length === 0) {
+    return "grants";
   }
   return null;
 }
@@ -179,8 +176,8 @@ export async function saveApiKeyAuthoringAction(
   if (validationError === "wallet") {
     return { ok: false, message: t("DashboardCustody.apiKeyWalletRequired") };
   }
-  if (validationError === "operations") {
-    return { ok: false, message: t("DashboardCustody.apiKeyOperationsRequired") };
+  if (validationError === "grants") {
+    return { ok: false, message: t("DashboardCustody.apiKeyGrantsRequired") };
   }
 
   let expiresAt: string | null;
@@ -191,7 +188,6 @@ export async function saveApiKeyAuthoringAction(
   }
 
   const walletPayload = buildEndpointWalletPayload(input.draft);
-  const allowedOperations = buildAllowedOperations(input.draft);
 
   try {
     const client = await createSdpApiClient();
@@ -203,9 +199,8 @@ export async function saveApiKeyAuthoringAction(
         method: "POST",
         body: JSON.stringify({
           name: input.draft.name.trim(),
-          role: input.draft.role,
+          grants: input.draft.grants,
           ...walletPayload,
-          ...(allowedOperations.length > 0 ? { allowedOperations } : {}),
           ...(expiresAt ? { expiresAt } : {}),
         }),
       });
@@ -237,9 +232,7 @@ export async function saveApiKeyAuthoringAction(
         // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
         // next to any wallet field, null included.
         ...walletPayload,
-        ...(input.operationsTouched
-          ? { allowedOperations: allowedOperations.length > 0 ? allowedOperations : null }
-          : {}),
+        ...(input.grantsTouched ? { grants: input.draft.grants } : {}),
       }),
     });
 

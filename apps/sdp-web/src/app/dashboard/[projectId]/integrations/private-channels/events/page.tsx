@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import { hasPermission } from "@sdp/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -21,8 +20,7 @@ export default async function PrivateChannelsEventsPage() {
     createSdpApiClient(),
     requestProjectId(),
   ]);
-  const { permissions } = resolveDashboardAccess(orgRole);
-  const canViewRawPayload = hasPermission(permissions, "org:admin");
+  const canViewRawPayload = resolveDashboardAccess(orgRole).mayPerform("organizations.manage");
   const [events, references] = await Promise.all([loadEvents(client), loadEventReferences(client)]);
 
   return (

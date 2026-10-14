@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { grantableActionsInChannel } from "../api-key-authoring";
 import { fetchApiKeyAuthoringWallets } from "../api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "../api-key-authoring-workspace";
 
@@ -22,5 +24,11 @@ export default async function NewApiKeyPage() {
 
   const client = await createSdpApiClient();
   const wallets = await fetchApiKeyAuthoringWallets(client);
-  return <ApiKeyAuthoringWorkspace mode="create" wallets={wallets} />;
+  return (
+    <ApiKeyAuthoringWorkspace
+      mode="create"
+      wallets={wallets}
+      offeredActions={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
+    />
+  );
 }
