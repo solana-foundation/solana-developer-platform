@@ -83,6 +83,22 @@ describe("movement steps", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("marks a record answer as a replay", async () => {
+    const app = testApp();
+    claimFromHeader(app);
+    app.post(
+      "/v1/move",
+      authorize(() => ({ walletId: "w1" })),
+      replayFromRecord(async () => ({ fingerprint: "fp", respond: () => new Response("row") })),
+      () => new Response("moved")
+    );
+
+    const response = await post(app, { "Idempotency-Key": "ran" });
+
+    expect(await response.text()).toBe("row");
+    expect(response.headers.get("Idempotent-Replayed")).toBe("true");
+  });
+
   it("refuses another request under a key whose row recorded a different fingerprint", async () => {
     const respond = vi.fn(() => new Response("row"));
     const app = testApp();

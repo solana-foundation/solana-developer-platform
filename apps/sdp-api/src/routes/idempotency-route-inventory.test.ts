@@ -7,7 +7,7 @@ import { declaredValidation } from "@/middleware/validate";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 
 /**
- * The Idempotency-Key standard as a build gate (HOO-1918, ADR 0008).
+ * The Idempotency-Key standard as a build gate (HOO-1918, ADR 0009).
  *
  * Every POST, PATCH, PUT and DELETE route of a module at `stable`:
  * - declares `idempotent()`, or is exempt below with a reason;

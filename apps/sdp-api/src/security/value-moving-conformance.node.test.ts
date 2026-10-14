@@ -47,7 +47,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
       evidence: "resolved.scope.auth.organizationId",
     },
-    // Access before the key, the row replay before admission (ADR 0008).
+    // Access before the key, the row replay before admission (ADR 0009).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
@@ -740,7 +740,7 @@ describe("value-moving authorization and replay conformance", () => {
       }
     }
     // Ramps still admit through the request gate. Transfers and batches run
-    // authorize -> idempotent -> replayFromRecord -> admit instead (ADR 0008):
+    // authorize -> idempotent -> replayFromRecord -> admit instead (ADR 0009):
     // access before the key is claimed, a replay before admission.
     for (const contract of contracts.filter((candidate) => candidate.family === "ramps")) {
       expect(contract.authorization.through).toBe("requestGate(");

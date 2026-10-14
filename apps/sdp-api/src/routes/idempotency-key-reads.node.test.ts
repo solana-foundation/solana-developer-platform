@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ratchet on hand-rolled Idempotency-Key handling (HOO-1918, ADR 0008).
+ * Ratchet on hand-rolled Idempotency-Key handling (HOO-1918, ADR 0009).
  *
  * The shared step (`middleware/idempotency.ts`) owns the header. Modules still
  * on their own handling read it directly; this pins how often, per file. The

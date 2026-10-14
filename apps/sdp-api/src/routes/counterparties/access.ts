@@ -11,7 +11,7 @@ import {
 import type { counterpartyIdParamsSchema } from "./schemas";
 
 /**
- * Access checks for counterparty routes (HOO-1918, ADR 0008): the counterparty
+ * Access checks for counterparty routes (HOO-1918, ADR 0009): the counterparty
  * or account the path names belongs to the caller's project, whatever its
  * status, so the retry of a request that archived it is still answered.
  */

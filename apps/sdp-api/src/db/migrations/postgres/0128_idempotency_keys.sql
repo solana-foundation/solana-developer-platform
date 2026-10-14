@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed')),
     claim_token TEXT,
     locked_until TIMESTAMPTZ,
+    -- When the current request claimed (or took over) the key. A lapsed lease
+    -- may only mean its renewals are failing, so the claim counts as live
+    -- until claimed_at + the renewal cap + the lease.
+    claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     released BOOLEAN NOT NULL DEFAULT false,
     response_status INTEGER,
     response_headers JSONB,

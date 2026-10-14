@@ -4431,7 +4431,7 @@ describe("Payments routes — recurring", () => {
 
   describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
     const keyed = (key: string) => ({ ...RECURRING_HEADERS, "Idempotency-Key": key });
-    /** What the domain rows store for a key: bound to the test API key (ADR 0008). */
+    /** What the domain rows store for a key: bound to the test API key (ADR 0009). */
     const recordKey = (key: string) =>
       deriveIdempotencyRecordKey(
         { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, principal: TEST_API_KEY.id },

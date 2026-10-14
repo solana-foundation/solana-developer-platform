@@ -1,4 +1,4 @@
--- Idempotency-Keys on recurring-payment attempts (HOO-1918, ADR 0008).
+-- Idempotency-Keys on recurring-payment attempts (HOO-1918, ADR 0009).
 --
 -- Each lifecycle action (activate, cancel, resume, update, collect) already
 -- writes an attempt row in the same transaction as its compare-and-swap claim.

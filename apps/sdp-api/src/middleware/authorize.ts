@@ -4,7 +4,7 @@ import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
 /**
- * A route's access check (HOO-1918, ADR 0008): may this caller act on every
+ * A route's access check (HOO-1918, ADR 0009): may this caller act on every
  * resource the request names? It runs after validation and before
  * `idempotent()`, so a replayed request passes exactly the checks a new one
  * does, and nothing after the idempotency step checks access.

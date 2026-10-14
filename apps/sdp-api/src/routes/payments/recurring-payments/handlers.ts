@@ -108,7 +108,7 @@ function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
   if (claim === undefined || recordKey === undefined) {
     throw internalError("Recurring payment request reached the handler without an Idempotency-Key");
   }
-  // The credential-bound record key (ADR 0008), never the raw client key.
+  // The credential-bound record key (ADR 0009), never the raw client key.
   return { key: recordKey, fingerprint: claim.fingerprint };
 }
 

@@ -173,7 +173,7 @@ export function resolveWalletByCustodyWalletId(
 
 /**
  * The access check for a route that names a wallet by its provider wallet ID
- * (HOO-1918, ADR 0008): the key's bindings as authentication read them on this
+ * (HOO-1918, ADR 0009): the key's bindings as authentication read them on this
  * request (HOO-2048), deactivated wallets kept, so the replay of a request
  * that ran is never refused. Resolving the wallet (ownership, whether it is
  * active) stays in the handler.

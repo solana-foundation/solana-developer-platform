@@ -280,7 +280,7 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
- * The create-transfer access check (HOO-1918, ADR 0008): the caller may move
+ * The create-transfer access check (HOO-1918, ADR 0009): the caller may move
  * money from the named source wallet, read fresh, in its own project. It runs
  * before the Idempotency-Key is claimed, so a replay passes exactly these
  * checks. A wallet deactivated since a request ran still passes here (a replay
@@ -726,7 +726,7 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  // The credential-bound record key (ADR 0008), never the raw client key.
+  // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
   const idempotency =

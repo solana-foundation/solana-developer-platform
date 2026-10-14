@@ -10,7 +10,7 @@ import { authorizeProviderWallet, findRetainedPaymentWalletByWalletId } from "./
 
 /**
  * Access checks for the payment routes that name wallets, plans and
- * counterparties (HOO-1918, ADR 0008). Each loads what the request names in the
+ * counterparties (HOO-1918, ADR 0009). Each loads what the request names in the
  * caller's project, whatever its status, and checks the key's wallet access
  * fresh. State (an archived plan, an inactive wallet) stays in the handler.
  */

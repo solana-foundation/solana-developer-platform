@@ -316,7 +316,7 @@ function startLeaseRenewal(
 
 /**
  * Runs one request under its Idempotency-Key (HOO-1918; contract and prior art
- * in ADR 0008). Routes use {@link idempotent}; it is exported so a composite
+ * in ADR 0009). Routes use {@link idempotent}; it is exported so a composite
  * route declaration can run it between its own checks.
  *
  * Place it after validation and the route's `authorize` step, so a replay
@@ -351,6 +351,7 @@ export async function runIdempotency(
   }
   const operation = idempotencyOperation(c);
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
+  const maxRenewalSeconds = options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS;
   const validatedParams = validatedInput(c).params;
   const fingerprint = requestFingerprint({
     operation,
@@ -375,6 +376,7 @@ export async function runIdempotency(
     principal: auth.id,
     fingerprint,
     takeOverLapsed: options.serverErrors === "rerun" || options.recovery === "record",
+    presumedLiveSeconds: maxRenewalSeconds + leaseSeconds,
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   });
@@ -421,7 +423,7 @@ export async function runIdempotency(
     id,
     claimToken,
     leaseSeconds,
-    options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS,
+    maxRenewalSeconds,
     operation
   );
   let thrown: { error: unknown } | null = null;
@@ -552,7 +554,7 @@ export function getIdempotencyClaim(
 
 /**
  * The key a handler stores on, and looks up, its domain row by: the claimed
- * key bound to its organization, project and credential (ADR 0008). After the
+ * key bound to its organization, project and credential (ADR 0009). After the
  * 24-hour key record expires, the domain row is what answers a retry, so the
  * raw client key would let another credential in the project read the
  * original's replay; this value never matches across credentials. Undefined
