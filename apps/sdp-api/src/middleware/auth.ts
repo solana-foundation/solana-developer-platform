@@ -4,9 +4,9 @@
  * Flow:
  * 1. Extract API key from Authorization header
  * 2. Hash the key
- * 3. Admit the hash against the highest rate-limit tier (one counter call)
+ * 3. Flood guard per key hash at the highest rate-limit tier
  * 4. Read and judge the key's live rows in one Postgres statement
- * 5. Judge the same admission against the key's own tier
+ * 5. Enforce the key's own tier per key id
  * 6. Set auth context for downstream handlers
  */
 
@@ -27,12 +27,7 @@ import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import {
-  API_KEY_PRE_READ_MAX_REQUESTS,
-  admitRateLimit,
-  judgeRateLimit,
-  RATE_LIMIT_TIERS,
-} from "./rate-limit";
+import { API_KEY_PRE_READ_MAX_REQUESTS, enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
 
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
@@ -206,25 +201,22 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   const pepper = c.env.API_KEY_PEPPER;
   const keyHash = await hashString(apiKey, pepper);
 
-  // Admitted per key hash before the row is read, against the highest tier
-  // since the key's own is not known yet: a flooding credential is bounded
-  // before it costs a DB read, valid or not. Random-key spray (a fresh hash
+  // A flood guard per key hash before the row is read, at the highest tier
+  // since the key's own is not known yet: a flooding credential, valid or
+  // not, is bounded before it costs a DB read. Random-key spray (a fresh hash
   // each time) is bounded by the per-IP backstop in front of auth.
-  const admission = await admitRateLimit(c, `api-key:${keyHash}`, API_KEY_PRE_READ_MAX_REQUESTS);
-  if (admission && !admission.admitted) {
-    judgeRateLimit(c, admission, API_KEY_PRE_READ_MAX_REQUESTS);
-  }
+  await enforceRateLimit(c, `api-key:${keyHash}`, API_KEY_PRE_READ_MAX_REQUESTS, {
+    metricTier: "api_key_flood_guard",
+  });
 
   // The authoritative read: every authorization field from the key's live
   // rows, in one statement, so a change to any of them applies on this
   // request. It refuses an unknown, revoked, expired or out-of-scope key.
   const key = await authorizeApiKey(c, keyHash);
 
-  // The key's own tier, judged against the admission above; no second
-  // counter call. A refused request still counted toward the window.
-  if (admission) {
-    judgeRateLimit(c, admission, RATE_LIMIT_TIERS[key.rateLimitTier]);
-  }
+  // The key's own tier, per key id. Only admitted requests count, so a client
+  // above its tier still gets its tier's worth through.
+  await enforceRateLimit(c, key.id, RATE_LIMIT_TIERS[key.rateLimitTier]);
 
   recordOrganizationEntitlements(c, key.settings);
 

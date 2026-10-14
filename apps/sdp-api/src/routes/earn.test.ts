@@ -742,8 +742,7 @@ describe("Earn route middleware isolation", () => {
     const res = await getEarn("/v1/earn/movements", {});
 
     expect(res.status).toBe(200);
-    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    expect(await readRateLimitCount(env, `api-key:${keyHash}`)).toBe(1);
+    expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);
   });
 });
 
