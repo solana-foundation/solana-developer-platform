@@ -707,6 +707,12 @@ export class AuditService {
       await lockedTransactionWithPostCommit(
         AUDIT_LEDGER_SESSION_LOCK_KEY,
         async (tx) => {
+          // This transaction awaits Redis (the checkpoint reads and CAS) while
+          // it is open. If the pool's idle-in-transaction timeout killed the
+          // session there, COMMIT and ROLLBACK would both fail, the rollback
+          // restore would be skipped, and the pending witness would lock
+          // every later audit write. Lifted for this transaction only.
+          await tx.execute("SET LOCAL idle_in_transaction_session_timeout = 0");
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,
                     encode(ledger.previous_entry_hash, 'hex') AS previous_entry_hash,

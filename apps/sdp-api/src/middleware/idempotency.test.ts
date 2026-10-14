@@ -11,16 +11,21 @@ import type { Env } from "@/types/env";
 import { authorize } from "./authorize";
 import {
   declaredIdempotency,
+  declaredIdempotencyRecovery,
+  deriveIdempotencyRecordKey,
+  getIdempotencyClaim,
   getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
   IDEMPOTENT_REPLAYED_HEADER,
   type IdempotencyOptions,
   idempotent,
   MAX_STORED_RESPONSE_BYTES,
+  markIdempotencyCommitted,
   requestFingerprint,
   runIdempotency,
 } from "./idempotency";
-import { replayFromRecord } from "./movement-steps";
-import { validateBody } from "./validate";
+import { declaresRecordReplay, replayFromRecord } from "./movement-steps";
+import { declaredValidation, validateBody, validateParams, validateQuery } from "./validate";
 
 const ORG = "org_idempotency";
 const USER = "usr_idempotency";
@@ -162,6 +167,55 @@ describe("idempotent()", () => {
       "accepted"
     );
     expect(declaredIdempotency(() => undefined)).toBeUndefined();
+  });
+
+  it("declares row recovery, record replay and validation for route inventories", () => {
+    expect(
+      declaredIdempotencyRecovery(
+        idempotent({ key: "required", serverErrors: "store", recovery: "record" })
+      )
+    ).toBe("record");
+    expect(
+      declaredIdempotencyRecovery(idempotent({ key: "required", serverErrors: "store" }))
+    ).toBeUndefined();
+    expect(declaredIdempotencyRecovery(() => undefined)).toBeUndefined();
+    expect(declaresRecordReplay(replayFromRecord(async () => null))).toBe(true);
+    expect(declaresRecordReplay(() => undefined)).toBe(false);
+    expect(declaredValidation(validateBody(z.object({})))).toBe("json");
+    expect(declaredValidation(validateQuery(z.object({})))).toBe("query");
+    expect(declaredValidation(validateParams(z.object({})))).toBe("param");
+    expect(declaredValidation(() => undefined)).toBeUndefined();
+  });
+
+  it("stores a refusal raised after the handler wrote its domain row", async () => {
+    const { app, create } = buildApp({ key: "required" }, (c) => {
+      markIdempotencyCommitted(c);
+      throw new AppError("CONFLICT", "the row exists but the provider refused");
+    });
+
+    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(409);
+    const replayed = await post(app, "/v1/other", { a: 1 }, KEY);
+
+    expect(replayed.status).toBe(409);
+    expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds the record key to the credential, never the raw key", async () => {
+    const seen: Array<string | undefined> = [];
+    const { app } = buildApp({ key: "required" }, (c) => {
+      seen.push(getIdempotencyRecordKey(c));
+      return c.json({}, 201);
+    });
+
+    await post(app, "/v1/other", { a: 1 }, KEY);
+
+    const scope = { organizationId: ORG, projectId: SANDBOX, principal: "key_test" };
+    expect(seen).toEqual([deriveIdempotencyRecordKey(scope, "key-1")]);
+    expect(seen[0]).not.toBe("key-1");
+    expect(deriveIdempotencyRecordKey({ ...scope, principal: "key_other" }, "key-1")).not.toBe(
+      seen[0]
+    );
   });
 
   it("runs an unkeyed request on an accepting route without recording anything", async () => {
@@ -373,13 +427,68 @@ describe("idempotent()", () => {
     }
   }
 
+  it.each(["store", "rerun"] as const)(
+    "answers a live request whose renewals fail as in flight on a %s route, then replays it",
+    async (serverErrors) => {
+      const actual = idempotencyKeysRepository.createPostgresIdempotencyKeyRepository;
+      const factory = vi
+        .spyOn(idempotencyKeysRepository, "createPostgresIdempotencyKeyRepository")
+        .mockImplementation((db) => ({
+          ...actual(db),
+          renew: async () => {
+            throw new Error("database failing over");
+          },
+        }));
+      try {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+          markStarted = resolve;
+        });
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const { app, create } = buildApp(
+          { key: "required", serverErrors, leaseSeconds: 1 },
+          async (c) => {
+            markStarted();
+            await released;
+            return c.json({ ok: true }, 201);
+          }
+        );
+
+        const first = post(app, "/v1/other", { a: 1 }, KEY);
+        await started;
+        // The 1s lease lapses because every renewal fails; the request is still running.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+        release();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+        const retryAfter = Number(retry.headers.get("Retry-After"));
+        expect(retryAfter).toBeGreaterThanOrEqual(1);
+        expect(retryAfter).toBeLessThanOrEqual(60);
+        expect((await first).status).toBe(201);
+        const replayed = await post(app, "/v1/other", { a: 1 }, KEY);
+        expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+        expect(create).toHaveBeenCalledTimes(1);
+      } finally {
+        factory.mockRestore();
+      }
+    }
+  );
+
   it("answers a store route's unrecorded outcome with a terminal 409 and never runs it twice", async () => {
     await withFailingCompletes(async () => {
-      const { app, create } = buildApp({ key: "required", leaseSeconds: 1 }, created);
+      const { app, create } = buildApp(
+        { key: "required", leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
+        created
+      );
 
       expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
-      // Past the 1s lease, which nothing renews once the request answered.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Past the 1s lease and the 2s window (renewal cap plus lease).
+      await new Promise((resolve) => setTimeout(resolve, 2500));
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
         expect(retry.status).toBe(409);
@@ -397,7 +506,7 @@ describe("idempotent()", () => {
     // A crash before the outcome was written: in progress, lease lapsed, never released.
     await getDb(env).execute(
       `UPDATE idempotency_keys
-          SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second',
+          SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second', claimed_at = now() - interval '1 hour',
               response_status = NULL, response_headers = NULL, response_body = NULL`
     );
 
@@ -413,16 +522,24 @@ describe("idempotent()", () => {
       const rows = new Map<string, { thing: { id: string } }>();
       const create = vi.fn((c: Context<{ Bindings: Env }>) => {
         const row = { thing: { id: `thing_${rows.size + 1}` } };
-        rows.set(c.req.header("Idempotency-Key") ?? "", row);
+        const recordKey = getIdempotencyRecordKey(c);
+        if (recordKey === undefined) throw new Error("expected a claimed key");
+        rows.set(recordKey, row);
         return c.json(row, 201);
       });
       const app = testApp();
       app.post(
         "/v1/other",
-        idempotent({ key: "required", serverErrors: "store", recovery, leaseSeconds: 1 }),
-        replayFromRecord(async (c, _input, idempotencyKey) => {
-          const row = rows.get(idempotencyKey);
-          return row === undefined ? null : c.json(row, 201);
+        idempotent({
+          key: "required",
+          serverErrors: "store",
+          recovery,
+          leaseSeconds: 1,
+          maxLeaseRenewalSeconds: 1,
+        }),
+        replayFromRecord(async (c, _input, recordKey) => {
+          const row = rows.get(recordKey);
+          return row === undefined ? null : { fingerprint: null, respond: () => c.json(row, 201) };
         }),
         (c) => create(c)
       );
@@ -433,7 +550,7 @@ describe("idempotent()", () => {
       await withFailingCompletes(async () => {
         const { app, create } = recoveringApp("record");
         const first = await post(app, "/v1/other", { a: 1 }, KEY);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
 
         expect(retry.status).toBe(201);
@@ -446,7 +563,7 @@ describe("idempotent()", () => {
       await withFailingCompletes(async () => {
         const { app, create } = recoveringApp(undefined);
         await post(app, "/v1/other", { a: 1 }, KEY);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
 
         expect(retry.status).toBe(409);
@@ -646,6 +763,33 @@ describe("idempotent()", () => {
     await post(app, "/v1/other", { a: 1 });
     expect(seen[0]).toMatch(/^[0-9a-f]{64}$/);
     expect(seen[1]).toBe(seen[0]);
+    expect(seen[2]).toBeUndefined();
+  });
+
+  it("hands the handler the claimed key only when this step claimed one", async () => {
+    const seen: Array<ReturnType<typeof getIdempotencyClaim>> = [];
+    const app = testApp();
+    app.post("/v1/other", idempotent({ key: "accepted", serverErrors: "store" }), (c) => {
+      seen.push(getIdempotencyClaim(c));
+      return c.json({}, 201);
+    });
+    const unclaimed = new Hono<{ Bindings: Env }>();
+    unclaimed.post("/v1/raw", (c) => {
+      seen.push(getIdempotencyClaim(c));
+      return c.json({}, 201);
+    });
+
+    await post(app, "/v1/other", { a: 1 }, KEY);
+    await post(app, "/v1/other", { a: 1 });
+    // A key header the step never claimed (no idempotent() on the route) is not a claim.
+    await unclaimed.request(
+      "/v1/raw",
+      { method: "POST", headers: { ...KEY, "Content-Type": "application/json" }, body: "{}" },
+      env
+    );
+
+    expect(seen[0]).toEqual({ key: "key-1", fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(seen[1]).toBeUndefined();
     expect(seen[2]).toBeUndefined();
   });
 

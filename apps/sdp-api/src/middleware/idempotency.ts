@@ -16,7 +16,12 @@ import {
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, internalError } from "@/lib/errors";
-import { canonicalJson, type JsonValue, jsonValueSchema } from "@/lib/idempotency";
+import {
+  canonicalJson,
+  deriveProviderRequestId,
+  type JsonValue,
+  jsonValueSchema,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -31,6 +36,8 @@ export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
  * tests.
  */
 export const IDEMPOTENCY_MARKER = Symbol.for("sdp.idempotency");
+/** Marks an {@link idempotent} handler with its `recovery` option, for route inventory tests. */
+const IDEMPOTENCY_RECOVERY_MARKER = Symbol.for("sdp.idempotency.recovery");
 
 export interface IdempotencyOptions {
   key: IdempotencyKeyMode;
@@ -309,7 +316,7 @@ function startLeaseRenewal(
 
 /**
  * Runs one request under its Idempotency-Key (HOO-1918; contract and prior art
- * in ADR 0008). Routes use {@link idempotent}; it is exported so a composite
+ * in ADR 0009). Routes use {@link idempotent}; it is exported so a composite
  * route declaration can run it between its own checks.
  *
  * Place it after validation and the route's `authorize` step, so a replay
@@ -344,6 +351,7 @@ export async function runIdempotency(
   }
   const operation = idempotencyOperation(c);
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
+  const maxRenewalSeconds = options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS;
   const validatedParams = validatedInput(c).params;
   const fingerprint = requestFingerprint({
     operation,
@@ -368,6 +376,7 @@ export async function runIdempotency(
     principal: auth.id,
     fingerprint,
     takeOverLapsed: options.serverErrors === "rerun" || options.recovery === "record",
+    presumedLiveSeconds: maxRenewalSeconds + leaseSeconds,
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   });
@@ -392,6 +401,7 @@ export async function runIdempotency(
       // The handler records it on its domain row, so a retry past the key's
       // 24 hours is matched by the same request identity.
       c.set("idempotencyFingerprint", fingerprint);
+      c.set("idempotencyClaimedKey", idempotencyKey);
       logOutcome(operation, idempotencyKey, claim.fresh ? "claimed" : "taken_over");
       if (claim.replacedUnfinished) {
         // The key's last request expired without recording an outcome.
@@ -413,7 +423,7 @@ export async function runIdempotency(
     id,
     claimToken,
     leaseSeconds,
-    options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS,
+    maxRenewalSeconds,
     operation
   );
   let thrown: { error: unknown } | null = null;
@@ -447,7 +457,10 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    if (isIdempotencyUnstoredStatus(response.status)) {
+    // Once the handler has written its domain row (markIdempotencyCommitted),
+    // any status is stored: the request changed something, so its retry gets
+    // the same answer.
+    if (isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
@@ -506,7 +519,16 @@ async function settle(write: () => Promise<unknown>, operation: string): Promise
 export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bindings: Env }> {
   const middleware: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
     runIdempotency(c, next, options);
-  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: options.key });
+  return Object.assign(middleware, {
+    [IDEMPOTENCY_MARKER]: options.key,
+    [IDEMPOTENCY_RECOVERY_MARKER]: options.recovery,
+  });
+}
+
+/** Whether an {@link idempotent} handler declares `recovery: "record"`, for route inventories. */
+export function declaredIdempotencyRecovery(handler: RouteHandler): "record" | undefined {
+  if (!(IDEMPOTENCY_RECOVERY_MARKER in handler)) return undefined;
+  return handler[IDEMPOTENCY_RECOVERY_MARKER] === "record" ? "record" : undefined;
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
@@ -514,6 +536,64 @@ export function declaredIdempotency(handler: RouteHandler): IdempotencyKeyMode |
   // SAFETY: the marker is a registered symbol only idempotent() sets, always to
   // an IdempotencyKeyMode; any other handler lacks it and reads undefined.
   return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode })[IDEMPOTENCY_MARKER];
+}
+
+/**
+ * The key and fingerprint this request claimed, for a handler that records
+ * them on its domain row or derives a provider request id from the key.
+ * Undefined unless this step claimed a key for the request, so a handler never
+ * reads the header itself (AGENTS.md: one step owns the key).
+ */
+export function getIdempotencyClaim(
+  c: Context<{ Bindings: Env }>
+): { key: string; fingerprint: string } | undefined {
+  const key = c.get("idempotencyClaimedKey");
+  const fingerprint = c.get("idempotencyFingerprint");
+  return key === undefined || fingerprint === undefined ? undefined : { key, fingerprint };
+}
+
+/**
+ * The key a handler stores on, and looks up, its domain row by: the claimed
+ * key bound to its organization, project and credential (ADR 0009). After the
+ * 24-hour key record expires, the domain row is what answers a retry, so the
+ * raw client key would let another credential in the project read the
+ * original's replay; this value never matches across credentials. Undefined
+ * unless this step claimed a key for the request.
+ */
+export function getIdempotencyRecordKey(c: Context<{ Bindings: Env }>): string | undefined {
+  const claim = getIdempotencyClaim(c);
+  if (claim === undefined) return undefined;
+  const auth = getAuth(c);
+  return deriveIdempotencyRecordKey(
+    {
+      organizationId: auth.organizationId,
+      projectId: c.get("projectId") ?? null,
+      principal: auth.id,
+    },
+    claim.key
+  );
+}
+
+/** {@link getIdempotencyRecordKey}'s derivation, for a caller that holds the parts. */
+export function deriveIdempotencyRecordKey(
+  scope: { organizationId: string; projectId: string | null; principal: string },
+  idempotencyKey: string
+): string {
+  return deriveProviderRequestId(
+    ["idempotency_record", scope.organizationId, scope.projectId ?? "", scope.principal],
+    idempotencyKey
+  );
+}
+
+/**
+ * Marks that the handler has written its domain row under this request's key,
+ * so its response is stored whatever its status: a 400 or 409 raised after the
+ * row exists is the request's answer, and a same-key retry replays it instead
+ * of being answered from the row with a different status. Call it right after
+ * the row is committed; refusals before it stay unstored and run again.
+ */
+export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
+  c.set("idempotencyCommitted", true);
 }
 
 /**
