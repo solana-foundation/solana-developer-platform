@@ -23,6 +23,7 @@ import { createApp } from "@/app";
 import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import app from "@/index";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import { noopObservability } from "@/runtime/observability";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -788,7 +789,8 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
+          // MoonPay offers no USDG on Solana in either direction.
+          assetRail: "usdg.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -797,7 +799,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(onrampRes.status).toBe(400);
-    const onrampBody = (await onrampRes.json()) as { error: { code: string } };
+    const onrampBody = errorResponseSchema.parse(await onrampRes.json());
     expect(onrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
 
     const offrampRes = await app.request(
@@ -812,7 +814,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
+          assetRail: "usdg.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -821,7 +823,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(offrampRes.status).toBe(400);
-    const offrampBody = (await offrampRes.json()) as { error: { code: string } };
+    const offrampBody = errorResponseSchema.parse(await offrampRes.json());
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 
