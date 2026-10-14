@@ -22,6 +22,7 @@ import type {
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { assertNoCachedTerminalRefusal } from "@/lib/api-key-refusal-cache";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { authorizeApiKey } from "@/lib/organization-access";
@@ -216,6 +217,10 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // Hash the key
   const pepper = c.env.API_KEY_PEPPER;
   const keyHash = await hashString(apiKey, pepper);
+
+  // A hash this instance recently refused for good (unknown, revoked,
+  // expired) is refused again from memory, with no Redis call or DB read.
+  assertNoCachedTerminalRefusal(keyHash);
 
   // A flood guard per key hash and client IP before the row is read, at the
   // highest tier since the key's own is not known yet: a flooding credential,

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
+import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
@@ -244,7 +245,7 @@ export async function authorizeApiKey(
     .first<ApiKeyAuthorizationRow>();
 
   if (!row) {
-    throw new AppError("INVALID_API_KEY", "Invalid API key");
+    throw refuseTerminally(keyHash, "INVALID_API_KEY");
   }
   // Organization and project status before the key's own: a key created or
   // rotated after an organization deletion enumerated its keys is covered by
@@ -256,11 +257,13 @@ export async function authorizeApiKey(
     throw new AppError("REVOKED_API_KEY");
   }
   const refusal = apiKeyRowRefusal(row, Date.now());
+  // A dead key never comes back, so its refusal is remembered; the
+  // organization and project refusals above can lift and are not.
   if (refusal === "revoked") {
-    throw new AppError("REVOKED_API_KEY");
+    throw refuseTerminally(keyHash, "REVOKED_API_KEY");
   }
   if (refusal === "expired") {
-    throw new AppError("EXPIRED_API_KEY");
+    throw refuseTerminally(keyHash, "EXPIRED_API_KEY");
   }
   if (!isClientIpAllowed(getClientIp(c), parseOptionalPostgresJson<unknown>(row.allowed_ips))) {
     throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");

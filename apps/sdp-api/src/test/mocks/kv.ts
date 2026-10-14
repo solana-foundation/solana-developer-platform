@@ -16,6 +16,7 @@ import type {
   RateLimitTier,
 } from "@sdp/types";
 import { getDb } from "@/db/client";
+import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
 import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import { DEFAULT_PROJECT_NAME, DEFAULT_PROJECT_SLUG } from "@/test/helpers/projects";
@@ -61,6 +62,9 @@ const SEEDED_KEY_CREATOR_ID = "usr_seeded_key_creator";
  * Skipped when the organization does not exist.
  */
 export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKey): Promise<void> {
+  // A seed can bring a refused key back to life within a test; the
+  // instance's refusal cache must not outlive that.
+  resetTerminalRefusalsForTesting();
   const db = getDb(env);
   await db
     .prepare(

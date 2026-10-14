@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { TERMINAL_REFUSAL_TTL_MS } from "@/lib/api-key-refusal-cache";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { AppError } from "@/lib/errors";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
@@ -643,6 +644,60 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
+    const authReads = (prepare: { mock: { calls: unknown[][] } }) =>
+      prepare.mock.calls.filter(([sql]) => String(sql).includes("FROM api_keys ak")).length;
+
+    it("refuses a revoked key from memory on its next attempt", async () => {
+      await updateKey("status", "revoked");
+      const prepare = vi.spyOn(getDb(env), "prepare");
+
+      const first = (await (await keyed("/context")).json()) as { error: { code: string } };
+      expect(first.error.code).toBe("REVOKED_API_KEY");
+      expect(authReads(prepare)).toBe(1);
+
+      const second = (await (await keyed("/context")).json()) as { error: { code: string } };
+      expect(second.error.code).toBe("REVOKED_API_KEY");
+      expect(authReads(prepare)).toBe(1);
+    });
+
+    it("refuses an unknown key from memory on its next attempt", async () => {
+      const prepare = vi.spyOn(getDb(env), "prepare");
+      const unknown = () =>
+        contextApp().request(
+          "/context",
+          { headers: { Authorization: "Bearer sk_test_never_issued_fixture" } },
+          env
+        );
+
+      expect((await unknown()).status).toBe(401);
+      expect((await unknown()).status).toBe(401);
+      expect(authReads(prepare)).toBe(1);
+    });
+
+    it("forgets a terminal refusal after its TTL", async () => {
+      await updateKey("status", "revoked");
+      expect((await keyed("/context")).status).toBe(401);
+      const now = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(now + TERMINAL_REFUSAL_TTL_MS + 1);
+      const prepare = vi.spyOn(getDb(env), "prepare");
+
+      expect((await keyed("/context")).status).toBe(401);
+      expect(authReads(prepare)).toBe(1);
+    });
+
+    // An inactive project can be restored, so its refusal is never remembered.
+    it("does not remember a refusal that can lift", async () => {
+      await archiveProject(getDb(env), TEST_PROJECT.id);
+      expect((await keyed("/context")).status).toBe(401);
+
+      await getDb(env)
+        .prepare("UPDATE projects SET status = 'active' WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+
+      expect((await keyed("/context")).status).toBe(200);
     });
 
     it("reads the key's rows in one statement per request", async () => {

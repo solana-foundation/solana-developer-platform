@@ -190,11 +190,18 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
     });
 
-    it("bounds an unknown key's reads like a valid one's", async () => {
-      await seedRateLimit(env, floodCounter(), API_KEY_PRE_READ_MAX_REQUESTS - 1);
+    it("bounds an unknown key's first read like a valid key's", async () => {
+      await seedRateLimit(env, floodCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
 
-      expect((await keyedRequest()).status).toBe(401);
       expect((await keyedRequest()).status).toBe(429);
+    });
+
+    // Once refused for good, a hash is refused from memory: no counter call.
+    it("refuses a known-unknown key before the flood guard counts it", async () => {
+      expect((await keyedRequest()).status).toBe(401);
+      expect((await keyedRequest()).status).toBe(401);
+
+      expect(await readRateLimitCount(env, floodCounter())).toBe(1);
     });
 
     it("reports remaining quota against the tier limit", async () => {
