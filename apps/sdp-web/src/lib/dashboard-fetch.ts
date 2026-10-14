@@ -194,7 +194,7 @@ async function sendUnderActionKey(
       if (requiresPersistedKey(init.method ?? "GET", path)) {
         // Only a key this call minted is dropped: a kept one belongs to an
         // earlier attempt that may have written, and its retry still needs it.
-        if (!kept) keys.release(fingerprint);
+        if (!kept) keys.release(fingerprint, key);
         return keyNotPersistedResponse();
       }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
@@ -204,7 +204,7 @@ async function sendUnderActionKey(
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
       if (retiresKey(response)) {
-        keys.release(fingerprint);
+        keys.release(fingerprint, key);
       }
       return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {
         status: response.status,

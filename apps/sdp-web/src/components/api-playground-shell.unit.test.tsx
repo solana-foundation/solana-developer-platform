@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
@@ -104,15 +105,14 @@ describe("ApiPlaygroundShell", () => {
       </I18nProvider>
     );
     const sentKey = (call: number) =>
-      (JSON.parse(String(fetchMock.mock.calls[call][1].body)) as { idempotencyKey?: string })
-        .idempotencyKey;
+      z
+        .object({ idempotencyKey: z.string().optional() })
+        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
 
     fireEvent.click(view.getByRole("button", { name: "Run request" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(
-        (view.getByRole("button", { name: "Run request" }) as HTMLButtonElement).disabled
-      ).toBe(false)
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
     );
     fireEvent.click(view.getByRole("button", { name: "Run request" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

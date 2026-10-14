@@ -17,8 +17,8 @@ describe("unresolved Treasury intent identity", () => {
   it.each([401, 403, 429])("preserves an ambiguous submit key after a later %s", (status) => {
     const store = createIdempotencyKeyStore("test:treasury-recovery");
     const original = store.claim("same-intent").key;
-    settleIdempotencyKey(store, "same-intent", { status: null, replayed: false });
-    settleIdempotencyKey(store, "same-intent", { status, replayed: false });
+    settleIdempotencyKey(store, "same-intent", original, { status: null, replayed: false });
+    settleIdempotencyKey(store, "same-intent", original, { status, replayed: false });
     expect(store.claim("same-intent").key).toBe(original);
   });
 
@@ -26,7 +26,7 @@ describe("unresolved Treasury intent identity", () => {
     vi.useFakeTimers();
     const store = createIdempotencyKeyStore("test:treasury-recovery");
     const original = store.claim("same-intent").key;
-    settleIdempotencyKey(store, "same-intent", { status: 504, replayed: false });
+    settleIdempotencyKey(store, "same-intent", original, { status: 504, replayed: false });
     vi.setSystemTime(Date.now() + 16 * 60_000);
     expect(store.claim("same-intent").key).toBe(original);
   });
@@ -70,8 +70,12 @@ describe("unresolved Treasury intent identity", () => {
       const store = createIdempotencyKeyStore(`test:back-to-back:${direction}`);
       const keys: string[] = [];
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        keys.push(store.claim("same-wallet-vault-amount").key);
-        settleIdempotencyKey(store, "same-wallet-vault-amount", { status: 200, replayed: false });
+        const { key } = store.claim("same-wallet-vault-amount");
+        keys.push(key);
+        settleIdempotencyKey(store, "same-wallet-vault-amount", key, {
+          status: 200,
+          replayed: false,
+        });
       }
       expect(new Set(keys).size).toBe(3);
     }

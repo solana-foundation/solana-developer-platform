@@ -17,11 +17,12 @@ function keyFor(input: string): string {
   return actionKeys.valueFor(input, () => crypto.randomUUID());
 }
 
-function settled(input: string, result: ActionKeyResult): void {
+function settled(input: string, key: string, result: ActionKeyResult): void {
   // A success retires the key; a thrown action, or a result that names no
   // answer, may have written, so it keeps it.
   actionKeys.settle(
     input,
+    key,
     result.status === "success"
       ? { status: 200, replayed: false }
       : (result.answer ?? { status: null, replayed: false })
@@ -37,7 +38,7 @@ function settled(input: string, result: ActionKeyResult): void {
  * (see `createActionMemo`); when the browser refuses storage the key lives as
  * long as the page, and the action is still sent: these are not money routes.
  *
- * @returns `keyFor(input)` right before the send, and `settled(input, result)`
+ * @returns `keyFor(input)` right before the send, and `settled(input, key, result)`
  *   once it answers.
  */
 export function useActionIdempotencyKey() {

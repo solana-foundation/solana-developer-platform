@@ -31,9 +31,20 @@ describe("claim", () => {
     expect(store.has(fingerprint)).toBe(true);
     expect(store.claim(fingerprint).key).toBe(first.key);
 
-    store.release(fingerprint);
+    store.release(fingerprint, first.key);
     expect(store.has(fingerprint)).toBe(false);
     expect(store.claim(fingerprint).key).not.toBe(first.key);
+  });
+
+  it("retires only the key an answer was sent under, never a newer one for the same request", () => {
+    const first = store.claim(fingerprint).key;
+    // A second attempt under the same key is answered first and retires it.
+    store.release(fingerprint, first);
+    const second = store.claim(fingerprint).key;
+
+    // The first attempt's late answer settles nothing the user has not sent yet.
+    store.release(fingerprint, first);
+    expect(store.claim(fingerprint).key).toBe(second);
   });
 
   it("reports a key the browser would not store, and still keeps it for this page", () => {
@@ -196,7 +207,7 @@ describe("createActionMemo", () => {
 
   it("never evicts an unanswered value, however many inputs follow", () => {
     const first = memo.valueFor("input=0", () => "first");
-    memo.settle("input=0", { status: 503, replayed: false });
+    memo.settle("input=0", first, { status: 503, replayed: false });
     for (let index = 1; index <= 40; index++) memo.valueFor(`input=${index}`, () => `v${index}`);
 
     expect(memo.valueFor("input=0", () => "fresh")).toBe(first);
@@ -204,13 +215,13 @@ describe("createActionMemo", () => {
 
   it("forgets a value on a success, a replay or a 422, and keeps it on a plain refusal", () => {
     memo.valueFor("a", () => "a1");
-    memo.settle("a", { status: 201, replayed: false });
+    memo.settle("a", "a1", { status: 201, replayed: false });
     memo.valueFor("b", () => "b1");
-    memo.settle("b", { status: 400, replayed: true });
+    memo.settle("b", "b1", { status: 400, replayed: true });
     memo.valueFor("c", () => "c1");
-    memo.settle("c", { status: 422, replayed: false });
+    memo.settle("c", "c1", { status: 422, replayed: false });
     memo.valueFor("d", () => "d1");
-    memo.settle("d", { status: 400, replayed: false });
+    memo.settle("d", "d1", { status: 400, replayed: false });
 
     expect(memo.valueFor("a", () => "a2")).toBe("a2");
     expect(memo.valueFor("b", () => "b2")).toBe("b2");
@@ -269,5 +280,42 @@ describe("user and org scope", () => {
     setIdempotencyKeyScope("user_a:org_1");
     expect(store.claim("same-payment").key).toBe(keyA);
     expect(memo.valueFor("same-label", () => "rebuilt")).toBe(actionKeyA);
+  });
+
+  it("settles an answer in the scope that claimed its key, after the user switched org", () => {
+    setIdempotencyKeyScope("user_a:org_1");
+    const { key: keyA } = store.claim("same-payment");
+    setIdempotencyKeyScope("user_a:org_2");
+    const { key: keyB } = store.claim("same-payment");
+
+    // Org 1's request answers while org 2 is selected.
+    store.release("same-payment", keyA);
+
+    expect(store.claim("same-payment").key).toBe(keyB);
+    setIdempotencyKeyScope("user_a:org_1");
+    expect(store.has("same-payment")).toBe(false);
+  });
+
+  it("adopts the key and floor an earlier, unscoped build left unanswered", () => {
+    sessionStorage.setItem(
+      "test:key-scope:v1",
+      JSON.stringify([{ id: "same-payment", value: "old-key", createdAt: 0, expiresAt: null }])
+    );
+    sessionStorage.setItem("test:floor-scope:v1", JSON.stringify({ "same-payment": "990" }));
+    const floors = createFloorMemo("test:floor-scope:v1");
+    setIdempotencyKeyScope("user_a:org_1");
+
+    expect(store.has("same-payment")).toBe(true);
+    expect(floors.recall("same-payment")).toBe("990");
+    expect(store.claim("same-payment").key).toBe("old-key");
+
+    // Adopted once: another scope never finds it again.
+    setIdempotencyKeyScope("user_b:org_1");
+    expect(store.has("same-payment")).toBe(false);
+    setIdempotencyKeyScope("user_a:org_1");
+    store.release("same-payment", "old-key");
+    floors.forget("same-payment");
+    expect(store.has("same-payment")).toBe(false);
+    expect(floors.recall("same-payment")).toBeUndefined();
   });
 });

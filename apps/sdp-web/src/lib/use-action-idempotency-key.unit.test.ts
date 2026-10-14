@@ -20,7 +20,7 @@ describe("useActionIdempotencyKey", () => {
     const first = result.current.keyFor("label=a");
 
     expect(result.current.keyFor("label=a")).toBe(first);
-    result.current.settled("label=a", {
+    result.current.settled("label=a", first, {
       status: "error",
       answer: { status: 503, replayed: false },
     });
@@ -29,20 +29,20 @@ describe("useActionIdempotencyKey", () => {
     const edited = result.current.keyFor("label=b");
     expect(edited).not.toBe(first);
 
-    result.current.settled("label=b", { status: "success" });
+    result.current.settled("label=b", edited, { status: "success" });
     expect(result.current.keyFor("label=b")).not.toBe(edited);
   });
 
   it("reuses A's unanswered key after the user went A, B and back to A", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const a = result.current.keyFor("label=a");
-    result.current.settled("label=a", {
+    result.current.settled("label=a", a, {
       status: "error",
       answer: { status: 503, replayed: false },
     });
 
     const b = result.current.keyFor("label=b");
-    result.current.settled("label=b", {
+    result.current.settled("label=b", b, {
       status: "error",
       answer: { status: 503, replayed: false },
     });
@@ -56,15 +56,18 @@ describe("useActionIdempotencyKey", () => {
   it("retires the key on a replayed failure and on a 422, and keeps it on a plain refusal", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const replayed = result.current.keyFor("label=a");
-    result.current.settled("label=a", {
+    result.current.settled("label=a", replayed, {
       status: "error",
       answer: { status: 503, replayed: false },
     });
-    result.current.settled("label=a", { status: "error", answer: { status: 400, replayed: true } });
+    result.current.settled("label=a", replayed, {
+      status: "error",
+      answer: { status: 400, replayed: true },
+    });
     expect(result.current.keyFor("label=a")).not.toBe(replayed);
 
     const reused = result.current.keyFor("label=b");
-    result.current.settled("label=b", {
+    result.current.settled("label=b", reused, {
       status: "error",
       answer: { status: 422, replayed: false },
     });
@@ -72,7 +75,7 @@ describe("useActionIdempotencyKey", () => {
 
     // An unstored refusal runs again under the same key; nothing to retire.
     const refused = result.current.keyFor("label=c");
-    result.current.settled("label=c", {
+    result.current.settled("label=c", refused, {
       status: "error",
       answer: { status: 400, replayed: false },
     });
@@ -82,8 +85,8 @@ describe("useActionIdempotencyKey", () => {
   it("keeps the key when a refusal follows an unanswered attempt, or the action threw", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const key = result.current.keyFor("label=a");
-    result.current.settled("label=a", { status: "error" });
-    result.current.settled("label=a", {
+    result.current.settled("label=a", key, { status: "error" });
+    result.current.settled("label=a", key, {
       status: "error",
       answer: { status: 400, replayed: false },
     });
@@ -95,7 +98,7 @@ describe("useActionIdempotencyKey", () => {
   it("keeps an unanswered key across a reload", () => {
     const { result } = renderHook(() => useActionIdempotencyKey());
     const key = result.current.keyFor("wallet=treasury");
-    result.current.settled("wallet=treasury", {
+    result.current.settled("wallet=treasury", key, {
       status: "error",
       answer: { status: 503, replayed: false },
     });
@@ -113,7 +116,7 @@ describe("useActionIdempotencyKey", () => {
     reload();
     const { result: reloaded } = renderHook(() => useActionIdempotencyKey());
     expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
-    reloaded.current.settled("wallet=treasury", {
+    reloaded.current.settled("wallet=treasury", key, {
       status: "error",
       answer: { status: 400, replayed: false },
     });
@@ -128,7 +131,7 @@ describe("useActionIdempotencyKey", () => {
     try {
       const { result } = renderHook(() => useActionIdempotencyKey());
       const key = result.current.keyFor("label=a");
-      result.current.settled("label=a", {
+      result.current.settled("label=a", key, {
         status: "error",
         answer: { status: 503, replayed: false },
       });

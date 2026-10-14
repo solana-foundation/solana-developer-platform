@@ -862,11 +862,15 @@ function useCreateWallet({
     submissionInFlightRef.current = true;
     setErrorMessage(null);
     // One key per submitted setup: the same details keep it across retries.
+    // The project is part of it: a setup's key is the API's per project, so a
+    // lost answer in one project is never settled by the same form in another.
     const input = JSON.stringify([
+      selectedProjectId,
       formAction === initializeCustodySetupAction,
       [...formData.entries()].map(([k, v]) => [k, String(v)]),
     ]);
-    formData.set("idempotencyKey", setupKey.keyFor(input));
+    const key = setupKey.keyFor(input);
+    formData.set("idempotencyKey", key);
 
     startTransition(async () => {
       try {
@@ -876,11 +880,11 @@ function useCreateWallet({
         } catch {
           // No answer: the call may have reached the server. The key stays and the form stays,
           // so Create wallet again resends the same request under the same key.
-          setupKey.settled(input, { status: "error" });
+          setupKey.settled(input, key, { status: "error" });
           setErrorMessage(t("DashboardCustody.walletSetupOutcomeUnknown"));
           return;
         }
-        setupKey.settled(input, result);
+        setupKey.settled(input, key, result);
 
         switch (result.status) {
           case "error":

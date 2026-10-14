@@ -85,7 +85,8 @@ function AddWalletForm({
     const formData = new FormData();
     formData.set("connectionId", connectionId);
     formData.set("label", label);
-    formData.set("idempotencyKey", actionKey.keyFor(input));
+    const key = actionKey.keyFor(input);
+    formData.set("idempotencyKey", key);
 
     const result = await run(() => createConnectionWalletAction(formData, provider), {
       successTitle: t("DashboardCustody.addWalletSuccessTitle"),
@@ -93,7 +94,7 @@ function AddWalletForm({
       failedTitle: t("DashboardCustody.addWalletFailedTitle"),
       unknownTitle: t("DashboardCustody.addWalletUnknownTitle"),
     });
-    actionKey.settled(input, result);
+    actionKey.settled(input, key, result);
     if (result.status === "success") {
       onClose();
     }

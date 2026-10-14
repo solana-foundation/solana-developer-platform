@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
@@ -21,6 +22,9 @@ vi.mock("@/lib/request-tracing", () => ({
 }));
 
 import { POST } from "./route";
+
+/** The headers part of the playground's envelope. */
+const envelopeHeadersSchema = z.object({ headers: z.record(z.string(), z.string()) });
 
 const OWNED_API_KEY = "sk_test_owned_secret";
 
@@ -170,7 +174,7 @@ describe("POST /api/playground/execute", () => {
     mocks.createSdpApiClient.mockResolvedValue({ request });
 
     const response = await POST(executeRequest());
-    const envelope = (await response.json()) as { headers: Record<string, string> };
+    const envelope = envelopeHeadersSchema.parse(await response.json());
 
     expect(envelope.headers).toEqual({
       "content-type": "application/json",
@@ -355,7 +359,7 @@ describe("POST /api/playground/execute", () => {
         headers: { Authorization: `Bearer ${OWNED_API_KEY}`, "Idempotency-Key": KEY },
         body: JSON.stringify({ amount: "1.00" }),
       });
-      const { headers } = (await response.json()) as { headers: Record<string, string> };
+      const { headers } = envelopeHeadersSchema.parse(await response.json());
       expect(headers["idempotency-key"]).toBe(KEY);
       expect(headers["idempotent-replayed"]).toBe("true");
     });

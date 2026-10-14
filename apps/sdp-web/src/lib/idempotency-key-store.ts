@@ -55,6 +55,19 @@ function scopedKey(storeKey: string): string {
   return keyScope ? `${storeKey}:${keyScope}` : storeKey;
 }
 
+/**
+ * The name an earlier build kept this store's entries under, before entries
+ * were scoped by user and org, or `null` while no scope is set (the scoped
+ * name is then that name). A key that build left unanswered is adopted by the
+ * first claim of its fingerprint, so an upgrade between a lost answer and the
+ * retry still resends the first attempt's key. Those entries name no owner: if
+ * the adopter is another user, the API refuses the key (422), which retires
+ * it, so the worst case is the fresh key the retry would otherwise have sent.
+ */
+function legacyKey(storeKey: string): string | null {
+  return keyScope ? storeKey : null;
+}
+
 function storage(): Storage | null {
   try {
     // Both the property access and the availability check can throw: some
@@ -102,8 +115,8 @@ function readStoredText(
   }
 }
 
-function readEntries(unscopedKey: string): StoredEntry[] {
-  const storeKey = scopedKey(unscopedKey);
+/** @param storeKey - The full `sessionStorage` name, scope included. */
+function readEntries(storeKey: string): StoredEntry[] {
   let parsed: unknown;
   if (storageDivergedKeys.has(storeKey)) {
     parsed = memoryEntries.get(storeKey) ?? [];
@@ -129,8 +142,8 @@ function readEntries(unscopedKey: string): StoredEntry[] {
   });
 }
 
-function writeEntries(unscopedKey: string, entries: readonly StoredEntry[]): boolean {
-  const storeKey = scopedKey(unscopedKey);
+/** @param storeKey - The full `sessionStorage` name, scope included. */
+function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
   // Memory first and unconditionally: it has to hold the value if the store
   // refuses this write.
   memoryEntries.set(storeKey, entries);
@@ -170,35 +183,70 @@ export interface IdempotencyKeyStore {
    * @param mint - Makes the value the first time; a fresh UUID by default.
    */
   claim(fingerprint: string, mint?: () => string): { key: string; persisted: boolean };
-  /** Retires the key: the next submit of this request is a new action. */
-  release(fingerprint: string): void;
+  /**
+   * Retires the key: the next submit of this request is a new action. Only
+   * the claimed key is retired, in the user and org scope that claimed it: a
+   * late answer to an earlier attempt never retires a newer key for the same
+   * request, or a key another scope kept for it.
+   *
+   * @param key - The key `claim` returned for the attempt being settled.
+   */
+  release(fingerprint: string, key: string): void;
 }
 
 /** One per flow, each under its own versioned `sessionStorage` key. */
 export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
+  /** The scoped storage name each claim was made under, by `[fingerprint, key]`. */
+  const claimedIn = new Map<string, string>();
+  const legacyEntries = (): StoredEntry[] => {
+    const legacy = legacyKey(storeKey);
+    return legacy === null ? [] : readEntries(legacy);
+  };
+
   return {
     has(fingerprint) {
-      return readEntries(storeKey).some((entry) => entry.id === fingerprint);
+      return [...readEntries(scopedKey(storeKey)), ...legacyEntries()].some(
+        (entry) => entry.id === fingerprint
+      );
     },
 
     claim(fingerprint, mint = () => crypto.randomUUID()) {
-      const entries = readEntries(storeKey);
-      const existing = entries.find((entry) => entry.id === fingerprint);
+      const name = scopedKey(storeKey);
+      const entries = readEntries(name);
+      const legacy = legacyEntries();
+      const existing =
+        entries.find((entry) => entry.id === fingerprint) ??
+        legacy.find((entry) => entry.id === fingerprint);
       const key = existing?.value ?? mint();
       // Written again for a kept key too, so `persisted` describes this claim.
-      const persisted = writeEntries(storeKey, [
+      const persisted = writeEntries(name, [
         ...entries.filter((entry) => entry.id !== fingerprint),
         { id: fingerprint, value: key },
       ]);
+      // Adopted from an earlier build: removed there only once it is kept here.
+      const legacyName = legacyKey(storeKey);
+      if (legacyName !== null && legacy.some((entry) => entry.id === fingerprint)) {
+        writeEntries(
+          legacyName,
+          legacy.filter((entry) => entry.id !== fingerprint)
+        );
+      }
+      claimedIn.set(JSON.stringify([fingerprint, key]), name);
       return { key, persisted };
     },
 
-    release(fingerprint) {
-      const entries = readEntries(storeKey);
-      if (!entries.some((entry) => entry.id === fingerprint)) return;
+    release(fingerprint, key) {
+      const claim = JSON.stringify([fingerprint, key]);
+      // A claim this page never made (it was made before a reload) is settled
+      // in the current scope; matching the key still keeps a newer one.
+      const name = claimedIn.get(claim) ?? scopedKey(storeKey);
+      claimedIn.delete(claim);
+      const entries = readEntries(name);
+      const isClaimed = (entry: StoredEntry) => entry.id === fingerprint && entry.value === key;
+      if (!entries.some(isClaimed)) return;
       writeEntries(
-        storeKey,
-        entries.filter((entry) => entry.id !== fingerprint)
+        name,
+        entries.filter((entry) => !isClaimed(entry))
       );
     },
   };
@@ -208,15 +256,17 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
  * Applies the one rule to an answer: a success, a replay or a 422 retires the
  * request's key; anything else keeps it for the retry.
  *
+ * @param key - The key the answered attempt was sent under (see `release`).
  * @returns Whether the key was retired.
  */
 export function settleIdempotencyKey(
   store: IdempotencyKeyStore,
   fingerprint: string,
+  key: string,
   answer: ApiAnswer
 ): boolean {
   if (!answerRetiresKey(answer)) return false;
-  store.release(fingerprint);
+  store.release(fingerprint, key);
   return true;
 }
 
@@ -262,8 +312,7 @@ export function createFloorMemo(unscopedKey: string): FloorMemo {
   type Entries = Record<string, string | null>;
   const memories = new Map<string, Entries>();
 
-  function read(): Entries {
-    const storageKey = scopedKey(unscopedKey);
+  function read(storageKey: string): Entries {
     const memory = memories.get(storageKey) ?? {};
     if (storageDivergedKeys.has(storageKey)) {
       // Storage is behind memory for this key (a write failed after the page
@@ -285,8 +334,7 @@ export function createFloorMemo(unscopedKey: string): FloorMemo {
     }
   }
 
-  function write(entries: Entries): void {
-    const storageKey = scopedKey(unscopedKey);
+  function write(storageKey: string, entries: Entries): void {
     memories.set(storageKey, { ...entries });
     try {
       window.sessionStorage.setItem(storageKey, JSON.stringify(entries));
@@ -303,19 +351,30 @@ export function createFloorMemo(unscopedKey: string): FloorMemo {
 
   return {
     remember(fingerprint, floor) {
-      const entries = read();
+      const storageKey = scopedKey(unscopedKey);
+      const entries = read(storageKey);
       delete entries[fingerprint];
       entries[fingerprint] = floor;
-      write(entries);
+      write(storageKey, entries);
     },
     recall(fingerprint) {
-      const entries = read();
-      return fingerprint in entries ? entries[fingerprint] : undefined;
+      const entries = read(scopedKey(unscopedKey));
+      if (fingerprint in entries) return entries[fingerprint];
+      // The floor an earlier, unscoped build kept beside a key the key store
+      // adopts (`legacyKey`).
+      const legacy = legacyKey(unscopedKey);
+      if (legacy === null) return undefined;
+      const legacyEntries = read(legacy);
+      return fingerprint in legacyEntries ? legacyEntries[fingerprint] : undefined;
     },
     forget(fingerprint) {
-      const entries = read();
-      delete entries[fingerprint];
-      write(entries);
+      for (const storageKey of [scopedKey(unscopedKey), legacyKey(unscopedKey)]) {
+        if (storageKey === null) continue;
+        const entries = read(storageKey);
+        if (!(fingerprint in entries)) continue;
+        delete entries[fingerprint];
+        write(storageKey, entries);
+      }
     },
     resetForTests() {
       const storageKey = scopedKey(unscopedKey);
@@ -336,8 +395,13 @@ export interface ActionMemo<T> {
    * Call it once per send, right before it.
    */
   valueFor(input: string, build: () => T): T;
-  /** Records the send's answer: one that retires the key forgets the value. */
-  settle(input: string, answer: ApiAnswer): void;
+  /**
+   * Records the send's answer: one that retires the key forgets the value,
+   * only if it is still the one this send went out with (see `release`).
+   *
+   * @param value - What `valueFor` returned for the send being answered.
+   */
+  settle(input: string, value: T, answer: ApiAnswer): void;
 }
 
 /**
@@ -347,8 +411,10 @@ export interface ActionMemo<T> {
  * after an edit and back (A to B to A) and after a reload, so a retry resends
  * the first attempt's request. Inputs are stored as digests
  * ({@link storageFingerprint}), so form contents never sit in storage; values
- * are stored as JSON. A store that refuses writes keeps the value in memory for
- * this page, and the send still goes out: no caller is a money route.
+ * are stored as JSON, so `schema` must not transform: a value has to
+ * serialize back to what was stored. A store that refuses writes keeps the
+ * value in memory for this page, and the send still goes out: no caller is a
+ * money route.
  *
  * @param storeKey - The `sessionStorage` key.
  * @param schema - What a stored value must be; anything else is rebuilt.
@@ -367,17 +433,18 @@ export function createActionMemo<T>(storeKey: string, schema: z.ZodType<T>): Act
     valueFor(input, build) {
       const fingerprint = storageFingerprint(input);
       const mint = () => JSON.stringify(build());
-      let remembered = decode(store.claim(fingerprint, mint).key);
+      const kept = store.claim(fingerprint, mint).key;
+      let remembered = decode(kept);
       if (!remembered) {
-        store.release(fingerprint);
+        store.release(fingerprint, kept);
         remembered = decode(store.claim(fingerprint, mint).key);
       }
       if (!remembered) throw new Error(`${storeKey}: build() made a value its schema rejects`);
       return remembered.data;
     },
 
-    settle(input, answer) {
-      settleIdempotencyKey(store, storageFingerprint(input), answer);
+    settle(input, value, answer) {
+      settleIdempotencyKey(store, storageFingerprint(input), JSON.stringify(value), answer);
     },
   };
 }

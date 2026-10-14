@@ -277,6 +277,7 @@ function useParRedemptionSubmission(options: {
       settleIdempotencyKey(
         vaultAsyncWithdrawalIdempotencyKeyStore,
         fingerprint,
+        key,
         fetchResultAnswer(result)
       );
       if (result.ok) {
@@ -324,12 +325,13 @@ function useParRedemptionRequestView(
       }
       const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
       if (result.ok) {
-        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint);
+        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
         setCancelResult(result.data);
       } else {
         settleIdempotencyKey(
           vaultAsyncWithdrawalIdempotencyKeyStore,
           fingerprint,
+          key,
           fetchResultAnswer(result)
         );
         setCancelError(result.error);

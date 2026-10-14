@@ -168,12 +168,13 @@ export async function POST(request: Request) {
       return failureResponse(trace, 403, "API key is not available for the selected project");
     }
 
+    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+    if (method !== "GET" && idempotencyKey) {
+      headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
+    }
     const response = await client.request(path, {
       method,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        ...(method !== "GET" && idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : {}),
-      },
+      headers,
       body:
         method !== "GET" && requestBody !== null && requestBody !== undefined
           ? JSON.stringify(requestBody)

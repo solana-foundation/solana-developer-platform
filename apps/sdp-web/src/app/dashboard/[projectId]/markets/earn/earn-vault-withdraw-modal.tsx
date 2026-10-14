@@ -903,12 +903,13 @@ export function EarnVaultWithdrawModal({
     const retired = settleIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
+      key,
       fetchResultAnswer(result)
     );
     // A slippage refusal comes from simulation, run only after no movement was
     // found under this key: the retry is a new request (see the deposit modal).
     const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
-    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint);
+    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint, key);
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
     if (retired || slippageRefused) forgetVaultWithdrawalFloor(fingerprint);

@@ -20,10 +20,12 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
+const workspace = vi.hoisted(() => ({ projectId: "project_test" }));
+
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-    selectedProjectId: "project_test",
+    selectedProjectId: workspace.projectId,
   }),
 }));
 
@@ -52,6 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetDashboardNavigation();
+  workspace.projectId = "project_test";
 });
 
 const SANDBOX_AVAILABILITY = availableCustodyProviders(
@@ -261,6 +264,35 @@ describe("WalletSetupFlow", () => {
     expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
     expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
     expect(createCustodySetupWalletAction).not.toHaveBeenCalled();
+  });
+
+  it("gives the same setup in another project its own key, so it never settles this one's", async () => {
+    vi.mocked(initializeCustodySetupAction).mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    const submit = async () => {
+      renderInteractiveFlow({
+        ...SANDBOX_FLOW,
+        connectedProviders: [],
+        custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
+        initialProvider: "privy",
+      });
+      await user.type(screen.getByLabelText("Wallet label"), "Per-project treasury");
+      await user.click(screen.getByRole("button", { name: "Create wallet" }));
+      expect(
+        await screen.findByText(/couldn't confirm whether the wallet was created/)
+      ).toBeTruthy();
+      cleanup();
+    };
+
+    await submit();
+    workspace.projectId = "project_other";
+    await submit();
+
+    const [inFirst, inOther] = vi
+      .mocked(initializeCustodySetupAction)
+      .mock.calls.map(([form]) => form);
+    expect(inFirst?.get("idempotencyKey")).toEqual(expect.any(String));
+    expect(inOther?.get("idempotencyKey")).not.toBe(inFirst?.get("idempotencyKey"));
   });
 
   it("explains why nothing can be selected when the project can use no provider", () => {

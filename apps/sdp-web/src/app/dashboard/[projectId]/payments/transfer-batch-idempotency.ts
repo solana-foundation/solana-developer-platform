@@ -92,8 +92,8 @@ export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
  * Retire a key once the API has answered for it: a recorded batch, or a
  * definitive refusal ({@link sendTransferBatchUnderKey}).
  */
-export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
+export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: string): void {
+  store.release(fingerprint, key);
 }
 
 /**
@@ -119,12 +119,15 @@ export async function sendTransferBatchUnderKey(
     result = await createTransferBatch(request, t, { value: key, persisted });
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {
-      settleIdempotencyKey(store, fingerprint, { status: error.status, replayed: error.replayed });
+      settleIdempotencyKey(store, fingerprint, key, {
+        status: error.status,
+        replayed: error.replayed,
+      });
     }
     throw error;
   }
   // The batch row exists, so the key is spent: the next identical batch is a
   // new intent rather than a retry of this one.
-  releaseTransferBatchIdempotencyKey(fingerprint);
+  releaseTransferBatchIdempotencyKey(fingerprint, key);
   return result;
 }
