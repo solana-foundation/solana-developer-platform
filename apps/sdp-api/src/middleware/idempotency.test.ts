@@ -427,13 +427,68 @@ describe("idempotent()", () => {
     }
   }
 
+  it.each(["store", "rerun"] as const)(
+    "answers a live request whose renewals fail as in flight on a %s route, then replays it",
+    async (serverErrors) => {
+      const actual = idempotencyKeysRepository.createPostgresIdempotencyKeyRepository;
+      const factory = vi
+        .spyOn(idempotencyKeysRepository, "createPostgresIdempotencyKeyRepository")
+        .mockImplementation((db) => ({
+          ...actual(db),
+          renew: async () => {
+            throw new Error("database failing over");
+          },
+        }));
+      try {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+          markStarted = resolve;
+        });
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const { app, create } = buildApp(
+          { key: "required", serverErrors, leaseSeconds: 1 },
+          async (c) => {
+            markStarted();
+            await released;
+            return c.json({ ok: true }, 201);
+          }
+        );
+
+        const first = post(app, "/v1/other", { a: 1 }, KEY);
+        await started;
+        // The 1s lease lapses because every renewal fails; the request is still running.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+        release();
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+        const retryAfter = Number(retry.headers.get("Retry-After"));
+        expect(retryAfter).toBeGreaterThanOrEqual(1);
+        expect(retryAfter).toBeLessThanOrEqual(60);
+        expect((await first).status).toBe(201);
+        const replayed = await post(app, "/v1/other", { a: 1 }, KEY);
+        expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+        expect(create).toHaveBeenCalledTimes(1);
+      } finally {
+        factory.mockRestore();
+      }
+    }
+  );
+
   it("answers a store route's unrecorded outcome with a terminal 409 and never runs it twice", async () => {
     await withFailingCompletes(async () => {
-      const { app, create } = buildApp({ key: "required", leaseSeconds: 1 }, created);
+      const { app, create } = buildApp(
+        { key: "required", leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
+        created
+      );
 
       expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
-      // Past the 1s lease, which nothing renews once the request answered.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Past the 1s lease and the 2s window (renewal cap plus lease).
+      await new Promise((resolve) => setTimeout(resolve, 2500));
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
         expect(retry.status).toBe(409);
@@ -451,7 +506,7 @@ describe("idempotent()", () => {
     // A crash before the outcome was written: in progress, lease lapsed, never released.
     await getDb(env).execute(
       `UPDATE idempotency_keys
-          SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second',
+          SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second', claimed_at = now() - interval '1 hour',
               response_status = NULL, response_headers = NULL, response_body = NULL`
     );
 
@@ -475,7 +530,13 @@ describe("idempotent()", () => {
       const app = testApp();
       app.post(
         "/v1/other",
-        idempotent({ key: "required", serverErrors: "store", recovery, leaseSeconds: 1 }),
+        idempotent({
+          key: "required",
+          serverErrors: "store",
+          recovery,
+          leaseSeconds: 1,
+          maxLeaseRenewalSeconds: 1,
+        }),
         replayFromRecord(async (c, _input, recordKey) => {
           const row = rows.get(recordKey);
           return row === undefined ? null : { fingerprint: null, respond: () => c.json(row, 201) };
@@ -489,7 +550,7 @@ describe("idempotent()", () => {
       await withFailingCompletes(async () => {
         const { app, create } = recoveringApp("record");
         const first = await post(app, "/v1/other", { a: 1 }, KEY);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
 
         expect(retry.status).toBe(201);
@@ -502,7 +563,7 @@ describe("idempotent()", () => {
       await withFailingCompletes(async () => {
         const { app, create } = recoveringApp(undefined);
         await post(app, "/v1/other", { a: 1 }, KEY);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2500));
         const retry = await post(app, "/v1/other", { a: 1 }, KEY);
 
         expect(retry.status).toBe(409);
