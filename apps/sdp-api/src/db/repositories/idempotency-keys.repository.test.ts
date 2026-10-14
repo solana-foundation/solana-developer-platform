@@ -283,15 +283,17 @@ describe("idempotency keys repository", () => {
     }
   });
 
-  it("keeps project-less keys unique", async () => {
-    expect(await repository().claim(claimInput({ projectId: null }))).toEqual({
-      kind: "claimed",
-      fresh: true,
-      replacedUnfinished: false,
-    });
-    expect(await repository().claim(claimInput({ projectId: null }))).toMatchObject({
-      kind: "in_flight",
-    });
+  it("requires a project on every key", async () => {
+    await expect(
+      getDb(env).execute(
+        `INSERT INTO idempotency_keys
+           (id, organization_id, project_id, operation, idempotency_key, principal, fingerprint,
+            status, claim_token, locked_until, expires_at)
+         VALUES ('idk_no_project', ?, NULL, 'POST /v1/things', 'k', 'p', 'f',
+                 'in_progress', 't', now(), now() + interval '1 day')`,
+        [ORG]
+      )
+    ).rejects.toThrow(/project_id/);
   });
 
   it("prunes only expired rows", async () => {

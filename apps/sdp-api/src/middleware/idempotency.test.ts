@@ -62,7 +62,9 @@ function testApp(): Hono<{ Bindings: Env }> {
     const keyId = c.req.header("x-test-key") ?? "key_test";
     // SAFETY: the middleware reads only id, organizationId and projectId.
     c.set("apiKey", { id: keyId, organizationId: ORG, projectId } as never);
-    c.set("projectId", projectId);
+    if (!c.req.header("x-test-skip-project")) {
+      c.set("projectId", projectId);
+    }
     // Stands in for the route's authorize step, which runs before idempotent().
     if (!c.req.header("x-test-skip-authorize")) {
       c.set("authorized", { loaded: undefined });
@@ -595,6 +597,14 @@ describe("idempotent()", () => {
   it("refuses to run without an earlier authorize step", async () => {
     const { app, create } = buildApp({ key: "required" }, created);
     const res = await post(app, "/v1/other", { a: 1 }, { ...KEY, "x-test-skip-authorize": "1" });
+    expect(res.status).toBe(500);
+    expect(create).not.toHaveBeenCalled();
+    expect(await storedRows()).toHaveLength(0);
+  });
+
+  it("refuses to run without project context, since every key belongs to a project", async () => {
+    const { app, create } = buildApp({ key: "required" }, created);
+    const res = await post(app, "/v1/other", { a: 1 }, { ...KEY, "x-test-skip-project": "1" });
     expect(res.status).toBe(500);
     expect(create).not.toHaveBeenCalled();
     expect(await storedRows()).toHaveLength(0);

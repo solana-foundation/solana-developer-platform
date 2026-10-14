@@ -2,9 +2,8 @@
 -- Idempotency-Key through `middleware/idempotency.ts`.
 --
 -- A key is unique within one organization, one project and one operation (the
--- HTTP method plus the Hono route pattern). `project_id` is null only for a
--- route that runs without project context; NULLS NOT DISTINCT keeps those keys
--- unique too.
+-- HTTP method plus the Hono route pattern). Every keyed route runs under
+-- project context, so `project_id` is required like every project-scoped table.
 --
 -- `in_progress` is claimed before the handler runs and carries a lease
 -- (`locked_until`), renewed while the request runs, plus the claim token of the
@@ -27,7 +26,7 @@
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     operation TEXT NOT NULL,
     idempotency_key TEXT NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
     -- The credential (API key id or user id) that first used the key. Another
@@ -52,7 +51,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
           AND claim_token IS NULL AND locked_until IS NULL)
     ),
     CONSTRAINT idempotency_keys_scope_key
-      UNIQUE NULLS NOT DISTINCT (organization_id, project_id, operation, idempotency_key)
+      UNIQUE (organization_id, project_id, operation, idempotency_key)
 );
 
 CREATE INDEX IF NOT EXISTS idempotency_keys_expires_at_idx
