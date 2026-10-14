@@ -96,8 +96,9 @@ authenticated.
    # Postgres and Redis (runs in the background)
    pnpm db:postgres:up
 
-   # Optional: local Kora, only when FEE_PAYMENT_PROVIDER=kora
-   pnpm kora:up
+   # Optional: local devnet + mainnet-fork Kora; writes the API's Kora env
+   # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
+   pnpm kora:local:up
 
    # API with team/Doppler configuration (keep this process running)
    pnpm dev:api
@@ -288,7 +289,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:up`)
+- Running Kora instance (`pnpm kora:local:up`, then `KORA_RPC_URL=http://127.0.0.1:18081`)
 - Funded Solana devnet account
 
 ## Database Migrations
