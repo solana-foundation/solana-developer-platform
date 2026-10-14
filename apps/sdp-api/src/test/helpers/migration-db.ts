@@ -96,6 +96,54 @@ export async function seedStoredProviderCredential(
   );
 }
 
+/**
+ * Seeds an individual counterparty. A NULL project is only insertable while a
+ * test has rewound the schema to before 0129.
+ *
+ * @param client - Connection the seed runs on.
+ * @param counterparty - The counterparty to seed.
+ * @param counterparty.id - Counterparty id, also used as its display name.
+ * @param counterparty.organizationId - Owning organization.
+ * @param counterparty.projectId - Owning project, or NULL on a pre-0129 schema.
+ * @returns Resolves once the row is inserted.
+ */
+export async function seedCounterparty(
+  client: Client,
+  counterparty: { id: string; organizationId: string; projectId: string | null }
+): Promise<void> {
+  await client.query(
+    `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+     VALUES ($1, $2, $3, 'individual', $1)`,
+    [counterparty.id, counterparty.organizationId, counterparty.projectId]
+  );
+}
+
+/**
+ * Seeds an active BVNK customer-link provider account. The organization and
+ * project are taken as given, so a test can seed one that disagrees with its
+ * counterparty's.
+ *
+ * @param client - Connection the seed runs on.
+ * @param link - The provider account to seed.
+ * @param link.id - Provider account id, also used as its provider customer reference.
+ * @param link.organizationId - Organization recorded on the provider account.
+ * @param link.projectId - Project recorded on the provider account.
+ * @param link.counterpartyId - Counterparty the provider account belongs to.
+ * @returns Resolves once the row is inserted.
+ */
+export async function seedCustomerLink(
+  client: Client,
+  link: { id: string; organizationId: string; projectId: string; counterpartyId: string }
+): Promise<void> {
+  await client.query(
+    `INSERT INTO counterparty_provider_accounts (
+       id, organization_id, project_id, counterparty_id, provider,
+       provider_customer_reference, kind, status
+     ) VALUES ($1, $2, $3, $4, 'bvnk', $1, 'customer_link', 'active')`,
+    [link.id, link.organizationId, link.projectId, link.counterpartyId]
+  );
+}
+
 /** Seeds the active project connection required by Helius Rings operations. */
 export async function seedHeliusRingsConnection(
   client: Client,

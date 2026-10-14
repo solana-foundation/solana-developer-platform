@@ -10,11 +10,14 @@ import {
   FK_VIOLATION,
   NOT_NULL_VIOLATION,
   RAISE_EXCEPTION,
+  seedCounterparty,
+  seedCustomerLink,
   seedOrgProject,
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
+import { restorePreCounterpartyProviderAccountsScopeSchema } from "./counterparty-provider-accounts-scope-schema";
 import {
   PROJECT_ID_NOT_NULL_MIGRATION,
   restorePreProjectIdNotNullSchema,
@@ -84,33 +87,6 @@ async function seedPaymentRequest(request: {
       request.status,
       request.fulfilledByTransferId,
     ]
-  );
-}
-
-async function seedCounterparty(counterparty: {
-  id: string;
-  organizationId: string;
-  projectId: string | null;
-}): Promise<void> {
-  await client.query(
-    `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
-     VALUES ($1, $2, $3, 'individual', $1)`,
-    [counterparty.id, counterparty.organizationId, counterparty.projectId]
-  );
-}
-
-async function seedCustomerLink(link: {
-  id: string;
-  organizationId: string;
-  projectId: string;
-  counterpartyId: string;
-}): Promise<void> {
-  await client.query(
-    `INSERT INTO counterparty_provider_accounts (
-       id, organization_id, project_id, counterparty_id, provider,
-       provider_customer_reference, kind, status
-     ) VALUES ($1, $2, $3, $4, 'bvnk', $1, 'customer_link', 'active')`,
-    [link.id, link.organizationId, link.projectId, link.counterpartyId]
   );
 }
 
@@ -247,6 +223,7 @@ afterAll(async () => {
 describe("0129 project_id not null migration", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await restorePreCounterpartyProviderAccountsScopeSchema(client);
     await restorePreProjectIdNotNullSchema(client);
   });
 
@@ -281,23 +258,23 @@ describe("0129 project_id not null migration", () => {
       status: "awaiting_payment",
       fulfilledByTransferId: null,
     });
-    await seedCounterparty({
+    await seedCounterparty(client, {
       id: "cpty_0129_null",
       organizationId: tenant.organizationId,
       projectId: null,
     });
-    await seedCustomerLink({
+    await seedCustomerLink(client, {
       id: "cpa_0129_null",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
       counterpartyId: "cpty_0129_null",
     });
-    await seedCounterparty({
+    await seedCounterparty(client, {
       id: "cpty_0129_kept",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
     });
-    await seedCustomerLink({
+    await seedCustomerLink(client, {
       id: "cpa_0129_kept",
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
@@ -594,7 +571,7 @@ describe("0129 project_id not null constraints", () => {
     await expectSqlstate(
       client,
       () =>
-        seedCounterparty({
+        seedCounterparty(client, {
           id: "cpty_0129_not_null",
           organizationId: tenant.organizationId,
           projectId: null,
