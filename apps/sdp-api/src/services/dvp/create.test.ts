@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { FeePaymentError } from "@sdp/payments/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
