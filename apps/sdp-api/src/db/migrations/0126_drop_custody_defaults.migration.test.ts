@@ -15,6 +15,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate,
   FK_VIOLATION,
+  RAISE_EXCEPTION,
   seedOrgProject,
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
@@ -27,7 +28,6 @@ import {
 import { restorePreProjectIdNotNullSchema } from "./project-id-not-null-schema";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const RAISE_EXCEPTION = "P0001";
 const ORGANIZATION_CREDENTIAL_SCOPE_KEY = "__organization__";
 const seededAt = "2026-01-01T00:00:00.000Z";
 let client: Client;

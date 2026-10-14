@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PaymentRequestStatus } from "@sdp/types";
+import type { PaymentRequestStatus, ProviderCredentialStatus } from "@sdp/types";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
@@ -9,6 +9,7 @@ import {
   expectSqlstate,
   FK_VIOLATION,
   NOT_NULL_VIOLATION,
+  RAISE_EXCEPTION,
   seedOrgProject,
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
@@ -160,14 +161,15 @@ async function seedGcpCredential(credential: {
   projectId: string | null;
   scope: CredentialScope;
   userId: string;
+  status: ProviderCredentialStatus;
   secretRef: string;
-  secretVersionRef: string;
+  secretVersionRef: string | null;
 }): Promise<void> {
   await client.query(
     `INSERT INTO provider_credentials (
        id, organization_id, project_id, provider, label, scope, source,
        storage_backend, secret_ref, secret_version_ref, status, created_by
-     ) VALUES ($1, $2, $3, 'privy', $1, $4, 'stored', 'gcp_secret_manager', $5, $6, 'active', $7)`,
+     ) VALUES ($1, $2, $3, 'privy', $1, $4, 'stored', 'gcp_secret_manager', $5, $6, $7, $8)`,
     [
       credential.id,
       credential.organizationId,
@@ -175,6 +177,7 @@ async function seedGcpCredential(credential: {
       credential.scope,
       credential.secretRef,
       credential.secretVersionRef,
+      credential.status,
       credential.userId,
     ]
   );
@@ -250,9 +253,6 @@ describe("0129 project_id not null migration", () => {
   afterEach(async () => {
     await seedTestDatabase(env);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
-    await client.query("DELETE FROM secret_retirements WHERE secret_version_ref = ANY($1)", [
-      [organizationSecretVersionRef, projectSecretVersionRef],
-    ]);
   });
 
   it("deletes NULL-project payment requests, transfers, counterparties with their provider accounts, and reservations, and keeps project-owned rows", async () => {
@@ -390,6 +390,7 @@ describe("0129 project_id not null migration", () => {
       projectId: null,
       scope: "organization",
       userId: tenant.userId,
+      status: "active",
       secretRef: organizationSecretRef,
       secretVersionRef: organizationSecretVersionRef,
     });
@@ -407,6 +408,7 @@ describe("0129 project_id not null migration", () => {
       projectId: tenant.projectId,
       scope: "project",
       userId: tenant.userId,
+      status: "active",
       secretRef: projectSecretRef,
       secretVersionRef: projectSecretVersionRef,
     });
@@ -434,6 +436,81 @@ describe("0129 project_id not null migration", () => {
         last_error: "organization-scoped provider credential removed (0129)",
       },
     ]);
+  });
+
+  it("fails the migration and leaves it unrecorded when an organization-scoped GCP credential has a secret but no recorded version", async () => {
+    const tenant = await seedOrgProject(client, "0129_unversioned");
+    await seedTransfer({
+      id: "xfr_0129_unversioned",
+      organizationId: tenant.organizationId,
+      projectId: null,
+    });
+    await seedGcpCredential({
+      id: "pcred_0129_unversioned",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      scope: "organization",
+      userId: tenant.userId,
+      status: "creating",
+      secretRef: "projects/p/secrets/pcred_0129_unversioned",
+      secretVersionRef: null,
+    });
+    await seedGcpCredential({
+      id: "pcred_0129_unversioned_versioned",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      scope: "organization",
+      userId: tenant.userId,
+      status: "active",
+      secretRef: organizationSecretRef,
+      secretVersionRef: organizationSecretVersionRef,
+    });
+
+    await expect(runPostgresMigrations({ databaseUrl, migrationsDir })).rejects.toMatchObject({
+      code: RAISE_EXCEPTION,
+      message: expect.stringContaining(
+        "1 organization-scoped GCP credential(s) have a secret but no recorded version"
+      ),
+    });
+
+    expect({
+      transfers: await idsOf("payment_transfers", tenant.organizationId),
+      credentials: await idsOf("provider_credentials", tenant.organizationId),
+      retirements: await retirementsOf([
+        "pcred_0129_unversioned",
+        "pcred_0129_unversioned_versioned",
+      ]),
+    }).toEqual({
+      transfers: ["xfr_0129_unversioned"],
+      credentials: ["pcred_0129_unversioned", "pcred_0129_unversioned_versioned"],
+      retirements: [],
+    });
+    expect(await recordedMigrations()).toEqual([]);
+  });
+
+  it("applies the migration and keeps a project-scoped GCP credential whose version is not yet recorded", async () => {
+    const tenant = await seedOrgProject(client, "0129_project_unversioned");
+    await seedGcpCredential({
+      id: "pcred_0129_project_unversioned",
+      organizationId: tenant.organizationId,
+      projectId: tenant.projectId,
+      scope: "project",
+      userId: tenant.userId,
+      status: "creating",
+      secretRef: projectSecretRef,
+      secretVersionRef: null,
+    });
+
+    await runPostgresMigrations({ databaseUrl, migrationsDir });
+
+    expect({
+      credentials: await idsOf("provider_credentials", tenant.organizationId),
+      retirements: await retirementsOf(["pcred_0129_project_unversioned"]),
+    }).toEqual({
+      credentials: ["pcred_0129_project_unversioned"],
+      retirements: [],
+    });
+    expect(await recordedMigrations()).toEqual([{ version: PROJECT_ID_NOT_NULL_MIGRATION }]);
   });
 
   it("fails the migration and leaves it unrecorded when a Helius Rings connection is bound to an organization-scoped credential", async () => {
@@ -636,5 +713,26 @@ describe("0130 drop signing_requests", () => {
     const relation = await client.query("SELECT to_regclass('signing_requests') AS relation");
 
     expect(relation.rows).toEqual([{ relation: null }]);
+  });
+});
+
+describe("0131 drop dead auth tables", () => {
+  it("leaves no sessions or magic_links table", async () => {
+    const relations = await client.query(
+      "SELECT to_regclass('sessions') AS sessions, to_regclass('magic_links') AS magic_links"
+    );
+
+    expect(relations.rows).toEqual([{ sessions: null, magic_links: null }]);
+  });
+
+  it("leaves users without login_count or last_login_at", async () => {
+    const columns = await client.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'users'
+          AND column_name = ANY($1)`,
+      [["login_count", "last_login_at"]]
+    );
+
+    expect(columns.rows).toEqual([]);
   });
 });

@@ -6,6 +6,7 @@ export const NOT_NULL_VIOLATION = "23502";
 export const UNIQUE_VIOLATION = "23505";
 export const FK_VIOLATION = "23503";
 export const CHECK_VIOLATION = "23514";
+export const RAISE_EXCEPTION = "P0001";
 
 /**
  * Runs a statement expected to violate a constraint. The savepoint is taken

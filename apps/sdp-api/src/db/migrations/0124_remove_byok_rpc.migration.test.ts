@@ -76,9 +76,6 @@ describe("0124 BYOK RPC removal", () => {
 
   afterEach(async () => {
     await runPostgresMigrations({ databaseUrl, migrationsDir });
-    await client.query("DELETE FROM secret_retirements WHERE secret_version_ref = ANY($1)", [
-      [quicknodeSecretVersionRef, privySecretVersionRef],
-    ]);
     await seedTestDatabase(env);
   });
 
