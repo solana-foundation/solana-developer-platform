@@ -7880,7 +7880,7 @@
       "module": "payments"
     },
     "counterparties.execute": {
-      "module": "ramps"
+      "module": "payments"
     },
     "transactions.read": {
       "module": "payments"

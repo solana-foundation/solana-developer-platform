@@ -72,8 +72,9 @@ describe("API-key authoring: grants offered by the release channel", () => {
       "organizations",
       "rpc",
     ]);
-    // Submitting counterparty requirements goes to a ramp provider, out of stable.
-    expect(offered).not.toContain("counterparties.execute");
+    // A counterparty's payout destination is a stable payments route; the
+    // ramp requirements route is gated by its own mount, not by this action.
+    expect(offered).toContain("counterparties.execute");
     expect(offered).not.toContain("issuance.read");
   });
 

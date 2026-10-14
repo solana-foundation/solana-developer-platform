@@ -4,14 +4,18 @@ import { hashString } from "@sdp/payments/hash";
 import {
   ACTIONS,
   API_KEY_FORBIDDEN_ACTIONS,
+  actionOwnerOf,
   COARSE_ACTION_MODULES,
   isAction,
+  isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
+  SDP_RELEASE_CHANNEL_NAMES,
 } from "@sdp/types";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import { registeredRouteAuthorizations } from "@/routes/route-actions";
+import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
@@ -85,6 +89,23 @@ describe("route actions", () => {
     );
     expect(ACTIONS.filter((action) => !used.has(action))).toEqual([]);
   });
+
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "lets a %s key hold the action of every route that channel runs",
+    (channel) => {
+      const inChannel = (owner: RouteOwner) =>
+        owner === "core" || isModuleInReleaseChannel(channel, owner, SDP_RAMP_PROVIDER_STAGES);
+      const unreachable = declared("action").flatMap(({ route, declaration }) => {
+        if (declaration.kind !== "action" || !isAction(declaration.action)) return [];
+        const routeOwner = routeOwnerOf(route.slice(route.indexOf(" ") + 1));
+        if (!routeOwner || !inChannel(routeOwner)) return [];
+        return inChannel(actionOwnerOf(declaration.action))
+          ? []
+          : [`${declaration.action} ${route}`];
+      });
+      expect(unreachable).toEqual([]);
+    }
+  );
 
   it("marks the non-V1 modules coarse", () => {
     expect([...COARSE_ACTION_MODULES].sort()).toEqual([

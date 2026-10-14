@@ -142,17 +142,13 @@ export function actionVerbOf(action: Action): ActionVerb {
 }
 
 /**
- * Actions whose routes belong to a different release-channel module than the
- * rest of their action module: submitting a counterparty's requirements goes
- * to a ramp provider.
+ * The release-channel module (or `core`) an action's routes run under. A
+ * route inside another module's mount (submitting a counterparty's ramp
+ * requirements) is gated by that mount's `requireModule`, not by its action,
+ * so a stable key can still hold the action for the stable routes.
  */
-const ACTION_OWNER_OVERRIDES: Partial<Record<Action, ActionOwner>> = {
-  "counterparties.execute": "ramps",
-};
-
-/** The release-channel module (or `core`) an action's routes run under. */
 export function actionOwnerOf(action: Action): ActionOwner {
-  return ACTION_OWNER_OVERRIDES[action] ?? ACTION_MODULES[actionModuleOf(action)].owner;
+  return ACTION_MODULES[actionModuleOf(action)].owner;
 }
 
 /** The actions of one module, in the registry's verb order. */
