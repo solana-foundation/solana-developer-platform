@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -220,7 +220,7 @@
             "description": "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Treasury wallet\",\n  \"purpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -483,7 +483,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

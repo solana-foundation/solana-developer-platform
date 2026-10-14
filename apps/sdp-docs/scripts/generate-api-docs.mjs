@@ -14,6 +14,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
+// What the build's release channel publishes, written by openapi:generate beside
+// the spec. Committed at experimental like the other generated docs files.
+const generatedSurfacePath = path.resolve(__dirname, "../../sdp-api/generated/public-surface.json");
+const surfacePath = path.resolve(__dirname, "../src/generated/public-surface.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
@@ -144,9 +148,26 @@ const extractRenderedRows = (content) => {
     );
 };
 
-const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
+// Families every release channel runs, so every build must render them.
+const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "api-keys", "wallets", "projects"];
+
+const validateGeneratedTagPages = async ({
+  outputDir,
+  tagPages,
+  groupedOperations,
+  tagDescriptions,
+}) => {
   const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
-  const missingPublicPages = [...PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
+  // The OpenAPI document is already narrowed to the build's release channel
+  // (SDP_RELEASE_CHANNEL), so every public family it declares needs a page.
+  const declaredSlugs = new Set([...tagDescriptions.keys()].map(slugify));
+  const requiredSlugs = [
+    ...new Set([
+      ...ALWAYS_PUBLIC_TAG_SLUGS,
+      ...[...PUBLIC_TAG_SLUGS].filter((slug) => declaredSlugs.has(slug)),
+    ]),
+  ];
+  const missingPublicPages = requiredSlugs.filter((slug) => !generatedSlugs.has(slug));
 
   if (missingPublicPages.length > 0) {
     throw new Error(
@@ -154,9 +175,16 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
     );
   }
 
-  for (const tagPage of tagPages) {
-    const source = await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8");
+  const renderedPages = await Promise.all(
+    tagPages.map(async (tagPage) => ({
+      tagPage,
+      source: await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"),
+    }))
+  );
+
+  for (const { tagPage, source } of renderedPages) {
     const actualRows = extractRenderedRows(source);
+    const actualRowSet = new Set(actualRows);
     const expectedRows = (groupedOperations.get(tagPage.title) || [])
       .slice()
       .sort((left, right) => {
@@ -174,7 +202,7 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
     }
 
     for (const row of expectedRows) {
-      if (!actualRows.includes(row)) {
+      if (!actualRowSet.has(row)) {
         throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
       }
     }
@@ -183,6 +211,9 @@ const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperation
 
 const run = async () => {
   const { tagDescriptions, operations } = await loadSpecData();
+
+  await fs.mkdir(path.dirname(surfacePath), { recursive: true });
+  await fs.copyFile(generatedSurfacePath, surfacePath);
 
   const groupedOperations = new Map();
   for (const operation of operations) {
@@ -330,6 +361,7 @@ const run = async () => {
     outputDir,
     tagPages,
     groupedOperations,
+    tagDescriptions,
   });
 
   console.log(

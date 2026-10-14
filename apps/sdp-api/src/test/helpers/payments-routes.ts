@@ -1,4 +1,4 @@
-import * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";

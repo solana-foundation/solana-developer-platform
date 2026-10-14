@@ -32,9 +32,11 @@ describe("Node HTTP response compression", () => {
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", prettyJSON());
     app.route("/openapi.json", openapi);
-    const response = await createNodeHttpApp(app).request("http://local.test/openapi.json?pretty", {
-      headers: { "Accept-Encoding": "gzip" },
-    });
+    const response = await createNodeHttpApp(app).request(
+      "http://local.test/openapi.json?pretty",
+      { headers: { "Accept-Encoding": "gzip" } },
+      { SDP_RELEASE_CHANNEL: "stable" } as Env
+    );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Encoding")).toBe("gzip");

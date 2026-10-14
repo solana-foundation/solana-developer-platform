@@ -1,6 +1,8 @@
-import type { RampProviderId } from "@sdp/types";
 import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins";
 import { defineConfig, defineDocs, frontmatterSchema } from "fumadocs-mdx/config";
+import { remarkDocsBlocks } from "./src/lib/docs-blocks";
+import { publishedRampProviderIds, ROTATE_PROVIDERS_TOKEN } from "./src/lib/docs-catalog";
+import { publicSurface } from "./src/lib/release-channel";
 
 type ShikiTransformer = NonNullable<typeof rehypeCodeDefaultOptions.transformers>[number];
 type Element = Parameters<NonNullable<ShikiTransformer["span"]>>[0];
@@ -13,32 +15,24 @@ export const docs = defineDocs({
   },
 });
 
-/**
- * Mirrors RAMP_PROVIDERS from @sdp/types (typed against it), duplicated as a
- * literal because fumadocs-mdx loads this config in a plain Node context that
- * cannot resolve the workspace package's TS source at runtime.
- */
-const ROTATOR_PROVIDERS = [
-  "moonpay",
-  "bvnk",
-  "coinbase",
-  "stripe",
-] as const satisfies readonly RampProviderId[];
-
 type Rotation = { flag: string; token: string; prefix: string; values: readonly string[] };
 
 /**
  * Each rotation swaps `token` in fences tagged with `flag` for a carousel of
  * `values`, with `prefix` re-emitted as plain text before the carousel (so a
  * leading `/` can sit outside the chip). A list of n values animates with the
- * `rpr-track-<n>` keyframes in ramp-rotator.css, so a new length needs its own.
+ * `rpr-track-<n>` keyframes in ramp-rotator.css, so a new length needs its own;
+ * a single value replaces the token without a carousel.
  */
 const ROTATIONS = [
   {
     flag: "rotate-providers",
-    token: '"moonpay"',
+    token: ROTATE_PROVIDERS_TOKEN,
     prefix: "",
-    values: ROTATOR_PROVIDERS.map((provider) => `"${provider}"`),
+    // Only the ramp providers this build's release channel publishes rotate.
+    values: publishedRampProviderIds(publicSurface.rampProviders).map(
+      (provider) => `"${provider}"`
+    ),
   },
   {
     flag: "rotate-token-ops",
@@ -93,6 +87,11 @@ const rampProviderRotator: ShikiTransformer = {
 
     const [before, after] = child.value.split(rotation.token);
     const [leadValue, ...restValues] = rotation.values;
+    if (leadValue === undefined) return;
+    if (restValues.length === 0) {
+      child.value = before + rotation.prefix + leadValue + after;
+      return;
+    }
     const items: ElementContent[] = [
       rotatorItem(leadValue, true),
       ...restValues.map((value) => rotatorItem(value, false)),
@@ -126,6 +125,9 @@ if (!defaultTransformers) {
 
 export default defineConfig({
   mdxOptions: {
+    // Generated blocks first, so headings and search text see what the build
+    // publishes (src/lib/docs-blocks.ts).
+    remarkPlugins: (defaults) => [remarkDocsBlocks, ...defaults],
     rehypeCodeOptions: {
       ...rehypeCodeDefaultOptions,
       transformers: [...defaultTransformers, rampProviderRotator],

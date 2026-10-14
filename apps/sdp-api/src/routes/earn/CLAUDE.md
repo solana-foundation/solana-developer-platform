@@ -121,10 +121,14 @@ balance with a live one.
   of the DEFAULT public document by `EARN_PUBLIC_SURFACE_PUBLISHED` in
   `../../openapi/spec.ts`, so api.solana.com/openapi.json, Swagger UI, the API
   reference, Postman, the playground catalog and the AI files carry no Earn
-  until launch. The pinned list is asserted against
-  `createPublicOpenApiDocument({ publishEarn: true })`, and a sibling test
-  asserts the default document is Earn-free. Flipping the constant is the
-  sign-off PR. The flag reaches one runtime response:
+  until launch. Each deployment's public document also carries only the
+  modules its release channel runs (`releaseChannel`, an additional
+  condition): Earn publishes only when the flag is true AND the channel runs
+  Earn, so promoting Earn to a channel never publishes it on its own. The
+  pinned list is asserted against `createPublicOpenApiDocument({ publishEarn:
+  true, releaseChannel: "experimental" })`, and sibling tests assert the
+  document is Earn-free on every channel while the flag is false. Flipping the
+  constant is the sign-off PR. The flag reaches one runtime response:
   `GET /v1/projects/{projectId}/provider-availability` omits Earn entries
   while it is false, so the response matches the public document.
   The current contract pins eight optional-auth operations: strategy list/detail,
@@ -736,7 +740,7 @@ transaction signed by the organization custody wallet or external owner.
     money-OUT path, the one failure ADR 0002 rules out.
     `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
     from CONFIGURATION: the flag, plus a Kora for that cluster
-    (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
+    (`isFeePaymentConfiguredForCluster`, @sdp/fee-payment): `KORA_RPC_URL` serves
     the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
     the other; there is no built-in default URL. The bare trio is legacy: the
     project's environment picks the cluster, so a deployment wires BOTH suffix

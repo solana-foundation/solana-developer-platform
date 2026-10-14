@@ -2491,15 +2491,30 @@ describe("Payments routes — ramps", () => {
       Object.assign(env, originalStripeEnv);
     });
 
-    function stripeSessionResponse(sessionId: string): Response {
-      return new Response(
-        JSON.stringify({
-          id: sessionId,
-          client_secret: `${sessionId}_secret`,
-          status: "initialized",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+    /** Answers a session create the way Stripe does, echoing the request's locked terms. */
+    function stripeSessionResponse(sessionId: string) {
+      return async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        if (!(init?.body instanceof URLSearchParams)) {
+          throw new Error("Expected the Stripe session request to send a form body");
+        }
+        const form = init.body;
+        return new Response(
+          JSON.stringify({
+            id: sessionId,
+            client_secret: `${sessionId}_secret`,
+            status: "initialized",
+            transaction_details: {
+              destination_currencies: form.getAll("destination_currencies[]"),
+              destination_networks: form.getAll("destination_networks[]"),
+              lock_wallet_address: form.get("lock_wallet_address") === "true",
+              source_amount: form.get("source_amount"),
+              source_currency: form.get("source_currency"),
+              wallet_addresses: { solana: form.get("wallet_addresses[solana]") },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      };
     }
 
     async function createStripeOnrampQuote(
@@ -2531,9 +2546,9 @@ describe("Payments routes — ramps", () => {
       const counterpartyId = await seedCounterparty({ externalId: "stripe_bind_reuse" });
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"))
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"))
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"));
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"))
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"))
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"));
 
       const created = await createStripeOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
@@ -2577,7 +2592,7 @@ describe("Payments routes — ramps", () => {
         .run();
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(stripeSessionResponse("cos_foreign_1"));
+        .mockImplementationOnce(stripeSessionResponse("cos_foreign_1"));
 
       const res = await createStripeOnrampQuote(counterpartyId, "25");
 

@@ -24,6 +24,7 @@ const MODULE_METADATA = [
       "@sdp/dvp",
       "@sdp/earn",
       "@sdp/env-config",
+      "@sdp/fee-payment",
       "@sdp/helius-rings",
       "@sdp/helius-rings-sdk",
       "@sdp/hastra",
@@ -122,6 +123,12 @@ const MODULE_METADATA = [
     allowedDependencies: [],
   },
   {
+    name: "@sdp/fee-payment",
+    directory: "packages/sdp-fee-payment",
+    purpose: "Fee-payment port, Kora and native fee-payer adapters, and Kora endpoint selection.",
+    allowedDependencies: ["@sdp/rpc", "@sdp/types"],
+  },
+  {
     name: "@sdp/hastra",
     directory: "packages/sdp-hastra",
     purpose:
@@ -135,7 +142,7 @@ const MODULE_METADATA = [
     name: "@sdp/issuance",
     directory: "packages/sdp-issuance",
     purpose: "Token issuance domain services and Mosaic integration.",
-    allowedDependencies: ["@sdp/payments", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/fee-payment", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/kamino",
@@ -184,7 +191,7 @@ const MODULE_METADATA = [
   {
     name: "@sdp/payments",
     directory: "packages/sdp-payments",
-    purpose: "Payment domain services, fee payment, and ramp providers.",
+    purpose: "Payment domain services and ramp providers.",
     allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {

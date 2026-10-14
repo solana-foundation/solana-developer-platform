@@ -51,6 +51,7 @@ packages/*
 !packages/sdp-redaction
 !packages/sdp-solana
 !packages/sdp-payments
+!packages/sdp-fee-payment
 !packages/sdp-issuance
 docs
 infra

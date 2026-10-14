@@ -15,7 +15,9 @@ import {
   type SecurityRequirementObject,
 } from "openapi3-ts/oas30";
 
+import { valueGates } from "../src/openapi/release-channel-values";
 import { createPublicOpenApiDocument } from "../src/openapi/spec";
+import { ROUTE_OWNERS, type RouteOwner, routeOwnerOf } from "../src/routes/route-modules";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
@@ -42,6 +44,8 @@ interface PlaygroundOperation {
   title: string;
   method: PlaygroundMethod;
   path: string;
+  /** The SDP module that owns the route; the dashboard drops it outside its release channel. */
+  releaseModule: RouteOwner;
   pathFields: PlaygroundField[];
   bodyFields: PlaygroundField[];
   expectedResponse: unknown;
@@ -323,6 +327,10 @@ function buildCatalogEntry(
   if (!acceptsApiKeyAuth(operation.security)) return null;
 
   const operationId = operation.operationId ?? `${method}-${pathname}`;
+  const releaseModule = routeOwnerOf(pathname);
+  if (releaseModule === undefined) {
+    throw new Error(`${pathname} has no owning module in src/routes/route-modules.ts`);
+  }
   const parameters = [...pathParameters, ...(operation.parameters ?? [])].map((parameter) =>
     dereferenceParameter(parameter, document)
   );
@@ -338,6 +346,7 @@ function buildCatalogEntry(
       title: operation.summary ?? operationId,
       method: method.toUpperCase() as PlaygroundMethod,
       path: buildPathWithQuery(pathname, pathAndQuery),
+      releaseModule,
       pathFields: parameters
         .map((parameter) => fieldFromParameter(parameter, document))
         .filter((field): field is PlaygroundField => field !== null),
@@ -347,8 +356,13 @@ function buildCatalogEntry(
   };
 }
 
+/**
+ * The catalog holds every release channel's operations. The dashboard filters it
+ * at runtime by its own `SDP_RELEASE_CHANNEL`, so one committed file serves
+ * every deployment.
+ */
 function generateCatalog(): string {
-  const document = createPublicOpenApiDocument();
+  const document = createPublicOpenApiDocument({ releaseChannel: "experimental" });
   const modules: Record<PlaygroundModule, PlaygroundOperation[]> = {
     wallets: [],
     payments: [],
@@ -377,6 +391,11 @@ function generateCatalog(): string {
         ),
       },
       modules,
+      // Route ownership, for hand-authored forms the catalog does not carry.
+      routeOwners: ROUTE_OWNERS.map(([pattern, owner]) => ({ pattern: pattern.source, owner })),
+      // Which module or ramp provider owns a field value, so the dashboard drops
+      // options, defaults and example values its channel does not run.
+      valueGates: valueGates(),
     },
     null,
     2

@@ -41,7 +41,7 @@ import {
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
 import {
@@ -51,7 +51,6 @@ import {
   resolveSdpEnvironment,
 } from "../context";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   type ResolvedScope,
   resolveScope,
@@ -218,7 +217,6 @@ export async function resolveRampQuoteRequest(
 
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 
@@ -379,6 +377,7 @@ export async function estimateAcrossProviders(
           provider,
           organization_id: scope.auth.organizationId,
           error_message: redactCredentialString(cause.message),
+          error_diagnostics: paymentsErrorDiagnostics(error),
           ...describeError(error),
         });
         const observability = c.get("observability");

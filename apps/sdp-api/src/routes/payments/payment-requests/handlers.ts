@@ -13,7 +13,7 @@ import {
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
+import { assertPaymentWalletExactAccess, resolveScope, resolveWallet } from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
@@ -80,7 +80,7 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
   assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
+  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
     c.env,

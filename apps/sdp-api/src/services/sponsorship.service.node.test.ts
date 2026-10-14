@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import * as feePayment from "@sdp/payments/fee-payment";
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import * as feePayment from "@sdp/fee-payment";
+import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Blockhash,
@@ -685,7 +685,7 @@ describe("sponsorship construction guard", () => {
     "createKoraAdapter",
     "KoraAdapter",
   ]);
-  const FEE_PAYMENT_SPECIFIER = `@sdp/payments/fee-payment(?:/[^"']*)?`;
+  const FEE_PAYMENT_SPECIFIER = `@sdp/fee-payment(?:/[^"']*)?`;
   const OPAQUE_IMPORT_PATTERNS = [
     new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
     new RegExp(String.raw`import\s+(?!type\b)[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
@@ -699,7 +699,7 @@ describe("sponsorship construction guard", () => {
     new RegExp(String.raw`import\(\s*["']${FEE_PAYMENT_SPECIFIER}["']\s*\)`),
   ];
   const NAMED_IMPORT_PATTERN =
-    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/payments\/fee-payment(?:\/[^"']*)?["']/g;
+    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/fee-payment(?:\/[^"']*)?["']/g;
   function sourceFiles(directory: string): string[] {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const entryPath = path.join(directory, entry.name);

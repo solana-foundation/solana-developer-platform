@@ -11,13 +11,11 @@ Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana 
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
 
-Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
-
 ## Tokens and token accounts
 
 Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
-**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to issuance operations (mint, burn, seize, force-burn) as well as payments transfers. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
 ## Transfer execution
 
@@ -36,7 +34,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | Field | Meaning |
 | --- | --- |
 | `id` | SDP-internal transfer identifier (use this in API URLs). |
-| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
+| `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
@@ -46,7 +44,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `error` | Set if the transfer failed; the rest of the record explains what reached the network. |
 | `risk` | Optional risk-score metadata, when a risk provider is configured. |
 
-Outbound wallet transfers start at `processing` and move to `confirmed` → `finalized`. Inbound transfers discovered on-chain surface directly at `confirmed`. Ramp transfers can start at `pending` while provider-side steps are still underway. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
+Outbound wallet transfers start at `processing` and move to `confirmed` → `finalized`. Inbound transfers discovered on-chain surface directly at `confirmed`. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
 
 ## What SDP does and does not give you
 

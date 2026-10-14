@@ -1,3 +1,4 @@
+import type { SdpReleaseChannel } from "@sdp/types";
 import {
   assetProfiles,
   custody,
@@ -12,7 +13,10 @@ import {
   privateChannels,
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+} from "@/flags/release-channel";
 import type { DesignModuleFlags } from "@/lib/design-modules";
 import { isRampsEnabled } from "./ramps";
 
@@ -35,6 +39,8 @@ export type DashboardFlags = {
   paymentsDemoMode?: boolean;
   privateChannels: boolean;
   ramps: boolean;
+  /** This deployment's release channel; the API playground offers only its modules. */
+  releaseChannel: SdpReleaseChannel;
 };
 
 /**
@@ -93,5 +99,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
+    releaseChannel: deploymentReleaseChannel(),
   };
 }

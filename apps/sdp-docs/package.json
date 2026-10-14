@@ -10,10 +10,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && node scripts/generate-postman-collection.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json",
+    "generate:api": "pnpm -C ../sdp-api run openapi:generate && node scripts/generate-api-docs.mjs && node scripts/generate-postman-collection.mjs && pnpm exec biome check --write content/docs/meta.json content/docs/reference/api/meta.json src/generated/public-surface.json",
     "generate:ai": "tsx scripts/generate-ai-resources.ts",
     "generate:source": "node scripts/generate-source.mjs",
     "check:links": "tsx scripts/check-links.ts",
+    "test": "tsx --test scripts/*.test.ts",
     "watch:source": "node scripts/watch-source.mjs"
   },
   "dependencies": {
@@ -25,10 +26,17 @@
     "lucide-react": "1.48.0",
     "next": "16.3.8",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "remark-gfm": "4.0.1",
+    "remark-mdx": "3.1.1",
+    "remark-parse": "11.0.0",
+    "unified": "11.0.5",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
+    "@types/mdast": "4.0.4",
     "@types/mdx": "2.0.14",
     "@types/node": "26.6.2",
     "@types/react": "19.3.0",

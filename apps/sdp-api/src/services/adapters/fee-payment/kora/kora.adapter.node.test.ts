@@ -1,5 +1,5 @@
-import { createKoraAdapter } from "@sdp/payments/fee-payment";
-import { KoraAdapter } from "@sdp/payments/fee-payment/kora";
+import { createKoraAdapter } from "@sdp/fee-payment";
+import { KoraAdapter } from "@sdp/fee-payment/kora";
 import type { KoraClient } from "@solana/kora";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

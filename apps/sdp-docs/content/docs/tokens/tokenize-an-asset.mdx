@@ -1,4 +1,5 @@
 ---
+module: issuance
 title: Tokenize an Asset
 description: Map a real-world asset to the right SDP token model, authorities, and implementation flow.
 ---
@@ -17,6 +18,71 @@ Pick the **Tokenization Template** that matches your asset's compliance and oper
 | Non-standard asset | `custom` | Manually selected extensions |
 
 **Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
+
+## Compliance enforced onchain
+
+Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
+
+Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+
+<Tabs items={["JavaScript", "Python", "curl"]}>
+<Tab value="JavaScript">
+```javascript title="compliance-action.js" rotate-token-ops
+const response = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(operationParams),
+  },
+);
+const result = await response.json();
+```
+</Tab>
+<Tab value="Python">
+```python title="compliance_action.py" rotate-token-ops
+import requests
+
+response = requests.post(
+    "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
+    headers={"Authorization": "Bearer sk_test_..."},
+    json=operation_params,
+)
+result = response.json()
+```
+</Tab>
+<Tab value="curl">
+```bash title="Terminal" rotate-token-ops
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d "$OPERATION_PARAMS"
+```
+</Tab>
+</Tabs>
+
+## Audit trail
+
+Issuance and compliance actions are recorded in the organization's audit log alongside every other sensitive operation (see [What is SDP?](/docs/introduction)):
+
+| Area                    | Recorded events                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
+| Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
+| Asset profiles          | Asset profile changes                                                              |
+
+## Idempotency
+
+Execute-mode issuance operations consume the `Idempotency-Key` header ([Idempotency](/docs/developing-with-sdp/idempotency)) in a namespace of their own:
+
+| Domain | Operations | Key namespace |
+| --- | --- | --- |
+| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
+
+The issuance namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
 
 ## Implementation sequence
 

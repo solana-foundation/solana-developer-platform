@@ -225,39 +225,6 @@ export function scheduleApiKeyLastUsedUpdate(
   return pending;
 }
 
-function normalizeWalletBindings(cachedKey: CachedApiKey): {
-  walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
-} {
-  const rawBindings = cachedKey.walletBindings ?? [];
-  const walletBindings = rawBindings
-    .filter(
-      (binding): binding is ApiKeyWalletAuthorizationBinding & { custodyWalletId: string } =>
-        typeof binding.walletId === "string" &&
-        binding.walletId.length > 0 &&
-        typeof binding.custodyWalletId === "string" &&
-        binding.custodyWalletId.length > 0
-    )
-    .map((binding) => ({
-      walletId: binding.walletId,
-      custodyWalletId: binding.custodyWalletId,
-      // An explicitly empty list grants nothing; it must never widen to "*".
-      permissions: binding.permissions ?? ([] as Permission[]),
-    }));
-
-  const signingWalletIds = walletBindings.map((binding) => binding.walletId);
-  const signingWalletId = cachedKey.signingWalletId ?? signingWalletIds[0] ?? null;
-
-  return {
-    walletScope: cachedKey.walletScope as ApiKeyWalletScope,
-    signingWalletId,
-    signingWalletIds,
-    walletBindings,
-  };
-}
-
 /**
  * Authentication middleware
  * Validates API key and sets auth context
@@ -349,14 +316,11 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // checks above only reject cheaply. It must sit behind the KV-backed limiter:
   // ahead of it, a flooding key costs one DB read per rejected request. Behind
   // it, reads are capped at the tier; the quota belongs to whoever holds the key.
-  recordOrganizationEntitlements(
-    c,
-    await enforceApiKeyOrganizationAccess(c, cachedKey.organizationId, cachedKey.id)
-  );
+  const access = await enforceApiKeyOrganizationAccess(c, cachedKey.organizationId, cachedKey.id);
+  recordOrganizationEntitlements(c, access.settings);
 
-  // Set auth context
-  const normalizedWalletBindings = normalizeWalletBindings(cachedKey);
-
+  // Wallet scope comes from that same fresh read, never the cache: a key
+  // narrowed to selected wallets, or a removed binding, applies on this request.
   const authContext: ApiKeyContext = {
     id: cachedKey.id,
     organizationId: cachedKey.organizationId,
@@ -365,10 +329,10 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     permissions: cachedKey.permissions,
     environment: cachedKey.environment,
     allowedOperations: cachedKey.allowedOperations ?? null,
-    walletScope: normalizedWalletBindings.walletScope,
-    signingWalletId: normalizedWalletBindings.signingWalletId,
-    signingWalletIds: normalizedWalletBindings.signingWalletIds,
-    walletBindings: normalizedWalletBindings.walletBindings,
+    walletScope: access.walletAuthorization.walletScope,
+    signingWalletId: access.walletAuthorization.signingWalletId,
+    signingWalletIds: access.walletAuthorization.signingWalletIds,
+    walletBindings: access.walletAuthorization.walletBindings,
   };
 
   c.set("apiKey", authContext);

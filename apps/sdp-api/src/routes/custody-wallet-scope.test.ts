@@ -1071,16 +1071,13 @@ describe("Custody wallet scope routes", () => {
       uiAmount: "3",
     });
 
+    // A binding names a Provider wallet ID, which two Connections share here, so
+    // authentication's fresh read cannot tell which wallet it means: the key
+    // stays wallet-scoped and reaches neither (deny-only, fail closed).
     await seedCachedKey({
       walletScope: "selected",
       signingWalletId: sharedWalletId,
-      walletBindings: [
-        {
-          walletId: sharedWalletId,
-          custodyWalletId: "cwlt_scope_shared_a",
-          permissions: ["*"],
-        },
-      ],
+      walletBindings: [{ walletId: sharedWalletId, permissions: ["*"] }],
     });
 
     const selectedList = await app.request(
@@ -1094,9 +1091,7 @@ describe("Custody wallet scope routes", () => {
     const selectedListBody = (await selectedList.json()) as {
       data: { wallets: Array<{ id: string }> };
     };
-    expect(selectedListBody.data.wallets.map((wallet) => wallet.id)).toEqual([
-      "cwlt_scope_shared_a",
-    ]);
+    expect(selectedListBody.data.wallets).toEqual([]);
 
     const selectedDetail = await app.request(
       `/v1/wallets/${sharedWalletId}?includeBalance=false`,
@@ -1105,44 +1100,7 @@ describe("Custody wallet scope routes", () => {
       },
       env
     );
-    expect(selectedDetail.status).toBe(200);
-    expect(await selectedDetail.json()).toMatchObject({
-      data: { wallet: { id: "cwlt_scope_shared_a", publicKey: TEST_SOLANA_ADDRESSES.wallet2 } },
-    });
-
-    const selectedPublicKey = await app.request(
-      `/v1/wallets/public-key?walletId=${sharedWalletId}`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedPublicKey.status).toBe(200);
-    expect(await selectedPublicKey.json()).toMatchObject({
-      data: { publicKey: TEST_SOLANA_ADDRESSES.wallet2 },
-    });
-
-    const selectedBalances = await app.request(
-      `/v1/payments/wallets/${sharedWalletId}/balances`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedBalances.status).toBe(200);
-
-    const selectedDelete = await app.request(
-      "/v1/wallets",
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ walletId: sharedWalletId, provider: "privy" }),
-      },
-      env
-    );
-    expect(selectedDelete.status).toBe(400);
-    expect(await selectedDelete.json()).toMatchObject({
-      error: { message: "Wallet deletion not supported for provider: privy" },
-    });
+    expect(selectedDetail.status).toBe(404);
   });
 
   it("returns the requested public key when the wallet is authorized", async () => {

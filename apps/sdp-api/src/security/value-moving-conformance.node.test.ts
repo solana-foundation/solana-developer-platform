@@ -546,7 +546,7 @@ const signingSinkInventory: Record<string, string[]> = {
   // DvP create, fund, settle/cancel and payments share the owned sponsorship
   // submission sink, which signs and persists before broadcasting; fund and
   // settle only partially sign as authorities and are not sinks of their own.
-  "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
+  "apps/sdp-api/src/services/payments/payment-request-sponsorship.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],

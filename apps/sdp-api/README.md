@@ -96,8 +96,9 @@ authenticated.
    # Postgres and Redis (runs in the background)
    pnpm db:postgres:up
 
-   # Optional: local Kora, only when FEE_PAYMENT_PROVIDER=kora
-   pnpm kora:up
+   # Optional: local devnet + mainnet-fork Kora; writes the API's Kora env
+   # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
+   pnpm kora:local:up
 
    # API with team/Doppler configuration (keep this process running)
    pnpm dev:api
@@ -130,8 +131,11 @@ FEE_PAYMENT_PROVIDER=native
 FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 ```
 
-Kora is a fee-payment provider, not a signing provider. To use local Kora,
-set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL=http://127.0.0.1:8080`
+Kora is a fee-payment provider, not a signing provider. `pnpm dev:kora` starts
+the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
+Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
+via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
+use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`
 instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
@@ -285,7 +289,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:up`)
+- Running Kora instance (`pnpm kora:local:up`, then `KORA_RPC_URL=http://127.0.0.1:18081`)
 - Funded Solana devnet account
 
 ## Database Migrations
