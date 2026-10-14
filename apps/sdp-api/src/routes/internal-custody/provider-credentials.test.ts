@@ -11,6 +11,7 @@ import { AuditService } from "@/services/audit.service";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
 import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
@@ -528,8 +529,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       id: "key_internal_credential_admin",
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       rateLimitTier: "standard",
       allowedIps: null,

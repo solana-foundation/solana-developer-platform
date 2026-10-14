@@ -185,8 +185,8 @@ describe("ApiKeyService.resolveUsableApiKey", () => {
   });
 });
 
-describe("ApiKeyService.createApiKey permission guard", () => {
-  it("rejects a non-admin minting an api_admin key before touching the database", async () => {
+describe("ApiKeyService.createApiKey grant guard", () => {
+  it("refuses an action no API key may hold before touching the database", async () => {
     const db = new RecordingDb();
     const service = new ApiKeyService(db, TEST_SCOPE);
 
@@ -194,10 +194,28 @@ describe("ApiKeyService.createApiKey permission guard", () => {
       service.createApiKey({
         organizationId: "org_1",
         projectId: "prj_1",
-        actorPermissions: ["api-keys:write"],
+        actorRole: "admin",
         createdByUserId: "usr_1",
         name: "escalated",
-        role: "api_admin",
+        grants: ["api_keys.manage"],
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    expect(db.runs).toHaveLength(0);
+  });
+
+  it("refuses a member granting an action their role lacks", async () => {
+    const db = new RecordingDb();
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await expect(
+      service.createApiKey({
+        organizationId: "org_1",
+        projectId: "prj_1",
+        actorRole: "member",
+        createdByUserId: "usr_1",
+        name: "escalated",
+        grants: ["issuance.authority"],
       })
     ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
 
@@ -210,20 +228,19 @@ describe("ApiKeyService.updateApiKey", () => {
     keyId: "key_1",
     organizationId: "org_1",
     projectId: "prj_1",
-    currentRole: "api_developer" as const,
   };
 
-  it("rejects a non-admin raising permissions to a wildcard", async () => {
+  it("refuses a grant no API key may hold", async () => {
     const db = new RecordingDb();
     const service = new ApiKeyService(db, TEST_SCOPE);
 
     await expect(
       service.updateApiKey({
         ...base,
-        actorPermissions: ["payments:read"],
-        permissions: ["*"],
+        actorRole: "admin",
+        grants: ["wallets.configure"],
       })
-    ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     expect(db.runs).toHaveLength(0);
   });
@@ -234,7 +251,7 @@ describe("ApiKeyService.updateApiKey", () => {
 
     await service.updateApiKey({
       ...base,
-      actorPermissions: ["org:admin"],
+      actorRole: "admin",
       name: "renamed",
     });
 
@@ -243,19 +260,19 @@ describe("ApiKeyService.updateApiKey", () => {
     expect(db.runs[0].values).toEqual(["renamed", "key_1", "org_1", "prj_1"]);
   });
 
-  it("lets a non-admin narrow permissions to a subset of its own", async () => {
+  it("stores replaced grants in registry order, deduplicated", async () => {
     const db = new RecordingDb();
     const service = new ApiKeyService(db, TEST_SCOPE);
 
     await service.updateApiKey({
       ...base,
-      actorPermissions: ["payments:read", "payments:write", "api-keys:write"],
-      permissions: ["payments:read"],
+      actorRole: "member",
+      grants: ["transfers.execute", "transfers.read", "transfers.execute"],
     });
 
     expect(db.runs).toHaveLength(1);
     expect(db.runs[0].values).toEqual([
-      JSON.stringify(["payments:read"]),
+      ["transfers.read", "transfers.execute"],
       "key_1",
       "org_1",
       "prj_1",
@@ -269,7 +286,7 @@ describe("ApiKeyService.updateApiKey", () => {
     await expect(
       service.updateApiKey({
         ...base,
-        actorPermissions: ["org:admin"],
+        actorRole: "admin",
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 

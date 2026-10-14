@@ -3,9 +3,9 @@ import type {
   PrivateChannelEventFamily,
   PrivateChannelEventStatus,
 } from "@sdp/types";
-import { hasPermission, PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
+import { PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS } from "@sdp/types";
 import type { PrivateChannelEventRow } from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
@@ -80,7 +80,7 @@ function eventsEnvelope(c: AppContext, rows: PrivateChannelEventRow[], hasMore: 
   const nextCursor = hasMore && last ? encodeKeysetCursor(last.occurred_at, last.id) : null;
   const auth = getAuth(c);
   const includeRawPayload =
-    auth.authType !== "api_key" && hasPermission(auth.permissions, "org:admin");
+    auth.authType !== "api_key" && authMayPerform(auth, "organizations.manage");
   return success(c, {
     events: rows.map((row) => mapPrivateChannelEventRow(row, includeRawPayload)),
     hasMore,

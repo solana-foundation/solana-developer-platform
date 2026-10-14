@@ -1,10 +1,10 @@
 import { type Context, Hono, type Next } from "hono";
 import { forbidden } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -49,62 +49,60 @@ dvp.use("*", projectContextMiddleware());
 // proposal until somebody funds an escrow.
 dvp.post(
   "/trades",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("dvp.manage"),
   validateBody(createDvpTradeSchema),
   meteredQuota({ name: "dvp-create", actorMax: 2, orgMax: 10 }),
   createTrade
 );
 // Reading a mint so the form can convert an amount. Read-only, and public
 // chain state about an address the caller already holds — but still behind
-// `payments:read` so it does not become an unauthenticated RPC proxy.
-dvp.get("/mints/:mint", requirePermissions("wallets:read", "payments:read"), inspectMint);
-dvp.get("/trades", requirePermissions("wallets:read", "payments:read"), listTrades);
+// `dvp.read` so it does not become an unauthenticated RPC proxy.
+dvp.get("/mints/:mint", requireAction("dvp.read"), inspectMint);
+dvp.get("/trades", requireAction("dvp.read"), listTrades);
 // BEFORE `/trades/:tradeId`, or the parameter route swallows it and "inbound"
 // is looked up as a trade id. Trades another organization created that name one
 // of this caller's wallets; takes no parameters, because the only one it could
 // take is a party address and that would make it an enumeration oracle.
-dvp.get("/trades/inbound", requirePermissions("wallets:read", "payments:read"), listInboundTrades);
-dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"), getTrade);
+dvp.get("/trades/inbound", requireAction("dvp.read"), listInboundTrades);
+dvp.get("/trades/:tradeId", requireAction("dvp.read"), getTrade);
 
 // Funding ONE side — creator and party funding are the same operation: the
 // right to fund side X is holding a custody wallet whose public key equals
 // that side's party address. Validation precedes quota so malformed bodies do
-// not consume the execution quota. Gated by Allowed Operations: this is the
+// not consume the execution quota. Needs `dvp.execute`: this is the
 // action that commits a custody wallet's tokens to an escrow.
 dvp.post(
   "/trades/:tradeId/fund",
-  requirePermissions("payments:write", "wallets:read"),
-  requireAllowedOperation("dvp_fund"),
+  requireAction("dvp.execute"),
   validateBody(fundDvpTradeSchema),
   meteredQuota({ name: "dvp-fund", actorMax: 2, orgMax: 10 }),
   fundTrade
 );
-// Reclaiming ONE side: the same right as funding it, because the program only
-// lets the leg's own party sign, and the deposit goes back to that party. The
-// trade stays open. NOT gated by Allowed Operations: it is the party's way back out of
-// an escrow, and a control that can refuse it traps the deposit.
+// Reclaiming ONE side: the program only lets the leg's own party sign, and the
+// deposit goes back to that party. The trade stays open. It is the party's way
+// back out of an escrow, so it needs only `dvp.manage`: a key that may no
+// longer fund can still unwind. (Coarse: review before DvP is promoted.)
 dvp.post(
   "/trades/:tradeId/reclaim",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("dvp.manage"),
   validateBody(fundDvpTradeSchema),
   meteredQuota({ name: "dvp-reclaim", actorMax: 2, orgMax: 10 }),
   reclaimTrade
 );
 // Settle and cancel are the only two actions the settlement authority can take,
 // and both are irreversible: settle delivers both legs and closes the trade,
-// cancel refunds both and closes it. Settle is gated by Allowed Operations;
-// cancel is NOT, because it is how an unwanted trade is unwound and a control
-// that can refuse it would leave both deposits in escrow.
+// cancel refunds both and closes it. Settle needs `dvp.execute`; cancel needs
+// only `dvp.manage`, because it is how an unwanted trade is unwound and a key
+// that can no longer execute must not leave both deposits in escrow.
 dvp.post(
   "/trades/:tradeId/settle",
-  requirePermissions("payments:write", "wallets:read"),
-  requireAllowedOperation("dvp_settle"),
+  requireAction("dvp.execute"),
   meteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   settleTrade
 );
 dvp.post(
   "/trades/:tradeId/cancel",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("dvp.manage"),
   meteredQuota({ name: "dvp-cancel", actorMax: 2, orgMax: 10 }),
   cancelTrade
 );

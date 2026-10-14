@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody, validateParams } from "@/middleware/validate";
+import { requireAction } from "@/middleware/require-action";
+import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { authorizeCounterparty, authorizeCounterpartyAccount } from "../counterparties/access";
 import {
@@ -23,10 +24,10 @@ import {
 // context middleware are applied by the parent counterparties router.
 const counterpartyAccounts = new Hono<{ Bindings: Env }>();
 
-counterpartyAccounts.get("/", requirePermissions("counterparties:read"), listCounterpartyAccounts);
+counterpartyAccounts.get("/", requireAction("counterparties.read"), listCounterpartyAccounts);
 counterpartyAccounts.post(
   "/",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyAccountListParamsSchema),
   validateBody(createCounterpartyAccountSchema),
   authorize(authorizeCounterparty),
@@ -35,12 +36,12 @@ counterpartyAccounts.post(
 );
 counterpartyAccounts.get(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:read"),
+  requireAction("counterparties.read"),
   getCounterpartyAccount
 );
 counterpartyAccounts.patch(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.execute"),
   validateParams(counterpartyAccountParamsSchema),
   validateBody(updateCounterpartyAccountSchema),
   authorize(authorizeCounterpartyAccount),
@@ -49,7 +50,7 @@ counterpartyAccounts.patch(
 );
 counterpartyAccounts.delete(
   "/:counterpartyAccountId",
-  requirePermissions("counterparties:write"),
+  requireAction("counterparties.manage"),
   validateParams(counterpartyAccountParamsSchema),
   authorize(authorizeCounterpartyAccount),
   idempotent({ key: "accepted", serverErrors: "store" }),

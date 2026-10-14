@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -33,8 +34,7 @@ const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -142,6 +142,7 @@ describe("Managed custody out of the release channel", () => {
     });
     const response = await sendAs(headers(PROJECT_ID), `/v1/projects/${PROJECT_ID}/api-keys`, {
       name: "Managed out of channel key",
+      grants: ["transfers.read"],
       walletScope: "selected",
       provisionWallet: { provider: "privy" },
     });
@@ -251,8 +252,7 @@ async function seedFixture(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     createdBy: USER_ID,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await seedTestCustodyRows(env, {

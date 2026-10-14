@@ -11,6 +11,7 @@ import app from "@/index";
 import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -52,8 +53,7 @@ function cachedKey(): SeededApiKey {
     id: KEY.id,
     organizationId: ORG,
     projectId: PROJECT,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
@@ -85,8 +85,7 @@ async function seedScope() {
     organizationId: ORG,
     projectId: `${PROJECT}_production`,
     createdBy: USER,
-    role: "api_admin",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
   await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
@@ -98,10 +97,10 @@ async function seedScope() {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'External positions', 'sk_test_ext', ?, 'api_admin', '["*"]', 'active')`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'External positions', 'sk_test_ext', ?, ?, 'active')`
       )
-      .bind(KEY.id, ORG, PROJECT, USER, keyHash),
+      .bind(KEY.id, ORG, PROJECT, USER, keyHash, ALL_API_KEY_GRANTS),
   ]);
 }
 

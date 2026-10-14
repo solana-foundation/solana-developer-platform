@@ -2,9 +2,9 @@ import { RAMP_PROVIDERS, UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
 import { getDb } from "@/db";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
-import { forbidden, insufficientPermissions } from "@/lib/errors";
+import { AppError, forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { grantedPermissions } from "@/middleware/auth";
+import { callerMayPerform } from "@/middleware/require-action";
 import {
   assertModuleInChannel,
   isModuleInChannel,
@@ -14,6 +14,7 @@ import type { ValidatedContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
   permittedUnifiedTransactionModules,
+  UNIFIED_TRANSACTION_MODULE_ACTIONS,
   UNIFIED_TRANSACTION_MODULE_PERMISSIONS,
 } from "./module-permissions";
 import type { UnifiedTransactionsQuery, unifiedTransactionsQuerySchema } from "./schemas";
@@ -26,13 +27,12 @@ export async function listUnifiedTransactions(
   if (query.module !== undefined) {
     assertModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[query.module]);
   }
-  const granted = grantedPermissions(c);
-  const grantedModules = permittedUnifiedTransactionModules(granted);
-  if (
-    grantedModules.length === 0 ||
-    (query.module !== undefined && !grantedModules.includes(query.module))
-  ) {
-    throw insufficientPermissions();
+  const grantedModules = permittedUnifiedTransactionModules((action) =>
+    callerMayPerform(c, action)
+  );
+  if (query.module !== undefined && !grantedModules.includes(query.module)) {
+    const action = UNIFIED_TRANSACTION_MODULE_ACTIONS[query.module];
+    throw new AppError("INSUFFICIENT_PERMISSIONS", `Missing action: ${action}`, { action });
   }
   // Rows of a module the release channel leaves out are not listed (ADR 0005).
   const permittedModules = grantedModules.filter((module) =>

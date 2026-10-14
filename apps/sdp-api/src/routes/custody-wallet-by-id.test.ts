@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder, systemAccountInfoResult } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
@@ -50,8 +51,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -83,8 +83,8 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
   await getDb(env).execute(
     `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       TEST_API_KEY.id,
       TEST_ORG.id,
@@ -93,8 +93,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       "Custody Wallet By ID Test Key",
       TEST_API_KEY.prefix,
       keyHash,
-      "api_admin",
-      JSON.stringify(["*"]),
+      ALL_API_KEY_GRANTS,
       "active",
     ]
   );
@@ -474,7 +473,7 @@ describe("Custody wallet by ID route", () => {
 
   it("returns 403 when the API key does not include wallets:read permission", async () => {
     await seedCachedKey({
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
 
     const res = await app.request(

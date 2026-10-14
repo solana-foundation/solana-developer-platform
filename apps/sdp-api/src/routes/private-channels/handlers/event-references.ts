@@ -1,6 +1,5 @@
-import { hasPermission } from "@sdp/types";
 import type { PrivateChannelReferenceWalletScope } from "@/db/repositories";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
 import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import type { AppContext } from "../context";
@@ -8,7 +7,7 @@ import { getPrivateChannelReferenceRepository } from "../context";
 import { resolveEventViewer } from "../event-access";
 
 function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletScope {
-  if (!hasPermission(auth.permissions, "wallets:read")) {
+  if (!authMayPerform(auth, "wallets.read")) {
     return { scope: "none" };
   }
 
@@ -23,7 +22,7 @@ function resolveWalletScope(auth: ApiKeyContext): PrivateChannelReferenceWalletS
  * GET /events/references — flat id→name dictionary for event enrichment.
  * Channels and members follow the same viewer rules as the events feed.
  * Issued-token symbols are project-wide (public on-chain data), and wallet
- * labels follow the same wallets:read and selected-wallet scope as custody.
+ * labels follow the same wallets.read action and selected-wallet scope as custody.
  */
 export async function listPrivateChannelEventReferences(c: AppContext) {
   const auth = getAuth(c);

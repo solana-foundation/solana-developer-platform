@@ -2,6 +2,7 @@
  * API Key test fixtures
  */
 
+import { type Action, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import type { SeededApiKey } from "@/test/mocks/kv";
 import { TEST_ORG } from "./organizations";
 import { TEST_PROJECT } from "./tokens";
@@ -18,12 +19,17 @@ export const TEST_PRODUCTION_API_KEY = {
   prefix: "sk_live_sha",
 };
 
+/** Every action an API key may hold: what the dashboard's "Everything" writes. */
+export const ALL_API_KEY_GRANTS: Action[] = [...API_KEY_GRANTABLE_ACTIONS];
+
+/** {@link ALL_API_KEY_GRANTS} as a Postgres `text[]` literal, for SQL written inline. */
+export const ALL_API_KEY_GRANTS_SQL = `'{${ALL_API_KEY_GRANTS.join(",")}}'`;
+
 export const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,

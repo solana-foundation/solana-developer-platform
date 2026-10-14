@@ -9,6 +9,7 @@ import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { insertTestCustodyConfigRow } from "@/test/helpers/custody";
 import {
   insertTestStoredProviderCredential,
@@ -51,8 +52,7 @@ const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -92,9 +92,17 @@ async function seedFixture(): Promise<void> {
     await tx.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, key_prefix,
-         key_hash, role, permissions, status
-       ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`,
-      [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
+         key_hash, grants, status
+       ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`,
+      [
+        API_KEY.id,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        USER_ID,
+        API_KEY.prefix,
+        keyHash,
+        ALL_API_KEY_GRANTS,
+      ]
     );
     await insertTestCustodyConfigRow(tx, {
       id: CONFIG_ID,

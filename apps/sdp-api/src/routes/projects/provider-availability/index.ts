@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { requireAction } from "@/middleware/require-action";
 import type { Env } from "@/types/env";
 import { projectMemberAccessMiddleware } from "../project-access";
 import { getProjectProviderAvailabilityHandler } from "./handlers";
@@ -10,6 +11,10 @@ import { getProjectProviderAvailabilityHandler } from "./handlers";
 const projectProviderAvailability = new Hono<{ Bindings: Env }>();
 
 projectProviderAvailability.use("*", projectMemberAccessMiddleware());
-projectProviderAvailability.get("/", getProjectProviderAvailabilityHandler);
+projectProviderAvailability.get(
+  "/",
+  requireAction("projects.read"),
+  getProjectProviderAvailabilityHandler
+);
 
 export default projectProviderAvailability;

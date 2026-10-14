@@ -24,33 +24,29 @@ let headers: Record<string, string>;
 interface KeyRow {
   id: string;
   status: string;
-  role: string;
-  permissions: string | null;
+  grants: string[];
   allowed_ips: string | null;
-  allowed_operations: string | null;
   expires_at: string | null;
   rotation_deadline: string | null;
   rotated_from: string | null;
 }
 
 async function insertKey(
-  overrides: Partial<Omit<KeyRow, "role">> & { id: string; keyHash?: string }
+  overrides: Partial<KeyRow> & { id: string; keyHash?: string }
 ): Promise<void> {
   await getDb(env).execute(
     `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role,
-        permissions, allowed_ips, allowed_operations, status, expires_at, rotation_deadline,
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, allowed_ips, status, expires_at, rotation_deadline,
         rotated_from)
-     VALUES (?, ?, ?, ?, 'Lifecycle key', 'sk_test_lif', ?, 'api_developer', ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, 'Lifecycle key', 'sk_test_lif', ?, ?, ?, ?, ?, ?, ?)`,
     [
       overrides.id,
       ORGANIZATION_ID,
       PROJECT_ID,
       USER_ID,
       overrides.keyHash ?? `hash_${overrides.id}`,
-      overrides.permissions ?? null,
+      overrides.grants ?? [],
       overrides.allowed_ips ?? null,
-      overrides.allowed_operations ?? null,
       overrides.status ?? "active",
       overrides.expires_at ?? null,
       overrides.rotation_deadline ?? null,
@@ -61,7 +57,7 @@ async function insertKey(
 
 async function readKey(id: string): Promise<KeyRow | null> {
   return getDb(env).queryOne<KeyRow>(
-    `SELECT id, status, role, permissions, allowed_ips, allowed_operations, expires_at,
+    `SELECT id, status, grants, allowed_ips, expires_at,
             rotation_deadline, rotated_from
        FROM api_keys WHERE id = ?`,
     [id]
@@ -70,7 +66,7 @@ async function readKey(id: string): Promise<KeyRow | null> {
 
 async function replacementsOf(id: string): Promise<KeyRow[]> {
   return getDb(env).queryMany<KeyRow>(
-    `SELECT id, status, role, permissions, allowed_ips, allowed_operations, expires_at,
+    `SELECT id, status, grants, allowed_ips, expires_at,
             rotation_deadline, rotated_from
        FROM api_keys WHERE rotated_from = ? ORDER BY created_at, id`,
     [id]
@@ -196,9 +192,8 @@ describe("API key lifecycle", () => {
     it("copies the target's fields and bindings from the locked row", async () => {
       await insertKey({
         id: TARGET_KEY_ID,
-        permissions: JSON.stringify(["payments:read"]),
+        grants: ["transfers.read"],
         allowed_ips: JSON.stringify(["203.0.113.0/24"]),
-        allowed_operations: JSON.stringify(["payment"]),
         expires_at: "2999-01-01T00:00:00.000Z",
       });
       await getDb(env).execute(
@@ -213,10 +208,8 @@ describe("API key lifecycle", () => {
       const [replacement] = await replacementsOf(TARGET_KEY_ID);
       expect(replacement).toMatchObject({
         status: "active",
-        role: "api_developer",
-        permissions: JSON.stringify(["payments:read"]),
+        grants: ["transfers.read"],
         allowed_ips: JSON.stringify(["203.0.113.0/24"]),
-        allowed_operations: JSON.stringify(["payment"]),
         expires_at: "2999-01-01T00:00:00.000Z",
       });
       expect(
@@ -358,7 +351,11 @@ describe("API key lifecycle", () => {
         {
           method: "POST",
           headers,
-          body: JSON.stringify({ name: "Lifecycle key", walletScope: "all" }),
+          body: JSON.stringify({
+            name: "Lifecycle key",
+            grants: ["transfers.read"],
+            walletScope: "all",
+          }),
         },
         env
       );
@@ -382,7 +379,11 @@ describe("API key lifecycle", () => {
         {
           method: "POST",
           headers,
-          body: JSON.stringify({ name: "Unaudited key", walletScope: "all" }),
+          body: JSON.stringify({
+            name: "Unaudited key",
+            grants: ["transfers.read"],
+            walletScope: "all",
+          }),
         },
         env
       );

@@ -3,9 +3,10 @@
  */
 
 import { Hono } from "hono";
-import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -31,29 +32,24 @@ apiKeys.use("*", unifiedAuthMiddleware());
 apiKeys.use("*", requireHumanSession());
 apiKeys.use("*", projectContextMiddleware());
 
-apiKeys.get("/", requirePermissions("api-keys:read"), listApiKeys);
-apiKeys.post(
-  "/",
-  requirePermissions("api-keys:write"),
-  validateBody(apiKeyCreateSchema),
-  createApiKey
-);
-apiKeys.get("/:keyId", requirePermissions("api-keys:read"), getApiKey);
+apiKeys.get("/", requireAction("api_keys.read"), listApiKeys);
+apiKeys.post("/", requireAction("api_keys.manage"), validateBody(apiKeyCreateSchema), createApiKey);
+apiKeys.get("/:keyId", requireAction("api_keys.read"), getApiKey);
 apiKeys.patch(
   "/:keyId",
-  requirePermissions("api-keys:write"),
+  requireAction("api_keys.manage"),
   validateBody(apiKeyUpdateSchema),
   updateApiKey
 );
 apiKeys.post(
   "/:keyId/rotate",
-  requirePermissions("api-keys:write"),
+  requireAction("api_keys.manage"),
   validateBody(apiKeyRotateSchema),
   rotateApiKey
 );
 apiKeys.delete(
   "/:keyId",
-  requirePermissions("api-keys:write"),
+  requireAction("api_keys.manage"),
   validateBody(apiKeyRevokeSchema),
   revokeApiKey
 );

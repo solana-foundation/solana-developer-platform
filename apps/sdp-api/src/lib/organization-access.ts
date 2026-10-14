@@ -1,20 +1,13 @@
-import type {
-  AllowedOperation,
-  ApiKeyEnvironment,
-  ApiKeyRole,
-  Permission,
-  RateLimitTier,
-} from "@sdp/types";
+import type { Action, ApiKeyEnvironment, RateLimitTier } from "@sdp/types";
 import {
+  expandStoredGrants,
   organizationStatusMayAuthenticate,
   projectStatusMayAuthenticate,
-  upgradeStoredAllowedOperations,
 } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
 import { refuseTerminally } from "@/lib/api-key-refusal-cache";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
@@ -34,15 +27,15 @@ import type { Env } from "@/types/env";
  *   stops authenticating on its next request, whatever a cache still says;
  * - for an API key, the key's own row, read in the same statement by key hash:
  *   it is still usable (active, not expired, not past its rotation deadline),
- *   its project is active, and every authorization field (role, permissions,
- *   Allowed Operations, IP restriction, rate-limit tier, project, environment)
+ *   its project is active, and every authorization field (grants, IP
+ *   restriction, rate-limit tier, project, environment)
  *   comes from it;
  * - for an API key, its wallet scope and bindings (HOO-2048), so routes check
  *   wallets against this request's read and never re-read them;
  * - the request's origin passes `settings.allowedIpAddresses`.
  *
  * Deliberately uncached: a cache would keep the previous answer for its TTL
- * after a revocation, a permission change or an allowlist change.
+ * after a revocation, a grant change or an allowlist change.
  *
  * Returns the raw settings it read, so authentication records the
  * organization's entitlements from the same read (APE-351).
@@ -127,15 +120,16 @@ const walletBindingCandidatesSchema = z.array(
   })
 );
 
+/** `api_keys.grants`, a `text[]` the driver returns as an array. */
+const storedGrantsSchema = z.array(z.string());
+
 /** The `api_keys` row and its joins, as the authoritative read returns them. */
 type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
   id: string;
   organization_id: string;
   project_id: string;
-  role: ApiKeyRole;
-  permissions: string | null;
+  grants: unknown;
   allowed_ips: string | null;
-  allowed_operations: string | null;
   rate_limit_tier: RateLimitTier;
   signing_wallet_id: string | null;
   environment: ApiKeyEnvironment;
@@ -150,12 +144,10 @@ export interface ApiKeyAuthorization {
   id: string;
   organizationId: string;
   projectId: string;
-  role: ApiKeyRole;
-  permissions: Permission[];
+  /** The key's explicit grants: aliases expanded, unknown strings dropped. */
+  grants: Action[];
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
-  /** Null when the key places no restriction (no list, or an empty one). */
-  allowedOperations: AllowedOperation[] | null;
   /** The organization's raw settings, for its entitlements. */
   settings: string | null;
   walletAuthorization: ReturnType<typeof resolveApiKeyWalletAuthorization>;
@@ -167,7 +159,7 @@ export interface ApiKeyAuthorization {
  * field, its project's status and environment, its organization's status and
  * settings, and its wallet bindings (HOO-2048), each with the custody wallets
  * it could name and their status. Nothing is cached, so a revocation, a
- * permission or Allowed Operations change, an IP restriction, an archived
+ * grant change, an IP restriction, an archived
  * project or a narrowed wallet scope applies on the key's next request.
  *
  * Refuses, in order: an unknown key (INVALID_API_KEY); an inactive
@@ -182,8 +174,8 @@ export async function authorizeApiKey(
 ): Promise<ApiKeyAuthorization> {
   const row = await getDb(c.env)
     .prepare(
-      `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
-              ak.allowed_ips, ak.allowed_operations, ak.rate_limit_tier,
+      `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants,
+              ak.allowed_ips, ak.rate_limit_tier,
               ak.status, ak.expires_at, ak.rotation_deadline, ak.signing_wallet_id,
               p.environment, p.status AS project_status,
               o.status AS organization_status, o.settings,
@@ -278,19 +270,13 @@ export async function authorizeApiKey(
     organizationId: row.organization_id,
     projectId: row.project_id,
   });
-  const storedAllowedOperations = parseOptionalPostgresJson<string[]>(row.allowed_operations);
-  const allowedOperations = storedAllowedOperations
-    ? upgradeStoredAllowedOperations(storedAllowedOperations)
-    : [];
   return {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    role: row.role,
-    permissions: parseStoredApiKeyPermissions(row.role, row.permissions),
+    grants: expandStoredGrants(storedGrantsSchema.parse(row.grants)),
     environment: row.environment,
     rateLimitTier: row.rate_limit_tier,
-    allowedOperations: allowedOperations.length > 0 ? allowedOperations : null,
     settings: row.settings,
     walletAuthorization: resolveApiKeyWalletAuthorization(walletBindings, row.signing_wallet_id),
   };

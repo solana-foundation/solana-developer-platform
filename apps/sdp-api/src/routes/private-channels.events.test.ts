@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as pcServices from "@/services/private-channels";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -44,8 +46,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -91,8 +92,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -102,12 +103,14 @@ async function seedAuth(): Promise<void> {
         "PC Events Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
 }
+
+/** A signed-in admin: instance and principal setup are `private_channels.configure`. */
+let adminHeaders: Record<string, string>;
 
 function authHeaders() {
   return { Authorization: `Bearer ${TEST_API_KEY.raw}`, "Content-Type": "application/json" };
@@ -119,7 +122,7 @@ async function connectInstance(): Promise<void> {
     "/v1/private-channels/instance",
     {
       method: "POST",
-      headers: authHeaders(),
+      headers: adminHeaders,
       body: JSON.stringify({
         gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
         escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
@@ -156,6 +159,14 @@ describe("Private Channels — event routes", () => {
     overviewMock.mockReset();
     await seedTestDatabase(env);
     await seedAuth();
+    adminHeaders = {
+      ...(await clerkAdminHeaders(env, getDb(env), {
+        userId: TEST_USER.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })),
+      "Content-Type": "application/json",
+    };
   });
 
   afterEach(async () => {
@@ -510,7 +521,7 @@ describe("Private Channels — event routes", () => {
     await connectInstance();
     const del = await app.request(
       "/v1/private-channels/instance",
-      { method: "DELETE", headers: authHeaders() },
+      { method: "DELETE", headers: adminHeaders },
       env
     );
     expect(del.status).toBe(200);

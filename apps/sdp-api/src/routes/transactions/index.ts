@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireAction } from "@/middleware/require-action";
 import { validateQuery } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { listUnifiedTransactions } from "./handlers";
@@ -21,6 +22,7 @@ transactions.use("*", unifiedAuthMiddleware());
 transactions.use("*", projectContextMiddleware());
 transactions.get(
   "/",
+  requireAction("transactions.read"),
   validateQuery(unifiedTransactionsQuerySchema),
   meteredQuota(UNIFIED_TRANSACTIONS_QUOTA),
   listUnifiedTransactions

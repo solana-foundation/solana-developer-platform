@@ -6,6 +6,7 @@ import app from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { privyWalletExternalId } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
@@ -38,8 +39,7 @@ const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -74,9 +74,9 @@ async function seedFixture(): Promise<void> {
   await getDb(env).execute(
     `INSERT INTO api_keys (
        id, organization_id, project_id, created_by, name, key_prefix,
-       key_hash, role, permissions, status
-     ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`,
-    [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
+       key_hash, grants, status
+     ) VALUES (?, ?, ?, ?, 'Test', ?, ?, ?, 'active')`,
+    [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash, ALL_API_KEY_GRANTS]
   );
   await seedTestCustodyRows(env, {
     configs: [

@@ -1,3 +1,4 @@
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 /**
  * Regression test for the Hacktron finding: an API key created concurrently
  * with organization deletion, before the revocation batch commits, must not
@@ -79,10 +80,10 @@ async function seedKeyRow(keyId: string, keyHash: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, 'sk_test_rac', ?, 'api_admin', ?, 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, ?, 'sk_test_rac', ?, ?, 'active')`
     )
-    .bind(keyId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, keyId, keyHash, JSON.stringify(["*"]))
+    .bind(keyId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, keyId, keyHash, ALL_API_KEY_GRANTS)
     .run();
 }
 
@@ -91,8 +92,7 @@ function cachedEntry(keyId: string) {
     id: keyId,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
-    role: "api_admin" as const,
-    permissions: ["*" as const],
+    grants: ALL_API_KEY_GRANTS,
     environment: "sandbox" as const,
     rateLimitTier: "standard" as const,
     allowedIps: null,

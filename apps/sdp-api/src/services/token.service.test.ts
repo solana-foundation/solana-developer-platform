@@ -1,3 +1,4 @@
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 /**
  * Token Service Unit Tests
  */
@@ -100,8 +101,8 @@ describe("TokenService", () => {
     await db
       .prepare(
         `INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, 'api_admin', '["*"]', 'active')`
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, 'Project Test Key', ?, ?, ?, 'active')`
       )
       .bind(
         TEST_PROJECT_API_KEY.id,
@@ -109,7 +110,8 @@ describe("TokenService", () => {
         TEST_PROJECT.id,
         TEST_USER.id,
         TEST_PROJECT_API_KEY.prefix,
-        "hash_unused_for_service_test"
+        "hash_unused_for_service_test",
+        ALL_API_KEY_GRANTS
       )
       .run();
 

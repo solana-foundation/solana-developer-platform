@@ -1,5 +1,6 @@
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
+import { authMayPerform } from "@/lib/auth";
 import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { selectPartyWalletId } from "@/services/dvp/custody-party";
@@ -22,10 +23,7 @@ export async function readDvpActionWallets(
   callerAddresses: ReadonlyMap<string, DvpCallerWallet>
 ): Promise<Map<string, DvpActionWallet>> {
   const result = new Map<string, DvpActionWallet>();
-  if (
-    !request.auth.permissions.includes("*") &&
-    !request.auth.permissions.includes("payments:write")
-  ) {
+  if (!authMayPerform(request.auth, "dvp.execute")) {
     return result;
   }
   const addresses = [...new Set(partyAddresses)].filter((key) => callerAddresses.has(key));

@@ -25,9 +25,9 @@ const INPUT: CreateApiKeyInput = {
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
   createdByUserId: TEST_USER.id,
-  actorPermissions: ["*"],
+  actorRole: "admin",
   name: "Racing key",
-  role: "api_readonly",
+  grants: ["transfers.read"],
 };
 
 function createKey(): Promise<unknown> {
@@ -183,7 +183,7 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
           new ApiKeyService(
             asTransactionalClient(tx),
             createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"])
+          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, "admin")
         )
       ).then(
         (result) => result,

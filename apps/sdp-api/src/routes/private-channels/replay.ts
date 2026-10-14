@@ -1,10 +1,9 @@
-import { hasAllPermissions } from "@sdp/types";
 import type {
   PrivateChannelDepositRow,
   PrivateChannelTransferRow,
   PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
@@ -15,16 +14,18 @@ import { refreshPrivateChannelAuth } from "@/services/private-channels/wallet-ac
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
-/** Every movement POST, including replay, requires current write access. */
+/** Every movement POST, including replay, requires `private_channels.execute`, re-read now. */
 export async function requireMovementWrite(c: AppContext): Promise<void> {
   const auth = getAuth(c);
   if (auth.authType === "api_key") {
     const current = await refreshPrivateChannelAuth(c.env, auth, requireProjectId(c));
     const key = c.get("apiKey");
-    if (key) c.set("apiKey", { ...key, permissions: current.permissions });
+    if (key && current.grants) c.set("apiKey", { ...key, grants: current.grants });
   }
-  if (!hasAllPermissions(getAuth(c).permissions, ["payments:write"])) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: payments:write");
+  if (!authMayPerform(getAuth(c), "private_channels.execute")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
+      action: "private_channels.execute",
+    });
   }
 }
 

@@ -56,7 +56,7 @@ function clerkAuth(organizationId: string, projectId: string): ApiKeyContext {
     organizationId,
     projectId,
     role: "admin",
-    permissions: ["*"],
+    grants: null,
     environment: "dashboard",
     walletScope: "all",
     signingWalletId: null,

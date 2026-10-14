@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import app from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -29,8 +30,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -58,8 +58,7 @@ const PARTY_CACHED_API_KEY: SeededApiKey = {
   id: PARTY_API_KEY.id,
   organizationId: PARTY_ORG.id,
   projectId: PARTY_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -95,8 +94,8 @@ async function seedAuth(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -106,8 +105,7 @@ async function seedAuth(): Promise<void> {
         "DvP Test Key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -142,8 +140,8 @@ async function seedPartyOrg(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         PARTY_API_KEY.id,
@@ -153,8 +151,7 @@ async function seedPartyOrg(): Promise<void> {
         "DvP Party Key",
         PARTY_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
     getDb(env)
@@ -1138,7 +1135,7 @@ describe("DvP routes", () => {
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
       await seedApiKeyRow(env, keyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["payments:read", "wallets:read"],
+        grants: ["dvp.read", "wallets.read"],
       });
       await seedTradeFor({ tradeId: "dvp_read_only" });
 

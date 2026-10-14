@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Permission } from "@sdp/types";
+import { type Action, actionsInModule, grantsCoverAction } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import app from "@/index";
 import earnRoutes from "@/routes/earn";
@@ -8,75 +8,71 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-type EarnRouteDeclaration =
-  | {
-      readonly tier: "keyless";
-      readonly scopes: readonly Permission[];
-    }
-  | {
-      readonly tier: "keyed";
-      readonly scopes: readonly Permission[];
-    };
-
-const keyless = (...scopes: Permission[]) =>
-  ({ tier: "keyless", scopes }) as const satisfies EarnRouteDeclaration;
-
-const keyed = (...scopes: Permission[]) =>
-  ({ tier: "keyed", scopes }) as const satisfies EarnRouteDeclaration;
-
-const EARN_ROUTE_SCOPES: Record<string, EarnRouteDeclaration> = {
-  "GET /strategies": keyless("earn:read"),
-  "GET /strategies/:strategyId": keyless("earn:read"),
-  "GET /external-wallet/positions/summary": keyed("earn:read"),
-  "GET /external-wallet/positions": keyed("earn:read"),
-  "GET /external-wallet/movements": keyed("earn:read"),
-  "GET /external-wallet/movements/:movementId": keyed("earn:read"),
-  "GET /external-wallet/earnings": keyed("earn:read"),
-  "POST /vault-deposits": keyed("earn:write", "wallets:read"),
-  "POST /vault-deposit-previews": keyless("earn:read"),
-  "GET /vault-deposits": keyed("earn:read", "wallets:read"),
-  "GET /vault-deposits/:movementId": keyed("earn:read", "wallets:read"),
-  "POST /vault-withdrawals": keyed("earn:write", "wallets:read"),
-  "POST /vault-withdrawal-previews": keyed("earn:read", "wallets:read"),
-  "POST /vault-withdrawal-options": keyed("earn:read", "wallets:read"),
-  "POST /vault-queued-withdrawal-previews": keyed("earn:read", "wallets:read"),
-  "GET /vault-withdrawals": keyed("earn:read", "wallets:read"),
-  "GET /vault-withdrawals/:movementId": keyed("earn:read", "wallets:read"),
-  "POST /vault-withdrawal-requests": keyed("earn:write", "wallets:read"),
-  "GET /vault-withdrawal-requests": keyed("earn:read", "wallets:read"),
-  "GET /vault-withdrawal-requests/:withdrawalRequestId": keyed("earn:read", "wallets:read"),
-  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed(
-    "earn:write",
-    "wallets:read"
-  ),
-  "GET /vault-positions": keyed("earn:read", "wallets:read"),
-  "GET /vault-share-reconciliation": keyed("earn:read", "wallets:read"),
-  "POST /external-wallet/deposit-transactions": keyless("earn:write"),
-  "POST /external-wallet/deposits": keyed("earn:write"),
-  "POST /external-wallet/withdrawal-previews": keyless("earn:read"),
-  "POST /external-wallet/withdrawal-transactions": keyless("earn:write"),
-  "POST /external-wallet/withdrawal-options": keyless("earn:read"),
-  "POST /external-wallet/queued-withdrawal-previews": keyless("earn:read"),
-  "POST /external-wallet/withdrawal-request-transactions": keyed("earn:write"),
-  "POST /external-wallet/withdrawal-request-cancel-transactions": keyed("earn:write"),
-  "POST /external-wallet/withdrawals": keyed("earn:write"),
-  "POST /external-wallet/withdrawal-requests": keyed("earn:write"),
-  "POST /external-wallet/withdrawal-request-cancellations": keyed("earn:write"),
-  "GET /external-wallet/withdrawal-requests": keyed("earn:read"),
-  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": keyed("earn:read"),
-  "GET /movements": keyed("earn:read", "wallets:read"),
-  "GET /programs": keyed("earn:read"),
-  "POST /programs": keyed("earn:write"),
-  "GET /programs/:programId": keyed("earn:read"),
-  "PUT /programs/:programId": keyed("earn:write"),
-  "GET /programs/:programId/deposits": keyed("earn:read"),
-  "POST /programs/:programId/withdrawal-preview": keyed("earn:read"),
-  "POST /programs/:programId/withdrawals": keyed("earn:write"),
-  "GET /programs/:programId/withdrawals": keyed("earn:read"),
-  "GET /programs/:programId/withdrawals/:withdrawalRef": keyed("earn:read"),
+type EarnRouteDeclaration = {
+  readonly tier: "keyless" | "keyed";
+  readonly action: Action;
 };
 
-const ALL_EARN_SCOPES = ["earn:read", "earn:write", "wallets:read"] as const satisfies Permission[];
+const keyless = (action: Action) =>
+  ({ tier: "keyless", action }) as const satisfies EarnRouteDeclaration;
+
+const keyed = (action: Action) =>
+  ({ tier: "keyed", action }) as const satisfies EarnRouteDeclaration;
+
+/**
+ * Each Earn route's one action (coarse until Earn is promoted: reads `read`,
+ * cancels and program setup `manage`, builds, submits and movements `execute`).
+ */
+const EARN_ROUTE_ACTIONS: Record<string, EarnRouteDeclaration> = {
+  "GET /strategies": keyless("earn.read"),
+  "GET /strategies/:strategyId": keyless("earn.read"),
+  "GET /external-wallet/positions/summary": keyed("earn.read"),
+  "GET /external-wallet/positions": keyed("earn.read"),
+  "GET /external-wallet/movements": keyed("earn.read"),
+  "GET /external-wallet/movements/:movementId": keyed("earn.read"),
+  "GET /external-wallet/earnings": keyed("earn.read"),
+  "POST /vault-deposits": keyed("earn.execute"),
+  "POST /vault-deposit-previews": keyless("earn.read"),
+  "GET /vault-deposits": keyed("earn.read"),
+  "GET /vault-deposits/:movementId": keyed("earn.read"),
+  "POST /vault-withdrawals": keyed("earn.execute"),
+  "POST /vault-withdrawal-previews": keyed("earn.read"),
+  "POST /vault-withdrawal-options": keyed("earn.read"),
+  "POST /vault-queued-withdrawal-previews": keyed("earn.read"),
+  "GET /vault-withdrawals": keyed("earn.read"),
+  "GET /vault-withdrawals/:movementId": keyed("earn.read"),
+  "POST /vault-withdrawal-requests": keyed("earn.execute"),
+  "GET /vault-withdrawal-requests": keyed("earn.read"),
+  "GET /vault-withdrawal-requests/:withdrawalRequestId": keyed("earn.read"),
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed("earn.manage"),
+  "GET /vault-positions": keyed("earn.read"),
+  "GET /vault-share-reconciliation": keyed("earn.read"),
+  "POST /external-wallet/deposit-transactions": keyless("earn.execute"),
+  "POST /external-wallet/deposits": keyed("earn.execute"),
+  "POST /external-wallet/withdrawal-previews": keyless("earn.read"),
+  "POST /external-wallet/withdrawal-transactions": keyless("earn.execute"),
+  "POST /external-wallet/withdrawal-options": keyless("earn.read"),
+  "POST /external-wallet/queued-withdrawal-previews": keyless("earn.read"),
+  "POST /external-wallet/withdrawal-request-transactions": keyed("earn.execute"),
+  "POST /external-wallet/withdrawal-request-cancel-transactions": keyed("earn.manage"),
+  "POST /external-wallet/withdrawals": keyed("earn.execute"),
+  "POST /external-wallet/withdrawal-requests": keyed("earn.execute"),
+  "POST /external-wallet/withdrawal-request-cancellations": keyed("earn.manage"),
+  "GET /external-wallet/withdrawal-requests": keyed("earn.read"),
+  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": keyed("earn.read"),
+  "GET /movements": keyed("earn.read"),
+  "GET /programs": keyed("earn.read"),
+  "POST /programs": keyed("earn.manage"),
+  "GET /programs/:programId": keyed("earn.read"),
+  "PUT /programs/:programId": keyed("earn.manage"),
+  "GET /programs/:programId/deposits": keyed("earn.read"),
+  "POST /programs/:programId/withdrawal-preview": keyed("earn.read"),
+  "POST /programs/:programId/withdrawals": keyed("earn.execute"),
+  "GET /programs/:programId/withdrawals": keyed("earn.read"),
+  "GET /programs/:programId/withdrawals/:withdrawalRef": keyed("earn.read"),
+};
+
+const EARN_ACTIONS = actionsInModule("earn");
 
 interface ErrorBody {
   error: {
@@ -162,37 +158,38 @@ function requestAnonymously(route: string) {
   );
 }
 
-const ROUTES = Object.keys(EARN_ROUTE_SCOPES).sort();
+const ROUTES = Object.keys(EARN_ROUTE_ACTIONS).sort();
 
-const KEYLESS_ROUTES = ROUTES.filter((route) => EARN_ROUTE_SCOPES[route].tier === "keyless");
+const KEYLESS_ROUTES = ROUTES.filter((route) => EARN_ROUTE_ACTIONS[route].tier === "keyless");
 
-const KEYED_ROUTES = ROUTES.filter((route) => EARN_ROUTE_SCOPES[route].tier === "keyed");
+const KEYED_ROUTES = ROUTES.filter((route) => EARN_ROUTE_ACTIONS[route].tier === "keyed");
 
-function scopesFor(route: string): readonly Permission[] {
-  const declaration = EARN_ROUTE_SCOPES[route];
+function actionFor(route: string): Action {
+  const declaration = EARN_ROUTE_ACTIONS[route];
   assert(declaration);
-  return declaration.scopes;
+  return declaration.action;
 }
 
-function permissionSetId(permissions: readonly Permission[]): string {
-  return permissions.length === 0
+function grantSetId(grants: readonly Action[]): string {
+  return grants.length === 0
     ? "none"
-    : permissions
-        .map((scope) => scope.replace(":", "_"))
+    : grants
+        .map((grant) => grant.replace(".", "_"))
         .sort()
         .join("__");
 }
 
-const PERMISSION_SETS = new Map<string, readonly Permission[]>();
+/** Every Earn action except the ones that would cover `action`. */
+function earnGrantsWithout(action: Action): Action[] {
+  return EARN_ACTIONS.filter((grant) => !grantsCoverAction([grant], action));
+}
 
-PERMISSION_SETS.set(permissionSetId(ALL_EARN_SCOPES), ALL_EARN_SCOPES);
+const GRANT_SETS = new Map<string, readonly Action[]>();
 
-for (const declaration of Object.values(EARN_ROUTE_SCOPES)) {
-  PERMISSION_SETS.set(permissionSetId(declaration.scopes), declaration.scopes);
-  for (const dropped of declaration.scopes) {
-    const subset = declaration.scopes.filter((scope) => scope !== dropped);
-    PERMISSION_SETS.set(permissionSetId(subset), subset);
-  }
+GRANT_SETS.set(grantSetId(EARN_ACTIONS), EARN_ACTIONS);
+for (const action of EARN_ACTIONS) {
+  GRANT_SETS.set(grantSetId([action]), [action]);
+  GRANT_SETS.set(grantSetId(earnGrantsWithout(action)), earnGrantsWithout(action));
 }
 
 let tenant: EarnAuthzTenant;
@@ -212,11 +209,11 @@ beforeEach(async () => {
   await clearKVStores(env);
   tenant = await seedEarnAuthzTenant(env, "matrix", { environment: "sandbox" });
   rawKeyBySet.clear();
-  for (const [setId, permissions] of PERMISSION_SETS) {
+  for (const [setId, grants] of GRANT_SETS) {
     const key = await seedEarnApiKey(env, tenant, {
       id: `key_matrix_${setId}`,
       environment: "sandbox",
-      permissions: [...permissions],
+      grants: [...grants],
     });
     rawKeyBySet.set(setId, key.raw);
   }
@@ -273,35 +270,32 @@ describe("route tier conformance", () => {
   );
 });
 
-describe("scope conformance: a key missing exactly one declared scope is refused", () => {
-  const cells = ROUTES.flatMap((route) =>
-    scopesFor(route).map((dropped) => ({
-      route,
-      dropped,
-      granted: scopesFor(route).filter((scope) => scope !== dropped),
-    }))
-  );
-  it.each(cells)("$route answers 403 without $dropped", async ({ route, granted }) => {
-    const raw = rawKeyBySet.get(permissionSetId(granted));
-    assert(raw);
-    const res = await requestAsKey(route, raw, {});
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as ErrorBody;
-    expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
-  });
-  it.each(ROUTES.map((route) => ({ route })))(
-    "$route accepts its declared scopes (the table is exact, not merely sufficient)",
-    async ({ route }) => {
-      const raw = rawKeyBySet.get(permissionSetId(scopesFor(route)));
-      assert(raw, "Expected seeded API key");
+describe("action conformance: each route needs exactly its declared action", () => {
+  it.each(ROUTES.map((route) => ({ route, action: actionFor(route) })))(
+    "$route answers 403 naming $action to a key holding every other Earn action",
+    async ({ route, action }) => {
+      const raw = rawKeyBySet.get(grantSetId(earnGrantsWithout(action)));
+      assert(raw);
       const res = await requestAsKey(route, raw, {});
-      expect(res.status, `${route} still refused with its declared scopes`).not.toBe(403);
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as ErrorBody;
+      expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+      expect(body.error.message).toBe(`Missing action: ${action}`);
     }
   );
-  it("an earn:read-only key cannot reach any money route", async () => {
-    const raw = rawKeyBySet.get(permissionSetId(["earn:read"]));
+  it.each(ROUTES.map((route) => ({ route })))(
+    "$route accepts its declared action alone (the table is exact, not merely sufficient)",
+    async ({ route }) => {
+      const raw = rawKeyBySet.get(grantSetId([actionFor(route)]));
+      assert(raw, "Expected seeded API key");
+      const res = await requestAsKey(route, raw, {});
+      expect(res.status, `${route} still refused with its declared action`).not.toBe(403);
+    }
+  );
+  it("an earn.read-only key cannot reach any money route", async () => {
+    const raw = rawKeyBySet.get(grantSetId(["earn.read"]));
     assert(raw, "Expected seeded API key");
-    const moneyRoutes = ROUTES.filter((route) => scopesFor(route).includes("earn:write"));
+    const moneyRoutes = ROUTES.filter((route) => actionFor(route) === "earn.execute");
     expect(moneyRoutes.length).toBeGreaterThan(0);
     for (const route of moneyRoutes) {
       const res = await requestAsKey(route, raw, {});
@@ -329,7 +323,7 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
 describe("feature gate", () => {
   it("EARN_ENABLED off darkens every route with 403", async () => {
     env.EARN_ENABLED = "false";
-    const raw = rawKeyBySet.get(permissionSetId(ALL_EARN_SCOPES));
+    const raw = rawKeyBySet.get(grantSetId(EARN_ACTIONS));
     assert(raw, "Expected seeded API key");
     for (const route of ROUTES) {
       const res = await requestAsKey(route, raw, {});

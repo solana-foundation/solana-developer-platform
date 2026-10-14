@@ -8,6 +8,7 @@
 
 import { Hono } from "hono";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
+import { publicRoute } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { completeOnboarding, getOnboardingStatus } from "./handlers";
@@ -16,7 +17,16 @@ import { completeOnboardingSchema } from "./schemas";
 const onboarding = new Hono<{ Bindings: Env }>();
 
 onboarding.use("*", clerkOnboardingMiddleware());
-onboarding.get("/status", getOnboardingStatus);
-onboarding.post("/complete", validateBody(completeOnboardingSchema), completeOnboarding);
+onboarding.get(
+  "/status",
+  publicRoute("onboarding: a Clerk session before its organization is provisioned"),
+  getOnboardingStatus
+);
+onboarding.post(
+  "/complete",
+  publicRoute("onboarding: a Clerk session before its organization is provisioned"),
+  validateBody(completeOnboardingSchema),
+  completeOnboarding
+);
 
 export default onboarding;

@@ -3,6 +3,7 @@ import { apiKeyCreateSchema, apiKeyUpdateSchema } from "./schemas";
 
 const validCreateRequest = {
   name: "Restricted key",
+  grants: ["transfers.read"],
   walletScope: "all" as const,
 };
 
@@ -41,6 +42,7 @@ describe("API key IP allowlist schemas", () => {
 describe("API key wallet provisioning schema", () => {
   const provisioningRequest = {
     name: "Provisioning key",
+    grants: ["transfers.read"],
     walletScope: "selected",
   } as const;
 
@@ -75,6 +77,46 @@ describe("API key wallet provisioning schema", () => {
         ...provisioningRequest,
         provisionWallet: { connectionId: "cconn_selected" },
         connectionId: "cconn_selected",
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("API key grants schema", () => {
+  it("requires grants on create, and accepts an empty list", () => {
+    const { grants: _grants, ...withoutGrants } = validCreateRequest;
+    expect(apiKeyCreateSchema.safeParse(withoutGrants).success).toBe(false);
+    expect(apiKeyCreateSchema.safeParse({ ...validCreateRequest, grants: [] }).success).toBe(true);
+  });
+
+  it.each(["transfers.everything", "payments:write", "*"])(
+    "refuses an unknown grant %s",
+    (grant) => {
+      expect(apiKeyCreateSchema.safeParse({ ...validCreateRequest, grants: [grant] }).success).toBe(
+        false
+      );
+      expect(apiKeyUpdateSchema.safeParse({ grants: [grant] }).success).toBe(false);
+    }
+  );
+
+  it.each([
+    "api_keys.manage",
+    "members.read",
+    "organizations.manage",
+    "projects.manage",
+    "wallets.configure",
+  ])("refuses %s, which no API key may hold", (grant) => {
+    expect(apiKeyCreateSchema.safeParse({ ...validCreateRequest, grants: [grant] }).success).toBe(
+      false
+    );
+    expect(apiKeyUpdateSchema.safeParse({ grants: [grant] }).success).toBe(false);
+  });
+
+  it("refuses a repeated grant", () => {
+    expect(
+      apiKeyCreateSchema.safeParse({
+        ...validCreateRequest,
+        grants: ["transfers.read", "transfers.read"],
       }).success
     ).toBe(false);
   });

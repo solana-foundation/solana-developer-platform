@@ -1,5 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
-import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
+import { type CreateApiKeyResponse, organizationRoleMayPerform } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
@@ -75,14 +75,13 @@ export const listProjectApiKeys = async (c: AppContext) => {
         name: key.name,
         description: key.description,
         keyPrefix: key.keyPrefix,
-        role: key.role as ApiKeyRole,
+        grants: key.grants,
         environment: key.environment as "sandbox" | "production",
         status: key.status,
         walletScope: key.walletScope,
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
-        allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
         createdAt: key.createdAt,
@@ -102,11 +101,9 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   const {
     name,
     description,
-    role = "api_developer",
-    permissions,
+    grants,
     walletScope,
     allowedIps,
-    allowedOperations,
     expiresAt,
     signingWalletId,
     signingWalletIds,
@@ -130,8 +127,11 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (provisionWalletRequested) {
-    if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    // Provisioning creates a custody wallet, which is wallet lifecycle.
+    if (!organizationRoleMayPerform(actor.role, "wallets.manage")) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: wallets.manage", {
+        action: "wallets.manage",
+      });
     }
 
     try {
@@ -177,13 +177,11 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       organizationId: actor.organizationId,
       projectId,
       createdByUserId: actor.userId,
-      actorPermissions: actor.permissions,
+      actorRole: actor.role,
       name,
       description,
-      role,
-      permissions,
+      grants,
       allowedIps,
-      allowedOperations,
       expiresAt,
       signingWalletId: resolvedSigningWalletId,
       pepper: c.env.API_KEY_PEPPER,
@@ -200,7 +198,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
         metadata: {
           projectId,
           name,
-          role,
+          grants: key.grants,
           environment: key.environment,
           walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
           signingWalletId: resolvedSigningWalletId,
@@ -217,7 +215,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       name: createdKey.name,
       key: createdKey.key, // Full key - only shown once!
       keyPrefix: createdKey.keyPrefix,
-      role: createdKey.role,
+      grants: createdKey.grants,
       environment: createdKey.environment,
       expiresAt: createdKey.expiresAt,
       createdAt: createdKey.createdAt,

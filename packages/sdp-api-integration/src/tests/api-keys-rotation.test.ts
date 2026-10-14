@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -80,8 +81,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
       },
       body: JSON.stringify({
         name: `Rotation key ${Date.now()}`,
-        role: "api_admin",
-        permissions: ["*"],
+        grants: [...API_KEY_GRANTABLE_ACTIONS],
         walletScope: "selected",
         signingWalletId: wallet.walletId,
         signingWalletIds: [wallet.walletId],

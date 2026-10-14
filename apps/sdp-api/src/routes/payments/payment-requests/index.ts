@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { requirePermissions } from "@/middleware/auth";
+import { requireAction } from "@/middleware/require-action";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
@@ -10,10 +10,10 @@ import { createPaymentRequestSchema } from "./schemas";
 
 const paymentRequests = new Hono<{ Bindings: Env }>();
 
-paymentRequests.get("/", requirePermissions("payments:read"), listPaymentRequests);
+paymentRequests.get("/", requireAction("payment_requests.read"), listPaymentRequests);
 paymentRequests.post(
   "/",
-  requirePermissions("payments:write", "wallets:read"),
+  requireAction("payment_requests.manage"),
   validateBody(createPaymentRequestSchema),
   authorize(authorizePaymentRequest),
   idempotent({ key: "accepted", serverErrors: "store" }),

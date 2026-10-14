@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { canonicalizeDecimalFields } from "@/lib/idempotency";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
-import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
+import { requestGate } from "@/middleware/request-gate";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -21,8 +21,7 @@ const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
   "/",
-  requirePermissions("payments:write", "wallets:read"),
-  requireAllowedOperation("payment_transfer_execute"),
+  requireAction("transfers.execute"),
   validateBody(createTransferSchema),
   authorize(authorizeTransfer),
   // The transfer row is written under its key before anything is signed, so a
@@ -38,7 +37,7 @@ transfers.post(
   admit(admitTransferExecution),
   createTransfer
 );
-transfers.get("/", requirePermissions("payments:read"), listTransfers);
-transfers.get("/:transferId", requirePermissions("payments:read"), getTransfer);
+transfers.get("/", requireAction("transfers.read"), listTransfers);
+transfers.get("/:transferId", requireAction("transfers.read"), getTransfer);
 
 export default transfers;

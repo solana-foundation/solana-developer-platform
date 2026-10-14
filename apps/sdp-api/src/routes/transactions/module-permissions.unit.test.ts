@@ -1,21 +1,22 @@
+import { type Action, API_KEY_GRANTABLE_ACTIONS, apiKeyMayPerform } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { permittedUnifiedTransactionModules } from "./module-permissions";
 
-describe("unified transaction module permissions", () => {
-  it("limits payments-only keys to payment-scoped modules", () => {
-    expect(permittedUnifiedTransactionModules(["payments:read"])).toEqual([
-      "payments",
-      "private_channels",
-      "rings",
-    ]);
+function forGrants(grants: readonly Action[]) {
+  return permittedUnifiedTransactionModules((action) => apiKeyMayPerform(grants, action));
+}
+
+describe("unified transaction module actions", () => {
+  it("limits a transactions-only key to payments rows", () => {
+    expect(forGrants(["transactions.read"])).toEqual(["payments"]);
   });
 
-  it("limits earn-only keys to Earn", () => {
-    expect(permittedUnifiedTransactionModules(["earn:read"])).toEqual(["earn"]);
+  it("adds a module's rows with that module's read, implied by its execute", () => {
+    expect(forGrants(["transactions.read", "earn.execute"])).toEqual(["payments", "earn"]);
   });
 
-  it("allows wildcard identities to see every module", () => {
-    expect(permittedUnifiedTransactionModules("*")).toEqual([
+  it("shows every module to a key holding everything", () => {
+    expect(forGrants(API_KEY_GRANTABLE_ACTIONS)).toEqual([
       "payments",
       "earn",
       "dvp",

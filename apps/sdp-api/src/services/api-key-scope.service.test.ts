@@ -1,10 +1,12 @@
+import { API_KEY_FORBIDDEN_ACTIONS, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import {
   assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
-  assertGrantableApiKeyPermissions,
+  assertGrantableApiKeyGrants,
   filterApiKeyWallets,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
   getAllowedApiKeyWalletAuthorizationForPermissions,
@@ -363,63 +365,47 @@ describe("api key scope service", () => {
   });
 });
 
-describe("assertGrantableApiKeyPermissions", () => {
-  it("lets wildcard and org admins grant the api_admin role", () => {
-    expect(() => assertGrantableApiKeyPermissions(["*"], "api_admin", undefined)).not.toThrow();
+describe("assertGrantableApiKeyGrants", () => {
+  it("lets an organization administrator grant every action a key may hold", () => {
+    expect(() => assertGrantableApiKeyGrants("admin", API_KEY_GRANTABLE_ACTIONS)).not.toThrow();
+  });
+
+  it("refuses an action no API key may hold, naming it, even for an administrator", () => {
+    for (const action of API_KEY_FORBIDDEN_ACTIONS) {
+      expect(() => assertGrantableApiKeyGrants("admin", [action])).toThrowError(
+        expect.objectContaining({ code: "BAD_REQUEST", details: { actions: [action] } })
+      );
+    }
+  });
+
+  it("refuses a grant beyond what the person's role holds", () => {
+    expect(() => assertGrantableApiKeyGrants("member", ["issuance.enforce"])).toThrowError(
+      expect.objectContaining({
+        code: "INSUFFICIENT_PERMISSIONS",
+        details: { actions: ["issuance.enforce"] },
+      })
+    );
+  });
+
+  it("allows a member to grant actions they hold, and an empty list", () => {
     expect(() =>
-      assertGrantableApiKeyPermissions(["org:admin", "api-keys:write"], "api_admin", undefined)
+      assertGrantableApiKeyGrants("member", ["transfers.execute", "counterparties.read"])
     ).not.toThrow();
-  });
-
-  it("blocks a non-admin api-keys:write holder from minting an api_admin key", () => {
-    expect(() =>
-      assertGrantableApiKeyPermissions(["api-keys:write"], "api_admin", undefined)
-    ).toThrowError(AppError);
-  });
-
-  it("blocks escalation through a custom permissions array the actor lacks", () => {
-    expect(() =>
-      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", ["*"])
-    ).toThrowError(AppError);
-    expect(() =>
-      assertGrantableApiKeyPermissions(["payments:read", "api-keys:write"], "api_developer", [
-        "tokens:write",
-      ])
-    ).toThrowError(AppError);
-  });
-
-  it("blocks the default api_developer role when the actor lacks those permissions", () => {
-    expect(() =>
-      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", undefined)
-    ).toThrowError(AppError);
-  });
-
-  it("allows a non-admin to grant a subset of its own permissions", () => {
-    expect(() =>
-      assertGrantableApiKeyPermissions(
-        ["payments:read", "payments:write", "api-keys:write"],
-        "api_developer",
-        ["payments:read"]
-      )
-    ).not.toThrow();
-  });
-
-  it("treats an empty permission set as always grantable", () => {
-    expect(() =>
-      assertGrantableApiKeyPermissions(["api-keys:write"], "api_developer", [])
-    ).not.toThrow();
+    expect(() => assertGrantableApiKeyGrants("member", [])).not.toThrow();
   });
 });
 
 function createApiKeyAuth(
-  overrides: Partial<Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId">> = {}
+  overrides: Partial<
+    Omit<ApiKeyContext, "authType" | "apiKeyId" | "userId" | "grants" | "role">
+  > = {}
 ): ApiKeyContext {
   return {
     id: "key_scope_test",
     organizationId: "org_scope_test",
     projectId: null,
-    role: "api_developer",
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
+    role: null,
     environment: "sandbox",
     signingWalletId: null,
     signingWalletIds: [],

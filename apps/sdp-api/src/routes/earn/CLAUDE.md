@@ -485,8 +485,7 @@ other's balance.
   outright (`assertApiKeyNotWalletScoped`) rather than silently treated as
   unbound. The same refusal is on `withdrawal-preview`, which discloses live
   lane liquidity through the identical chain. The route is gated by
-  authentication, `earn:write` and the key's Allowed Operations
-  (`earn_program_withdrawal`), nothing else.
+  authentication and the `earn.execute` action, nothing else.
   **Replay resolution lives in the HANDLER, not in the gate's
   `findIdempotentKeyReplay` hook**: that hook only runs for callers using the
   `Idempotency-Key` header, and this route equally accepts the key as body
@@ -567,8 +566,7 @@ transaction signed by the organization custody wallet or external owner.
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
   required `Idempotency-Key` header; body `requestId` is rejected.
   Registered as
-  `requirePermissions("earn:write", "wallets:read")` →
-  `requireAllowedOperation("earn_vault_deposit")` → `requestGate` → handler.
+  `requireAction("earn.execute")` → `requestGate` → handler.
   The caller names a CATALOGUE row, never a raw vault address, so the sync's
   admission gates still bound this path.
   - **`requestGate`.** `requestGate({ extract: extractEarnVaultDeposit })`
@@ -988,10 +986,10 @@ transaction signed by the organization custody wallet or external owner.
   DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping and the
   read-side wallet binding, both 404 — no surfacing, no entitlement, no
   admission, no environment capability. Registered as
-  `requirePermissions("earn:read", "wallets:read")`: `wallets:read` is not a
-  money-in gate, and for a key with NO wallet bindings the binding check is a
-  documented no-op, so dropping it would let an earn:read-only key read any
-  org position's live payout while `GET /vault-positions` answers it 403.
+  `requireAction("earn.read")`. For a key with NO wallet bindings the binding
+  check is a documented no-op, so the read-side wallet binding is the only
+  per-wallet gate here; an `earn.read` key reads only positions its bindings
+  reach, exactly as `GET /vault-positions` answers it.
   The dashboard fingerprints each flow's idempotency key on the USER'S
   tolerance (reproducible after a reload) and remembers the floor a held key
   was minted with separately, because the API's own fingerprint includes the
@@ -1090,8 +1088,7 @@ expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
 - `POST /vault-withdrawals` — **build + simulate + sign ALL legs + record ALL
   legs + broadcast in order**. Body `{positionId, shares, minAmountOut?}` and a required
   `Idempotency-Key` header (body `requestId` rejected, same as deposits).
-  Registered `requirePermissions("earn:write", "wallets:read")` →
-  `requireAllowedOperation("earn_vault_withdrawal")` → `requestGate` (extractor
+  Registered `requireAction("earn.execute")` → `requestGate` (extractor
   `extractEarnVaultWithdrawal`) → handler. Registered as the second `earn` entry in
   `value-moving-conformance.node.test.ts`.
   - **The caller names its own POSITION, never a strategy and never a raw

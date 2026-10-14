@@ -2,9 +2,10 @@ import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } 
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { requirePermissions } from "@/middleware/auth";
+import { requireAction } from "@/middleware/require-action";
 import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { listOfframpCurrencies } from "./offramp/handlers";
@@ -25,8 +26,7 @@ function buildApp(stages: SdpRampProviderStages) {
       id: "key_ramp_channel_test",
       organizationId: "org_ramp_channel_test",
       projectId: "prj_ramp_channel_test",
-      role: "api_admin",
-      permissions: ["payments:read", "payments:write", "counterparties:read"],
+      grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
       signingWalletId: null,
     });
@@ -34,8 +34,8 @@ function buildApp(stages: SdpRampProviderStages) {
     c.set("projectEnvironment", "sandbox");
     await next();
   });
-  app.get("/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
-  app.get("/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
+  app.get("/onramp/currency", requireAction("onramp.read"), listOnrampCurrencies);
+  app.get("/offramp/currency", requireAction("offramp.read"), listOfframpCurrencies);
   app.get("/offered", (c) => c.json({ providers: filterProviders(c, RAMP_PROVIDERS, undefined) }));
   app.get("/counterparties/:counterpartyId/requirements", getCounterpartyRequirements);
   app.get("/counterparties/:counterpartyId/provider-accounts", listCounterpartyProviderAccounts);

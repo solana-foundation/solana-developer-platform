@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -35,8 +36,7 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
-  role: "api_admin",
-  permissions: ["*"],
+  grants: ALL_API_KEY_GRANTS,
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
@@ -99,8 +99,8 @@ async function seedAuthAndWallets(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_API_KEY.id,
@@ -110,8 +110,7 @@ async function seedAuthAndWallets(): Promise<void> {
         "Admin test key",
         TEST_API_KEY.prefix,
         keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
+        ALL_API_KEY_GRANTS,
         "active"
       ),
   ]);
@@ -184,6 +183,7 @@ function authenticatedJsonHeaders() {
 
 async function createManagedApiKey(input: {
   name: string;
+  grants: ["transfers.read"];
   walletScope: "all" | "selected";
   walletIds?: string[];
 }): Promise<string> {
@@ -195,6 +195,7 @@ async function createManagedApiKey(input: {
       headers: authenticatedJsonHeaders(),
       body: JSON.stringify({
         name: input.name,
+        grants: ["transfers.read"],
         walletScope: input.walletScope,
         ...(input.walletScope === "selected"
           ? {
@@ -254,6 +255,7 @@ describe("API key wallet scope routes", () => {
         body: JSON.stringify({
           name: "Conflicting all-wallet key",
           projectId: TEST_PROJECT.id,
+          grants: ["transfers.read"],
           walletScope: "all",
           signingWalletId: "wal_scope_a",
         }),
@@ -278,6 +280,7 @@ describe("API key wallet scope routes", () => {
         body: JSON.stringify({
           name: "Scoped key",
           projectId: TEST_PROJECT.id,
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_a", "wal_scope_b"],
@@ -323,6 +326,7 @@ describe("API key wallet scope routes", () => {
         headers: authenticatedJsonHeaders(),
         body: JSON.stringify({
           name: "Atomic create rollback",
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_b"],
@@ -353,6 +357,7 @@ describe("API key wallet scope routes", () => {
         headers: authenticatedJsonHeaders(),
         body: JSON.stringify({
           name: "Ambiguous wallet key",
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "wal_scope_a",
         }),
@@ -380,6 +385,7 @@ describe("API key wallet scope routes", () => {
         body: JSON.stringify({
           name: "Scoped key",
           projectId: TEST_PROJECT.id,
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_a", "wal_scope_b"],
@@ -454,6 +460,7 @@ describe("API key wallet scope routes", () => {
   it("requires walletScope when updating wallet bindings", async () => {
     const targetKeyId = await createManagedApiKey({
       name: "Update target",
+      grants: ["transfers.read"],
       walletScope: "all",
     });
     const res = await app.request(
@@ -480,6 +487,7 @@ describe("API key wallet scope routes", () => {
   it("clears wallet bindings when walletScope is updated to all", async () => {
     const targetKeyId = await createManagedApiKey({
       name: "Scope clear target",
+      grants: ["transfers.read"],
       walletScope: "selected",
       walletIds: ["wal_scope_a"],
     });
@@ -517,6 +525,7 @@ describe("API key wallet scope routes", () => {
   it("preserves API key fields and wallet bindings when binding update fails", async () => {
     const apiKeyId = await createManagedApiKey({
       name: "Atomic update original",
+      grants: ["transfers.read"],
       walletScope: "selected",
       walletIds: ["wal_scope_a"],
     });
@@ -529,6 +538,7 @@ describe("API key wallet scope routes", () => {
         headers: authenticatedJsonHeaders(),
         body: JSON.stringify({
           name: "Atomic update changed",
+          grants: ["transfers.read"],
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_b"],
@@ -583,8 +593,8 @@ describe("API key wallet scope routes", () => {
       getDb(env)
         .prepare(
           `INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           "key_other_org_policy",
@@ -594,8 +604,7 @@ describe("API key wallet scope routes", () => {
           "Other organization key",
           "sk_other_org",
           "hash_other_org_policy",
-          "api_admin",
-          JSON.stringify(["*"]),
+          ALL_API_KEY_GRANTS,
           "active"
         ),
     ]);

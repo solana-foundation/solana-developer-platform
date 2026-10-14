@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -172,7 +172,7 @@ describe("POST /v1/members/accept", () => {
     await seedInvitation({ ...invitationFixture(), email: OTHER_EMAIL });
     await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
     const res = await app.request(
       "/v1/members/accept",

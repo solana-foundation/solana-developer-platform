@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Permission } from "@sdp/types";
+import type { Action } from "@sdp/types";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -10,7 +10,7 @@ export interface EarnTestApiKey {
   id: string;
   raw: string;
   prefix: string;
-  permissions: Permission[];
+  grants: Action[];
 }
 
 export interface EarnAuthzTenant {
@@ -83,7 +83,7 @@ export async function seedEarnApiKey(
   tenant: EarnAuthzTenant,
   key: {
     id: string;
-    permissions: Permission[];
+    grants: Action[];
     environment: SeededApiKey["environment"];
   }
 ): Promise<EarnTestApiKey> {
@@ -92,8 +92,7 @@ export async function seedEarnApiKey(
     id: key.id,
     organizationId: tenant.org.id,
     projectId: tenant.project.id,
-    role: "api_admin",
-    permissions: key.permissions,
+    grants: key.grants,
     environment: key.environment,
     rateLimitTier: "standard",
     allowedIps: null,
@@ -104,9 +103,9 @@ export async function seedEarnApiKey(
   await seedApiKeyRow(env, await hashString(raw, env.API_KEY_PEPPER), cached);
   await getDb(env)
     .prepare(`INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', ?, 'active')
-         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`)
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, grants = excluded.grants, status = excluded.status`)
     .bind(
       key.id,
       tenant.org.id,
@@ -115,10 +114,10 @@ export async function seedEarnApiKey(
       `Earn authz ${key.id}`,
       raw.slice(0, 11),
       await hashString(raw, env.API_KEY_PEPPER),
-      JSON.stringify(key.permissions)
+      key.grants
     )
     .run();
-  return { id: key.id, raw, prefix: raw.slice(0, 11), permissions: key.permissions };
+  return { id: key.id, raw, prefix: raw.slice(0, 11), grants: key.grants };
 }
 
 /** Deployment flags under which `isEarnEnabled` admits Earn: Markets and Earn both on. */

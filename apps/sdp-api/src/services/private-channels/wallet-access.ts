@@ -1,8 +1,8 @@
-import { type ApiKeyRole, hasAllPermissions, type MovementId } from "@sdp/types";
+import { expandStoredGrants, type MovementId } from "@sdp/types";
+import { z } from "zod";
 import { getDb } from "@/db";
-import { parseStoredApiKeyPermissions } from "@/lib/api-key-permissions";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
-import type { ApiKeyContext } from "@/lib/auth";
+import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import { AppError, conflict, forbidden, providerUnavailable, walletNotFound } from "@/lib/errors";
 import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -12,7 +12,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
 /**
- * Refresh the key's role and permissions before authorizing a specific
+ * Refresh the key's grants before authorizing a specific
  * operation or wallet, and its liveness from the same row, so a key revoked
  * between authentication and this read signs nothing. Authentication already
  * read all of it fresh (HOO-2099); this is the deliberate re-check right before
@@ -28,10 +28,8 @@ export async function refreshPrivateChannelAuth(
   projectId: string
 ): Promise<ApiKeyContext> {
   if (auth.authType !== "api_key") return auth;
-  const current = await getDb(env).queryOne<
-    { role: ApiKeyRole; permissions: string | null } & ApiKeyLifecycleColumns
-  >(
-    `SELECT role, permissions, status, expires_at, rotation_deadline
+  const current = await getDb(env).queryOne<{ grants: unknown } & ApiKeyLifecycleColumns>(
+    `SELECT grants, status, expires_at, rotation_deadline
        FROM api_keys
       WHERE id = ? AND organization_id = ? AND project_id = ?`,
     [auth.apiKeyId, auth.organizationId, projectId]
@@ -42,11 +40,7 @@ export async function refreshPrivateChannelAuth(
   if (apiKeyRowRefusal(current, Date.now()) !== null) {
     throw forbidden("API key is no longer active");
   }
-  return {
-    ...auth,
-    role: current.role,
-    permissions: parseStoredApiKeyPermissions(current.role, current.permissions),
-  };
+  return { ...auth, grants: expandStoredGrants(z.array(z.string()).parse(current.grants)) };
 }
 
 export function listPrivateChannelCustodyWallets(
@@ -69,8 +63,10 @@ export async function resolvePrivateChannelCustodyWallet(
   allowAddress = false
 ): Promise<CustodyWallet> {
   const current = await refreshPrivateChannelAuth(env, auth, projectId);
-  if (!hasAllPermissions(current.permissions, ["payments:write"])) {
-    throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: payments:write");
+  if (!authMayPerform(current, "private_channels.execute")) {
+    throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
+      action: "private_channels.execute",
+    });
   }
   const candidates =
     wallets ?? (await listPrivateChannelCustodyWallets(env, auth.organizationId, projectId));

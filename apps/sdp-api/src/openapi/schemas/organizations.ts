@@ -165,7 +165,9 @@ export const pendingInvitationSchema = z
       example: "https://accounts.example.com/accept?__clerk_ticket=example",
     }),
   })
-  .openapi({ description: "Pending invitation, returned only to callers holding `org:write`." });
+  .openapi({
+    description: "Pending invitation, returned only to callers holding `members.manage`.",
+  });
 
 export const listMembersMetaSchema = z
   .object({
@@ -194,7 +196,7 @@ export const listMembersResponseSchema = z
     members: z.array(organizationMemberSchema).openapi({ description: "Organization members." }),
     invitations: z.array(pendingInvitationSchema).openapi({
       description:
-        "Pending invitations, paged as a continuation of the member list. Always empty for callers without `org:write`, since the acceptance link is a shareable credential.",
+        "Pending invitations, paged as a continuation of the member list. Always empty for callers without `members.manage`, since the acceptance link is a shareable credential.",
     }),
     meta: listMembersMetaSchema,
   })

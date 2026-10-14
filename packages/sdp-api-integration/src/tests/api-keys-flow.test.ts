@@ -89,13 +89,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
       },
       body: JSON.stringify({
         name: `PRO-966 key ${Date.now()}`,
-        permissions: [
-          "tokens:read",
-          "tokens:write",
-          "payments:read",
-          "payments:write",
-          "wallets:read",
-        ],
+        grants: ["issuance.manage", "issuance.execute", "transfers.execute", "wallets.read"],
         walletScope: "selected",
         signingWalletId: sourceWallet.walletId,
       }),

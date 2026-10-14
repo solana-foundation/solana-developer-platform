@@ -46,3 +46,33 @@ export async function signSeededClerkMember(
     expiresInSeconds: 300,
   });
 }
+
+/**
+ * Headers for a signed-in organization administrator of `projectId`, seeding
+ * the membership rows when the suite has none. Custody setup and other
+ * `configure` actions answer only a person, never an API key (HOO-2099).
+ */
+export async function clerkAdminHeaders(
+  env: Env,
+  db: DatabaseClient,
+  input: { userId: string; organizationId: string; projectId: string }
+): Promise<Record<string, string>> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'admin', 'active')
+         ON CONFLICT DO NOTHING`
+      )
+      .bind(`om_admin_${input.userId}`, input.organizationId, input.userId),
+    db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role)
+         VALUES (?, ?, ?, 'admin')
+         ON CONFLICT DO NOTHING`
+      )
+      .bind(`pm_admin_${input.projectId}_${input.userId}`, input.projectId, input.userId),
+  ]);
+  const token = await signSeededClerkMember(env, db, input.userId, input.organizationId);
+  return { Authorization: `Bearer ${token}`, "X-Project-ID": input.projectId };
+}

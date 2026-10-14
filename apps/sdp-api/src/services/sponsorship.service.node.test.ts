@@ -22,6 +22,7 @@ import {
   resolveProjectSponsorshipScope,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
 import { env as testEnv } from "@/test/helpers/env";
@@ -293,8 +294,7 @@ describe("sponsorship identity boundary", () => {
         id: "key_trusted",
         organizationId: "org_trusted",
         projectId: "project_stale",
-        role: "api_admin",
-        permissions: ["*"],
+        grants: ALL_API_KEY_GRANTS,
         environment: "sandbox",
         signingWalletId: null,
       });

@@ -5,11 +5,7 @@
  * and sets a Clerk auth context for downstream handlers.
  */
 
-import {
-  getPermissionsForOrgRole,
-  normalizeOrganizationRole,
-  type OrganizationRole,
-} from "@sdp/types";
+import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
@@ -497,7 +493,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     return {
       userId: existingContext.user_id,
       organizationId: existingContext.organization_id,
-      permissions: getPermissionsForOrgRole(role),
       role,
       clerkUserId: payload.sub as string,
       clerkOrgId: organizationClaims.organizationId,
@@ -540,7 +535,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     userIdentity.userId
   );
 
-  const permissions = getPermissionsForOrgRole(role);
   if (!knownOrganization) {
     // First provisioned by this request: no allowlist read recorded them yet.
     await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
@@ -549,7 +543,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   return {
     userId: userIdentity.userId,
     organizationId: resolvedOrgIdentity.organization_id,
-    permissions,
     role,
     clerkUserId: payload.sub as string,
     clerkOrgId: organizationClaims.organizationId,

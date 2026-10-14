@@ -184,8 +184,7 @@ describe("Payments routes — list transfers", () => {
       organizationId: TEST_ORG.id,
       projectId: `${TEST_PROJECT.id}_production`,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["payments:read"],
+      grants: ["transfers.read"],
     });
   });
 

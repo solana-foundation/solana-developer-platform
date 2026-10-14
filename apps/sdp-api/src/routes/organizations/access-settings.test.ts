@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { API_KEY_PRE_READ_MAX_REQUESTS, apiKeyFloodGuardIdentifier } from "@/middleware/rate-limit";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
@@ -34,7 +34,7 @@ async function seedOrganization(settings: OrganizationSettings | null): Promise<
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_CACHED_API_KEY,
     projectId: PROJECT_ID,
-    permissions: ["*"],
+    grants: ALL_API_KEY_GRANTS,
   });
 }
 
@@ -108,7 +108,7 @@ describe("Organization access settings", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, permissions: ["*"] });
+    await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, grants: ALL_API_KEY_GRANTS });
   });
   afterEach(async () => {
     await clearKVStores(env);
@@ -429,7 +429,7 @@ describe("Organization access settings", () => {
       await clearKVStores(env);
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["*"],
+        grants: ALL_API_KEY_GRANTS,
         allowedIps: ["203.0.113.7/32"],
       });
       expect(

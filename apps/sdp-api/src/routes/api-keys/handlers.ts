@@ -1,10 +1,10 @@
 import { SigningError } from "@sdp/custody/signing";
-import type {
-  ApiKeyRole,
-  CreateApiKeyResponse,
-  ListApiKeysResponse,
-  Permission,
-  RotateApiKeyResponse,
+import {
+  type CreateApiKeyResponse,
+  type ListApiKeysResponse,
+  type OrganizationRole,
+  organizationRoleMayPerform,
+  type RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -41,13 +41,13 @@ type AppContext = Context<{ Bindings: Env }>;
 /** The signed-in person managing keys; the router refuses API keys first. */
 function resolveActor(c: AppContext): {
   organizationId: string;
-  permissions: Permission[];
+  role: OrganizationRole;
   userId: string;
 } {
   const clerk = requireHumanActor(c);
   return {
     organizationId: clerk.organizationId,
-    permissions: clerk.permissions,
+    role: clerk.role,
     userId: clerk.userId,
   };
 }
@@ -96,14 +96,13 @@ export const listApiKeys = async (c: AppContext) => {
         id: key.id,
         name: key.name,
         keyPrefix: key.keyPrefix,
-        role: key.role as ApiKeyRole,
+        grants: key.grants,
         environment: key.environment as "sandbox" | "production",
         status: key.status,
         walletScope: key.walletScope,
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
-        allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
         createdAt: key.createdAt,
@@ -121,11 +120,9 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   const {
     name,
     description,
-    role = "api_developer",
-    permissions,
+    grants,
     walletScope,
     allowedIps,
-    allowedOperations,
     expiresAt,
     signingWalletId,
     signingWalletIds,
@@ -151,8 +148,11 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (provisionWalletRequested) {
-    if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
-      throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
+    // Provisioning creates a custody wallet, which is wallet lifecycle.
+    if (!organizationRoleMayPerform(actor.role, "wallets.manage")) {
+      throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: wallets.manage", {
+        action: "wallets.manage",
+      });
     }
 
     try {
@@ -194,13 +194,11 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       organizationId: orgId,
       projectId,
       createdByUserId: actor.userId,
-      actorPermissions: actor.permissions,
+      actorRole: actor.role,
       name,
       description,
-      role,
-      permissions,
+      grants,
       allowedIps,
-      allowedOperations,
       expiresAt,
       signingWalletId: resolvedSigningWalletId,
       pepper: c.env.API_KEY_PEPPER,
@@ -216,12 +214,11 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
         resourceId: key.id,
         metadata: {
           name,
-          role,
+          grants: key.grants,
           environment: key.environment,
           walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
           signingWalletId: resolvedSigningWalletId,
           signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-          allowedOperations: allowedOperations ?? [],
           provisionedWallet: provisionWalletRequested,
         },
       },
@@ -234,7 +231,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       name: createdKey.name,
       key: createdKey.key, // Full key - only shown once!
       keyPrefix: createdKey.keyPrefix,
-      role: createdKey.role,
+      grants: createdKey.grants,
       environment: createdKey.environment,
       expiresAt: createdKey.expiresAt,
       createdAt: createdKey.createdAt,
@@ -265,8 +262,7 @@ export const getApiKey = async (c: AppContext) => {
     name: key.name,
     description: key.description,
     keyPrefix: key.keyPrefix,
-    role: key.role,
-    permissions: key.permissions,
+    grants: key.grants,
     environment: key.environment,
     status: key.status,
     projectId: key.projectId,
@@ -275,7 +271,6 @@ export const getApiKey = async (c: AppContext) => {
     signingWalletId: key.signingWalletId,
     signingWalletIds: walletBindings.map((binding) => binding.walletId),
     walletBindings,
-    allowedOperations: key.allowedOperations,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,
@@ -294,10 +289,10 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   // Verify key belongs to this organization and the current project scope
   const existing = await getDb(c.env)
     .prepare(
-      "SELECT id, project_id, role FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
+      "SELECT id, project_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
     )
     .bind(keyId, actor.organizationId, projectId)
-    .first<{ id: string; project_id: string; role: ApiKeyRole }>();
+    .first<{ id: string; project_id: string }>();
 
   if (!existing) {
     throw notFound("API key");
@@ -327,14 +322,12 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       keyId,
       organizationId: actor.organizationId,
       projectId,
-      actorPermissions: actor.permissions,
-      currentRole: existing.role,
+      actorRole: actor.role,
       name: body.name,
       description: body.description,
+      grants: body.grants,
       allowedIps: body.allowedIps,
-      allowedOperations: body.allowedOperations,
       expiresAt: body.expiresAt,
-      permissions: body.permissions,
       signingWallet: walletSelection.touched
         ? { walletId: walletSelection.defaultSigningWalletId }
         : undefined,
@@ -368,7 +361,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
       actor.organizationId,
       projectId,
       gracePeriodHours,
-      actor.permissions,
+      actor.role,
       c.env.API_KEY_PEPPER
     );
     return {

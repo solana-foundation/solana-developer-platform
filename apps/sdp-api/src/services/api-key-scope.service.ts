@@ -1,10 +1,10 @@
 import {
-  type ApiKeyRole,
+  type Action,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
-  getPermissionsForApiKeyRole,
-  hasAllPermissions,
-  hasAnyPermission,
+  isApiKeyGrantableAction,
+  type OrganizationRole,
+  organizationRoleMayPerform,
   type Permission,
 } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
@@ -350,26 +350,28 @@ export async function resolveWalletBindingsInScope(
 }
 
 /**
- * A signed-in person may grant a key at most the permissions they hold; an
- * organization administrator may grant any. Only people manage keys
+ * A signed-in person may grant a key only actions an API key may hold, and
+ * only actions they hold themselves. Only people manage keys
  * (`requireHumanSession`), so the actor is never itself a key.
  */
-export function assertGrantableApiKeyPermissions(
-  actorPermissions: Permission[],
-  resolvedRole: ApiKeyRole,
-  requestedPermissions: Permission[] | null | undefined
+export function assertGrantableApiKeyGrants(
+  actorRole: OrganizationRole,
+  requestedGrants: readonly Action[]
 ): void {
-  if (hasAnyPermission(actorPermissions, ["org:admin"])) {
-    return;
+  const forbiddenForKeys = requestedGrants.filter((grant) => !isApiKeyGrantableAction(grant));
+  if (forbiddenForKeys.length > 0) {
+    throw new AppError("BAD_REQUEST", `API keys cannot hold: ${forbiddenForKeys.join(", ")}`, {
+      actions: forbiddenForKeys,
+    });
   }
-
-  const effectivePermissions =
-    requestedPermissions == null ? getPermissionsForApiKeyRole(resolvedRole) : requestedPermissions;
-
-  if (!hasAllPermissions(actorPermissions, effectivePermissions)) {
+  const beyondActor = requestedGrants.filter(
+    (grant) => !organizationRoleMayPerform(actorRole, grant)
+  );
+  if (beyondActor.length > 0) {
     throw new AppError(
       "INSUFFICIENT_PERMISSIONS",
-      "Cannot grant an API key more permissions than you hold"
+      `Cannot grant an API key actions you do not hold: ${beyondActor.join(", ")}`,
+      { actions: beyondActor }
     );
   }
 }

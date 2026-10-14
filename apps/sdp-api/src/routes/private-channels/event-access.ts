@@ -1,5 +1,4 @@
-import { hasPermission } from "@sdp/types";
-import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, authMayPerform, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
 import type { AppContext } from "./context";
 import { getPrivateChannelUserRepository } from "./context";
@@ -28,7 +27,7 @@ export async function resolveEventViewerForAuth(
     }
     return { scope: "all" };
   }
-  if (hasPermission(auth.permissions, "projects:write")) {
+  if (authMayPerform(auth, "projects.manage")) {
     return { scope: "all" };
   }
   if (!auth.userId) {

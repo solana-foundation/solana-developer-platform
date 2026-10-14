@@ -2,9 +2,9 @@
  * API Key Types
  */
 
-import type { AllowedOperation } from "./allowed-operations";
+import type { Action } from "./actions";
 import type { CustodyWalletOwnerTarget } from "./custody";
-import type { ApiKeyRole, Permission } from "./permissions";
+import type { Permission } from "./permissions";
 
 export const SDP_ENVIRONMENTS = ["sandbox", "production"] as const;
 
@@ -37,12 +37,10 @@ export interface ApiKey {
   description: string | null;
   keyPrefix: string; // "sk_live_abc" for display
   keyHash: string; // SHA-256 of full key
-  role: ApiKeyRole;
-  permissions: Permission[] | null; // Override permissions, null = use role defaults
+  grants: Action[]; // Explicit grants; no role, no wildcard
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
-  allowedOperations: AllowedOperation[] | null; // Operation families/types the key may perform; null or [] = unrestricted
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -60,11 +58,9 @@ export interface ApiKey {
 export interface CreateApiKeyRequest {
   name: string;
   description?: string;
-  role?: ApiKeyRole;
-  permissions?: Permission[];
+  grants: Action[];
   walletScope: ApiKeyWalletScope;
   allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
-  allowedOperations?: AllowedOperation[]; // Omit or [] for no restriction
   expiresAt?: string; // ISO date string
   signingWalletId?: string;
   signingWalletIds?: string[];
@@ -81,10 +77,9 @@ export interface UpdateApiKeyRequest {
   name?: string;
   description?: string;
   walletScope?: ApiKeyWalletScope;
+  grants?: Action[]; // Replaces the key's grants
   allowedIps?: string[] | null; // null to remove IP restrictions
-  allowedOperations?: AllowedOperation[] | null; // null or [] to remove the restriction
   expiresAt?: string | null; // null to remove expiration
-  permissions?: Permission[] | null; // null to revert to role defaults
   signingWalletId?: string | null; // null to unset binding
   signingWalletIds?: string[] | null;
   walletBindings?: Array<{
@@ -103,7 +98,7 @@ export interface RotateApiKeyResponse {
     name: string;
     key: string; // Full new key, only shown once!
     keyPrefix: string;
-    role: ApiKeyRole;
+    grants: Action[];
     environment: ApiKeyEnvironment;
     expiresAt: string | null;
     createdAt: string;
@@ -120,7 +115,7 @@ export interface CreateApiKeyResponse {
     name: string;
     key: string; // Full key, only shown once!
     keyPrefix: string;
-    role: ApiKeyRole;
+    grants: Action[];
     environment: ApiKeyEnvironment;
     expiresAt: string | null;
     createdAt: string;
@@ -132,14 +127,13 @@ export interface ListApiKeysResponse {
     id: string;
     name: string;
     keyPrefix: string;
-    role: ApiKeyRole;
+    grants: Action[];
     environment: ApiKeyEnvironment;
     status: ApiKeyStatus;
     walletScope: ApiKeyWalletScope;
     signingWalletId: string | null;
     signingWalletIds: string[];
     walletBindings: ApiKeyWalletBinding[];
-    allowedOperations: AllowedOperation[];
     lastUsedAt: string | null;
     expiresAt: string | null;
     createdAt: string;

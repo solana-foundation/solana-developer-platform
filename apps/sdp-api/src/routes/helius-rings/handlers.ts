@@ -8,7 +8,6 @@ import {
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { assertOperationAllowed } from "@/middleware/allowed-operations";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
@@ -359,9 +358,6 @@ export async function createRingsZone(c: AppContext) {
 export async function prepareRingsOperation(c: AppContext) {
   const parsed = prepareRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
-  // The operation type comes from the body, so the Allowed Operations check
-  // runs here instead of as a static route declaration.
-  assertOperationAllowed(c, `rings_${parsed.data.opType}`);
 
   const { tenant } = tenantOf(c);
   await requireRingsWallet(c, tenant, parsed.data.walletId, ["payments:write"]);
@@ -415,12 +411,9 @@ export async function getRingsOperation(c: AppContext) {
  */
 export async function executeRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
-  const waiting = await requireRingsOperation(c, tenant, requireParam(c, "operationId"), [
+  const _waiting = await requireRingsOperation(c, tenant, requireParam(c, "operationId"), [
     "payments:write",
   ]);
-  // Execution pushes a prepared operation to signing, and the executing key
-  // may not be the one that prepared it, so it is judged on its own list.
-  assertOperationAllowed(c, `rings_${waiting.op_type}`);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.executeOperation(requireParam(c, "operationId"))
@@ -438,10 +431,7 @@ export async function retryRingsOperation(c: AppContext) {
 
   const { tenant } = tenantOf(c);
   const failedId = requireParam(c, "operationId");
-  const failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
-  // A retry prepares a fresh operation of the same type, so the retrying key
-  // is judged exactly like a key preparing it for the first time.
-  assertOperationAllowed(c, `rings_${failed.op_type}`);
+  const _failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>

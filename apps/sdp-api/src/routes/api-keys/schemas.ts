@@ -1,4 +1,4 @@
-import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
+import { ACTIONS, isApiKeyGrantableAction, PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 import { custodyWalletOwnerSchema } from "../custody/schemas";
@@ -6,6 +6,26 @@ import { custodyWalletOwnerSchema } from "../custody/schemas";
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
 });
+
+/**
+ * An API key's grants: known actions only (an unknown string is a 400, never
+ * silently dropped), none an API key may never hold, each at most once.
+ */
+export const apiKeyGrantsSchema = z
+  .array(z.enum(ACTIONS))
+  .max(ACTIONS.length)
+  .superRefine((grants, ctx) => {
+    const forbidden = grants.filter((grant) => !isApiKeyGrantableAction(grant));
+    if (forbidden.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: `API keys cannot hold: ${forbidden.join(", ")}`,
+      });
+    }
+    if (new Set(grants).size !== grants.length) {
+      ctx.addIssue({ code: "custom", message: "Grants must not repeat an action" });
+    }
+  });
 
 const apiKeyWalletBindingSchema = z.object({
   walletId: z.string().min(1),
@@ -15,11 +35,9 @@ const apiKeyWalletBindingSchema = z.object({
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
-  role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
-  permissions: z.array(z.enum(PERMISSIONS)).optional(),
+  grants: apiKeyGrantsSchema,
   walletScope: z.enum(["all", "selected"]),
   allowedIps: z.array(apiKeyAllowedIpSchema).optional(),
-  allowedOperations: z.array(z.enum(ALLOWED_OPERATIONS)).max(ALLOWED_OPERATIONS.length).optional(),
   expiresAt: z.string().datetime().optional(),
   signingWalletId: z.string().min(1).optional(),
   signingWalletIds: z.array(z.string().min(1)).optional(),
@@ -35,15 +53,10 @@ export const apiKeyCreateSchema = z.object({
 export const apiKeyUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
+  grants: apiKeyGrantsSchema.optional(),
   walletScope: z.enum(["all", "selected"]).optional(),
   allowedIps: z.array(apiKeyAllowedIpSchema).nullable().optional(),
-  allowedOperations: z
-    .array(z.enum(ALLOWED_OPERATIONS))
-    .max(ALLOWED_OPERATIONS.length)
-    .nullable()
-    .optional(),
   expiresAt: z.string().datetime().nullable().optional(),
-  permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),
   signingWalletId: z.string().min(1).nullable().optional(),
   signingWalletIds: z.array(z.string().min(1)).nullable().optional(),
   walletBindings: z.array(apiKeyWalletBindingSchema).nullable().optional(),
