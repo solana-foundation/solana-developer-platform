@@ -416,10 +416,17 @@ function withForwardedIdempotencyKey(
   return headers;
 }
 
+/** The headers sdp-api answers a keyed request with, passed back to the browser. */
+const IDEMPOTENCY_RESPONSE_HEADERS = ["Idempotent-Replayed", "Retry-After"] as const;
+
+type IdempotencyResponseHeader = (typeof IDEMPOTENCY_RESPONSE_HEADERS)[number];
+
 /** What sdp-api says about a keyed request, passed back to the browser. */
-function idempotencyResponseHeaders(response: Response): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const name of ["Idempotent-Replayed", "Retry-After"]) {
+function idempotencyResponseHeaders(
+  response: Response
+): Partial<Record<IdempotencyResponseHeader, string>> {
+  const headers: Partial<Record<IdempotencyResponseHeader, string>> = {};
+  for (const name of IDEMPOTENCY_RESPONSE_HEADERS) {
     const value = response.headers.get(name);
     if (value !== null) headers[name] = value;
   }

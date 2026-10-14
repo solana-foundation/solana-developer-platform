@@ -1,5 +1,6 @@
 import {
   type CreatePaymentRecurringPaymentRequest,
+  isIdempotencyKeyOutcomeUnknown,
   type ListPaymentRecurringPaymentsResponse,
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
@@ -140,7 +141,7 @@ const recurringPaymentsListEnvelopeSchema = z.object({ data: recurringPaymentsLi
 const recurringPaymentEnvelopeSchema = z.object({ data: recurringPaymentResponseSchema });
 const collectionAttemptsEnvelopeSchema = z.object({ data: collectionAttemptsResponseSchema });
 const apiErrorEnvelopeSchema = z.object({
-  error: z.union([z.string(), z.object({ message: z.string() })]),
+  error: z.union([z.string(), z.object({ message: z.string(), code: z.string().optional() })]),
   message: z.string().optional(),
 });
 
@@ -189,6 +190,12 @@ async function readDashboardEnvelope<T>(
 ): Promise<T> {
   const body = schema.parse(await response.json());
   if (!response.ok) {
+    const code =
+      "error" in body && typeof body.error === "object" ? (body.error.code ?? null) : null;
+    if (isIdempotencyKeyOutcomeUnknown(response.status, code)) {
+      // The money rule keeps the key, so a retry is answered under it.
+      throw new Error(t("Shared.idempotency.outcomeUnknownCheckList"));
+    }
     throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
   }
   if (!("data" in body)) {

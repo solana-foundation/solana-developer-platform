@@ -67,6 +67,33 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
   });
 
+  // A money movement never mints a fresh key while the original may have run:
+  // the next press is answered under the same key.
+  it("keeps the key on an unknown outcome and resends under it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () =>
+        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
+          { status: 409 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+      "Shared.idempotency.outcomeUnknownCheckList"
+    );
+    await sendTransferUnderKey(SUBMISSION, t);
+
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   // Browser test (HOO-1918): the API recorded the transfer but the answer was
   // lost; a refusal after that settles nothing about the recorded transfer, so
   // the third press must replay it under the first key, not send a second one.
