@@ -19,9 +19,10 @@ KORA_LOCAL_DEVNET_PORT="${KORA_LOCAL_DEVNET_PORT:-18081}"
 KORA_LOCAL_MAINNET_PORT=18080
 # Surfpool forks this upstream; without it the harness picks a devnet provider.
 SURFPOOL_REMOTE_RPC_URL="${SURFPOOL_REMOTE_RPC_URL:-${SOLANA_MAINNET_RPC_URL:-}}"
-# Compose interpolates the shell before --env-file; drop inherited values so the
-# ports and RPC below are the ones the services actually get.
-unset KORA_PORT RPC_URL
+# Compose interpolates the shell before --env-file, and the harness honours an
+# inherited Kora endpoint; drop them so the ports below are the ones the
+# services get and api.env stays in step.
+unset KORA_PORT RPC_URL KORA_RPC_URL KORA_SURFPOOL_KORA_RPC_URL
 # Off the default 6379 so the stack's own Redis keeps its port.
 KORA_LOCAL_DEVNET_REDIS_PORT="${KORA_LOCAL_DEVNET_REDIS_PORT:-16379}"
 KORA_LOCAL_MAINNET_REDIS_PORT="${KORA_LOCAL_MAINNET_REDIS_PORT:-16380}"
