@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { createSystemPaymentsRepository } from "@/db/repositories";
 import { rootLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
@@ -22,12 +23,24 @@ const TEST_SIG_4 =
   "7hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as unknown as Signature;
 
 const TEST_ORG_ID = "org_job_test_001";
+const TEST_USER_ID = "usr_job_test_001";
+const TEST_PROJECT_ID = "prj_job_test_001";
 
 async function seedOrg(): Promise<void> {
   await getDb(env)
     .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
     .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "individual", "active")
     .run();
+  await getDb(env)
+    .prepare("INSERT INTO users (id, email) VALUES (?, ?)")
+    .bind(TEST_USER_ID, "job-test-001@example.test")
+    .run();
+  await seedDefaultProjects(getDb(env), {
+    organizationId: TEST_ORG_ID,
+    createdBy: TEST_USER_ID,
+    members: [],
+    ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
 }
 
 async function insertTransfer(params: {
@@ -45,14 +58,15 @@ async function insertTransfer(params: {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers
-       (id, organization_id, wallet_id, source_address, destination_address,
+       (id, organization_id, project_id, wallet_id, source_address, destination_address,
         token, amount, type, direction, status, signature, signed_transaction,
         last_valid_block_height, submission_started_at, confirmed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
       TEST_ORG_ID,
+      TEST_PROJECT_ID,
       "wal_test",
       "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
       "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
@@ -424,7 +438,7 @@ describe("trackPendingTransfers", () => {
             flow: "reconciler",
             reason: "history_absent",
             organization_id: TEST_ORG_ID,
-            project_id: null,
+            project_id: TEST_PROJECT_ID,
             transfer_id: "xfr_started_outbox_not_found",
             transfer_type: "transfer",
             signature: TEST_SIG_1,
