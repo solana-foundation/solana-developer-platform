@@ -1,9 +1,6 @@
 import { createServer } from "node:http";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  setWalletIdentityRpcMode,
-  startWalletIdentityRpc,
-} from "../../playwright/support/wallet-identity-rpc";
+import { setWalletIdentityRpcMode, startWalletIdentityRpc } from "./wallet-identity-rpc";
 
 let server: Awaited<ReturnType<typeof startWalletIdentityRpc>>;
 let url: string;
