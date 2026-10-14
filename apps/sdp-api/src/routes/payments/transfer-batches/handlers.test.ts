@@ -1028,7 +1028,11 @@ describe("payment transfer batches", () => {
       env
     );
     expect(unauthorizedDetail.status).toBe(403);
-    await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "all",
+      walletBindings: [],
+    });
     const tenantDetail = await app.request(
       "/v1/payments/transfer-batches/xbatch_legacy_authorized",
       { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
