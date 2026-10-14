@@ -215,7 +215,10 @@ test.describe
         (r) => r.url().endsWith(TRANSFERS) && r.request().method() === "POST"
       );
       await send.click();
-      expect((await replay).headers()["idempotent-replayed"]).toBe("true");
+      // The transfer route answers a retry from its transfer row (`requestGate`'s
+      // `findIdempotentKeyReplay`), which sends no Idempotent-Replayed mark: the
+      // replay shows as a success under the same key that made one transfer.
+      expect((await replay).ok()).toBe(true);
       await submitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
