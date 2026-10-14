@@ -22,6 +22,14 @@ export interface IdempotencyKeyClaimInput {
   /** The credential (API key id or user id) making the request. */
   principal: string;
   fingerprint: string;
+  /**
+   * Whether a claim whose lease lapsed without being released (a crash, a
+   * failed outcome write, a request past its renewal cap) may be taken over.
+   * Only a `rerun` route may: its handler answers a retry from its own row. On
+   * a `store` route the earlier attempt may have run and nothing else records
+   * it, so the key stays in flight until it expires.
+   */
+  takeOverLapsed: boolean;
   leaseSeconds: number;
   retentionSeconds: number;
 }
@@ -173,8 +181,9 @@ export function createPostgresIdempotencyKeyRepository(
       };
     }
 
-    // An earlier attempt with this request crashed or failed and its lease is
-    // over: this request takes the row over and runs again.
+    // An earlier attempt with this request failed (released) or, on a route
+    // that allows it, crashed, and its lease is over: this request takes the
+    // row over and runs again.
     const takenOver = await db
       .prepare(
         `UPDATE idempotency_keys
@@ -183,6 +192,7 @@ export function createPostgresIdempotencyKeyRepository(
           WHERE ${scope.sql}
             AND status = 'in_progress' AND principal = ? AND fingerprint = ?
             AND locked_until <= now() AND expires_at > now()
+            AND (released OR ?::boolean)
           RETURNING id`
       )
       .bind(
@@ -191,7 +201,8 @@ export function createPostgresIdempotencyKeyRepository(
         input.leaseSeconds,
         ...scope.params,
         input.principal,
-        input.fingerprint
+        input.fingerprint,
+        input.takeOverLapsed
       )
       .first<{ id: string }>();
     if (takenOver !== null) {
@@ -308,7 +319,11 @@ export function createPostgresIdempotencyKeyRepository(
         )
         .bind(limit)
         .first<{ deleted: number; unfinished: number }>();
-      return { deleted: row?.deleted ?? 0, unfinished: row?.unfinished ?? 0 };
+      if (row === null) {
+        // The aggregate returns one row even when nothing was deleted.
+        throw new Error("idempotency key prune returned no row");
+      }
+      return { deleted: row.deleted, unfinished: row.unfinished };
     },
   };
 }

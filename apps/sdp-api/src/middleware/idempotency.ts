@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { IdempotencyKeyMode } from "@sdp/types";
+import {
+  assertNever,
+  type IdempotencyKeyMode,
+  isBodylessHttpStatus,
+  isIdempotencyUnstoredStatus,
+} from "@sdp/types";
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { routePath } from "hono/route";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
@@ -11,7 +16,7 @@ import {
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, internalError } from "@/lib/errors";
-import { canonicalJson, type JsonValue } from "@/lib/idempotency";
+import { canonicalJson, type JsonValue, jsonValueSchema } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -51,6 +56,10 @@ export interface IdempotencyOptions {
    *   Only for a route whose handler writes its own row under a unique key
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
+   *
+   * It also decides whether a retry may take over a claim whose lease lapsed
+   * without an outcome (a crash, a failed write of the outcome): only on a
+   * `rerun` route. On a `store` route the key stays in flight until it expires.
    */
   serverErrors: "store" | "rerun";
   /**
@@ -63,11 +72,12 @@ export interface IdempotencyOptions {
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
 /**
- * The longest a request keeps renewing its lease. Past it, renewal stops and a
- * retry can take the key over once the lease runs out: a request still running
- * after this long is hung, and holding its key would block every retry for the
- * 24 hours the key lives. Statement and signing timeouts end requests well
- * before it.
+ * The longest a request keeps renewing its lease. Past it, renewal stops and,
+ * on a `rerun` route, a retry can take the key over once the lease runs out: a
+ * request still running after this long is hung, and holding its key would
+ * block every retry for the 24 hours the key lives. A `store` route has no row
+ * of its own to answer that retry, so its key stays in flight instead.
+ * Statement and signing timeouts end requests well before it.
  */
 export const MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS = 15 * 60;
 export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
@@ -75,15 +85,6 @@ export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
 export const MAX_STORED_RESPONSE_BYTES = 1024 * 1024;
 const COMPLETE_ATTEMPTS = 3;
 
-/**
- * Statuses that are never stored: the request was refused before it changed
- * anything, so a retry with the same key runs again. Stripe saves no result for
- * validation failures or concurrent conflicts; refusals of the caller (401,
- * 403, 429) are re-evaluated on every attempt too.
- */
-const UNSTORED_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 409, 429]);
-/** Statuses whose responses carry no body. */
-const BODYLESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 /** Response headers a replay carries back. Everything else is per-request. */
 const STORED_RESPONSE_HEADERS = ["content-type", "location"] as const;
 
@@ -127,8 +128,7 @@ async function readFingerprintBody(
     const raw = await c.req.text();
     try {
       // An empty body reaches validateBody as `{}`, so it is the same request.
-      // SAFETY: JSON.parse returns a JSON value by definition.
-      parsed = raw.trim().length === 0 ? {} : (JSON.parse(raw) as JsonValue);
+      parsed = raw.trim().length === 0 ? {} : jsonValueSchema.parse(JSON.parse(raw));
     } catch {
       // Tagged so it can never equal a parsed body.
       return ["unparsed", raw];
@@ -137,14 +137,20 @@ async function readFingerprintBody(
   return canonicalize ? canonicalize(parsed) : parsed;
 }
 
-/** A validator's output as JSON: dates as ISO strings, bigints as strings, undefined dropped. */
+/**
+ * A validator's output as JSON: dates as ISO strings, bigints as strings,
+ * undefined dropped. It parses whatever the route's validator stored, so like
+ * any parser it takes `unknown`.
+ */
 function toJsonValue(value: unknown): JsonValue {
-  // SAFETY: JSON.parse of JSON.stringify output is a JSON value by definition.
-  return JSON.parse(
-    JSON.stringify(value, (_key, entry: unknown) =>
-      typeof entry === "bigint" ? entry.toString() : entry
-    ) ?? "null"
-  ) as JsonValue;
+  return jsonValueSchema.parse(
+    JSON.parse(
+      // A target with no validator stringifies to undefined; it fingerprints as null.
+      JSON.stringify(value, (_key, entry: unknown) =>
+        typeof entry === "bigint" ? entry.toString() : entry
+      ) ?? "null"
+    )
+  );
 }
 
 function replay(c: Context<{ Bindings: Env }>, stored: StoredIdempotentResponse): Response {
@@ -190,7 +196,7 @@ async function snapshot(response: Response, operation: string): Promise<StoredId
     const value = response.headers.get(name);
     if (value !== null) headers[name] = value;
   }
-  if (BODYLESS_STATUSES.has(response.status)) {
+  if (isBodylessHttpStatus(response.status)) {
     return { status: response.status, headers, body: null };
   }
   let body: string | null;
@@ -262,8 +268,9 @@ function startLeaseRenewal(
       pending = pending.then(async () => {
         if (stopped) return;
         if (Date.now() - startedAt >= maxRenewalSeconds * 1000) {
-          // Hung: let the lease run out so a retry can take the key over. The
-          // handler's own row keeps that retry from moving anything twice.
+          // Hung: let the lease run out so a retry on a `rerun` route can take
+          // the key over. The handler's own row keeps that retry from moving
+          // anything twice.
           stopped = true;
           clearInterval(timer);
           getLogger().error(
@@ -346,6 +353,7 @@ export async function runIdempotency(
     // response produced for a narrower or wider credential.
     principal: auth.id,
     fingerprint,
+    takeOverLapsed: options.serverErrors === "rerun",
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   });
@@ -374,6 +382,8 @@ export async function runIdempotency(
         );
       }
       break;
+    default:
+      return assertNever(claim);
   }
 
   const freshClaim = claim.fresh;
@@ -418,7 +428,7 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    if (UNSTORED_STATUSES.has(response.status)) {
+    if (isIdempotencyUnstoredStatus(response.status)) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
@@ -449,8 +459,9 @@ async function record(
       return;
     } catch (error) {
       if (attempt === COMPLETE_ATTEMPTS) {
-        // The lease runs out and a retry runs again; only the handler's own
-        // row stands between that retry and a second execution.
+        // The lease runs out. On a `store` route the key stays in flight until
+        // it expires, so a retry is refused rather than run again; on a
+        // `rerun` route the handler's own row answers the retry.
         getLogger().error(
           { operation, status: stored.status, ...describeError(error) },
           "idempotency: failed to record the outcome"
@@ -480,8 +491,10 @@ export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bin
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
-export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
-  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+export function declaredIdempotency(handler: object): IdempotencyKeyMode | undefined {
+  // SAFETY: the marker is a registered symbol only idempotent() sets, always to
+  // an IdempotencyKeyMode; any other handler lacks it and reads undefined.
+  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode })[IDEMPOTENCY_MARKER];
 }
 
 /**

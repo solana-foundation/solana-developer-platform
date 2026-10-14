@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
+import * as idempotencyKeysRepository from "@/db/repositories/idempotency-keys.repository";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -294,7 +295,7 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a hung request's key go once it outlives the renewal cap", async () => {
+  function hungApp(serverErrors: IdempotencyOptions["serverErrors"]) {
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
@@ -303,16 +304,21 @@ describe("idempotent()", () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const { app, create } = buildApp(
-      { key: "required", leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
+    const built = buildApp(
+      { key: "required", serverErrors, leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
       async (c) => {
-        if (create.mock.calls.length === 1) {
+        if (built.create.mock.calls.length === 1) {
           markStarted();
           await released;
         }
         return c.json({ ok: true }, 201);
       }
     );
+    return { ...built, started, release };
+  }
+
+  it("lets a hung request's key go once it outlives the renewal cap on a rerun route", async () => {
+    const { app, create, started, release } = hungApp("rerun");
 
     const first = post(app, "/v1/other", { a: 1 }, KEY);
     await started;
@@ -324,6 +330,50 @@ describe("idempotent()", () => {
 
     expect(takeover.status).toBe(201);
     expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a hung request's key in flight on a store route, then replays its outcome", async () => {
+    const { app, create, started, release } = hungApp("store");
+
+    const first = post(app, "/v1/other", { a: 1 }, KEY);
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+    release();
+
+    expect(retry.status).toBe(409);
+    expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+    expect((await first).status).toBe(201);
+    const replayed = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(replayed.status).toBe(201);
+    expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("never runs a store route twice when recording its outcome fails", async () => {
+    const actual = idempotencyKeysRepository.createPostgresIdempotencyKeyRepository;
+    const factory = vi
+      .spyOn(idempotencyKeysRepository, "createPostgresIdempotencyKeyRepository")
+      .mockImplementation((db) => ({
+        ...actual(db),
+        complete: async () => {
+          throw new Error("database unavailable");
+        },
+      }));
+    try {
+      const { app, create } = buildApp({ key: "required", leaseSeconds: 1 }, created);
+
+      expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
+      // Past the 1s lease, which nothing renews once the request answered.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+
+      expect(retry.status).toBe(409);
+      expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      factory.mockRestore();
+    }
   });
 
   it("does not store a refusal, so the same key runs again", async () => {

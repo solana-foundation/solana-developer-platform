@@ -12,6 +12,7 @@ import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
+import * as idempotencyKeysCron from "./idempotency-keys";
 import { IDEMPOTENCY_KEY_PRUNE_CRON } from "./idempotency-keys";
 import {
   PENDING_DEPOSITS_CRON,
@@ -141,10 +142,8 @@ vi.mock("./secret-retirements", () => ({
   runSecretRetirements: vi.fn(),
 }));
 
-vi.mock("./idempotency-keys", () => ({
-  IDEMPOTENCY_KEY_PRUNE_CRON: "17 * * * *",
-  runIdempotencyKeyPrune: vi.fn(),
-}));
+// A work function, so it is swapped on the shared module rather than mocked.
+vi.spyOn(idempotencyKeysCron, "runIdempotencyKeyPrune").mockImplementation(() => undefined);
 
 vi.mock("./provider-credential-secret-cleanup", () => ({
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON: "*/5 * * * *",

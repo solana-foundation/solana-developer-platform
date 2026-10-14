@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
@@ -47,6 +47,7 @@ function claimInput(overrides: Partial<IdempotencyKeyClaimInput> = {}): Idempote
     idempotencyKey: "key-1",
     principal: "key_api_1",
     fingerprint: "fp-1",
+    takeOverLapsed: true,
     leaseSeconds: 60,
     retentionSeconds: 86_400,
     ...overrides,
@@ -100,6 +101,36 @@ describe("idempotency keys repository", () => {
     await repository().discard(first.id, "stale");
     await repository().unlock(first.id, "stale");
     expect(await repository().claim(claimInput())).toMatchObject({ kind: "in_flight" });
+  });
+
+  it("takes over a lapsed, never-released claim only when the route allows it", async () => {
+    const crashed = claimInput();
+    await repository().claim(crashed);
+    await getDb(env).execute(
+      `UPDATE idempotency_keys SET locked_until = now() - interval '1 second' WHERE id = ?`,
+      [crashed.id]
+    );
+
+    expect(await repository().claim(claimInput({ takeOverLapsed: false }))).toMatchObject({
+      kind: "in_flight",
+    });
+    expect(await repository().claim(claimInput({ takeOverLapsed: true }))).toEqual({
+      kind: "claimed",
+      fresh: false,
+      replacedUnfinished: false,
+    });
+  });
+
+  it("takes over a released claim even when lapsed claims stay in flight", async () => {
+    const released = claimInput();
+    await repository().claim(released);
+    await repository().unlock(released.id, released.claimToken);
+
+    expect(await repository().claim(claimInput({ takeOverLapsed: false }))).toEqual({
+      kind: "claimed",
+      fresh: false,
+      replacedUnfinished: false,
+    });
   });
 
   it("stores and replays a bodyless response", async () => {
@@ -193,6 +224,23 @@ describe("idempotency keys repository", () => {
     );
 
     expect(await repository().pruneExpired(100)).toEqual({ deleted: 2, unfinished: 1 });
+  });
+
+  it("fails loudly when the prune query returns no row", async () => {
+    const db = getDb(env);
+    const statement = db.prepare("SELECT 1");
+    const bind = vi.spyOn(statement, "bind").mockReturnValue(statement);
+    const first = vi.spyOn(statement, "first").mockResolvedValue(null);
+    const prepare = vi.spyOn(db, "prepare").mockReturnValue(statement);
+    try {
+      await expect(createPostgresIdempotencyKeyRepository(db).pruneExpired(100)).rejects.toThrow(
+        "idempotency key prune returned no row"
+      );
+    } finally {
+      prepare.mockRestore();
+      first.mockRestore();
+      bind.mockRestore();
+    }
   });
 
   it("keeps project-less keys unique", async () => {

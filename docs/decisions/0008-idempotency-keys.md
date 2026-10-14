@@ -95,6 +95,12 @@ point finds its row and never signs or sends twice. Unlike Brandur's design the 
 on the domain row, not the key row, because domain rows outlive the key's 24 hours and the
 reconciler works from them.
 
+Only a `rerun` route takes over a claim whose lease lapsed without being released (a crash, a
+failed write of the outcome, a request past the renewal cap). A `store` route has no row of its
+own, so nothing would stop the retry from running the handler twice: its key answers 409
+`IDEMPOTENCY_KEY_IN_FLIGHT` until the original records its outcome or the key expires. A released
+claim (a refusal, an error the app maps itself) is taken over on either kind of route.
+
 **Outcomes.**
 
 | Case | Stored? | Answer |
@@ -103,6 +109,7 @@ reconciler works from them.
 | Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
+| Original's lease lapsed unreleased, `serverErrors: "store"` | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until it records or expires |
 | 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
 | 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
 | 5xx, `serverErrors: "rerun"` | No: unlocked, still bound to its fingerprint | A same-key retry runs again |
@@ -118,9 +125,10 @@ reconciler works from them.
   (204, 205, 304) replays without one.
 
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
-handler runs. A crashed request's key frees when the lease runs out. A request still running after
-15 minutes (`maxLeaseRenewalSeconds`) is treated as hung: renewal stops and logs
-`sdp_idempotency_lease_renewal_cap`, so a retry can take over once the lease lapses. Statement and
+handler runs. On a `rerun` route a crashed request's key frees when the lease runs out. A request
+still running after 15 minutes (`maxLeaseRenewalSeconds`) is treated as hung: renewal stops and logs
+`sdp_idempotency_lease_renewal_cap`, so on a `rerun` route a retry can take over once the lease
+lapses. Statement and
 signing timeouts end requests well before that.
 
 **No bypass.** Every request on a route with the step goes through it. (Approved-operation
