@@ -322,7 +322,7 @@ describe("providerFetch fences", () => {
     });
   }
 
-  function failsWith(message: string, code: SdpPaymentsErrorCode = "PROVIDER_UNAVAILABLE") {
+  function failsWith(message: string, code: SdpPaymentsErrorCode) {
     return (cause: unknown) => {
       assert.ok(cause instanceof SdpPaymentsError);
       assert.equal(cause.code, code);
@@ -345,7 +345,10 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("stripe", "https://api.example.test/hang", { method: "GET" }),
-      failsWith(`The stripe API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+      failsWith(
+        `The stripe API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`,
+        "PROVIDER_UNAVAILABLE"
+      )
     );
     assert.deepEqual(requested, [PROVIDER_REQUEST_TIMEOUT_MS]);
   });
@@ -360,7 +363,10 @@ describe("providerFetch fences", () => {
     });
     caller.abort();
 
-    await assert.rejects(pending, failsWith("Failed to reach the moonpay API"));
+    await assert.rejects(
+      pending,
+      failsWith("Failed to reach the moonpay API", "PROVIDER_UNAVAILABLE")
+    );
   });
 
   it("gives up on a body that stops arriving once the timeout passes", {
