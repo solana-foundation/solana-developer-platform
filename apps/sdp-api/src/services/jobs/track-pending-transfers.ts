@@ -38,7 +38,7 @@ import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
-const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
+export const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 // A confirmed transaction finalizes within ~30s or never (fork, ledger reset);

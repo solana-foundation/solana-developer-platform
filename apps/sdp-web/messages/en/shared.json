@@ -447,6 +447,7 @@
     "connectManaged": "Provisioned per deployment. This provider is configured by your SDP operator rather than self-serve."
   },
   "idempotency": {
-    "outcomeUnknownCheckList": "We couldn’t confirm whether this was created — check the list before trying again."
+    "outcomeUnknownCheckList": "We couldn’t confirm whether this was created — check the list before trying again.",
+    "keyNotPersisted": "This browser isn’t keeping the request’s retry key (private browsing or storage full), so it wasn’t sent. Allow site storage and try again."
   }
 }

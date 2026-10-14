@@ -9,7 +9,11 @@ import { I18nProvider } from "@/i18n/provider";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
-import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
+import {
+  type ApiPlaygroundEndpointConfig,
+  ApiPlaygroundShell,
+  resetPlaygroundRetryKeyForTests,
+} from "./api-playground-shell";
 import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +45,7 @@ const endpoint: ApiPlaygroundEndpointConfig = {
 describe("ApiPlaygroundShell", () => {
   beforeEach(() => {
     clearStoredApiKeySecrets();
+    resetPlaygroundRetryKeyForTests();
     mocks.replaceSearchParams.mockReset();
     mocks.searchParamGet.mockReset();
     mocks.searchParamGet.mockReturnValue(null);
@@ -133,6 +138,64 @@ describe("ApiPlaygroundShell", () => {
     fireEvent.click(getView.getByRole("button", { name: "Run request" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(sentKey(0)).toBeUndefined();
+  });
+
+  // Jina (#2333): a Send after a lost answer used a new key, so the API ran the
+  // write again instead of replaying the first attempt.
+  it("resends a lost or 5xx-answered POST under its key, and a settled one under a new key", async () => {
+    storeApiKeySecret({
+      value: ["sk", "test", "idempotency", "fixture"].join("_"),
+      apiKeyId: "key-test",
+    });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const envelope = (status: number) =>
+      new Response(
+        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    const answers: (Response | "lost")[] = ["lost", envelope(503), envelope(201)];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
+      const answer = answers.shift() ?? envelope(201);
+      if (answer === "lost") throw new TypeError("Failed to fetch");
+      return answer;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const postEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-retry",
+      method: "POST",
+    };
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell
+          apiKeyId="key-test"
+          endpoints={[postEndpoint]}
+          productName="Test product"
+        />
+      </I18nProvider>
+    );
+    const sentKey = (call: number) =>
+      z
+        .object({ idempotencyKey: z.string().optional() })
+        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+    const send = async (calls: number) => {
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+    };
+
+    await send(1);
+    await send(2);
+    await send(3);
+    await send(4);
+
+    expect(sentKey(1)).toBe(sentKey(0));
+    expect(sentKey(2)).toBe(sentKey(0));
+    expect(sentKey(3)).not.toBe(sentKey(2));
   });
 });
 

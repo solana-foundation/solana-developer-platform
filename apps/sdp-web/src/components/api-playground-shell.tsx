@@ -22,6 +22,7 @@ import { useTranslations } from "@/i18n/provider";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { answerRetiresKey, apiErrorCode } from "@/lib/idempotency";
 import {
   getStoredApiKeySecret,
   isValidSdpApiKey,
@@ -410,6 +411,27 @@ function getExecutionStatus(
   };
 }
 
+/**
+ * The key of the last Send whose answer settled nothing (a lost answer, a 5xx,
+ * an unstored refusal), with the request it went out for. Sending that same
+ * request again reuses it, so the API answers the retry from the first attempt
+ * instead of running it twice; an answer that retires a key
+ * (`answerRetiresKey`) clears it, and any other request gets a new key. Memory
+ * only: the request can carry a pasted secret, so it never reaches storage.
+ */
+let unsettledSend: { request: string; key: string } | null = null;
+
+/** @internal Test-only. */
+export function resetPlaygroundRetryKeyForTests(): void {
+  unsettledSend = null;
+}
+
+/** A new key per Send of a write, except the retry of a Send that settled nothing. */
+function keyForSend(request: string): string {
+  if (unsettledSend?.request === request) return unsettledSend.key;
+  return crypto.randomUUID();
+}
+
 interface ExecutePlaygroundRequestOptions {
   activeEndpoint: ApiPlaygroundEndpointConfig;
   apiKeyId: string | null;
@@ -467,9 +489,16 @@ async function executePlaygroundRequest({
   const startedAt = Date.now();
   setIsExecuting(true);
 
-  // Each Send is a new call, so it gets a new key. The proxy forwards it as Idempotency-Key,
+  // Each Send is a new call with a new key, unless it retries one that settled
+  // nothing ({@link unsettledSend}). The proxy forwards it as Idempotency-Key,
   // which the money routes require.
-  const idempotencyKey = hasRequestBody(activeEndpoint.method) ? crypto.randomUUID() : undefined;
+  const sendRequest = JSON.stringify([apiKeyId, activeEndpoint.method, resolvedPath, requestBody]);
+  const idempotencyKey = hasRequestBody(activeEndpoint.method)
+    ? keyForSend(sendRequest)
+    : undefined;
+  if (idempotencyKey !== undefined) {
+    unsettledSend = { request: sendRequest, key: idempotencyKey };
+  }
 
   try {
     const proxyResponse = await dashboardRequest("/api/playground/execute", {
@@ -497,6 +526,15 @@ async function executePlaygroundRequest({
     if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
       onValidationError(t("Shared.SharedComponents.playgroundExecutionFailed"));
       return;
+    }
+    if (
+      answerRetiresKey({
+        status: envelope.status,
+        replayed: envelope.headers?.["idempotent-replayed"] === "true",
+        code: envelope.ok ? null : apiErrorCode(JSON.stringify(envelope.body ?? null)),
+      })
+    ) {
+      unsettledSend = null;
     }
 
     onResult({
