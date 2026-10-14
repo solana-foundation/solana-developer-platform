@@ -445,5 +445,8 @@
     "connectYouWillNeed": "You will need",
     "connectByArrangement": "Available by arrangement. The SDP team grants access and sets up the connection with your organization.",
     "connectManaged": "Provisioned per deployment. This provider is configured by your SDP operator rather than self-serve."
+  },
+  "idempotency": {
+    "outcomeUnknownCheckList": "We couldn’t confirm whether this was created — check the list before trying again."
   }
 }

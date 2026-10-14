@@ -14,6 +14,8 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import type { ComplianceSnapshot } from "../payments-workspace.types";
 import { CRYPTO_ACCOUNT_NETWORKS, type CryptoAccountNetwork } from "./counterparty-create-schemas";
@@ -43,6 +45,7 @@ export function CryptoAccountForm({
   footerStart,
 }: CryptoAccountFormProps) {
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice();
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
   const [address, setAddress] = useState("");
@@ -125,6 +128,7 @@ export function CryptoAccountForm({
 
     if (!result.ok) {
       resetScreening();
+      if (notice(fetchResultAnswer(result))) return;
       setError(result.error);
       toast.error(result.error, { position: "bottom-right" });
       return;

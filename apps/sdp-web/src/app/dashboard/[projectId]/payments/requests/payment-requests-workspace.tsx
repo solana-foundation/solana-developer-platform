@@ -67,6 +67,8 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -213,6 +215,7 @@ function CreateRequestModal({
   onCreated: (request: PaymentRequest | null) => void;
 }) {
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice();
   const form = useZodForm(createRequestSchema, {
     amount: "",
     token: "",
@@ -290,6 +293,11 @@ function CreateRequestModal({
     settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
     if (!res.ok) {
+      // The earlier attempt may have created it: close and refresh the list.
+      if (notice(fetchResultAnswer(res))) {
+        onCreated(null);
+        return;
+      }
       toast.error(res.error);
       return;
     }

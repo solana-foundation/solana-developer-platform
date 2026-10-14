@@ -24,10 +24,12 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { fetchResultAnswer } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { cn } from "@/lib/utils";
 import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
@@ -393,6 +395,7 @@ function PaymentRequestCreateForm({
   counterparties,
 }: PaymentRequestCreateWorkspaceProps) {
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice();
   const locale = useLocale();
   const router = useRouter();
   const projectHref = useProjectHref();
@@ -466,6 +469,11 @@ function PaymentRequestCreateForm({
       );
       settleExpiresAt(input, expiresAt, res);
       if (!res.ok) {
+        // The earlier attempt may have created it: show the list to check.
+        if (notice(fetchResultAnswer(res))) {
+          router.push(projectHref(PAYMENT_REQUESTS_HREF));
+          return;
+        }
         toast.error(res.error);
         return;
       }

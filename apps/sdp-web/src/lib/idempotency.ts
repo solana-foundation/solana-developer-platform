@@ -41,22 +41,19 @@ const apiErrorCodeSchema = z.object({ error: z.object({ code: z.string() }) });
 
 /**
  * The error code an sdp-api error body names, or `null` for a body that names
- * none (a success, a proxy's own refusal, text).
+ * none (a success, a proxy's own refusal, text that is not JSON).
  *
- * @param body - The parsed JSON body.
+ * @param text - The response body as received.
  */
-export function apiErrorCode(body: unknown): string | null {
-  const parsed = apiErrorCodeSchema.safeParse(body);
-  return parsed.success ? parsed.data.error.code : null;
-}
-
-/** {@link apiErrorCode} of a body still in its raw text, which may not be JSON. */
-export function apiErrorCodeOfText(text: string): string | null {
+export function apiErrorCode(text: string): string | null {
+  let json: unknown;
   try {
-    return apiErrorCode(JSON.parse(text));
+    json = JSON.parse(text);
   } catch {
     return null;
   }
+  const parsed = apiErrorCodeSchema.safeParse(json);
+  return parsed.success ? parsed.data.error.code : null;
 }
 
 /**
@@ -83,6 +80,16 @@ export function answerRetiresKey(answer: ApiAnswer): boolean {
 }
 
 /**
+ * Whether the answer is a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: the original
+ * request never recorded its outcome, so it may have run. Its key retires
+ * ({@link answerRetiresKey}), but the form must not offer a plain retry: the
+ * user is told to check the list first, and the list is refreshed.
+ */
+export function isOutcomeUnknownAnswer(answer: ApiAnswer): boolean {
+  return answer.status !== null && isIdempotencyKeyOutcomeUnknown(answer.status, answer.code);
+}
+
+/**
  * The answer a `dashboardFetch`-shaped result carries. A failure below 400 (a
  * followed redirect, a body nobody could read) is no answer from sdp-api, so it
  * reads as a lost one.
@@ -91,13 +98,13 @@ export function fetchResultAnswer(result: {
   ok: boolean;
   status: number | null;
   replayed?: boolean;
-  body?: unknown;
+  code?: string | null;
 }): ApiAnswer {
   const answered = result.ok || (result.status !== null && result.status >= 400);
   return {
     status: answered ? result.status : null,
     replayed: result.replayed === true,
-    code: answered && !result.ok ? apiErrorCode(result.body) : null,
+    code: answered && !result.ok && result.code !== undefined ? result.code : null,
   };
 }
 

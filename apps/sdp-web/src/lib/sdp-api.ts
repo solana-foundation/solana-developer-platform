@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
-import { type ApiAnswer, apiErrorCodeOfText, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
@@ -234,7 +234,7 @@ export function sdpApiAnswer(cause: unknown): ApiAnswer {
     return {
       status: cause.status,
       replayed: cause.replayed,
-      code: apiErrorCodeOfText(cause.responseBody),
+      code: apiErrorCode(cause.responseBody),
     };
   }
   // Crossed a server-action boundary: the body survives only in the message.
@@ -245,7 +245,7 @@ export function sdpApiAnswer(cause: unknown): ApiAnswer {
   return {
     status: extractSdpApiError(cause).status,
     replayed: false,
-    code: body?.[1] === undefined ? null : apiErrorCodeOfText(body[1]),
+    code: body?.[1] === undefined ? null : apiErrorCode(body[1]),
   };
 }
 

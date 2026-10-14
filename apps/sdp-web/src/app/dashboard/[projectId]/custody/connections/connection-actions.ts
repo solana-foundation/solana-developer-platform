@@ -4,7 +4,11 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
-import { type ApiAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
+import {
+  type ApiAnswer,
+  actionIdempotencyHeaders,
+  isOutcomeUnknownAnswer,
+} from "@/lib/idempotency";
 import {
   createSdpApiClient,
   extractSdpApiError,
@@ -56,10 +60,15 @@ async function revalidateCustody(provider: CustodyProvider, connectionId?: strin
  */
 function classifyThrown(
   error: unknown,
+  t: Awaited<ReturnType<typeof getTranslations>>,
   fallback: string
 ): Exclude<CustodyActionResult, { status: "success" }> {
   const { status, message } = extractSdpApiError(error);
   const answer = sdpApiAnswer(error);
+  // The key's original request never recorded its outcome: it may have run.
+  if (isOutcomeUnknownAnswer(answer)) {
+    return { status: "unknown", message: t("Shared.idempotency.outcomeUnknownCheckList"), answer };
+  }
   if (status !== null && status < 500 && status !== 408 && status !== 429) {
     return {
       status: "failed",
@@ -121,7 +130,7 @@ export async function rotateCredentialsAction(
       }
     );
   } catch (error) {
-    const result = classifyThrown(error, fallback);
+    const result = classifyThrown(error, t, fallback);
     // A replay can be refused before the server reads the original outcome.
     // Only a rotation result can settle an earlier unknown submission.
     return isRecoveryAttempt ? { status: "unknown", message: result.message } : result;
@@ -157,7 +166,7 @@ export async function completeRotationAction(
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.rotateFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.rotateFailed"));
   }
 
   await revalidateCustody(custodyProvider, connectionId);
@@ -196,7 +205,7 @@ export async function rollbackCredentialAction(
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.rollbackFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.rollbackFailed"));
   }
   await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
@@ -217,7 +226,7 @@ export async function deactivateCredentialAction(
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.deactivateCredentialsFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.deactivateCredentialsFailed"));
   }
   await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
@@ -237,7 +246,7 @@ export async function deactivateConnectionAction(
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.deactivateConnectionFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.deactivateConnectionFailed"));
   }
   await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
@@ -260,7 +269,7 @@ export async function cancelSetupAction(
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.cancelSetupFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.cancelSetupFailed"));
   }
   await revalidateCustody(custodyProvider);
   return { status: "success" };
@@ -302,7 +311,7 @@ export async function createConnectionWalletAction(
       headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
     });
   } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.addWalletFailed"));
+    return classifyThrown(error, t, t("DashboardCustody.addWalletFailed"));
   }
   await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };

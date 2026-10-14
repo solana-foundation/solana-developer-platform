@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { z } from "zod";
-import type { ApiAnswer } from "./idempotency";
+import { type ApiAnswer, isOutcomeUnknownAnswer } from "./idempotency";
 import { createActionMemo } from "./idempotency-key-store";
+import { useOutcomeUnknownRefresh } from "./use-outcome-unknown";
 
 /** What a server action reports: its status, and on a failure what sdp-api answered. */
 export interface ActionKeyResult {
@@ -17,16 +19,16 @@ function keyFor(input: string): string {
   return actionKeys.valueFor(input, () => crypto.randomUUID());
 }
 
-function settled(input: string, key: string, result: ActionKeyResult): void {
+/** @returns What sdp-api answered: the answer settles the key. */
+function settle(input: string, key: string, result: ActionKeyResult): ApiAnswer {
   // A success retires the key; a thrown action, or a result that names no
   // answer, may have written, so it keeps it.
-  actionKeys.settle(
-    input,
-    key,
+  const answer =
     result.status === "success"
       ? { status: 200, replayed: false, code: null }
-      : (result.answer ?? { status: null, replayed: false, code: null })
-  );
+      : (result.answer ?? { status: null, replayed: false, code: null });
+  actionKeys.settle(input, key, answer);
+  return answer;
 }
 
 /**
@@ -38,9 +40,22 @@ function settled(input: string, key: string, result: ActionKeyResult): void {
  * (see `createActionMemo`); when the browser refuses storage the key lives as
  * long as the page, and the action is still sent: these are not money routes.
  *
+ * A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` retires the key and refreshes the
+ * page, so the row the earlier attempt may have made shows up; the action's own
+ * message tells the user to check the list before trying again.
+ *
  * @returns `keyFor(input)` right before the send, and `settled(input, key, result)`
  *   once it answers.
  */
 export function useActionIdempotencyKey() {
-  return { keyFor, settled };
+  const refresh = useOutcomeUnknownRefresh();
+  return useMemo(
+    () => ({
+      keyFor,
+      settled(input: string, key: string, result: ActionKeyResult): void {
+        if (isOutcomeUnknownAnswer(settle(input, key, result))) refresh();
+      },
+    }),
+    [refresh]
+  );
 }
