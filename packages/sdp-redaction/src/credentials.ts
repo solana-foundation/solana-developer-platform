@@ -19,8 +19,14 @@ import { isCredentialKey, REDACTED } from "./policy";
 // backreference anchors the alternation to the whole quoted key. The separator
 // is mandatory each repetition, so the group cannot split a run two ways and
 // the pattern stays linear.
+//
+// A quoted value ends at its first unescaped quote: the value body consumes a
+// backslash and the character after it as one unit, so `\"` inside a secret
+// never closes it. Both quotes may carry their own backslashes, which is how a
+// body serialized twice spells them. The two body alternatives are disjoint
+// (one starts with a backslash, the other excludes it), so this stays linear.
 const SENSITIVE_JSON_FIELD_PATTERN =
-  /(["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(["'])(.*?)\3/gi;
+  /(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(\\*["'])((?:\\[\s\S]|(?!\3)[^\\])*?)\3/gi;
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
