@@ -11,7 +11,7 @@ import {
 
 /**
  * The steps between `idempotent()` and a money-moving handler (HOO-1918, ADR
- * 0008), in their fixed order:
+ * 0009), in their fixed order:
  *
  *   authorize → idempotent → replayFromRecord → admit → handler
  *

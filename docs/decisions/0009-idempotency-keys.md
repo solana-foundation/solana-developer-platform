@@ -1,4 +1,4 @@
-# 0008. One Idempotency-Key middleware
+# 0009. One Idempotency-Key middleware
 
 Date: 2026-10-08
 Status: Accepted for the core (HOO-1918 PR 1). PR 2 makes first-party clients send keys; PRs 3–5
@@ -31,9 +31,9 @@ one table, `idempotency_keys` (migration 0128). It follows three sources:
   lease plus a claim token, compare-and-swapped on every write.
 
 **Scope.** Organization, project, and operation. Every keyed route runs under project context, and
-the step refuses to run without it (`project_id` is NOT NULL). The operation is the HTTP method plus the Hono
-route pattern, read with `routePath(c)`, so it needs no shared vocabulary that could drift from
-`OPERATION_TYPES`.
+the step refuses to run without it (`project_id` is NOT NULL). The operation is the HTTP method
+plus the Hono route pattern, read with `routePath(c)`, so it needs no shared vocabulary that could
+drift from `OPERATION_TYPES`.
 
 - The step must sit in a route's own chain. It throws if the pattern is a `use("*")` wildcard.
 - Renaming a path resets that route's keys, which is acceptable with 24h retention.
@@ -46,9 +46,10 @@ credential is recorded on the row and compared in plain text rather than hashed:
   treats as one request match;
 - the credential (API key id or user id), so another credential reusing the key gets 422 and
   never reads a response produced for it. A rotated API key is a new credential, so a same-key
-  retry after rotation gets 422. The domain row is found by the key too, so a retry under a new key
-  is a new request: after a rotation, read the resource with GET to learn whether the original
-  request ran before sending it again.
+  retry after rotation gets 422. The domain row is found by a record key derived from the key, the
+  organization, the project and the credential (`getIdempotencyRecordKey`), so another credential
+  never reads it, and a retry under a new key is a new request: after a rotation, read the resource
+  with GET to learn whether the original request ran before sending it again.
 
 A route can pass `canonicalize` where two spellings mean one request, such as unordered batch
 recipients.
@@ -60,8 +61,8 @@ validation → **`authorize`** → **this step** → replay from the domain row 
   act on every resource the request names, in tenant scope, and hands what it loaded to the
   handler. It runs before this step, so a replay passes exactly the checks a new request passes,
   and nothing after this step checks access. The step refuses to run (500) on a route without an
-  earlier `authorize` or `authorizeNone(reason)`; the stable route inventory pins every
-  `authorizeNone` with its reason.
+  earlier `authorize` or `authorizeNone(reason)`. The step carries its reason, so the route
+  inventory that comes with the routes (PR 3) can pin every `authorizeNone`.
 - **Access, never state.** `authorize` answers "may this caller act on these resources?" (an API
   key bound to the wallet, a schedule in the caller's project), read fresh where the handler reads
   fresh. State ("the wallet is active", "the schedule is active") stays in the handler. A state
@@ -89,6 +90,13 @@ recovery point:
 - a provider call carries a request id derived from the key, so the provider dedupes the retry;
 - the reconciler settles unsettled rows from the chain; it never reads keys.
 
+`replayFromRecord(find)` (`middleware/movement-steps.ts`) is that recovery point's step. Its finder
+looks the row up by the record key and returns it with the fingerprint the row recorded
+(`getIdempotencyFingerprint`). Another fingerprint is 422 `IDEMPOTENCY_KEY_REUSED`; a matching one
+is answered from the row, marked `Idempotent-Replayed: true`, and stored under the key whatever its
+status. A handler that wrote its row calls `markIdempotencyCommitted(c)`, so a 400 or 409 it raises
+after that point is stored too: the request changed something, and its retry gets the same answer.
+
 A takeover (a retry after the original's lease ran out) **never resumes** the earlier attempt. The
 handler finds its row by key and answers from it; the reconciler settles or fails what the crashed
 attempt left. Every handler on a `rerun` route is therefore re-entrant: a retry after a crash at any
@@ -96,17 +104,24 @@ point finds its row and never signs or sends twice. Unlike Brandur's design the 
 on the domain row, not the key row, because domain rows outlive the key's 24 hours and the
 reconciler works from them.
 
-A claim whose lease lapsed without being released (a crash, a failed write of the outcome, a
-request past the renewal cap) is taken over only on a route that recovers from its domain row: a
-`rerun` route, or a `store` route declared `idempotent({ ..., recovery: "record" })` because it
-mounts `replayFromRecord`, which answers the takeover from the row. Every route that mounts
-`replayFromRecord` sets it, and the route inventory pins that. On any other route nothing would
-stop the retry from running the handler twice, so it gets the terminal 409
+A lapsed lease alone does not mean the request died: a database blip longer than the lease (a
+Cloud SQL failover during a slow custody sign) makes renewals fail while the request still runs.
+So a claim whose lease lapsed without being released counts as live until `claimed_at` plus the
+renewal cap plus the lease, and a retry before then gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with a
+`Retry-After` of the time left (at most 60 seconds). After that the claim is treated as dead (a
+crash, a failed write of the outcome, a request past the renewal cap).
+
+A dead claim is taken over only on a route that recovers from its domain row: a `rerun` route, or a
+`store` route declared `idempotent({ ..., recovery: "record" })` because it mounts
+`replayFromRecord`, which answers the takeover from the row. Both steps carry markers
+(`declaredIdempotencyRecovery`, `declaresRecordReplay`) so the route inventory that comes with the
+routes can pin that every route mounting `replayFromRecord` sets it. On any other route nothing
+would stop the retry from running the handler twice, so it gets the terminal 409
 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`: the caller reads the resource with GET to
 see whether it ran, then sends again with a new key. That answer is not stored and the claim is
 left as it is, so every retry with the key gets it until the key expires (or until a hung original
-records its outcome after all, which is then replayed). A released claim (a refusal, an error the
-app maps itself) is taken over on any route.
+records its outcome after all, which is then replayed). A released claim (a refusal, a `rerun`
+5xx, an error a composite caller cannot classify) is taken over at once on any route.
 
 **Outcomes.**
 
@@ -116,9 +131,12 @@ app maps itself) is taken over on any route.
 | Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
-| Original's lease lapsed unreleased, `rerun` or `recovery: "record"` | Taken over | Answered from the domain row (or run again on `rerun`) |
-| Original's lease lapsed unreleased, other `store` route | No; the claim is left as is | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key |
-| 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
+| Original's lease lapsed unreleased, within `claimed_at` + renewal cap + lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` (time left, at most 60s) |
+| Lapsed unreleased past that window, `rerun` or `recovery: "record"` | Taken over | Answered from the domain row (or run again on `rerun`) |
+| Lapsed unreleased past that window, other `store` route | No; the claim is left as is | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key |
+| Domain row exists, different fingerprint (`replayFromRecord`) | No | 422 `IDEMPOTENCY_KEY_REUSED` |
+| Domain row exists, same fingerprint (`replayFromRecord`) | Yes | The row's answer + `Idempotent-Replayed: true` |
+| 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No, unless the handler called `markIdempotencyCommitted`: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
 | 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
 | 5xx, `serverErrors: "rerun"` | No: unlocked, still bound to its fingerprint | A same-key retry runs again |
 | 2xx and other 4xx | Yes, 24h | Same status and body + `Idempotent-Replayed: true` |
@@ -126,18 +144,26 @@ app maps itself) is taken over on any route.
 - `serverErrors` is required: each route states which applies. `rerun` is only for a route whose
   handler writes its own row under a unique key before it moves anything and answers a retry from
   that row; every other route stores the 5xx.
-- An error thrown past a caller that composes `runIdempotency` is stored only if it is an
-  `AppError`, whose status is known. Any other error is mapped by the app's handler, so the key is
-  unlocked and stays bound to its request instead of storing a guess.
+- Inside a route's chain, Hono's error handler maps every thrown error to a response before this
+  step sees it, so a non-`AppError` reaches it as a 500 and is stored on a `store` route.
+- An error thrown past a caller that composes `runIdempotency` (outside Hono's chain) is stored
+  only if it is an `AppError`, whose status is known. Any other error is unlocked and stays bound
+  to its request instead of storing a guess.
 - A success is never unlocked. A body over 1 MiB is stored without its body, and a bodyless status
   (204, 205, 304) replays without one.
 
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
-handler runs. On a route that recovers from its row a crashed request's key frees when the lease
-runs out. A request still running after 15 minutes (`maxLeaseRenewalSeconds`) is treated as hung:
-renewal stops and logs `sdp_idempotency_lease_renewal_cap`, so a retry can take over once the lease
-lapses on such a route, and gets `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` on any other. Statement and
-signing timeouts end requests well before that.
+handler runs. A request still running after 15 minutes (`maxLeaseRenewalSeconds`) is treated as
+hung: renewal stops and logs `sdp_idempotency_lease_renewal_cap`. Statement and signing timeouts
+end requests well before that.
+
+Crash recovery waits for the whole window: a crashed request's key is taken over (on a route that
+recovers from its row), or answered `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` (on any other), only once
+`claimed_at` plus the renewal cap plus the lease has passed, about 16 minutes by default. The
+trade-off is deliberate: a retry of a request that really crashed waits up to that long, getting
+409 `IDEMPOTENCY_KEY_IN_FLIGHT` meanwhile, so that a live request whose renewals fail is never run
+twice or reported unknown while it still finishes. A refusal or a `rerun` 5xx releases its claim
+and is not delayed.
 
 **No bypass.** Every request on a route with the step goes through it. (Approved-operation
 executions and Dry-Run skipped it until approvals and wallet policies were removed, HOO-1889.)
@@ -154,6 +180,9 @@ lives in `@sdp/types`.
 
 - A route mounts the step itself, directly after its `authorize` step. A future composite route
   declaration can call the exported `runIdempotency` in the same position.
+- `recovery: "record"` is carried as `Symbol.for("sdp.idempotency.recovery")`, `replayFromRecord`
+  as `Symbol.for("sdp.replayFromRecord")`, and each route validator as `Symbol.for("sdp.validate")`
+  with its target, for the route inventory.
 - `authorize` carries `Symbol.for("sdp.authorize")`. When the route-declarations primitive lands,
   the markers become `RouteDeclaration.authorize` and `RouteDeclaration.idempotency`.
 
@@ -174,10 +203,11 @@ lives in `@sdp/types`.
 
 ### Known risks
 
-- An error that is not an `AppError` thrown on a `store` route is mapped by the app's handler, which
-  this step cannot see, so the claim is unlocked and a same-key retry runs the handler again. A
-  handler that moved something before throwing such an error can therefore run twice unless its
-  own row stops it.
-- A hung `store` request past the renewal cap is answered `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, but it
-  can still finish and record its outcome. A caller that already retried with a new key may then
-  have caused the operation twice.
+- A non-`AppError` thrown by a mounted route becomes a 500 in Hono's error handler before this step
+  sees it, so a `store` route stores and replays that 500 even when the handler moved something
+  first; the caller reads the resource with GET before retrying with a new key. Only a composite
+  caller of `runIdempotency` that lets a non-`AppError` escape unlocks the claim, and a same-key
+  retry then runs again unless the handler's own row stops it.
+- A `store` request still running past the renewal cap plus the lease is answered
+  `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, but it can still finish and record its outcome. A caller that
+  already retried with a new key may then have caused the operation twice.
