@@ -65,8 +65,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - **A prod deploy is done only once its canary passes.** A failed rollout or canary restores the
   previous revision and sets `sdp_prod_hold`, as does a manual dispatch; merge and approval deploys
   refuse until a dispatch with `clear_hold` passes its canary. A `breaking` migration deploys only
-  while prod serves its parent commit (`commit` on `/health/ready`) and is never rolled back. Runbook:
-  `docs/ops/release-operations.md`, "Production Rollback".
+  while prod serves the commit before its last pending edit (`commit` on `/health/ready`) and is
+  never rolled back. Runbook: `docs/ops/release-operations.md`, "Production Rollback".
 - **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
   `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
   wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter

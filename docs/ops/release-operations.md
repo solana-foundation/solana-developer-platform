@@ -157,7 +157,7 @@ Merging the release pull request creates a `chore(main): release X.Y.Z` commit o
 The production deploy workflow:
 
 1. Authenticates to the production GCP project.
-2. Refuses a commit that is behind the schema production last applied, and, outside an approved-migration run, one that adds migrations production has not applied. Merge and approval deploys also refuse while `sdp_prod_hold` is set, and refuse a `breaking` migration until production serves its parent commit.
+2. Refuses a commit that is behind the schema production last applied, and, outside an approved-migration run, one that adds migrations production has not applied. Merge and approval deploys also refuse while `sdp_prod_hold` is set (unless an approval run was dispatched with `clear_hold`), and refuse a `breaking` migration until production serves the commit before its last pending edit.
 3. Verifies the signed per-merge image built by `release-images.yml`, copies that digest to Artifact Registry, and resolves it to an immutable digest.
 4. Runs the migration job with that image.
 5. Captures the current service traffic, cron image and worker image for rollback.
@@ -205,6 +205,8 @@ While the hold is set, merge and approval deploys refuse, so the next merge cann
 3. That run lifts the hold once its canary passes. If its canary fails it rolls back too, and the hold stays.
 4. Re-run the refused merge deploy, or merge again. Dispatch a fresh `Apply pending migrations to prod` run for held migrations, since an approved run cannot be re-run.
 
+A rollback restores images, not SQL. When a migration the run applied is what broke the canary, a manual dispatch cannot fix it: it never runs migrations. Merge a repair migration and dispatch `Apply pending migrations to prod` for it with `clear_hold` checked. It still needs the `release-production` approval, deploys while production is held, and lifts the hold once its canary passes. Without `clear_hold`, an approval run fails before it asks for approval while production is held.
+
 Every prod deploy run shares one concurrency group, and GitHub keeps one pending run per group, so a merge deploy that queues behind your dispatch cancels it. Dispatch again if that happens.
 
 Lifting the hold takes a passing canary, so a broken `sdp-prod-canary` job (sdp-infra) rolls back every deploy and keeps production held. There is deliberately no bypass: removing the label by hand would only let the next deploy roll back again. When rollbacks repeat, fix the canary job first.
@@ -241,7 +243,7 @@ Production records the commit it last migrated with as the `sdp_schema_sha` labe
 
 Migrations reach production only through that approval flow (and through unheld merges, whose migrate step finds nothing pending). Releases and manual redeploys never run the migrate job; both refuse an image that adds migrations production has not applied, and every deploy refuses a commit behind the recorded schema. Keep `release-production` configured with required reviewers, `prevent_self_review`, and a `main` branch policy; the gate depends on it.
 
-A `breaking` migration also waits for the code that stopped using the old shape: a merge or approval run that would apply one is refused unless production already serves the commit before it (`git merge-base --is-ancestor <migration commit>^ <serving commit>`), read from `commit` on `https://api.solana.com/health/ready` while all traffic is on one revision; an image that does not report `commit` fails the check. The pending range starts at `sdp_schema_sha`, or at the latest release tag while that label is unknown. When the code change never reached production on its own, for example because it merged seconds before the migration, revert the migration pull request, let the revert deploy, and land it again. A run that applied a `breaking` migration is never rolled back automatically.
+A `breaking` migration also waits for the code that stopped using the old shape: a merge or approval run that would apply one is refused unless production already serves the commit before its last pending edit (`git merge-base --is-ancestor <newest pending commit touching the file>^ <serving commit>`), read from `commit` on `https://api.solana.com/health/ready` while all traffic is on one revision; an image that does not report `commit` fails the check. The pending range starts at `sdp_schema_sha`, or at the latest release tag while that label is unknown. When the code change never reached production on its own, for example because it merged seconds before the migration, revert the migration pull request, let the revert deploy, and land it again. A run that applied a `breaking` migration is never rolled back automatically.
 
 The approval run enforces its own integrity because GitHub sees the dispatching bot, not the migration author, as the run's actor: the commit must have a green stage deploy and smoke before the prompt appears, the approver may not have authored or committed any pending migration in the range being applied, a re-run of an approved run is refused (dispatch a fresh one), and the kill switch is re-checked when the deploy starts.
 

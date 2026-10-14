@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      clear_hold:
+        description: "Set by apply-prod-migrations.yml when dispatched with clear_hold: deploy while prod is held and lift the hold once the canary passes"
+        type: boolean
+        required: false
+        default: false
     outputs:
       rolled_back:
         description: "'true' when the deploy restored the previous production revision and set the prod hold"
@@ -144,14 +149,14 @@ jobs:
           fi
 
       - name: Refuse a merge or approval deploy while prod is held
-        if: ${{ env.BUILD_IMAGE == 'true' }}
+        if: ${{ env.BUILD_IMAGE == 'true' && !inputs.clear_hold }}
         run: |
           set -euo pipefail
           hold="$(gcloud run jobs describe "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --format 'value(metadata.labels.sdp_prod_hold)')"
           if [[ -n "${hold}" ]]; then
-            echo "Prod is held by the deploy of ${hold}, an automatic rollback or a manual dispatch. Merge and approval deploys stay refused until a manual dispatch of this workflow with clear_hold passes its canary (docs/ops/release-operations.md, Production Rollback)." >&2
+            echo "Prod is held by the deploy of ${hold}, an automatic rollback or a manual dispatch. Merge and approval deploys stay refused until a deploy dispatched with clear_hold passes its canary (docs/ops/release-operations.md, Production Rollback)." >&2
             exit 1
           fi
 
@@ -224,7 +229,7 @@ jobs:
 
       # A breaking migration drops what the serving image may still read, and it
       # runs before the candidate takes traffic. Apply one only while prod serves
-      # the commit before it, which already stopped reading what it drops.
+      # the commit before its last pending edit, which no longer reads what it drops.
       - name: Refuse a breaking migration until prod serves its parent
         if: ${{ env.BUILD_IMAGE == 'true' }}
         run: |
@@ -270,10 +275,9 @@ jobs:
             sleep 10
           done
           for file in "${breaking[@]}"; do
-            added="$(git log --format=%H --reverse "${since}..${DEPLOY_IMAGE_SHA}" -- "${file}")"
-            added="${added%%$'\n'*}"
-            if ! git merge-base --is-ancestor "${added}^" "${serving}"; then
-              echo "${file} is marked breaking, so it runs only once prod serves ${added}^, the commit before it. Prod serves ${serving}; deploy that parent first." >&2
+            edited="$(git log --format=%H -n 1 "${since}..${DEPLOY_IMAGE_SHA}" -- "${file}")"
+            if ! git merge-base --is-ancestor "${edited}^" "${serving}"; then
+              echo "${file} is marked breaking, so it runs only once prod serves ${edited}^, the commit before its last pending edit. Prod serves ${serving}; deploy that parent first." >&2
               exit 1
             fi
           done
@@ -456,7 +460,7 @@ jobs:
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --update-labels "sdp_prod_hold=${DEPLOY_IMAGE_SHA}"
-          echo "Holding prod at ${DEPLOY_IMAGE_SHA}: merge and approval deploys refuse until a manual dispatch with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Holding prod at ${DEPLOY_IMAGE_SHA}: merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Deploy candidate without production traffic
         timeout-minutes: 5
@@ -610,7 +614,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Lift the prod hold
-        if: ${{ env.ROLLOUT_COMPLETE == 'true' && env.BUILD_IMAGE != 'true' && inputs.clear_hold }}
+        if: ${{ env.ROLLOUT_COMPLETE == 'true' && inputs.clear_hold }}
         run: |
           set -euo pipefail
           gcloud run jobs update "${MIGRATE_JOB}" \
@@ -654,7 +658,7 @@ jobs:
             exit 1
           fi
           echo "rolled_back=true" >> "${GITHUB_OUTPUT}"
-          echo "Rolled back ${DEPLOY_IMAGE_SHA} and set sdp_prod_hold=${DEPLOY_IMAGE_SHA} on ${MIGRATE_JOB}. Merge and approval deploys refuse until a manual dispatch with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Rolled back ${DEPLOY_IMAGE_SHA} and set sdp_prod_hold=${DEPLOY_IMAGE_SHA} on ${MIGRATE_JOB}. Merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Remove candidate traffic tag
         id: remove_tag

@@ -544,11 +544,11 @@ test("rollback verification falls back to the signing origin at the same pinned 
 
 // Run one step's shell exactly as the workflow has it, with stubbed commands
 // first on PATH and the GitHub step files in a temp dir.
-function stepScript(name) {
+function stepScript(name, source = workflow) {
   const header = `      - name: ${name}\n`;
-  const start = workflow.indexOf(header);
+  const start = source.indexOf(header);
   assert.notEqual(start, -1, `missing step: ${name}`);
-  const lines = workflow.slice(start + header.length).split("\n");
+  const lines = source.slice(start + header.length).split("\n");
   const run = lines.findIndex((line) => line === "        run: |" || line.startsWith("      - "));
   assert.equal(lines[run], "        run: |", `step has no run block: ${name}`);
   const body = [];
@@ -561,7 +561,7 @@ function stepScript(name) {
 
 const gitEnv = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 
-function runStep(name, { env = {}, stubs = {}, cwd } = {}) {
+function runStep(name, { env = {}, stubs = {}, cwd, source = workflow } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "prod-deploy-step-"));
   const calls = join(dir, "calls.log");
   const files = {
@@ -578,7 +578,7 @@ function runStep(name, { env = {}, stubs = {}, cwd } = {}) {
     );
     chmodSync(stub, 0o755);
   }
-  const result = spawnSync("bash", ["-e", "-c", stepScript(name)], {
+  const result = spawnSync("bash", ["-e", "-c", stepScript(name, source)], {
     cwd,
     env: { PATH: `${dir}:${process.env.PATH}`, ...gitEnv, ...files, ...env },
     encoding: "utf8",
@@ -693,7 +693,7 @@ test("merge and approval deploys refuse while prod is held; a manual dispatch ca
   const holdStep = "Refuse a merge or approval deploy while prod is held";
   assert.match(
     workflow,
-    /- name: Refuse a merge or approval deploy while prod is held\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}\n/
+    /- name: Refuse a merge or approval deploy while prod is held\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' && !inputs\.clear_hold \}\}\n/
   );
   const holdCheck = workflow.indexOf(`- name: ${holdStep}`);
   assert.ok(workflow.indexOf("- name: Read the schema position prod last applied") < holdCheck);
@@ -712,14 +712,17 @@ test("merge and approval deploys refuse while prod is held; a manual dispatch ca
   assert.equal(runStep(holdStep, { env: deployEnv, stubs: { gcloud: "exit 0" } }).code, 0);
   assert.notEqual(runStep(holdStep, { env: deployEnv, stubs: { gcloud: "exit 1" } }).code, 0);
 
-  assert.doesNotMatch(workflow.slice(0, workflow.indexOf("  workflow_dispatch:")), /clear_hold/);
-  assert.match(
-    workflow,
-    /\n {6}clear_hold:\n\s+description: "[^"\n]+"\n\s+type: boolean\n\s+required: false\n\s+default: false\n/
+  const clearHoldInput =
+    /\n {6}clear_hold:\n\s+description: "[^"\n]+"\n\s+type: boolean\n\s+required: false\n\s+default: false\n/g;
+  assert.equal(workflow.match(clearHoldInput).length, 2, "workflow_call and workflow_dispatch");
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
   );
+  assert.doesNotMatch(orchestrator, /clear_hold/);
   assert.match(
     workflow,
-    /- name: Lift the prod hold\n\s+if: \$\{\{ env\.ROLLOUT_COMPLETE == 'true' && env\.BUILD_IMAGE != 'true' && inputs\.clear_hold \}\}\n/
+    /- name: Lift the prod hold\n\s+if: \$\{\{ env\.ROLLOUT_COMPLETE == 'true' && inputs\.clear_hold \}\}\n/
   );
   assert.ok(
     workflow.indexOf("- name: Run prod canary against the promoted revision") <
@@ -809,19 +812,27 @@ function git(cwd, ...args) {
   ).trim();
 }
 
-// base (v0.1.0) reads `legacy`; stopReading drops the read; drop is the
-// migrations-only contraction; head is a later, unrelated merge.
-function migrationRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "breaking-gate-"));
-  const migrations = "apps/sdp-api/src/db/migrations/postgres";
-  mkdirSync(join(dir, migrations), { recursive: true });
+function scratchRepo(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  git(dir, "init", "-q");
   const commit = (message, files) => {
-    for (const [file, content] of Object.entries(files)) writeFileSync(join(dir, file), content);
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), content);
+    }
     git(dir, "add", "-A");
     git(dir, "commit", "-q", "-m", message);
     return git(dir, "rev-parse", "HEAD");
   };
-  git(dir, "init", "-q");
+  return { dir, commit };
+}
+
+const migrations = "apps/sdp-api/src/db/migrations/postgres";
+
+// base (v0.1.0) reads `legacy`; stopReading drops the read; drop is the
+// migrations-only contraction; head is a later, unrelated merge.
+function migrationRepo() {
+  const { dir, commit } = scratchRepo("breaking-gate-");
   const base = commit("base", {
     "app.txt": "reads legacy\n",
     [`${migrations}/0001_init.sql`]: "CREATE TABLE legacy (id int);\n",
@@ -923,4 +934,64 @@ test("the gate fails closed when it cannot tell which commit prod serves", () =>
   assert.notEqual(split.code, 0);
   assert.match(split.out, /production traffic is not on exactly one revision/);
   assert.equal(split.env, "");
+});
+
+test("a breaking edit to a repeatable view waits for the code before that edit, not the first one", () => {
+  const view = `${migrations}/repeatable/legacy_view.sql`;
+  const { dir, commit } = scratchRepo("breaking-gate-view-");
+  const base = commit("base", {
+    "app.txt": "reads old_col\n",
+    [view]: "CREATE VIEW legacy AS SELECT id, old_col FROM t;\n",
+  });
+  commit("expand the view", {
+    [view]: "CREATE VIEW legacy AS SELECT id, old_col, new_col FROM t;\n",
+  });
+  const stopReading = commit("stop reading old_col", { "app.txt": "reads new_col\n" });
+  const contract = commit("drop old_col from the view", {
+    [view]: "-- sdp:migration-compat: breaking\nCREATE VIEW legacy AS SELECT id, new_col FROM t;\n",
+  });
+  const repo = { dir, head: contract };
+
+  const refused = runGate(repo, { applied: base, serving: base });
+  assert.equal(refused.code, 1, refused.out);
+  assert.match(
+    refused.out,
+    new RegExp(
+      `legacy_view\\.sql is marked breaking, so it runs only once prod serves ${contract}\\^`
+    )
+  );
+  assert.equal(runGate(repo, { applied: base, serving: stopReading }).code, 0);
+});
+
+test("an approval run deploys while prod is held only when dispatched with clear_hold", () => {
+  const approval = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/apply-prod-migrations.yml"),
+    "utf8"
+  );
+  assert.match(
+    approval,
+    /\n {6}clear_hold:\n\s+description: "[^"\n]+"\n\s+type: boolean\n\s+required: false\n\s+default: false\n/
+  );
+  assert.match(
+    approval,
+    /\n\s+approved_schema: true\n\s+clear_hold: \$\{\{ inputs\.clear_hold \}\}\n/
+  );
+  const refuse = "Refuse while prod is held unless this run lifts the hold";
+  const refuseAt = approval.indexOf(`- name: ${refuse}`);
+  assert.ok(approval.indexOf("- name: Set up gcloud") < refuseAt);
+  assert.ok(refuseAt < approval.indexOf("  approve:"));
+
+  const held = { gcloud: `printf '%s' '${deploySha}'` };
+  const refused = runStep(refuse, { source: approval, env: { CLEAR_HOLD: "false" }, stubs: held });
+  assert.equal(refused.code, 1);
+  assert.match(refused.out, /Dispatch this workflow again with clear_hold/);
+  const lifting = runStep(refuse, { source: approval, env: { CLEAR_HOLD: "true" }, stubs: held });
+  assert.equal(lifting.code, 0, lifting.out);
+  assert.match(lifting.summary, /lifts the hold once its canary passes/);
+  const unheld = runStep(refuse, {
+    source: approval,
+    env: { CLEAR_HOLD: "false" },
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(unheld.code, 0, unheld.out);
 });
