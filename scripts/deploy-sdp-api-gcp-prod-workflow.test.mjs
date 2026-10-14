@@ -67,7 +67,7 @@ test("automatic production deploys are called from main with a required image SH
   assert.doesNotMatch(workflow, /\n\s+release:\n/);
   assert.match(
     workflow,
-    /name: Deploy production image\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.ref == 'refs\/heads\/main' &&\n\s+\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n\s+runs-on:/
+    /name: Deploy production image\n(?:\s+#[^\n]*\n)*\s+if: >-\n\s+always\(\) &&\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.ref == 'refs\/heads\/main' &&\n\s+\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n\s+runs-on:/
   );
 });
 
@@ -247,7 +247,7 @@ test("pending migrations are detected before the prod workflow is called", () =>
   assert.match(orchestrator, /pending="prod schema position unknown/);
   assert.match(
     orchestrator,
-    / {2}deploy-api-prod:\n[\s\S]*?needs: \[changes, deploy-api-stage, schema\]\n\s+if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&\n\s+needs\.schema\.outputs\.pending == 'false' &&/
+    / {2}deploy-api-prod:\n[\s\S]*?needs: \[changes, deploy-api-stage, schema\]\n(?:\s+#[^\n]*\n)*\s+if: >-\n\s+always\(\) &&\n\s+needs\.changes\.result == 'success' &&\n\s+needs\.deploy-api-stage\.result == 'success' &&\n\s+needs\.schema\.result == 'success' &&\n\s+needs\.changes\.outputs\.prod == 'true' &&\n\s+needs\.schema\.outputs\.pending == 'false' &&/
   );
 
   assert.doesNotMatch(workflow, /\n {2}schema:\n/);
@@ -378,7 +378,10 @@ test("the orchestrator sends every continuous merge to prod", () => {
   assert.doesNotMatch(orchestrator, /prod_hold|prod-merge-gate/);
 
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
-  assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);
+  assert.match(
+    prodJob,
+    /if: >-\n\s+always\(\) &&\n[\s\S]*?needs\.changes\.outputs\.prod == 'true' &&/
+  );
   assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
   assert.match(
     prodJob,
@@ -994,4 +997,38 @@ test("an approval run deploys while prod is held only when dispatched with clear
     stubs: { gcloud: "exit 0" },
   });
   assert.equal(unheld.code, 0, unheld.out);
+});
+
+test("cancelling a run cannot cut the rollback short or start a deploy late", () => {
+  const job = workflow.slice(
+    workflow.indexOf("\n  deploy:\n"),
+    workflow.indexOf("\n  release-web:\n")
+  );
+  const steps = [
+    ...job.matchAll(/\n {6}- name: ([^\n]+)\n(?: {8}id: [^\n]+\n)?(?: {8}if: ([^\n]+)\n)?/g),
+  ];
+  assert.equal(steps[0][1], "Stop a deploy whose run was cancelled before it started");
+  assert.equal(steps[0][2], "${{ cancelled() }}");
+  const statusSteps = steps
+    .filter(([, , condition]) =>
+      /always\(\)|cancelled\(\)|failure\(\)|success\(\)/.test(condition ?? "")
+    )
+    .map(([, name]) => name);
+  assert.deepEqual(statusSteps, [
+    "Stop a deploy whose run was cancelled before it started",
+    "Roll back incomplete rollout",
+    "Remove candidate traffic tag",
+  ]);
+  const stop = runStep("Stop a deploy whose run was cancelled before it started", {});
+  assert.equal(stop.code, 1);
+  assert.deepEqual(stop.calls, []);
+
+  const approval = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/apply-prod-migrations.yml"),
+    "utf8"
+  );
+  assert.match(
+    approval,
+    / {2}deploy:\n[^\n]*\n\s+needs: approve\n(?:\s+#[^\n]*\n)*\s+if: always\(\) && needs\.approve\.result == 'success'\n/
+  );
 });

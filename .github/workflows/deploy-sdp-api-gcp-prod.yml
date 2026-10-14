@@ -86,7 +86,12 @@ jobs:
       revision: ${{ steps.promote.outputs.revision }}
       rolled_back: ${{ steps.rollback_guard.outputs.rolled_back }}
     name: Deploy production image
+    # always(): GitHub force-kills a job it marks for cancellation five minutes
+    # after a cancel, which could cut the rollback guard short. Steps that move
+    # prod forward keep their implicit success(), so a cancel stops them and the
+    # always() steps roll back; the first step stops a job that starts after one.
     if: >-
+      always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true')
@@ -103,6 +108,12 @@ jobs:
       MIGRATE_JOB: sdp-prod-api-public-migrate
       BUILD_IMAGE: ${{ (github.event_name != 'workflow_dispatch' || inputs.approved_schema) && 'true' || 'false' }}
     steps:
+      - name: Stop a deploy whose run was cancelled before it started
+        if: ${{ cancelled() }}
+        run: |
+          echo "This run was cancelled before the deploy started; nothing was changed." >&2
+          exit 1
+
       - name: Validate deploy image SHA
         env:
           DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}

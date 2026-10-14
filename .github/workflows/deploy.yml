@@ -245,7 +245,13 @@ jobs:
   deploy-api-prod:
     name: sdp-api + worker + cron — prod
     needs: [changes, deploy-api-stage, schema]
+    # Explicit results instead of the implicit success(), so cancelling the run
+    # cannot cancel the prod deploy before its rollback guard runs.
     if: >-
+      always() &&
+      needs.changes.result == 'success' &&
+      needs.deploy-api-stage.result == 'success' &&
+      needs.schema.result == 'success' &&
       needs.changes.outputs.prod == 'true' &&
       needs.schema.outputs.pending == 'false' &&
       github.event_name == 'push' &&

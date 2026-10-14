@@ -196,7 +196,7 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 
 ### Automatic rollback
 
-A production deploy is complete only once the canary passes. When the canary fails, or any step from the candidate deploy on fails or is cancelled, the run restores the traffic split, cron image and worker image it captured, sets `sdp_prod_hold=<rolled-back SHA>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK`. Web stays on its previous deployment.
+A production deploy is complete only once the canary passes. When the canary fails, or any step from the candidate deploy on fails or is cancelled, the run restores the traffic split, cron image and worker image it captured, sets `sdp_prod_hold=<rolled-back SHA>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK`. Web stays on its previous deployment. The deploy job and its callers run under `always()`, so a cancel stops the steps that move production forward without GitHub force-killing the rollback five minutes later.
 
 While the hold is set, merge and approval deploys refuse, so the next merge cannot redeploy the change. Manual dispatches still run. To resume:
 

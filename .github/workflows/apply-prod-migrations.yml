@@ -142,6 +142,8 @@ jobs:
   deploy:
     name: sdp-api + worker + cron — prod
     needs: approve
+    # Cancelling the run must not cancel the prod deploy before its rollback guard runs.
+    if: always() && needs.approve.result == 'success'
     permissions:
       actions: read
       contents: read
