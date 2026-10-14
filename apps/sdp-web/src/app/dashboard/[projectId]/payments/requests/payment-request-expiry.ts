@@ -42,7 +42,7 @@ export function expiresAtForAction(
 export function settleExpiresAt(
   input: string,
   expiresAt: string | null,
-  result: { ok: boolean; status: number | null; replayed?: boolean; body?: unknown }
+  result: { ok: boolean; status: number | null; replayed?: boolean; code?: string | null }
 ) {
   frozenExpiries.settle(input, expiresAt, fetchResultAnswer(result));
 }

@@ -293,6 +293,44 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 2)).not.toBe(keyOfCall(fetchMock, 1));
   });
 
+  // Greptile (#2333): a create whose 2xx body was not the JSON it claimed lost
+  // its key, so the retry ran again under a new one.
+  it("keeps the key when a success's body is not readable JSON", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const responses = [
+      new Response("{", { status: 201, headers: { "content-type": "application/json" } }),
+      jsonResponse(201),
+    ];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        responses.shift() ?? jsonResponse(201)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit();
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+  });
+
+  it("reports an unknown outcome's code and sends nothing more on its own", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const body = { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "check" } };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(body, { status: 409 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await dashboardFetch(PATH, { method: "POST", body: { amount: "1" } });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the key when a success's body fails to download", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const brokenBody = () =>

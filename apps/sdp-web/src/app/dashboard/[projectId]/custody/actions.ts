@@ -11,10 +11,13 @@ import {
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { type ApiAnswer, actionIdempotencyHeaders } from "@/lib/idempotency";
+import {
+  type ApiAnswer,
+  actionIdempotencyHeaders,
+  isOutcomeUnknownAnswer,
+} from "@/lib/idempotency";
 import {
   createSdpApiClient,
-  extractSdpApiError,
   requestProjectHref,
   type SdpApiClient,
   sdpApiAnswer,
@@ -81,6 +84,10 @@ function toApiActionErrorMessage(
   error: unknown,
   t: Awaited<ReturnType<typeof getTranslations>>
 ): string {
+  // The earlier request may have run: the user checks the list before trying again.
+  if (isOutcomeUnknownAnswer(sdpApiAnswer(error))) {
+    return t("Shared.idempotency.outcomeUnknownCheckList");
+  }
   const raw = extractErrorMessage(error).trim();
 
   // Format thrown by SdpApiClient.request/fetch: "SDP API request failed (XXX): <body>"
@@ -207,8 +214,10 @@ export async function initializeCustodySetupAction(
     await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
-    if (extractSdpApiError(error).status === 409) {
-      return { status: "provider_already_set_up", answer: sdpApiAnswer(error) };
+    const answer = sdpApiAnswer(error);
+    // A 409 that is not the key's unknown outcome is the provider already set up.
+    if (answer.status === 409 && !isOutcomeUnknownAnswer(answer)) {
+      return { status: "provider_already_set_up", answer };
     }
     return {
       status: "error",

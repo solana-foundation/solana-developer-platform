@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { resetIdempotencyKeyStoresForTests } from "./idempotency-key-store";
 import { useActionIdempotencyKey } from "./use-action-idempotency-key";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 beforeEach(() => {
   window.sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
+  resetDashboardNavigation();
 });
 
 /** What a reload leaves: `sessionStorage`, and no module memory. */
@@ -92,11 +96,14 @@ describe("useActionIdempotencyKey", () => {
       answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_IN_FLIGHT" },
     });
     expect(result.current.keyFor("wallet=treasury")).toBe(key);
+    expect(dashboardRouter.refresh).not.toHaveBeenCalled();
 
     result.current.settled("wallet=treasury", key, {
       status: "error",
       answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
     });
+    // The page refreshes, so a wallet the earlier attempt made shows up.
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
     expect(result.current.keyFor("wallet=treasury")).not.toBe(key);
   });
 
