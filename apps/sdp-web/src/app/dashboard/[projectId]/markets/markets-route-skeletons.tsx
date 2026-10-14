@@ -26,13 +26,7 @@ const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "wit
  * either sub-module does, so drawing both showed a DvP card on stage (Earn `beta`, DvP
  * `experimental`) that the page leaves out.
  */
-export function MarketsLandingSkeleton({
-  earn = true,
-  dvp = true,
-}: {
-  earn?: boolean;
-  dvp?: boolean;
-} = {}) {
+export function MarketsLandingSkeleton({ earn, dvp }: { earn: boolean; dvp: boolean }) {
   const paths = [...(earn ? EARN_PATH_SKELETON_IDS : []), ...(dvp ? DVP_PATH_SKELETON_IDS : [])];
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true">

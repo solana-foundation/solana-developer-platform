@@ -47,7 +47,7 @@ function textOutsideTags(markup: string): string {
 }
 
 const SKELETONS = [
-  ["MarketsLanding", MarketsLandingSkeleton],
+  ["MarketsLanding", () => <MarketsLandingSkeleton earn dvp />],
   ["TreasurySolutions", TreasurySolutionsSkeleton],
   ["EmbeddedYieldPortfolio", EmbeddedYieldPortfolioSkeleton],
   ["EarnIntegrationGuide", EarnIntegrationGuideSkeleton],
