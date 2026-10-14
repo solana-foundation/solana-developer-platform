@@ -6,6 +6,7 @@ import {
   answerRetiresKey,
   apiErrorCode,
   IDEMPOTENCY_KEY_HEADER,
+  moneyAnswerRetiresKey,
   storageFingerprint,
 } from "./idempotency";
 import {
@@ -147,9 +148,10 @@ function answerOf(response: Response, text: string): ApiAnswer | null {
  * a readable backend answer can ({@link answerOf}), on the dashboard-wide rule
  * (`answerRetiresKey`).
  */
-function retiresKey(response: Response, body: ArrayBuffer): boolean {
+function retiresKey(response: Response, body: ArrayBuffer, movesMoney: boolean): boolean {
   const answer = answerOf(response, new TextDecoder().decode(body));
-  return answer !== null && answerRetiresKey(answer);
+  if (answer === null) return false;
+  return movesMoney ? moneyAnswerRetiresKey(answer) : answerRetiresKey(answer);
 }
 
 function sendWithProject(
@@ -241,7 +243,7 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response, body)) {
+      if (retiresKey(response, body, requiresPersistedKey(init.method ?? "GET", path))) {
         keys.release(fingerprint, key);
       }
       return new Response(isBodylessHttpStatus(response.status) ? null : body, {

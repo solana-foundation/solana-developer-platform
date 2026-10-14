@@ -1,10 +1,13 @@
 "use client";
 
-import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import {
+  isIdempotencyKeyOutcomeUnknown,
+  type PaymentTransferSummary as TransferRecord,
+} from "@sdp/types";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
-  settleIdempotencyKey,
+  settleMoneyIdempotencyKey,
 } from "@/lib/idempotency-key-store";
 import {
   type CreateTransferInput,
@@ -82,13 +85,22 @@ async function performTransferUnderKey(
   } catch (error) {
     // A provider may repeat its signature callback after a lost event response,
     // and its session always names the same payment, so its key is never
-    // released. Otherwise the dashboard-wide rule decides (`answerRetiresKey`).
+    // released. Otherwise the money rule decides (`moneyAnswerRetiresKey`).
     if (!providerSession && error instanceof TransferRequestError) {
-      settleIdempotencyKey(store, fingerprint, key, {
+      settleMoneyIdempotencyKey(store, fingerprint, key, {
         status: error.status,
         replayed: error.replayed,
         code: error.code,
       });
+      if (isIdempotencyKeyOutcomeUnknown(error.status, error.code)) {
+        // The key is kept, so the next press is answered under it: send nothing new.
+        throw new TransferRequestError(
+          t("Shared.idempotency.outcomeUnknownCheckList"),
+          error.status,
+          error.replayed,
+          error.code
+        );
+      }
     }
     throw error;
   }
