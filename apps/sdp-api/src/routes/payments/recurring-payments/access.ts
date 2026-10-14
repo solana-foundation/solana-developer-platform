@@ -51,22 +51,12 @@ export interface AuthorizedRecurringPaymentCreate {
 
 const PERMISSIONS = ["payments:write"] as const;
 
-/** The counterparty and its account, in the caller's project whatever their status. */
+/** The counterparty's account, in the caller's project whatever its status. */
 async function assertCounterpartyAccountInProject(
   c: AppContext,
-  input: { counterpartyId: string; counterpartyAccountId: string; checkCounterparty: boolean }
+  input: { counterpartyId: string; counterpartyAccountId: string }
 ): Promise<void> {
   const tenant = { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) };
-  if (input.checkCounterparty) {
-    const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-      ...tenant,
-      counterpartyId: input.counterpartyId,
-      status: "any",
-    });
-    if (!counterparty) {
-      throw notFound("Counterparty");
-    }
-  }
   const account = await getCounterpartyAccountsRepository(c).getCounterpartyAccountById({
     ...tenant,
     counterpartyId: input.counterpartyId,
@@ -75,6 +65,49 @@ async function assertCounterpartyAccountInProject(
   });
   if (!account) {
     throw notFound("Counterparty account");
+  }
+}
+
+/**
+ * Update: each counterparty id the body names is in the project, whatever its
+ * status. Only the request's own ids are paired, never the schedule's current
+ * ones, which a later edit may have changed: a retry of an edit that already
+ * ran must still reach its replay. Whether the account fits the schedule now
+ * is the handler's check, for new work.
+ */
+async function assertNamedCounterpartyIdsInProject(
+  c: AppContext,
+  body: { counterpartyId?: string; counterpartyAccountId?: string }
+): Promise<void> {
+  const tenant = { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) };
+  if (body.counterpartyId !== undefined && body.counterpartyAccountId !== undefined) {
+    await assertCounterpartyAccountInProject(c, {
+      counterpartyId: body.counterpartyId,
+      counterpartyAccountId: body.counterpartyAccountId,
+    });
+    return;
+  }
+  if (body.counterpartyId !== undefined) {
+    const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
+      ...tenant,
+      counterpartyId: body.counterpartyId,
+      status: "any",
+    });
+    if (!counterparty) {
+      throw notFound("Counterparty");
+    }
+  }
+  if (body.counterpartyAccountId !== undefined) {
+    const [account] = await getCounterpartyAccountsRepository(
+      c
+    ).listCounterpartyAccountsByIdsInProject({
+      ...tenant,
+      counterpartyAccountIds: [body.counterpartyAccountId],
+      status: "any",
+    });
+    if (account === undefined) {
+      throw notFound("Counterparty account");
+    }
   }
 }
 
@@ -97,7 +130,6 @@ export async function authorizeRecurringPaymentCreate(
   await assertCounterpartyAccountInProject(c, {
     counterpartyId: body.counterpartyId,
     counterpartyAccountId: body.counterpartyAccountId,
-    checkCounterparty: false,
   });
   return { scope, sourceWallet };
 }
@@ -164,13 +196,6 @@ export async function authorizeRecurringPaymentUpdate(
     assertApiKeyCustodyWalletAccess(access, named.id, [...PERMISSIONS]);
     nextSourceWallet = named;
   }
-  if (body.counterpartyId !== undefined || body.counterpartyAccountId !== undefined) {
-    await assertCounterpartyAccountInProject(c, {
-      counterpartyId: body.counterpartyId ?? authorized.recurringPayment.counterparty_id,
-      counterpartyAccountId:
-        body.counterpartyAccountId ?? authorized.recurringPayment.counterparty_account_id,
-      checkCounterparty: body.counterpartyId !== undefined,
-    });
-  }
+  await assertNamedCounterpartyIdsInProject(c, body);
   return { ...authorized, nextSourceWallet };
 }

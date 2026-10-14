@@ -3,22 +3,29 @@
 import { useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { useSWRConfig } from "swr";
+import { type Arguments, useSWRConfig } from "swr";
 import { useTranslations } from "@/i18n/provider";
 import { type ApiAnswer, isOutcomeUnknownAnswer } from "./idempotency";
 
 /**
- * Refreshes what the page shows after a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`
- * (HOO-1918): every SWR list in this dashboard scope and the server-rendered
- * page, so a row the earlier attempt may have created shows up.
+ * The SWR lists an action's row would appear in, as a key predicate from its
+ * feature's query-key factory; null when every list on the page is
+ * server-rendered and the page refresh covers it.
  */
-export function useOutcomeUnknownRefresh(): () => void {
+export type OutcomeUnknownLists = ((key: Arguments) => boolean) | null;
+
+/**
+ * Refreshes what the page shows after a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`
+ * (HOO-1918): the action's own SWR lists and the server-rendered page, so a
+ * row the earlier attempt may have created shows up.
+ */
+export function useOutcomeUnknownRefresh(lists: OutcomeUnknownLists): () => void {
   const router = useRouter();
   const { mutate } = useSWRConfig();
   return useCallback(() => {
-    void mutate(() => true);
+    if (lists !== null) void mutate(lists);
     router.refresh();
-  }, [mutate, router]);
+  }, [lists, mutate, router]);
 }
 
 /**
@@ -30,9 +37,11 @@ export function useOutcomeUnknownRefresh(): () => void {
  * @returns `notice(answer)`: whether the answer was that 409 and was handled,
  *   so the form shows nothing else for it.
  */
-export function useOutcomeUnknownNotice(): (answer: ApiAnswer) => boolean {
+export function useOutcomeUnknownNotice(
+  lists: OutcomeUnknownLists
+): (answer: ApiAnswer) => boolean {
   const t = useTranslations();
-  const refresh = useOutcomeUnknownRefresh();
+  const refresh = useOutcomeUnknownRefresh(lists);
   return useCallback(
     (answer) => {
       if (!isOutcomeUnknownAnswer(answer)) return false;

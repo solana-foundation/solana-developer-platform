@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
@@ -25,7 +26,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
   const [pending, startTransition] = useTransition();
-  const actionKey = useActionIdempotencyKey();
+  const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
   const changed = draft.trim() !== saved.trim();
 
   function save(event: FormEvent) {

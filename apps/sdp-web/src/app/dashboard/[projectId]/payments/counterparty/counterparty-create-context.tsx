@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
@@ -39,7 +40,7 @@ export function CounterpartyCreateProvider({
   const router = useRouter();
   const href = useProjectHref();
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice();
+  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
 
   const resolveValidationMessage = useMemo(
     () => () => t("DashboardPayments.counterparty.validation.required"),

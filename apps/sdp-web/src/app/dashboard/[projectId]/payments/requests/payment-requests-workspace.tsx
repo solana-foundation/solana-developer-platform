@@ -215,7 +215,7 @@ function CreateRequestModal({
   onCreated: (request: PaymentRequest | null) => void;
 }) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice();
+  const notice = useOutcomeUnknownNotice(null);
   const form = useZodForm(createRequestSchema, {
     amount: "",
     token: "",

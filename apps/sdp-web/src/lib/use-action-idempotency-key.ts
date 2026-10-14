@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { z } from "zod";
 import { type ApiAnswer, isOutcomeUnknownAnswer } from "./idempotency";
 import { createActionMemo } from "./idempotency-key-store";
-import { useOutcomeUnknownRefresh } from "./use-outcome-unknown";
+import { type OutcomeUnknownLists, useOutcomeUnknownRefresh } from "./use-outcome-unknown";
 
 /** What a server action reports: its status, and on a failure what sdp-api answered. */
 export interface ActionKeyResult {
@@ -41,14 +41,15 @@ function settle(input: string, key: string, result: ActionKeyResult): ApiAnswer 
  * long as the page, and the action is still sent: these are not money routes.
  *
  * A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` retires the key and refreshes the
- * page, so the row the earlier attempt may have made shows up; the action's own
+ * page and the action's `lists`, so the row the earlier attempt may have made
+ * shows up; the action's own
  * message tells the user to check the list before trying again.
  *
  * @returns `keyFor(input)` right before the send, and `settled(input, key, result)`
  *   once it answers.
  */
-export function useActionIdempotencyKey() {
-  const refresh = useOutcomeUnknownRefresh();
+export function useActionIdempotencyKey(lists: OutcomeUnknownLists) {
+  const refresh = useOutcomeUnknownRefresh(lists);
   return useMemo(
     () => ({
       keyFor,
