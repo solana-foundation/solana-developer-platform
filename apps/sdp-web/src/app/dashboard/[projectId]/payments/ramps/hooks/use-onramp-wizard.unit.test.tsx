@@ -332,6 +332,9 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
     quoteCalls = [];
     honorAbort = true;
     const base = fetchMock.getMockImplementation();
+    if (base === undefined) {
+      throw new Error("The file's beforeEach must install the default fetch mock first");
+    }
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.startsWith("/api/dashboard/wallets")) {
@@ -351,7 +354,7 @@ describe("useOnrampWizard: a quote in flight when the selection changes (APE-466
           });
         });
       }
-      return base === undefined ? Promise.resolve(Response.json({ data: {} })) : base(input, init);
+      return base(input, init);
     });
   });
 

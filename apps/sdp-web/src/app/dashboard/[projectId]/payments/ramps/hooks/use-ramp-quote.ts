@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -20,28 +20,23 @@ async function createRampQuote(
   signal: AbortSignal,
   t: Translate
 ): Promise<CreatedRampQuote> {
-  const response = await dashboardRequest(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal,
-  });
-  const body: unknown = await response.json().catch(() => ({}));
+  const result = await dashboardFetch<{
+    data?: { quote?: PaymentRampQuote; transferId?: string };
+  } | null>(endpoint, { method: "POST", body: payload, signal });
 
-  if (!response.ok) {
+  if (!result.ok) {
     throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
-      )
+      result.status === null
+        ? result.error
+        : getApiError(
+            result.body,
+            t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: result.status })
+          )
     );
   }
 
-  // SAFETY: the dashboard route returns the API's quote response unchanged, so
-  // its shape is the API's own contract; both fields read here are checked below.
-  const envelope = body as { data?: { quote?: PaymentRampQuote; transferId?: string } } | null;
-  const quote = envelope?.data?.quote;
-  const transferId = envelope?.data?.transferId;
+  const quote = result.data?.data?.quote;
+  const transferId = result.data?.data?.transferId;
   if (!quote || !transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
