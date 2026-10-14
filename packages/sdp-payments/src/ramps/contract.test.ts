@@ -211,7 +211,7 @@ describe("ramp provider contract", () => {
         replayExchanges([exchange]);
         await assert.rejects(runEstimate(client, kit, direction, "sandbox"), (cause: unknown) => {
           assert.ok(cause instanceof SdpPaymentsError);
-          assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+          assert.equal(cause.code, "PROVIDER_RESPONSE_INVALID");
           assert.equal(cause.message, `${provider} returned an unexpected response`);
           assert.ok(Array.isArray(cause.diagnostics?.issues));
           return true;

@@ -52,6 +52,7 @@ export type ErrorCode =
   | "SIGNING_REJECTED"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_RESPONSE_INVALID"
   | "ESTIMATE_NOT_AVAILABLE"
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
@@ -114,6 +115,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   SIGNING_REJECTED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
+  // 502, never 503: the provider answered success, so the action may have
+  // happened and a blind retry could repeat it.
+  PROVIDER_RESPONSE_INVALID: 502,
   ESTIMATE_NOT_AVAILABLE: 503,
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
@@ -168,6 +172,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   SIGNING_REJECTED: "The signing provider rejected this transaction",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
+  PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
   ESTIMATE_NOT_AVAILABLE:
     "An indicative estimate is not available; the rate is known at quote time",
   UNSUPPORTED_CORRIDOR: "Provider does not support this currency corridor",

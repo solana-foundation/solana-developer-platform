@@ -822,7 +822,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "On-ramp quote created",
         content: jsonContent(onrampQuoteResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 502, 503]),
     },
   });
 
