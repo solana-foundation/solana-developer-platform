@@ -5,7 +5,7 @@ const EARN_FORENSIC_HISTORY =
   "ADR 0002: Earn history is forensic, so its project_id is ON DELETE SET NULL";
 const DROPPED_BY_PR_2274 = "dead policy-engine table, dropped by PR #2274";
 
-const NULLABLE_PROJECT_TABLES: Record<string, string> = {
+const NULLABLE_PROJECT_TABLES = {
   earn_external_wallet_transactions: EARN_FORENSIC_HISTORY,
   earn_external_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
   earn_movements: EARN_FORENSIC_HISTORY,
@@ -20,7 +20,7 @@ const NULLABLE_PROJECT_TABLES: Record<string, string> = {
   wallet_operations: DROPPED_BY_PR_2274,
   approval_groups: DROPPED_BY_PR_2274,
   approval_requests: DROPPED_BY_PR_2274,
-};
+} as const satisfies Record<string, string>;
 
 async function nullableProjectTables(): Promise<string[]> {
   const rows = await env.db.queryMany<{ table_name: string }>(
