@@ -1203,7 +1203,10 @@ describe("EarnRepository (postgres)", () => {
         const upshiftA = await seedProviderWallet();
         const upshiftB = await seedProviderWallet();
         const veda = await seedProviderWallet({ provider: "veda" });
-        const production = await seedProviderWallet({ environment: "production" });
+        const production = await seedProviderWallet({
+          projectId: projects.production.id,
+          environment: "production",
+        });
         const sibling = await seedProviderWallet({
           organizationId: OTHER_ORG.id,
           projectId: OTHER_ORG_PROJECT_ID,
@@ -1226,9 +1229,9 @@ describe("EarnRepository (postgres)", () => {
         );
 
         // The sibling environment and the sibling org each see only their own.
-        await expect(listPrograms({ environment: "production" })).resolves.toMatchObject({
-          total: 1,
-        });
+        await expect(
+          listPrograms({ projectId: projects.production.id, environment: "production" })
+        ).resolves.toMatchObject({ total: 1 });
         const theirs = await listPrograms({
           organizationId: OTHER_ORG.id,
           projectId: OTHER_ORG_PROJECT_ID,
@@ -1287,9 +1290,9 @@ describe("EarnRepository (postgres)", () => {
       expect(second.id).not.toBe(first.id);
 
       // Sibling environments and providers were always open and stay open.
-      await expect(seedProviderWallet({ environment: "production" })).resolves.toMatchObject({
-        environment: "production",
-      });
+      await expect(
+        seedProviderWallet({ projectId: projects.production.id, environment: "production" })
+      ).resolves.toMatchObject({ environment: "production" });
       await expect(seedProviderWallet({ provider: "veda" })).resolves.toMatchObject({
         provider: "veda",
       });
@@ -1330,7 +1333,11 @@ describe("EarnRepository (postgres)", () => {
       // …and across ENVIRONMENTS, for the same reason: the provider wallet is
       // one object, whatever SDP environment reached for it.
       await expect(
-        seedProviderWallet({ environment: "production", providerWalletRef: WALLET_REF })
+        seedProviderWallet({
+          projectId: projects.production.id,
+          environment: "production",
+          providerWalletRef: WALLET_REF,
+        })
       ).rejects.toSatisfy((err: unknown) => isPostgresUniqueViolation(err));
 
       // The pair is (provider, ref): the same string under a DIFFERENT provider

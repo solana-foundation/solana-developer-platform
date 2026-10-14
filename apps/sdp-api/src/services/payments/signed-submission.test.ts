@@ -270,7 +270,7 @@ describe("createTransferSignedSubmissionStore", () => {
   const transfer = {
     id: "xfr_signed_submission_test",
     organization_id: "org_signed_submission_test",
-    project_id: null,
+    project_id: "prj_signed_submission_test",
   } as PaymentTransferRow;
   const signedRow = {
     ...transfer,

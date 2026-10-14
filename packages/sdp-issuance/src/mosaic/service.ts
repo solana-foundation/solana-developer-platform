@@ -12,7 +12,7 @@
  * - Decimal-aware amount conversion for minting
  */
 
-import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import type { RpcEnv } from "@sdp/rpc";
 import {
   type ConfirmTransactionOptions,

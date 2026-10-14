@@ -161,6 +161,12 @@ export type RampSettlementEvent =
       /** Amount the receiving side settled for, in display units — fiat for off-ramp, crypto for on-ramp. */
       receivedAmount?: string;
       settlement?: RampTransferSettlement;
+      /**
+       * On-ramp: the rail the provider reports delivering. `null` when it names
+       * an asset SDP has no rail for; absent when the provider never reports
+       * one. Settlement refuses the event unless it is the transfer's own asset.
+       */
+      deliveredAssetRail?: CryptoRailId | null;
     })
   | (BaseRampSettlementEvent & {
       kind: "failed" | "expired";

@@ -939,10 +939,25 @@ describe("submitExternalWalletDeposit", () => {
       await signBuiltTransaction(built),
       crypto.randomUUID()
     );
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        "org_ext_wallet_unclaimed",
+        "Unclaimed Org",
+        "ext-wallet-unclaimed",
+        "enterprise",
+        "active"
+      )
+      .run();
+    const unclaimed = await seedDefaultProjects(getDb(env), {
+      organizationId: "org_ext_wallet_unclaimed",
+      createdBy: USER,
+      members: [],
+    });
     await expect(
       getDb(env)
         .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
-        .bind(PRODUCTION_PROJECT, result.movement.id)
+        .bind(unclaimed.sandbox.id, result.movement.id)
         .run()
     ).rejects.toThrow(/earn_movements_external_wallet_claim_fkey/i);
   });

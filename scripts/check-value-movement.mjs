@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const API = "apps/sdp-api/src";
-const FEE_PAYMENT = "packages/sdp-payments/src/fee-payment";
+const FEE_PAYMENT = "packages/sdp-fee-payment/src";
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
 /**
  * The packages that define these constructors. They build, subclass and pass

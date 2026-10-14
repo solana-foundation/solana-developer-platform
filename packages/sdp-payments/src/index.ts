@@ -11,4 +11,3 @@ export {
   type SdpPaymentsErrorCode,
   unsupportedCounterparty,
 } from "./errors";
-export type { FeePaymentEnv, FeePaymentProviderType } from "./fee-payment";
