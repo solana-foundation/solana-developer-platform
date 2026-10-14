@@ -57,11 +57,19 @@ export interface IdempotencyOptions {
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
    *
-   * It also decides whether a retry may take over a claim whose lease lapsed
-   * without an outcome (a crash, a failed write of the outcome): only on a
-   * `rerun` route. On a `store` route the key stays in flight until it expires.
+   * A `rerun` route also lets a retry take over a claim whose lease lapsed
+   * without an outcome (a crash, a failed write of the outcome); see
+   * {@link IdempotencyOptions.recovery} for a `store` route.
    */
   serverErrors: "store" | "rerun";
+  /**
+   * `record`: the route mounts `replayFromRecord` after this step, so a retry
+   * that takes over a claim whose lease lapsed without an outcome is answered
+   * from the domain row instead of running again. Set it on every route that
+   * mounts `replayFromRecord`. Without it (and without `rerun`) such a retry
+   * gets the terminal 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`.
+   */
+  recovery?: "record";
   /**
    * Rewrites the parsed JSON body before it is fingerprinted, for a route where
    * two spellings mean the same request (for example, recipients whose order
@@ -72,12 +80,13 @@ export interface IdempotencyOptions {
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
 /**
- * The longest a request keeps renewing its lease. Past it, renewal stops and,
- * on a `rerun` route, a retry can take the key over once the lease runs out: a
- * request still running after this long is hung, and holding its key would
- * block every retry for the 24 hours the key lives. A `store` route has no row
- * of its own to answer that retry, so its key stays in flight instead.
- * Statement and signing timeouts end requests well before it.
+ * The longest a request keeps renewing its lease. Past it, renewal stops and a
+ * retry on a route that recovers from its row (`rerun`, or `recovery:
+ * "record"`) can take the key over once the lease runs out: a request still
+ * running after this long is hung, and holding its key would block every
+ * retry for the 24 hours the key lives. Any other route answers that retry
+ * with the terminal `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`. Statement and signing
+ * timeouts end requests well before it.
  */
 export const MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS = 15 * 60;
 export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
@@ -268,9 +277,9 @@ function startLeaseRenewal(
       pending = pending.then(async () => {
         if (stopped) return;
         if (Date.now() - startedAt >= maxRenewalSeconds * 1000) {
-          // Hung: let the lease run out so a retry on a `rerun` route can take
-          // the key over. The handler's own row keeps that retry from moving
-          // anything twice.
+          // Hung: let the lease run out so a retry on a route that recovers
+          // from its row can take the key over. That row keeps the retry from
+          // moving anything twice.
           stopped = true;
           clearInterval(timer);
           getLogger().error(
@@ -353,7 +362,7 @@ export async function runIdempotency(
     // response produced for a narrower or wider credential.
     principal: auth.id,
     fingerprint,
-    takeOverLapsed: options.serverErrors === "rerun",
+    takeOverLapsed: options.serverErrors === "rerun" || options.recovery === "record",
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   });
@@ -369,6 +378,11 @@ export async function runIdempotency(
       logOutcome(operation, idempotencyKey, "in_flight");
       c.header("Retry-After", String(claim.retryAfterSeconds));
       throw new AppError("IDEMPOTENCY_KEY_IN_FLIGHT");
+    case "outcome_unknown":
+      // Terminal and never stored: the claim stays as it is, so every retry
+      // with this key gets the same answer until it expires.
+      logOutcome(operation, idempotencyKey, "outcome_unknown");
+      throw new AppError("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
     case "claimed":
       // The handler records it on its domain row, so a retry past the key's
       // 24 hours is matched by the same request identity.
@@ -459,9 +473,9 @@ async function record(
       return;
     } catch (error) {
       if (attempt === COMPLETE_ATTEMPTS) {
-        // The lease runs out. On a `store` route the key stays in flight until
-        // it expires, so a retry is refused rather than run again; on a
-        // `rerun` route the handler's own row answers the retry.
+        // The lease runs out. A route that recovers from its row answers the
+        // retry from it; any other route refuses it with the terminal
+        // IDEMPOTENCY_KEY_OUTCOME_UNKNOWN rather than run it again.
         getLogger().error(
           { operation, status: stored.status, ...describeError(error) },
           "idempotency: failed to record the outcome"

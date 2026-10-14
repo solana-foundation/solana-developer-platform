@@ -59,7 +59,8 @@ export type ErrorCode =
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | "IDEMPOTENCY_KEY_REQUIRED"
   | "IDEMPOTENCY_KEY_REUSED"
-  | "IDEMPOTENCY_KEY_IN_FLIGHT";
+  | "IDEMPOTENCY_KEY_IN_FLIGHT"
+  | "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
 
 export interface ApiError {
   code: ErrorCode;
@@ -126,6 +127,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
   IDEMPOTENCY_KEY_IN_FLIGHT: 409,
+  IDEMPOTENCY_KEY_OUTCOME_UNKNOWN: 409,
 };
 
 export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
@@ -187,6 +189,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
   IDEMPOTENCY_KEY_IN_FLIGHT:
     "A request with this Idempotency-Key is still in progress; retry after the Retry-After delay",
+  IDEMPOTENCY_KEY_OUTCOME_UNKNOWN:
+    "The original request with this Idempotency-Key never recorded its outcome; read the resource with GET to see whether it ran, then send again with a new Idempotency-Key",
 };
 
 export class AppError extends Error {

@@ -111,8 +111,8 @@ describe("idempotency keys repository", () => {
       [crashed.id]
     );
 
-    expect(await repository().claim(claimInput({ takeOverLapsed: false }))).toMatchObject({
-      kind: "in_flight",
+    expect(await repository().claim(claimInput({ takeOverLapsed: false }))).toEqual({
+      kind: "outcome_unknown",
     });
     expect(await repository().claim(claimInput({ takeOverLapsed: true }))).toEqual({
       kind: "claimed",
