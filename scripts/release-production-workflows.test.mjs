@@ -139,14 +139,19 @@ test("the production API deploy releases the sdp-web production gate for the dep
   );
 });
 
-test("the deploy job exposes the revision it promoted once the rollout completes", () => {
+test("the deploy job exposes the revision it promoted, and the rollout completes after the canary", () => {
   const deploy = jobBlock(readWorkflow(prodDeployFile), "deploy");
   assertLine(deploy, `      revision: ${expression("steps.promote.outputs.revision")}`);
   const promote = stepBlock(deploy, "Promote service and cron with rollback");
   assertLine(promote, "        id: promote");
   assert.match(
     promote,
-    /echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n\s+echo "revision=\$\{CANDIDATE_REVISION\}" >> "\$\{GITHUB_OUTPUT\}"\n/
+    /\n {10}echo "revision=\$\{CANDIDATE_REVISION\}" >> "\$\{GITHUB_OUTPUT\}"\n/
+  );
+  assert.doesNotMatch(promote, /ROLLOUT_COMPLETE/);
+  assert.match(
+    stepBlock(deploy, "Run prod canary against the promoted revision"),
+    /\n {10}echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n/
   );
 });
 
@@ -185,7 +190,7 @@ test("a deploy whose web release did not succeed reports web-held", () => {
   assertLine(notifyResult, "    needs: [deploy, release-web]");
   assert.match(
     notifyResult,
-    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
+    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.deploy\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
   );
   assert.match(
     fs.readFileSync(path.join(here, "notify-slack.sh"), "utf8"),

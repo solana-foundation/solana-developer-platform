@@ -46,6 +46,8 @@ health.get("/ready", async (c) => {
         : ("not_ready" as const),
     timestamp: new Date().toISOString(),
     revision: c.env.K_REVISION ?? "local",
+    // The prod deploy orders breaking migrations against the commit prod serves.
+    commit: c.env.SDP_BUILD_SHA?.trim() || "local",
     checks,
   };
 

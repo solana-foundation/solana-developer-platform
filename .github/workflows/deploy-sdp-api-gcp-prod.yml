@@ -12,12 +12,21 @@ on:
         type: boolean
         required: false
         default: false
+    outputs:
+      rolled_back:
+        description: "'true' when the deploy restored the previous production revision and set the prod hold"
+        value: ${{ jobs.deploy.outputs.rolled_back }}
   workflow_dispatch:
     inputs:
       image_sha:
         description: "Existing 40-character Git SHA image tag to redeploy (run from main)"
         type: string
         required: true
+      clear_hold:
+        description: "Lift sdp_prod_hold once this deploy passes its canary. Unchecked, this deploy holds prod so merge and approval deploys cannot replace it"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   actions: read
@@ -69,9 +78,8 @@ jobs:
 
   deploy:
     outputs:
-      canary: ${{ steps.canary_outcome.outputs.result }}
-      tail_clean: ${{ steps.tail_outcome.outputs.clean }}
       revision: ${{ steps.promote.outputs.revision }}
+      rolled_back: ${{ steps.rollback_guard.outputs.rolled_back }}
     name: Deploy production image
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
@@ -133,6 +141,18 @@ jobs:
           else
             echo "APPLIED_SCHEMA_SHA=" >> "${GITHUB_ENV}"
             echo "::warning::sdp_schema_sha on ${MIGRATE_JOB} is unset or unknown (${applied:-unset}); schema ordering is not checked for this deploy."
+          fi
+
+      - name: Refuse a merge or approval deploy while prod is held
+        if: ${{ env.BUILD_IMAGE == 'true' }}
+        run: |
+          set -euo pipefail
+          hold="$(gcloud run jobs describe "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format 'value(metadata.labels.sdp_prod_hold)')"
+          if [[ -n "${hold}" ]]; then
+            echo "Prod is held by the deploy of ${hold}, an automatic rollback or a manual dispatch. Merge and approval deploys stay refused until a manual dispatch of this workflow with clear_hold passes its canary (docs/ops/release-operations.md, Production Rollback)." >&2
+            exit 1
           fi
 
       - name: Refuse an approved deploy that was re-run or self-approved
@@ -201,6 +221,63 @@ jobs:
               "${DEPLOY_IMAGE_SHA}" "${pending}" >&2
             exit 1
           fi
+
+      # A breaking migration drops what the serving image may still read, and it
+      # runs before the candidate takes traffic. Apply one only while prod serves
+      # the commit before it, which already stopped reading what it drops.
+      - name: Refuse a breaking migration until prod serves its parent
+        if: ${{ env.BUILD_IMAGE == 'true' }}
+        run: |
+          set -euo pipefail
+          since="${APPLIED_SCHEMA_SHA:-$(git describe --tags --abbrev=0 --match 'v*' origin/main)}"
+          changed="$(git diff --name-only --no-renames --diff-filter=AM "${since}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+          breaking=()
+          for file in ${changed}; do
+            sql="$(git show "${DEPLOY_IMAGE_SHA}:${file}")"
+            if grep -Eq '^--[[:space:]]*sdp:migration-compat:[[:space:]]*breaking[[:space:]]*$' <<<"${sql}"; then
+              breaking+=("${file}")
+            fi
+          done
+          if [[ "${#breaking[@]}" -eq 0 ]]; then
+            exit 0
+          fi
+
+          service_json="$(
+            gcloud run services describe "${SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json
+          )"
+          serving_revision="$(
+            jq -er '
+              [.status.traffic[] | select((.percent // 0) > 0)]
+              | if length != 1 then error("production traffic is not on exactly one revision")
+                elif (.[0].revisionName // "") == "" then error("the serving traffic target has no resolved revisionName")
+                else .[0].revisionName end
+            ' <<<"${service_json}"
+          )"
+          serving=""
+          for attempt in 1 2 3; do
+            if serving="$(
+              curl --fail --silent --show-error --max-time 10 "https://api.solana.com/health/ready" |
+                jq -er --arg revision "${serving_revision}" 'select(.revision == $revision) | .commit'
+            )" && [[ "${serving}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${serving}^{commit}" 2>/dev/null; then
+              break
+            fi
+            serving=""
+            if [[ "${attempt}" -eq 3 ]]; then
+              echo "Could not read the commit ${serving_revision} serves from /health/ready, so these breaking migrations cannot be ordered against it: ${breaking[*]}" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          for file in "${breaking[@]}"; do
+            added="$(git log --format=%H --reverse "${since}..${DEPLOY_IMAGE_SHA}" -- "${file}")"
+            added="${added%%$'\n'*}"
+            if ! git merge-base --is-ancestor "${added}^" "${serving}"; then
+              echo "${file} is marked breaking, so it runs only once prod serves ${added}^, the commit before it. Prod serves ${serving}; deploy that parent first." >&2
+              exit 1
+            fi
+          done
+          echo "BREAKING_MIGRATIONS=${breaking[*]}" >> "${GITHUB_ENV}"
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -372,6 +449,15 @@ jobs:
           }
           echo "PREVIOUS_WORKER_IMAGE=${previous_worker_image}" >> "${GITHUB_ENV}"
 
+      - name: Hold prod for a manual deploy
+        if: ${{ env.BUILD_IMAGE != 'true' && !inputs.clear_hold }}
+        run: |
+          set -euo pipefail
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --update-labels "sdp_prod_hold=${DEPLOY_IMAGE_SHA}"
+          echo "Holding prod at ${DEPLOY_IMAGE_SHA}: merge and approval deploys refuse until a manual dispatch with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Deploy candidate without production traffic
         timeout-minutes: 5
         run: |
@@ -498,8 +584,19 @@ jobs:
             cat "${describe_err}" >&2
             exit 1
           fi
-          echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
+
+      # The rollout is complete only once the canary passes; until then the
+      # rollback guard below restores the previous revision.
+      - name: Run prod canary against the promoted revision
+        id: canary
+        if: ${{ steps.promote.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          gcloud run jobs execute sdp-prod-canary \
+            --region "${REGION}" --project "${PROJECT_ID}" --wait
+          echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
 
       - name: Record managed monitor migration gate
         if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
@@ -512,18 +609,13 @@ jobs:
             echo 'docs/ops/managed-reconciliation-monitor-migration.md'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Run prod canary against the promoted revision
-        id: canary
-        if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
-        timeout-minutes: 5
+      - name: Lift the prod hold
+        if: ${{ env.ROLLOUT_COMPLETE == 'true' && env.BUILD_IMAGE != 'true' && inputs.clear_hold }}
         run: |
-          gcloud run jobs execute sdp-prod-canary \
-            --region "${REGION}" --project "${PROJECT_ID}" --wait
-
-      - name: Record canary outcome
-        id: canary_outcome
-        if: ${{ always() }}
-        run: echo "result=${{ steps.canary.outcome }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_hold
+          echo "Lifted sdp_prod_hold: merge and approval deploys resume." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Roll back incomplete rollout
         id: rollback_guard
@@ -534,12 +626,21 @@ jobs:
           if [[ "${ROLLOUT_STARTED:-}" != "true" || "${ROLLOUT_COMPLETE:-}" == "true" ]]; then
             exit 0
           fi
+          if [[ -n "${BREAKING_MIGRATIONS:-}" ]]; then
+            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not roll back. Production keeps its current traffic, cron and worker images; fix forward."
+            exit 1
+          fi
 
-          echo "Rollout did not complete; restoring service traffic and cron image." >&2
+          echo "Rollout did not complete; restoring service traffic, cron and worker images and holding prod." >&2
           rollback_failed=0
+          # Traffic first: users are on the failed revision until it moves, and
+          # the hold only has to land before this run ends.
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --update-labels "sdp_prod_hold=${DEPLOY_IMAGE_SHA}" || rollback_failed=1
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
@@ -552,6 +653,8 @@ jobs:
             echo "Automatic rollback was incomplete; escalate immediately." >&2
             exit 1
           fi
+          echo "rolled_back=true" >> "${GITHUB_OUTPUT}"
+          echo "Rolled back ${DEPLOY_IMAGE_SHA} and set sdp_prod_hold=${DEPLOY_IMAGE_SHA} on ${MIGRATE_JOB}. Merge and approval deploys refuse until a manual dispatch with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Remove candidate traffic tag
         id: remove_tag
@@ -565,11 +668,6 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --remove-tags "${CANDIDATE_TAG}"
-
-      - name: Record tail cleanup outcome
-        id: tail_outcome
-        if: ${{ always() }}
-        run: echo "clean=${{ (steps.rollback_guard.outcome == 'success' || steps.rollback_guard.outcome == 'skipped') && (steps.remove_tag.outcome == 'success' || steps.remove_tag.outcome == 'skipped') }}" >> "$GITHUB_OUTPUT"
 
   # sdp-web requires this status as a Vercel Deployment Check, so Vercel holds
   # each commit's production web build until production serves that commit's
@@ -648,8 +746,8 @@ jobs:
           STATUS: >-
             ${{ needs.deploy.result == 'success' && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
                 needs.deploy.result == 'success' && 'web-held' ||
+                needs.deploy.outputs.rolled_back == 'true' && 'rolled-back' ||
                 needs.deploy.result == 'cancelled' && 'cancelled' ||
-                needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 'failure' }}
           VERSION: ${{ inputs.image_sha }}
           DEPLOY_SHA: ${{ inputs.image_sha }}

@@ -8,21 +8,44 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workflowPath = path.resolve(here, "../.github/workflows/deploy-sdp-api-gcp-prod.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 
-test("a canary failure after promotion reports canary-failed, not a deploy failure", () => {
+test("a rolled-back deploy says so in Slack for approval, manual and merge deploys", () => {
+  assert.match(workflow, /rolled_back: \$\{\{ steps\.rollback_guard\.outputs\.rolled_back \}\}/);
   assert.match(
     workflow,
-    /- name: Record canary outcome\n\s+id: canary_outcome\n\s+if: \$\{\{ always\(\) \}\}/
+    /workflow_call:[\s\S]*?outputs:\n\s+rolled_back:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.deploy\.outputs\.rolled_back \}\}\n\s+workflow_dispatch:/
   );
-  assert.match(workflow, /canary: \$\{\{ steps\.canary_outcome\.outputs\.result \}\}/);
   assert.match(
     workflow,
-    /'cancelled' \|\|\n\s+needs\.deploy\.outputs\.canary == 'failure' && needs\.deploy\.outputs\.tail_clean == 'true' && 'canary-failed'/
+    /'web-held' \|\|\n\s+needs\.deploy\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|\n\s+'failure' \}\}/
   );
-  assert.match(workflow, /tail_clean: \$\{\{ steps\.tail_outcome\.outputs\.clean \}\}/);
+  assert.doesNotMatch(workflow, /canary-failed|tail_clean|canary_outcome/);
+  const notifier = fs.readFileSync(path.resolve(here, "notify-slack.sh"), "utf8");
+  assert.match(notifier, /\n {2}rolled-back\) MARKER="\[ROLLED BACK\] Deploy \$LABEL"/);
+  assert.doesNotMatch(notifier, /canary-failed/);
+
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
+  );
+  assert.match(
+    orchestrator,
+    /OUTCOME: >-\n\s+\$\{\{ needs\.deploy-api-prod\.outputs\.rolled_back == 'true' && 'ROLLED BACK' \|\|\n/
+  );
+  assert.match(orchestrator, /\[ "\$OUTCOME" = "ROLLED BACK" \] && COLOR=/);
+});
+
+test("the rollout completes only once the canary passes", () => {
+  const promote = workflow.indexOf("- name: Promote service and cron with rollback");
+  const canary = workflow.indexOf("- name: Run prod canary against the promoted revision");
+  assert.doesNotMatch(workflow.slice(promote, canary), /ROLLOUT_COMPLETE/);
   assert.match(
     workflow,
-    /clean=\$\{\{ \(steps\.rollback_guard\.outcome == 'success' \|\| steps\.rollback_guard\.outcome == 'skipped'\) && \(steps\.remove_tag\.outcome == 'success' \|\| steps\.remove_tag\.outcome == 'skipped'\) \}\}/
+    /- name: Run prod canary against the promoted revision\n\s+id: canary\n\s+if: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n\s+timeout-minutes: 5\n\s+run: \|\n\s+set -euo pipefail\n\s+gcloud run jobs execute sdp-prod-canary \\\n\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --wait\n\s+echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n/
   );
+  assert.equal(workflow.match(/ROLLOUT_COMPLETE=true/g).length, 1);
+  const monitorNote = workflow.indexOf("- name: Record managed monitor migration gate");
+  const guard = workflow.indexOf("- name: Roll back incomplete rollout");
+  assert.ok(promote < canary && canary < monitorNote && monitorNote < guard);
 });
 
 test("manual production deploy requires an immutable SHA-tagged image", () => {
@@ -429,8 +452,8 @@ test("candidate verification accepts the signed index digest or its child manife
 // Execute the actual digest-selection block from the workflow against stubbed
 // registries, so CI fails when the shell behavior breaks even if the text
 // fragments above still match.
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -517,4 +540,387 @@ test("rollback verification falls back to the signing origin at the same pinned 
     /ORIGIN_IMAGE="ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/sdp\/sdp-api@\$\{IMAGE##\*@\}"/
   );
   assert.match(workflow, /cosign verify "\$\{ORIGIN_IMAGE\}" "\$\{verify_flags\[@\]\}"/);
+});
+
+// Run one step's shell exactly as the workflow has it, with stubbed commands
+// first on PATH and the GitHub step files in a temp dir.
+function stepScript(name) {
+  const header = `      - name: ${name}\n`;
+  const start = workflow.indexOf(header);
+  assert.notEqual(start, -1, `missing step: ${name}`);
+  const lines = workflow.slice(start + header.length).split("\n");
+  const run = lines.findIndex((line) => line === "        run: |" || line.startsWith("      - "));
+  assert.equal(lines[run], "        run: |", `step has no run block: ${name}`);
+  const body = [];
+  for (const line of lines.slice(run + 1)) {
+    if (line !== "" && !line.startsWith(" ".repeat(10))) break;
+    body.push(line.slice(10));
+  }
+  return body.join("\n");
+}
+
+const gitEnv = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
+function runStep(name, { env = {}, stubs = {}, cwd } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "prod-deploy-step-"));
+  const calls = join(dir, "calls.log");
+  const files = {
+    GITHUB_ENV: join(dir, "github-env"),
+    GITHUB_OUTPUT: join(dir, "github-output"),
+    GITHUB_STEP_SUMMARY: join(dir, "github-summary"),
+  };
+  for (const file of [calls, ...Object.values(files)]) writeFileSync(file, "");
+  for (const [command, body] of Object.entries({ sleep: "exit 0", ...stubs })) {
+    const stub = join(dir, command);
+    writeFileSync(
+      stub,
+      `#!/usr/bin/env bash\nprintf '%s\\n' "${command} $*" >> '${calls}'\n${body}\n`
+    );
+    chmodSync(stub, 0o755);
+  }
+  const result = spawnSync("bash", ["-e", "-c", stepScript(name)], {
+    cwd,
+    env: { PATH: `${dir}:${process.env.PATH}`, ...gitEnv, ...files, ...env },
+    encoding: "utf8",
+    // A socket on stdin makes bash source ~/.bashrc, which may reorder PATH.
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const read = (file) => readFileSync(file, "utf8");
+  return {
+    code: result.status,
+    out: `${result.stdout}${result.stderr}`,
+    calls: read(calls)
+      .split("\n")
+      .filter((call) => call !== "" && !call.startsWith("sleep ")),
+    env: read(files.GITHUB_ENV),
+    output: read(files.GITHUB_OUTPUT),
+    summary: read(files.GITHUB_STEP_SUMMARY),
+  };
+}
+
+const deployEnv = {
+  PROJECT_ID: "solana-developer-platform",
+  REGION: "us-central1",
+  SERVICE: "sdp-prod-api-public",
+  JOB: "sdp-prod-api-public-cron",
+  WORKER_SERVICE: "sdp-prod-worker",
+  MIGRATE_JOB: "sdp-prod-api-public-migrate",
+};
+const deploySha = "d".repeat(40);
+const rollbackEnv = {
+  ...deployEnv,
+  DEPLOY_IMAGE_SHA: deploySha,
+  ROLLOUT_STARTED: "true",
+  PREVIOUS_TRAFFIC: "sdp-prod-api-public-00041-old=100",
+  PREVIOUS_CRON_IMAGE: "registry.example/cron@sha256:old",
+  PREVIOUS_WORKER_IMAGE: "registry.example/worker@sha256:old",
+};
+const scope = "--region us-central1 --project solana-developer-platform";
+
+test("a failed canary leaves the rollout incomplete, so the guard restores prod and holds it", () => {
+  const canary = runStep("Run prod canary against the promoted revision", {
+    env: deployEnv,
+    stubs: { gcloud: "exit 1" },
+  });
+  assert.notEqual(canary.code, 0);
+  assert.equal(canary.env, "");
+
+  const guard = runStep("Roll back incomplete rollout", {
+    env: rollbackEnv,
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(guard.code, 0, guard.out);
+  assert.deepEqual(guard.calls, [
+    `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=${deploySha}`,
+    `gcloud run jobs update sdp-prod-api-public-cron ${scope} --image registry.example/cron@sha256:old`,
+    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/worker@sha256:old`,
+  ]);
+  assert.equal(guard.output, "rolled_back=true\n");
+  assert.match(guard.summary, new RegExp(`set sdp_prod_hold=${deploySha}`));
+});
+
+test("a passed canary completes the rollout, so the guard leaves prod alone", () => {
+  const canary = runStep("Run prod canary against the promoted revision", {
+    env: deployEnv,
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(canary.code, 0, canary.out);
+  assert.deepEqual(canary.calls, [`gcloud run jobs execute sdp-prod-canary ${scope} --wait`]);
+  assert.match(canary.env, /^ROLLOUT_COMPLETE=true\n$/);
+
+  for (const env of [
+    { ...rollbackEnv, ROLLOUT_COMPLETE: "true" },
+    { ...rollbackEnv, ROLLOUT_STARTED: "" },
+  ]) {
+    const guard = runStep("Roll back incomplete rollout", { env, stubs: { gcloud: "exit 0" } });
+    assert.equal(guard.code, 0, guard.out);
+    assert.deepEqual(guard.calls, []);
+    assert.equal(guard.output, "");
+  }
+});
+
+test("a run that applied a breaking migration fails loudly instead of rolling back", () => {
+  const guard = runStep("Roll back incomplete rollout", {
+    env: {
+      ...rollbackEnv,
+      BREAKING_MIGRATIONS: "apps/sdp-api/src/db/migrations/postgres/0133_drop.sql",
+    },
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(guard.code, 1);
+  assert.deepEqual(guard.calls, []);
+  assert.match(
+    guard.out,
+    /::error::This run applied breaking migrations \(apps\/sdp-api\/src\/db\/migrations\/postgres\/0133_drop\.sql\)/
+  );
+  assert.equal(guard.output, "");
+});
+
+test("a failed restore still sets the hold and fails the run without reporting a rollback", () => {
+  const guard = runStep("Roll back incomplete rollout", {
+    env: rollbackEnv,
+    stubs: { gcloud: 'case "$*" in *update-traffic*) exit 1 ;; esac' },
+  });
+  assert.equal(guard.code, 1);
+  assert.equal(guard.calls.length, 4);
+  assert.match(guard.calls[1], new RegExp(`--update-labels sdp_prod_hold=${deploySha}$`));
+  assert.match(guard.out, /Automatic rollback was incomplete; escalate immediately\./);
+  assert.equal(guard.output, "");
+});
+
+test("merge and approval deploys refuse while prod is held; a manual dispatch can lift it", () => {
+  const holdStep = "Refuse a merge or approval deploy while prod is held";
+  assert.match(
+    workflow,
+    /- name: Refuse a merge or approval deploy while prod is held\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}\n/
+  );
+  const holdCheck = workflow.indexOf(`- name: ${holdStep}`);
+  assert.ok(workflow.indexOf("- name: Read the schema position prod last applied") < holdCheck);
+  assert.ok(holdCheck < workflow.indexOf("- name: Verify and promote merge image"));
+  assert.ok(holdCheck < workflow.indexOf("- name: Run database migrations"));
+
+  const held = runStep(holdStep, {
+    env: deployEnv,
+    stubs: { gcloud: `printf '%s' '${deploySha}'` },
+  });
+  assert.equal(held.code, 1);
+  assert.match(held.out, new RegExp(`Prod is held by the deploy of ${deploySha}, `));
+  assert.deepEqual(held.calls, [
+    `gcloud run jobs describe sdp-prod-api-public-migrate ${scope} --format value(metadata.labels.sdp_prod_hold)`,
+  ]);
+  assert.equal(runStep(holdStep, { env: deployEnv, stubs: { gcloud: "exit 0" } }).code, 0);
+  assert.notEqual(runStep(holdStep, { env: deployEnv, stubs: { gcloud: "exit 1" } }).code, 0);
+
+  assert.doesNotMatch(workflow.slice(0, workflow.indexOf("  workflow_dispatch:")), /clear_hold/);
+  assert.match(
+    workflow,
+    /\n {6}clear_hold:\n\s+description: "[^"\n]+"\n\s+type: boolean\n\s+required: false\n\s+default: false\n/
+  );
+  assert.match(
+    workflow,
+    /- name: Lift the prod hold\n\s+if: \$\{\{ env\.ROLLOUT_COMPLETE == 'true' && env\.BUILD_IMAGE != 'true' && inputs\.clear_hold \}\}\n/
+  );
+  assert.ok(
+    workflow.indexOf("- name: Run prod canary against the promoted revision") <
+      workflow.indexOf("- name: Lift the prod hold")
+  );
+  const lift = runStep("Lift the prod hold", { env: deployEnv, stubs: { gcloud: "exit 0" } });
+  assert.equal(lift.code, 0, lift.out);
+  assert.deepEqual(lift.calls, [
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_hold`,
+  ]);
+});
+
+test("a manual dispatch holds prod before it changes anything, unless it lifts the hold", () => {
+  const manualHold = "Hold prod for a manual deploy";
+  assert.match(
+    workflow,
+    /- name: Hold prod for a manual deploy\n\s+if: \$\{\{ env\.BUILD_IMAGE != 'true' && !inputs\.clear_hold \}\}\n/
+  );
+  const capture = workflow.indexOf("- name: Capture rollback state");
+  const hold = workflow.indexOf(`- name: ${manualHold}`);
+  const candidate = workflow.indexOf("- name: Deploy candidate without production traffic");
+  assert.ok(workflow.indexOf("- name: Verify rollback image signature") < capture);
+  assert.ok(capture < hold && hold < candidate);
+
+  const env = { ...deployEnv, DEPLOY_IMAGE_SHA: deploySha };
+  const run = runStep(manualHold, { env, stubs: { gcloud: "exit 0" } });
+  assert.equal(run.code, 0, run.out);
+  assert.deepEqual(run.calls, [
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=${deploySha}`,
+  ]);
+  const failed = runStep(manualHold, { env, stubs: { gcloud: "exit 1" } });
+  assert.notEqual(failed.code, 0);
+  assert.equal(failed.calls.length, 1);
+});
+
+const gateStep = "Refuse a breaking migration until prod serves its parent";
+
+test("breaking migrations are ordered before any image or schema change", () => {
+  assert.match(
+    workflow,
+    /- name: Refuse a breaking migration until prod serves its parent\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}\n/
+  );
+  const gate = workflow.indexOf(`- name: ${gateStep}`);
+  assert.ok(workflow.indexOf("- name: Refuse a deploy that is behind prod") < gate);
+  assert.ok(gate < workflow.indexOf("- name: Verify and promote merge image"));
+  assert.ok(gate < workflow.indexOf("- name: Run database migrations"));
+});
+
+test("the gate reads the breaking directive exactly as the migration lint does", () => {
+  const lint = fs.readFileSync(path.resolve(here, "check-migration-compat.mjs"), "utf8");
+  const literal = lint.match(/const BREAKING_DIRECTIVE = \/(.+)\/([a-z]*);/);
+  assert.ok(literal, "BREAKING_DIRECTIVE not found in the migration lint");
+  const lintDirective = new RegExp(literal[1], literal[2]);
+  const pattern = stepScript(gateStep).match(/grep -Eq '([^']+)'/)[1];
+  for (const line of [
+    "-- sdp:migration-compat: breaking",
+    "--sdp:migration-compat:breaking",
+    "--   sdp:migration-compat:   breaking   ",
+    "-- sdp:migration-compat: breaking\r",
+    "  -- sdp:migration-compat: breaking",
+    "-- sdp:migration-compat: breaking change",
+    "-- sdp:migration-compat: non-breaking",
+    "SELECT 1; -- sdp:migration-compat: breaking",
+    "-- SDP:migration-compat: breaking",
+  ]) {
+    const sql = `SELECT 1;\n${line}\nDROP TABLE legacy;\n`;
+    const grep = spawnSync("grep", ["-Eq", pattern], { input: sql });
+    assert.equal(grep.status === 0, lintDirective.test(sql), JSON.stringify(line));
+  }
+});
+
+function git(cwd, ...args) {
+  return execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "init.defaultBranch=main",
+      ...args,
+    ],
+    { cwd, encoding: "utf8", env: { ...process.env, ...gitEnv } }
+  ).trim();
+}
+
+// base (v0.1.0) reads `legacy`; stopReading drops the read; drop is the
+// migrations-only contraction; head is a later, unrelated merge.
+function migrationRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "breaking-gate-"));
+  const migrations = "apps/sdp-api/src/db/migrations/postgres";
+  mkdirSync(join(dir, migrations), { recursive: true });
+  const commit = (message, files) => {
+    for (const [file, content] of Object.entries(files)) writeFileSync(join(dir, file), content);
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", message);
+    return git(dir, "rev-parse", "HEAD");
+  };
+  git(dir, "init", "-q");
+  const base = commit("base", {
+    "app.txt": "reads legacy\n",
+    [`${migrations}/0001_init.sql`]: "CREATE TABLE legacy (id int);\n",
+  });
+  git(dir, "tag", "v0.1.0");
+  const stopReading = commit("stop reading legacy", { "app.txt": "reads nothing\n" });
+  const drop = commit("drop legacy", {
+    [`${migrations}/0002_drop_legacy.sql`]:
+      "-- sdp:migration-compat: breaking\nDROP TABLE legacy;\n",
+  });
+  const head = commit("unrelated", { "app.txt": "reads nothing, faster\n" });
+  git(dir, "update-ref", "refs/remotes/origin/main", head);
+  return { dir, base, stopReading, drop, head };
+}
+
+const servingRevision = "sdp-prod-api-public-00041-old";
+const serviceJson = (traffic) => JSON.stringify({ status: { traffic } });
+const health = (commit, revision = servingRevision) =>
+  JSON.stringify({ status: "ready", revision, commit });
+
+function runGate(repo, { applied, serving, healthJson, traffic }) {
+  return runStep(gateStep, {
+    cwd: repo.dir,
+    env: {
+      ...deployEnv,
+      DEPLOY_IMAGE_SHA: repo.head,
+      APPLIED_SCHEMA_SHA: applied,
+      SERVICE_JSON: serviceJson(
+        traffic ?? [
+          { revisionName: servingRevision, percent: 100 },
+          { revisionName: "sdp-prod-api-public-00040-tagged", tag: "candidate-0123456789ab" },
+        ]
+      ),
+      HEALTH_JSON: healthJson ?? health(serving),
+    },
+    stubs: { gcloud: `printf '%s' "$SERVICE_JSON"`, curl: `printf '%s' "$HEALTH_JSON"` },
+  });
+}
+
+test("a breaking migration deploys once prod serves its parent, and the run records it", () => {
+  const repo = migrationRepo();
+  const run = runGate(repo, { applied: repo.base, serving: repo.stopReading });
+  assert.equal(run.code, 0, run.out);
+  assert.equal(
+    run.env,
+    "BREAKING_MIGRATIONS=apps/sdp-api/src/db/migrations/postgres/0002_drop_legacy.sql\n"
+  );
+});
+
+test("a breaking migration is refused while prod serves a commit older than its parent", () => {
+  const repo = migrationRepo();
+  const run = runGate(repo, { applied: repo.base, serving: repo.base });
+  assert.equal(run.code, 1);
+  assert.match(
+    run.out,
+    new RegExp(
+      `0002_drop_legacy\\.sql is marked breaking, so it runs only once prod serves ${repo.drop}\\^`
+    )
+  );
+  assert.equal(run.env, "");
+});
+
+test("a deploy with no breaking migration pending never reads the serving commit", () => {
+  const repo = migrationRepo();
+  const run = runGate(repo, { applied: repo.drop, serving: repo.base });
+  assert.equal(run.code, 0, run.out);
+  assert.deepEqual(run.calls, []);
+  assert.equal(run.env, "");
+});
+
+test("with the schema position unknown, the gate checks breaking migrations since the last release tag", () => {
+  const repo = migrationRepo();
+  assert.equal(runGate(repo, { applied: "", serving: repo.base }).code, 1);
+  assert.equal(runGate(repo, { applied: "", serving: repo.stopReading }).code, 0);
+});
+
+test("the gate fails closed when it cannot tell which commit prod serves", () => {
+  const repo = migrationRepo();
+  const unreadable = [
+    health(repo.stopReading, "sdp-prod-api-public-00039-other"),
+    health("local"),
+    JSON.stringify({ status: "ready", revision: servingRevision }),
+    health("f".repeat(40)),
+  ];
+  for (const healthJson of unreadable) {
+    const run = runGate(repo, { applied: repo.base, healthJson });
+    assert.equal(run.code, 1, healthJson);
+    assert.match(run.out, /Could not read the commit sdp-prod-api-public-00041-old serves/);
+    assert.equal(run.env, "");
+  }
+  const split = runGate(repo, {
+    applied: repo.base,
+    serving: repo.stopReading,
+    traffic: [
+      { revisionName: servingRevision, percent: 50 },
+      { revisionName: "sdp-prod-api-public-00042-new", percent: 50 },
+    ],
+  });
+  assert.notEqual(split.code, 0);
+  assert.match(split.out, /production traffic is not on exactly one revision/);
+  assert.equal(split.env, "");
 });
