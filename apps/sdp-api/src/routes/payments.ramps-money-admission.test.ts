@@ -1,5 +1,5 @@
-import type { MovementId } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { MovementOf } from "@sdp/types";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as moneyAdmission from "@/lib/money-admission";
@@ -14,16 +14,11 @@ import {
   TEST_PROJECT,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
-
-const STRIPE_TEST_ENV = {
-  STRIPE_SECRET_KEY: "sk_test_money_admission",
-  STRIPE_PUBLISHABLE_KEY: "pk_test_money_admission",
-  STRIPE_WEBHOOK_SECRET: "whsec_money_admission",
-} as const;
+import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 
 const ADMISSION_SCOPE = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
 
-function admissionContext(movement: MovementId) {
+function admissionContext(movement: MovementOf<"ramps">) {
   return { surface: "http", movement, subjectId: TEST_CUSTODY_WALLET_ID };
 }
 
@@ -102,21 +97,7 @@ async function expectMoneyStartRefused(response: Response): Promise<void> {
 
 describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
   installPaymentsRouteTestHooks();
-
-  let originalStripeEnv: Pick<typeof env, keyof typeof STRIPE_TEST_ENV>;
-
-  beforeEach(() => {
-    originalStripeEnv = {
-      STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
-      STRIPE_PUBLISHABLE_KEY: env.STRIPE_PUBLISHABLE_KEY,
-      STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
-    };
-    Object.assign(env, STRIPE_TEST_ENV);
-  });
-
-  afterEach(() => {
-    Object.assign(env, originalStripeEnv);
-  });
+  installStripeTestEnv();
 
   it.each([
     ["onramp", "ramps.onramp_quote"],
@@ -141,45 +122,46 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
     }
   );
 
-  it("refuses a Stripe onramp quote before the session call", async () => {
-    const counterpartyId = await seedCounterparty({ externalId: "admission_stripe_refused" });
-    const admission = refuseNextMoneyStart();
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      throw new Error("A refused quote reached the provider");
-    });
-    onTestFinished(() => fetchSpy.mockRestore());
+  it.each([
+    {
+      quote: "a Stripe onramp quote",
+      movement: "ramps.onramp_quote",
+      request: (counterpartyId: string) =>
+        requestQuote("onramp", {
+          provider: "stripe",
+          counterpartyId,
+          destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          fiatAmount: "25",
+        }),
+    },
+    {
+      quote: "a MoonPay offramp quote",
+      movement: "ramps.offramp_quote",
+      request: (counterpartyId: string) => requestMoonPayQuote("offramp", counterpartyId),
+    },
+  ] as const)(
+    "refuses $quote before any provider call or transfer write",
+    async ({ movement, request }) => {
+      const counterpartyId = await seedCounterparty({
+        externalId: `admission_${movement}_refused`,
+      });
+      const admission = refuseNextMoneyStart();
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        throw new Error("A refused quote reached the provider");
+      });
+      onTestFinished(() => fetchSpy.mockRestore());
 
-    await expectMoneyStartRefused(
-      await requestQuote("onramp", {
-        provider: "stripe",
-        counterpartyId,
-        destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        assetRail: "usdc.solana",
-        fiatCurrency: "USD",
-        fiatAmount: "25",
-      })
-    );
+      await expectMoneyStartRefused(await request(counterpartyId));
 
-    expect(admission).toHaveBeenCalledExactlyOnceWith(
-      env,
-      ADMISSION_SCOPE,
-      admissionContext("ramps.onramp_quote")
-    );
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);
-  });
-
-  it("refuses a MoonPay offramp quote before signing a hosted URL or writing a transfer", async () => {
-    const counterpartyId = await seedCounterparty({ externalId: "admission_moonpay_refused" });
-    const admission = refuseNextMoneyStart();
-
-    await expectMoneyStartRefused(await requestMoonPayQuote("offramp", counterpartyId));
-
-    expect(admission).toHaveBeenCalledExactlyOnceWith(
-      env,
-      ADMISSION_SCOPE,
-      admissionContext("ramps.offramp_quote")
-    );
-    expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);
-  });
+      expect(admission).toHaveBeenCalledExactlyOnceWith(
+        env,
+        ADMISSION_SCOPE,
+        admissionContext(movement)
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await countCounterpartyTransfers(counterpartyId)).toBe(0);
+    }
+  );
 });

@@ -1,5 +1,5 @@
 import type {
-  MovementId,
+  MovementOf,
   PaymentTransferType,
   PersistedRampProviderId,
   RampDirection,
@@ -46,7 +46,7 @@ export type RampAdmission =
 const RAMP_QUOTE_MOVEMENT = {
   onramp: "ramps.onramp_quote",
   offramp: "ramps.offramp_quote",
-} as const satisfies Record<RampDirection, MovementId>;
+} as const satisfies Record<RampDirection, MovementOf<"ramps">>;
 
 /**
  * The one access check ramp routes make. `quote` and `read` apply the project

@@ -56,6 +56,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
+import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types", async (importOriginal) => {
@@ -2468,28 +2469,7 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("ramp session and destination binding", () => {
-    const STRIPE_TEST_ENV = {
-      STRIPE_SECRET_KEY: "sk_test_session_binding",
-      STRIPE_PUBLISHABLE_KEY: "pk_test_session_binding",
-      STRIPE_WEBHOOK_SECRET: "whsec_session_binding",
-    } as const;
-    let originalStripeEnv: Pick<
-      typeof env,
-      "STRIPE_SECRET_KEY" | "STRIPE_PUBLISHABLE_KEY" | "STRIPE_WEBHOOK_SECRET"
-    >;
-
-    beforeEach(() => {
-      originalStripeEnv = {
-        STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
-        STRIPE_PUBLISHABLE_KEY: env.STRIPE_PUBLISHABLE_KEY,
-        STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
-      };
-      Object.assign(env, STRIPE_TEST_ENV);
-    });
-
-    afterEach(() => {
-      Object.assign(env, originalStripeEnv);
-    });
+    installStripeTestEnv();
 
     /** Answers a session create the way Stripe does, echoing the request's locked terms. */
     function stripeSessionResponse(sessionId: string) {
