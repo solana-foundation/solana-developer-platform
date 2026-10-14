@@ -3,6 +3,7 @@
 import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,7 +78,7 @@ function AddWalletForm({
   t: ReturnType<typeof useTranslations>;
 }) {
   const [label, setLabel] = useState("");
-  const actionKey = useActionIdempotencyKey();
+  const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

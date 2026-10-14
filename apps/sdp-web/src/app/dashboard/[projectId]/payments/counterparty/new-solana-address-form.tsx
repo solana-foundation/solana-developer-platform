@@ -3,6 +3,7 @@
 import type { CounterpartyAccount, CounterpartyAccountResponse } from "@sdp/types";
 import { useState } from "react";
 import { toast } from "sonner";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,7 +42,7 @@ export function NewSolanaAddressForm({
   className,
 }: NewSolanaAddressFormProps) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice();
+  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);

@@ -15,6 +15,7 @@ import {
   initializeCustodySetupAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
 import type { CustodyConnectionListItem } from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
@@ -548,7 +549,7 @@ export function WalletSetupFlow({
   const [byokRequestPending, setByokRequestPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
-  const setupKey = useActionIdempotencyKey();
+  const setupKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
 
   const selectedAvailability = useMemo(() => {
     const match = availability.find((provider) => provider.entry.id === selectedProvider);
