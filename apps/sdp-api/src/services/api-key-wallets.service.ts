@@ -124,24 +124,59 @@ export function resolveApiKeyWalletAuthorization(
   );
 }
 
+/** How long one key's unresolved-binding warning stays quiet once logged. */
+export const UNRESOLVED_BINDING_WARNING_INTERVAL_MS = 10 * 60_000;
+
+/** When each key last logged an unresolved-binding warning, in this process. */
+const lastUnresolvedBindingWarningAt = new Map<string, number>();
+let nextUnresolvedBindingWarningSweepAt = 0;
+
 /**
  * Report each binding that names no single custody wallet: it hydrates as
  * deny-only, so the key silently loses that wallet. Authentication calls it on
- * every request that reads such a binding, so a misconfigured key logs at most
- * its rate limit per minute.
+ * every request that reads such a binding, so a key logs at most once per
+ * {@link UNRESOLVED_BINDING_WARNING_INTERVAL_MS} in each process, however often
+ * it is used.
  */
 export function warnUnresolvedApiKeyWalletBindings(
   rows: ApiKeyWalletBindingCandidates[],
-  key: { apiKeyId: string; organizationId: string; projectId: string }
+  key: { apiKeyId: string; organizationId: string; projectId: string },
+  now = Date.now()
 ): void {
-  for (const row of rows) {
-    if (resolveBindingCandidate(row.candidates) === null) {
-      getLogger().warn(
-        { ...key, walletId: row.wallet_id, candidateCount: row.candidates.length },
-        "api_key_wallet_binding_unresolved"
-      );
+  const unresolved = rows.filter((row) => resolveBindingCandidate(row.candidates) === null);
+  if (unresolved.length === 0) {
+    return;
+  }
+  sweepUnresolvedBindingWarnings(now);
+  const lastWarnedAt = lastUnresolvedBindingWarningAt.get(key.apiKeyId);
+  if (lastWarnedAt !== undefined && now - lastWarnedAt < UNRESOLVED_BINDING_WARNING_INTERVAL_MS) {
+    return;
+  }
+  lastUnresolvedBindingWarningAt.set(key.apiKeyId, now);
+  for (const row of unresolved) {
+    getLogger().warn(
+      { ...key, walletId: row.wallet_id, candidateCount: row.candidates.length },
+      "api_key_wallet_binding_unresolved"
+    );
+  }
+}
+
+function sweepUnresolvedBindingWarnings(now: number): void {
+  if (now < nextUnresolvedBindingWarningSweepAt) {
+    return;
+  }
+  for (const [apiKeyId, warnedAt] of lastUnresolvedBindingWarningAt) {
+    if (now - warnedAt >= UNRESOLVED_BINDING_WARNING_INTERVAL_MS) {
+      lastUnresolvedBindingWarningAt.delete(apiKeyId);
     }
   }
+  nextUnresolvedBindingWarningSweepAt = now + UNRESOLVED_BINDING_WARNING_INTERVAL_MS;
+}
+
+/** Forget every key's last warning, so a test starts from a quiet process. */
+export function resetUnresolvedBindingWarningsForTesting(): void {
+  lastUnresolvedBindingWarningAt.clear();
+  nextUnresolvedBindingWarningSweepAt = 0;
 }
 
 export async function listApiKeyWalletBindings(

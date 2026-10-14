@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
-import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
+import {
+  resetUnresolvedBindingWarningsForTesting,
+  upsertApiKeyWalletBinding,
+} from "@/services/api-key-wallets.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
@@ -291,6 +294,7 @@ describe("custody wallets across an organization's projects", () => {
         walletId,
         permissions: ["wallets:read"],
       });
+      resetUnresolvedBindingWarningsForTesting();
       const warn = vi.spyOn(getLogger(), "warn");
 
       for (const requestedWalletId of [walletId, REQUESTER_WALLET_ID]) {

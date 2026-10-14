@@ -1,7 +1,9 @@
 import { expect, it, vi } from "vitest";
 import {
   hydrateApiKeyWalletAuthorization,
+  resetUnresolvedBindingWarningsForTesting,
   resolveApiKeyWalletAuthorization,
+  UNRESOLVED_BINDING_WARNING_INTERVAL_MS,
   warnUnresolvedApiKeyWalletBindings,
 } from "./api-key-wallets.service";
 
@@ -48,28 +50,29 @@ it("keeps unresolved wallet selectors selected and fail-closed", () => {
   });
 });
 
+const UNRESOLVED_ROWS = [
+  { wallet_id: "wallet_zero", permissions: '["*"]', candidates: [] },
+  {
+    wallet_id: "wallet_multi",
+    permissions: '["*"]',
+    candidates: [
+      { id: "cwlt_multi_1", status: "active" },
+      { id: "cwlt_multi_2", status: "active" },
+    ],
+  },
+  {
+    wallet_id: "wallet_ok",
+    permissions: '["*"]',
+    candidates: [{ id: "cwlt_ok", status: "active" }],
+  },
+];
+const KEY = { apiKeyId: "key_1", organizationId: "org_1", projectId: "prj_1" };
+
 it("warns for each selector that does not resolve to exactly one active wallet", () => {
+  resetUnresolvedBindingWarningsForTesting();
   warn.mockClear();
 
-  warnUnresolvedApiKeyWalletBindings(
-    [
-      { wallet_id: "wallet_zero", permissions: '["*"]', candidates: [] },
-      {
-        wallet_id: "wallet_multi",
-        permissions: '["*"]',
-        candidates: [
-          { id: "cwlt_multi_1", status: "active" },
-          { id: "cwlt_multi_2", status: "active" },
-        ],
-      },
-      {
-        wallet_id: "wallet_ok",
-        permissions: '["*"]',
-        candidates: [{ id: "cwlt_ok", status: "active" }],
-      },
-    ],
-    { apiKeyId: "key_1", organizationId: "org_1", projectId: "prj_1" }
-  );
+  warnUnresolvedApiKeyWalletBindings(UNRESOLVED_ROWS, KEY, 0);
 
   expect(warn).toHaveBeenCalledTimes(2);
   expect(warn).toHaveBeenCalledWith(
@@ -86,6 +89,26 @@ it("warns for each selector that does not resolve to exactly one active wallet",
     expect.objectContaining({ walletId: "wallet_multi", candidateCount: 2 }),
     "api_key_wallet_binding_unresolved"
   );
+});
+
+it("logs one key's unresolved bindings at most once per interval", () => {
+  resetUnresolvedBindingWarningsForTesting();
+  warn.mockClear();
+
+  warnUnresolvedApiKeyWalletBindings(UNRESOLVED_ROWS, KEY, 0);
+  warnUnresolvedApiKeyWalletBindings(
+    UNRESOLVED_ROWS,
+    KEY,
+    UNRESOLVED_BINDING_WARNING_INTERVAL_MS - 1
+  );
+  expect(warn).toHaveBeenCalledTimes(2);
+
+  // Another key is not held back by the first one's quiet period.
+  warnUnresolvedApiKeyWalletBindings(UNRESOLVED_ROWS, { ...KEY, apiKeyId: "key_2" }, 1);
+  expect(warn).toHaveBeenCalledTimes(4);
+
+  warnUnresolvedApiKeyWalletBindings(UNRESOLVED_ROWS, KEY, UNRESOLVED_BINDING_WARNING_INTERVAL_MS);
+  expect(warn).toHaveBeenCalledTimes(6);
 });
 
 it("does not replace an unresolved preferred wallet with another binding", () => {
