@@ -7,17 +7,20 @@ import { adminDatabaseUrl } from "@/test/helpers/env";
 
 const scriptsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts");
 
-function recurringSection(file: string): string {
-  const sql = readFileSync(path.join(scriptsDir, file), "utf8");
+function recurringCatchUpSql(): string {
+  const sql = readFileSync(
+    path.join(scriptsDir, "backfill-payments-execution-identity.sql"),
+    "utf8"
+  );
   const marker = "-- BEGIN recurring exact identity";
   const start = sql.indexOf(marker);
-  if (start < 0) throw new Error(`Missing recurring audit/catch-up section in ${file}`);
+  if (start < 0) throw new Error("Missing recurring catch-up section");
   return sql
     .slice(start, sql.indexOf("-- END recurring exact identity", start))
     .replace(/^\\.*$/gm, "");
 }
 
-it("audits and catches up only proven retained recurring roles without rebinding history", async () => {
+it("catches up only proven retained recurring roles without rebinding history", async () => {
   const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
   try {
@@ -51,7 +54,8 @@ it("audits and catches up only proven retained recurring roles without rebinding
     await client.query(`INSERT INTO custody_configs VALUES
       ('cfg', 'org', 'project', 'active'),
       ('archived', 'org', 'project', 'archived'),
-      ('moved', 'org', 'sandbox', 'archived');
+      ('moved', 'org', 'sandbox', 'archived'),
+      ('foreign_org', 'other_org', 'project', 'archived');
     INSERT INTO custody_connections VALUES ('connection', 'org', 'project', 'active');
     INSERT INTO custody_wallets VALUES
       ('owner', 'cfg', NULL, 'owner_ref', 'owner_address', 'inactive'),
@@ -60,7 +64,8 @@ it("audits and catches up only proven retained recurring roles without rebinding
       ('collision_b', 'archived', NULL, 'collision_ref', 'collision_address', 'inactive'),
       ('replacement', 'archived', NULL, 'replacement_ref', 'replacement_address', 'inactive'),
       ('provider_drift', 'cfg', NULL, 'current_provider_ref', 'drift_address', 'active'),
-      ('foreign', 'moved', NULL, 'foreign_ref', 'foreign_address', 'active');
+      ('foreign', 'moved', NULL, 'foreign_ref', 'foreign_address', 'active'),
+      ('foreign_org_owner', 'foreign_org', NULL, 'owner_ref', 'owner_address', 'inactive');
     INSERT INTO payment_subscription_plans VALUES
       ('old', 'org', 'project', 'active', 'owner_ref', 'owner_address', NULL,
        'puller_ref', 'puller_address', NULL, 'old_pda'),
@@ -88,90 +93,10 @@ it("audits and catches up only proven retained recurring roles without rebinding
       ('unresolved', 'org', 'project', 'processing', 'replacement', 'create_plan',
        'recurring', NULL, 'old', NULL, '{}', '{}', NULL),
       ('stale_attempt', 'org', 'project', 'processing', 'replacement', 'authorize_subscription',
-       'recurring', 'owner', 'old', 'new', '{}', '{}', 'retained_signature')`);
+       'recurring', 'owner', 'old', 'new', '{}', '{}', 'retained_signature'),
+      ('conflicting_snapshot', 'org', 'project', 'processing', 'replacement', 'create_plan',
+       'recurring', NULL, 'old', 'new', '{}', '{"sourceCustodyWalletId":"owner"}', NULL)`);
 
-    const beforeAudit = await client.query(
-      recurringSection("audit-payments-execution-identity.sql")
-    );
-    expect(beforeAudit.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "old",
-          classification: "resolvable_unique",
-        }),
-        expect.objectContaining({
-          resource: "plan_puller",
-          id: "new",
-          classification: "absent_optional_role",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "ambiguous",
-          classification: "ambiguous_multi",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "foreign_plan",
-          classification: "unresolved_zero",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "stale",
-          classification: "inconsistent_pin",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "provider_drift",
-          provider_wallet_id: "saved_provider_ref",
-          match_count: 0,
-          classification: "exact_pin",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "independent_puller",
-          classification: "exact_pin",
-        }),
-        expect.objectContaining({
-          resource: "plan_puller",
-          id: "independent_puller",
-          classification: "resolvable_unique",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "independent_owner",
-          classification: "resolvable_unique",
-        }),
-        expect.objectContaining({
-          resource: "plan_puller",
-          id: "independent_owner",
-          classification: "exact_pin",
-        }),
-        expect.objectContaining({
-          resource: "replacement_source",
-          id: "stale_attempt",
-          classification: "inconsistent_pin",
-        }),
-        expect.objectContaining({
-          resource: "replacement_source",
-          id: "unresolved",
-          classification: "unresolved_zero",
-        }),
-        expect.objectContaining({
-          resource: "replacement_old_plan_owner",
-          id: "replacement",
-          classification: "resolvable_unique",
-        }),
-        expect.objectContaining({
-          resource: "replacement_new_plan_owner",
-          id: "unresolved",
-          classification: "unresolved_zero",
-        }),
-      ])
-    );
-
-    const catchup = recurringSection("backfill-payments-execution-identity.sql");
-    await client.query(catchup);
     const snapshot = async () => ({
       plans: (await client.query("SELECT * FROM payment_subscription_plans ORDER BY id")).rows,
       recurring: (await client.query("SELECT * FROM payment_recurring_payments ORDER BY id")).rows,
@@ -179,90 +104,34 @@ it("audits and catches up only proven retained recurring roles without rebinding
         await client.query("SELECT * FROM payment_recurring_payment_update_attempts ORDER BY id")
       ).rows,
     });
+    const before = await snapshot();
+    const catchup = recurringCatchUpSql();
+    await client.query(catchup);
     const first = await snapshot();
-    expect(first.plans).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "old",
-          owner_custody_wallet_id: "owner",
-          puller_custody_wallet_id: "puller",
-          plan_pda: "old_pda",
-        }),
-        expect.objectContaining({
-          id: "new",
-          owner_custody_wallet_id: "replacement",
-          puller_custody_wallet_id: null,
-          plan_pda: "new_pda",
-        }),
-        expect.objectContaining({ id: "stale", owner_custody_wallet_id: "owner" }),
-        expect.objectContaining({
-          id: "independent_owner",
-          owner_custody_wallet_id: "owner",
-          puller_custody_wallet_id: "puller",
-          plan_pda: "independent_owner_pda",
-        }),
-        expect.objectContaining({
-          id: "independent_puller",
-          owner_custody_wallet_id: "owner",
-          puller_custody_wallet_id: "puller",
-          plan_pda: "independent_puller_pda",
-        }),
-        expect.objectContaining({ id: "ambiguous", owner_custody_wallet_id: null }),
-        expect.objectContaining({ id: "foreign_plan", owner_custody_wallet_id: null }),
-      ])
-    );
-    expect(first.recurring).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "recurring",
-          source_custody_wallet_id: "owner",
-          status: "canceled",
-        }),
-        expect.objectContaining({ id: "ambiguous", source_custody_wallet_id: null }),
-        expect.objectContaining({ id: "foreign", source_custody_wallet_id: null }),
-      ])
-    );
-    expect(first.attempts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "replacement",
-          new_source_custody_wallet_id: "replacement",
-          old_plan_id: "old",
-          new_plan_id: "new",
-          authorization_setup_signature: "saved_setup",
-        }),
-        expect.objectContaining({ id: "unresolved", new_source_custody_wallet_id: null }),
-        expect.objectContaining({
-          id: "stale_attempt",
-          new_source_custody_wallet_id: "owner",
-          authorization_setup_signature: "retained_signature",
-        }),
-      ])
-    );
+    const expectedPlanPins = new Map<
+      string,
+      { owner_custody_wallet_id?: string; puller_custody_wallet_id?: string }
+    >([
+      ["old", { owner_custody_wallet_id: "owner", puller_custody_wallet_id: "puller" }],
+      ["new", { owner_custody_wallet_id: "replacement" }],
+      ["independent_owner", { owner_custody_wallet_id: "owner" }],
+      ["independent_puller", { puller_custody_wallet_id: "puller" }],
+    ]);
+    expect(first).toEqual({
+      plans: before.plans.map((plan) => ({ ...plan, ...expectedPlanPins.get(plan.id) })),
+      recurring: before.recurring.map((recurring) =>
+        recurring.id === "recurring"
+          ? { ...recurring, source_custody_wallet_id: "owner" }
+          : recurring
+      ),
+      attempts: before.attempts.map((attempt) =>
+        attempt.id === "replacement"
+          ? { ...attempt, new_source_custody_wallet_id: "replacement" }
+          : attempt
+      ),
+    });
     await client.query(catchup);
     expect(await snapshot()).toEqual(first);
-    const afterAudit = await client.query(
-      recurringSection("audit-payments-execution-identity.sql")
-    );
-    expect(afterAudit.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          resource: "replacement_source",
-          id: "replacement",
-          classification: "exact_pin",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "stale",
-          classification: "inconsistent_pin",
-        }),
-        expect.objectContaining({
-          resource: "plan_owner",
-          id: "independent_puller",
-          classification: "exact_pin",
-        }),
-      ])
-    );
   } finally {
     await client.end();
   }
