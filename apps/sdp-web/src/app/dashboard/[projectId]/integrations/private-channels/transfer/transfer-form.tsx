@@ -19,6 +19,7 @@ import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
+  claimMovementKey,
   movementAnswer,
   privateChannelTransferIdempotencyKeyStore,
   privateChannelTransferRequestFingerprint,
@@ -362,7 +363,11 @@ function TransferFormState({
       mint: selectedToken?.mint,
     };
     const fingerprint = privateChannelTransferRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelTransferIdempotencyKeyStore.claim(fingerprint).key;
+    const idempotencyKey = claimMovementKey(privateChannelTransferIdempotencyKeyStore, fingerprint);
+    if (idempotencyKey === null) {
+      updateState({ error: t("Shared.idempotency.keyNotPersisted") });
+      return;
+    }
 
     startTransition(async () => {
       try {

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ApiAnswer } from "@/lib/idempotency";
-import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
+import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import type { CreateDepositResult } from "./deposit/actions";
 import type { CreateTransferResult } from "./transfer/actions";
 import type { CreateWithdrawalResult } from "./withdraw/actions";
@@ -32,6 +32,21 @@ export const privateChannelWithdrawalIdempotencyKeyStore = createIdempotencyKeyS
 export const privateChannelTransferIdempotencyKeyStore = createIdempotencyKeyStore(
   "sdp:private-channels:transfer:idempotency:v1"
 );
+
+/**
+ * The key a movement is sent under, or `null` when the browser will not keep
+ * it across a reload: these move money, so like every money route they are not
+ * sent then (the dashboard's 428), or a reload and retry could move it twice.
+ * Only a key this claim minted is dropped; a kept one belongs to an earlier
+ * attempt that may have run, and its retry still needs it.
+ */
+export function claimMovementKey(store: IdempotencyKeyStore, fingerprint: string): string | null {
+  const kept = store.has(fingerprint);
+  const { key, persisted } = store.claim(fingerprint);
+  if (persisted) return key;
+  if (!kept) store.release(fingerprint, key);
+  return null;
+}
 
 /**
  * What sdp-api answered a movement, for the retire rule (`answerRetiresKey`).
