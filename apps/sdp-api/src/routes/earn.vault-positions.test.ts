@@ -1,7 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { withRpcReadContext } from "@sdp/rpc/read-context";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
-import type { CachedApiKey } from "@sdp/types";
 import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -16,7 +15,7 @@ import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const signatureStatuses = vi.hoisted(() => vi.fn());
 vi.mock("@sdp/rpc/solana", async (original) => ({
@@ -63,7 +62,7 @@ const PRODUCTION_API_KEY = {
   prefix: "sk_live_vau",
 };
 
-function cachedKey(): CachedApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: API_KEY.id,
     organizationId: ORG,
@@ -81,7 +80,7 @@ function cachedKey(): CachedApiKey {
 
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -104,7 +103,7 @@ async function seedScope(): Promise<void> {
     role: "api_admin",
     permissions: ["*"],
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: PRODUCTION_API_KEY.id,
     projectId: `${PROJECT_A}_production`,
@@ -393,7 +392,7 @@ describe("GET /v1/earn/vault-positions", () => {
       signature: "sig_second_binding",
     });
     const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       ...cachedKey(),
       signingWalletId: PROVIDER_WALLET_A,
       walletBindings: [{ walletId: PROVIDER_WALLET_A, permissions: ["earn:read"] }],

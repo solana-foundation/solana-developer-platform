@@ -44,7 +44,6 @@ import { pruneIdempotencyKeys } from "@/services/jobs/prune-idempotency-keys";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
-import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
@@ -199,11 +198,7 @@ export async function runCronJob(): Promise<void> {
         await collect(
           monitored(PENDING_TRANSFERS_MONITOR, async () => {
             const outcomes = await Promise.allSettled([
-              (async () => {
-                // Keep revocation recovery ahead of payment reconciliation.
-                await reconcileRevokedApiKeyCache(env);
-                await runInEachClusterScope(() => trackPendingTransfers(env));
-              })(),
+              runInEachClusterScope(() => trackPendingTransfers(env)),
               reconcileSponsorshipBudgets(env),
             ]);
             throwCollected(

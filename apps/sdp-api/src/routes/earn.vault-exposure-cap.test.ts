@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -14,7 +13,7 @@ import {
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 /**
  * ADR 0004 layer 1 (PRO-1934): the SDP-wide vault exposure cap at deposit
@@ -90,7 +89,7 @@ const TEST_PROJECT = { id: "prj_test_earn_cap", slug: "test-earn-cap-project" };
 const OTHER_PROJECT = { id: "prj_test_earn_cap_other", slug: "test-earn-cap-other" };
 const TEST_USER = { id: "usr_earn_cap", email: "earn-cap@example.com" };
 const TEST_API_KEY = { id: "key_earn_cap", raw: "sk_test_earn_cap", prefix: "sk_test_ear" };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -118,7 +117,7 @@ let originalCapsEnforced: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
 
   const settings = JSON.stringify({ providerOverrides: { earn: { kamino: true, veda: true } } });
   await getDb(env).batch([

@@ -10,7 +10,6 @@
  */
 
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -19,7 +18,7 @@ import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const fundDvpTradeLeg = vi.hoisted(() => vi.fn());
 const reclaimDvpTradeLeg = vi.hoisted(() => vi.fn());
@@ -52,7 +51,7 @@ const TEST_PROJECT = { id: "prj_dvp_audit", slug: "dvp-audit-project" };
 const TEST_USER = { id: "usr_dvp_audit", email: "dvp-audit@example.com" };
 const TEST_API_KEY = { id: "key_dvp_audit", raw: "sk_test_dvp_audit", prefix: "sk_test_dvp_aud" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -90,7 +89,7 @@ function authHeaders() {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   const db = getDb(env);
   await db.batch([
     db

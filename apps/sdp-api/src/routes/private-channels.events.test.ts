@@ -2,7 +2,6 @@ import { hashString } from "@sdp/payments/hash";
 import * as privateChannelsPkg from "@sdp/private-channels";
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import {
-  type CachedApiKey,
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
@@ -16,7 +15,7 @@ import * as pcServices from "@/services/private-channels";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const probeConnectionMock = vi.spyOn(privateChannelsPkg, "probeConnection");
 const spcRegisterMock = vi.spyOn(privateChannelsPkg, "spcRegister");
@@ -41,7 +40,7 @@ const TEST_PROJECT = { id: "prj_pce_test", slug: "pc-events-test-project" };
 const TEST_USER = { id: "usr_pce_test", email: "pc-events-test@example.com" };
 const TEST_API_KEY = { id: "key_pce_test", raw: "sk_test_pc_events", prefix: "sk_test_pce" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -73,7 +72,7 @@ function successProbe() {
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")

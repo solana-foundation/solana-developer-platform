@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
@@ -10,7 +9,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 /**
  * GET /v1/earn/movements — the cross-provider feed (PRO-1705).
@@ -62,7 +61,7 @@ interface MovementJson {
  */
 function cachedKey(
   binding: { walletScope: "selected"; signingWalletIds: string[] } | null = null
-): CachedApiKey {
+): SeededApiKey {
   return {
     id: API_KEY.id,
     organizationId: ORG,
@@ -90,8 +89,8 @@ function cachedKey(
  */
 async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  // seedCachedApiKey writes the binding rows authentication reads.
-  await seedCachedApiKey(
+  // seedApiKeyRow writes the binding rows authentication reads.
+  await seedApiKeyRow(
     env,
     keyHash,
     cachedKey({ walletScope: "selected", signingWalletIds: providerWalletIds })
@@ -100,7 +99,7 @@ async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
 
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey());
+  await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -126,7 +125,7 @@ async function seedScope(): Promise<void> {
     role: "api_admin",
     permissions: ["*"],
   });
-  await seedCachedApiKey(env, productionKeyHash, {
+  await seedApiKeyRow(env, productionKeyHash, {
     ...cachedKey(),
     id: TEST_PRODUCTION_API_KEY.id,
     projectId: "prj_earn_feed_prod",

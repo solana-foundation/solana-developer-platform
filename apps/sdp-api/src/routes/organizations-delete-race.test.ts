@@ -52,7 +52,7 @@ import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_delete_race",
@@ -133,7 +133,7 @@ describe("organization deletion vs concurrent API key creation", () => {
     });
 
     await seedKeyRow(ADMIN_KEY.id, adminHash);
-    await seedCachedApiKey(env, adminHash, cachedEntry(ADMIN_KEY.id));
+    await seedApiKeyRow(env, adminHash, cachedEntry(ADMIN_KEY.id));
   });
 
   afterEach(async () => {
@@ -147,7 +147,7 @@ describe("organization deletion vs concurrent API key creation", () => {
     // is active (as a fill from a pre-revocation DB read would leave it).
     raceState.onBatch = async () => {
       await seedKeyRow(CONCURRENT_KEY.id, concurrentHash);
-      await seedCachedApiKey(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
+      await seedApiKeyRow(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
     };
 
     const res = await app.request(

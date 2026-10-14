@@ -10,7 +10,6 @@ import { hashString } from "@sdp/payments/hash";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -47,14 +46,6 @@ describe("tenant isolation through the HTTP stack", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-
-    // API-key lookups may be served from the KV cache; drop any stale entries
-    // so each run resolves keys through the database path under test.
-    const kv = createKVStoreSet(env);
-    const cached = await kv.apiKeys.list();
-    for (const key of cached.keys) {
-      await kv.apiKeys.delete(key.name);
-    }
 
     const db = getDb(env);
     await db

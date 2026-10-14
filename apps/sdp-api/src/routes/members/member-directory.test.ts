@@ -6,7 +6,7 @@ import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 
 const CLERK_API_URL = "https://clerk.example.test/v1";
 const CLERK_ORG_ID = "org_clerk_member_directory";
@@ -125,7 +125,7 @@ async function seedDirectory(memberCount: number): Promise<void> {
 /** Authenticates every request as an API key holding exactly `permissions`. */
 async function authenticateAs(permissions: Permission[]): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     organizationId: ORGANIZATION_ID,
     role: "api_developer",

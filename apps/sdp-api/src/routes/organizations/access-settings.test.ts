@@ -3,7 +3,7 @@ import type { OrganizationSettings } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { RATE_LIMIT_TIERS } from "@/middleware/rate-limit";
+import { API_KEY_PRE_READ_MAX_REQUESTS } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -11,7 +11,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedApiKeyRowFor, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
 
@@ -31,9 +31,9 @@ async function seedOrganization(settings: OrganizationSettings | null): Promise<
       settings === null ? null : JSON.stringify(settings)
     )
     .run();
-  // The cached key is seeded before the organization exists; its row needs it.
-  await seedApiKeyRowFor(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+  await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_CACHED_API_KEY,
+    projectId: PROJECT_ID,
     permissions: ["*"],
   });
 }
@@ -100,7 +100,7 @@ describe("Organization access settings", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, permissions: ["*"] });
+    await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, permissions: ["*"] });
   });
   afterEach(async () => {
     await clearKVStores(env);
@@ -390,6 +390,8 @@ describe("Organization access settings", () => {
       );
       expect(allowed.status).toBe(200);
     });
+    // A key is admitted against the highest tier before its rows are read, so
+    // a flood is refused there; its own tier is judged after the read.
     it("dies at the rate limiter before the organization row is read", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       const headers = {
@@ -399,7 +401,11 @@ describe("Organization access settings", () => {
       const now = Date.now();
       const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
       try {
-        await seedRateLimit(env, TEST_CACHED_API_KEY.id, RATE_LIMIT_TIERS.standard);
+        await seedRateLimit(
+          env,
+          `api-key:${await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER)}`,
+          API_KEY_PRE_READ_MAX_REQUESTS
+        );
         expect((await get(headers)).status).toBe(429);
       } finally {
         nowSpy.mockRestore();
@@ -408,7 +414,7 @@ describe("Organization access settings", () => {
     it("intersects with the API key's own allowlist rather than replacing it", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
         allowedIps: ["203.0.113.7/32"],

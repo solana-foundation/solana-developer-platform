@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -103,13 +103,6 @@ describe("Projects Routes", () => {
         apiKeyHash
       )
       .run();
-
-    // Cache API key in KV — override projectId so the cached actor scope
-    // matches the project row we just seeded for this test suite.
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT.id })
-    );
   });
 
   describe("POST /v1/projects", () => {
@@ -186,7 +179,6 @@ describe("Projects Routes", () => {
 
     it("filters out the API key's own production project when the org is not enabled", async () => {
       const db = getDb(env);
-      const kv = createKVStoreSet(env);
       await db
         .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
         .bind(TEST_ORG.id)
@@ -195,14 +187,6 @@ describe("Projects Routes", () => {
         .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
         .bind(TEST_PRODUCTION_PROJECT.id, TEST_API_KEY.id)
         .run();
-      await kv.apiKeys.put(
-        `key:${apiKeyHash}`,
-        JSON.stringify({
-          ...TEST_CACHED_API_KEY,
-          projectId: TEST_PRODUCTION_PROJECT.id,
-          environment: "production",
-        })
-      );
       const res = await app.request(
         "/v1/projects",
         {

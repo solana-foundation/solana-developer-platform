@@ -1,10 +1,13 @@
-import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { AppError } from "@/lib/errors";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
+import { authMiddleware } from "@/middleware/auth";
+import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
@@ -16,9 +19,10 @@ import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
+import { archiveProject, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);
@@ -39,12 +43,13 @@ describe("Auth Middleware", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await clearKVStores(env);
   });
 
   describe("key extraction", () => {
     it("accepts Bearer token format", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
@@ -60,7 +65,7 @@ describe("Auth Middleware", () => {
     });
 
     it("accepts raw key format", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
@@ -137,8 +142,8 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("INVALID_API_KEY");
     });
 
-    it("accepts valid API keys from KV cache", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+    it("accepts a valid API key", async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
@@ -153,8 +158,8 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("rejects a cached API key used outside its IPv4 allowlist", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("rejects an API key used outside its IPv4 allowlist", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
@@ -175,8 +180,8 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("FORBIDDEN");
     });
 
-    it("accepts a cached API key used from an allowed IPv4 address", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("accepts an API key used from an allowed IPv4 address", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
@@ -196,7 +201,7 @@ describe("Auth Middleware", () => {
     });
 
     it("uses the Cloud Run verified client instead of an untrusted forwarded prefix", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["198.51.100.99/32"],
       });
@@ -216,7 +221,7 @@ describe("Auth Middleware", () => {
     });
 
     it("rejects a restricted API key when no trusted client IP is available", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["203.0.113.0/24"],
       });
@@ -234,8 +239,8 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(403);
     });
 
-    it("rejects malformed allowlist data already stored in the cache", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("rejects malformed allowlist data stored on the key", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         allowedIps: ["not-an-ip-range"],
       });
@@ -323,7 +328,7 @@ describe("Auth Middleware", () => {
 
     it("rejects revoked API keys", async () => {
       const revokedKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, revokedKeyHash, TEST_REVOKED_KEY);
+      await seedApiKeyRow(env, revokedKeyHash, TEST_REVOKED_KEY);
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
@@ -342,7 +347,7 @@ describe("Auth Middleware", () => {
 
     it("rejects expired API keys", async () => {
       const expiredKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, expiredKeyHash, TEST_EXPIRED_KEY);
+      await seedApiKeyRow(env, expiredKeyHash, TEST_EXPIRED_KEY);
 
       const res = await app.request(
         `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
@@ -359,10 +364,9 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
-    // The cached check applies the live row's predicate, so a malformed expiry
-    // fails closed here too instead of reading as "not expired".
-    it("rejects a cached key whose expiry does not parse", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    // A malformed expiry fails closed instead of reading as "not expired".
+    it("rejects a key whose expiry does not parse", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         expiresAt: "not-a-timestamp",
       });
@@ -382,8 +386,8 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
-    it("rejects rotated API keys after their cached grace period ends", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("rejects rotated API keys after their grace period ends", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         rotationDeadline: "2020-01-01T00:00:00.000Z",
       });
@@ -403,8 +407,8 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
-    it("accepts rotated API keys while their cached grace period is active", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("accepts rotated API keys while their grace period is active", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         rotationDeadline: "2999-01-01T00:00:00.000Z",
       });
@@ -421,153 +425,10 @@ describe("Auth Middleware", () => {
 
       expect(res.status).toBe(200);
     });
-
-    it("bypasses a legacy cache entry and rejects a database key past its rotation deadline", async () => {
-      await getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email)
-        .run();
-      await seedDefaultProjects(getDb(env), {
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        members: [],
-        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
-      });
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-              role, permissions, status, rotation_deadline)
-           VALUES (?, ?, ?, ?, 'Rotated key', ?, ?, 'api_admin', '["*"]', 'active', ?)`
-        )
-        .bind(
-          TEST_API_KEY.id,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          TEST_USER.id,
-          TEST_API_KEY.prefix,
-          validKeyHash,
-          "2020-01-01T00:00:00.000Z"
-        )
-        .run();
-
-      const { rotationDeadline: _, ...legacyCachedKey } = TEST_CACHED_API_KEY;
-      await createKVStoreSet(env).apiKeys.put(
-        `key:${validKeyHash}`,
-        JSON.stringify(legacyCachedKey)
-      );
-
-      const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("EXPIRED_API_KEY");
-    });
-
-    it("reloads stale string-only wallet authorization from the database", async () => {
-      await getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email)
-        .run();
-      await seedDefaultProjects(getDb(env), {
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        members: [],
-        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
-      });
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-              role, permissions, status)
-           VALUES (?, ?, ?, ?, 'Exact auth key', ?, ?, 'api_admin', '["*"]', 'active')`
-        )
-        .bind(
-          TEST_API_KEY.id,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          TEST_USER.id,
-          TEST_API_KEY.prefix,
-          validKeyHash
-        )
-        .run();
-      await seedAuthCustodyWallet({
-        configId: "cust_auth_resolved",
-        provider: "local",
-        custodyWalletId: "cwlt_auth_resolved",
-        publicKey: "wallet_resolved_public_key",
-      });
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions
-             (id, api_key_id, wallet_id, permissions)
-           VALUES ('akw_auth_resolved', ?, 'wallet_resolved', '["*"]')`
-        )
-        .bind(TEST_API_KEY.id)
-        .run();
-
-      await createKVStoreSet(env).apiKeys.put(
-        `key:${validKeyHash}`,
-        JSON.stringify({
-          ...TEST_CACHED_API_KEY,
-          rotationDeadline: null,
-          walletScope: "selected",
-          walletBindings: [{ walletId: "wallet_resolved", permissions: ["*"] }],
-        })
-      );
-
-      const res = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
-        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-      expect(res.status).toBe(200);
-
-      const cached = await createKVStoreSet(env).apiKeys.get<{
-        walletScope: string;
-        walletBindings: unknown[];
-      }>(`key:${validKeyHash}`, "json");
-      expect(cached).toMatchObject({
-        walletScope: "selected",
-        signingWalletId: "wallet_resolved",
-        walletBindings: [
-          {
-            walletId: "wallet_resolved",
-            custodyWalletId: "cwlt_auth_resolved",
-            permissions: ["*"],
-          },
-        ],
-      });
-
-      await seedAuthCustodyWallet({
-        configId: "cust_auth_ambiguous",
-        provider: "privy",
-        custodyWalletId: "cwlt_auth_ambiguous",
-        publicKey: "wallet_ambiguous_public_key",
-      });
-      await clearKVStores(env);
-
-      const unresolved = await app.request(
-        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
-        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-      expect(unresolved.status).toBe(200);
-      expect(await createKVStoreSet(env).apiKeys.get(`key:${validKeyHash}`, "json")).toBeNull();
-    });
   });
 
   // HOO-2048: authentication reads the key's wallet bindings in its uncached
-  // statement, so a change to them applies on the next request whatever the
-  // warm cache entry still says.
+  // statement, so a change to them applies on the next request.
   describe("fresh wallet bindings", () => {
     const walletRequest = (walletId: string) =>
       app.request(
@@ -611,7 +472,7 @@ describe("Auth Middleware", () => {
     });
 
     it("refuses a key narrowed from all wallets to selected ones on its next request", async () => {
-      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
+      await seedApiKeyRow(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
       expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
 
       await getDb(env)
@@ -621,20 +482,12 @@ describe("Auth Middleware", () => {
         )
         .bind(TEST_API_KEY.id)
         .run();
-      // The cache entry is still warm and still says all wallets.
-      expect(
-        await createKVStoreSet(env).apiKeys.get<{ walletScope: string }>(
-          `key:${validKeyHash}`,
-          "json"
-        )
-      ).toMatchObject({ walletScope: "all" });
-
       expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
       expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
     });
 
-    it("refuses a wallet whose binding was revoked, with the cache still warm", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("refuses a wallet whose binding was revoked on its next request", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         walletScope: "selected",
         signingWalletId: "wallet_fresh_a",
@@ -657,9 +510,154 @@ describe("Auth Middleware", () => {
     });
   });
 
+  // HOO-2099: every authorization field comes from the key's live rows, read
+  // once per request, so a change applies on the very next request.
+  describe("fresh authorization", () => {
+    const contextApp = () => {
+      const mini = new Hono<{ Bindings: Env }>();
+      mini.onError((err, c) => {
+        if (err instanceof AppError) {
+          return c.json(err.toResponse(), err.statusCode as 401 | 403);
+        }
+        throw err;
+      });
+      mini.use("*", kvStoreMiddleware());
+      mini.use("*", authMiddleware());
+      mini.get("/context", (c) => c.json(c.get("apiKey")));
+      mini.get("/transfer", requireAllowedOperation("payment_transfer_execute"), (c) =>
+        c.json({ ok: true })
+      );
+      return mini;
+    };
+    const keyed = (path: string, headers: Record<string, string> = {}) =>
+      contextApp().request(
+        path,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, ...headers } },
+        env
+      );
+    const orgRequest = () =>
+      app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+    const updateKey = (assignment: string, value: string | null) =>
+      getDb(env)
+        .prepare(`UPDATE api_keys SET ${assignment} = ? WHERE id = ?`)
+        .bind(value, TEST_API_KEY.id)
+        .run();
+
+    beforeEach(async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+    });
+
+    it("builds the request context from the key's row", async () => {
+      await updateKey("role", "api_developer");
+      await updateKey("permissions", JSON.stringify(["org:read"]));
+
+      const res = await keyed("/context");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        id: TEST_API_KEY.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        role: "api_developer",
+        permissions: ["org:read"],
+        environment: "sandbox",
+        allowedOperations: null,
+        walletScope: "all",
+      });
+    });
+
+    it("applies a permission reduction on the next request", async () => {
+      expect((await orgRequest()).status).toBe(200);
+
+      await updateKey("permissions", JSON.stringify(["tokens:read"]));
+
+      const res = await orgRequest();
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+    });
+
+    it("applies an Allowed Operations change on the next request", async () => {
+      expect((await keyed("/transfer")).status).toBe(200);
+
+      await updateKey("allowed_operations", JSON.stringify(["ramp"]));
+
+      expect((await keyed("/transfer")).status).toBe(403);
+      expect(await (await keyed("/context")).json()).toMatchObject({
+        allowedOperations: ["ramp"],
+      });
+    });
+
+    it("applies an IP restriction on the next request", async () => {
+      const origin = { "x-forwarded-for": "198.51.100.42" };
+      expect((await keyed("/context", origin)).status).toBe(200);
+
+      await updateKey("allowed_ips", JSON.stringify(["203.0.113.0/24"]));
+
+      const res = await keyed("/context", origin);
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("refuses a key whose project was archived on its next request", async () => {
+      expect((await keyed("/context")).status).toBe(200);
+
+      await archiveProject(getDb(env), TEST_PROJECT.id);
+
+      const res = await keyed("/context");
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
+    it("refuses a key revoked after its last request", async () => {
+      expect((await keyed("/context")).status).toBe(200);
+
+      await updateKey("status", "revoked");
+
+      const body = (await (await keyed("/context")).json()) as { error: { code: string } };
+      expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
+    it("refuses a key whose rotation deadline passed after its last request", async () => {
+      expect((await keyed("/context")).status).toBe(200);
+
+      await updateKey("rotation_deadline", new Date(Date.now() - 1_000).toISOString());
+
+      const body = (await (await keyed("/context")).json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
+    it("refuses a key whose organization was deleted", async () => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+
+      const res = await keyed("/context");
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
+    it("reads the key's rows in one statement per request", async () => {
+      const prepare = vi.spyOn(getDb(env), "prepare");
+
+      expect((await keyed("/context")).status).toBe(200);
+
+      const authReads = prepare.mock.calls.filter(([sql]) => sql.includes("FROM api_keys ak"));
+      expect(authReads).toHaveLength(1);
+    });
+  });
+
   describe("permissions", () => {
     it("allows access with wildcard permission", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
       });
@@ -678,7 +676,7 @@ describe("Auth Middleware", () => {
     });
 
     it("allows access with specific permission", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["org:read", "org:write"],
       });
@@ -697,7 +695,7 @@ describe("Auth Middleware", () => {
     });
 
     it("rejects requests without required permissions", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["tokens:read"],
       });
@@ -718,34 +716,3 @@ describe("Auth Middleware", () => {
     });
   });
 });
-
-async function seedAuthCustodyWallet(params: {
-  configId: string;
-  provider: CustodyProvider;
-  custodyWalletId: string;
-  publicKey: string;
-}): Promise<void> {
-  await seedTestCustodyRows(env, {
-    configs: [
-      {
-        id: params.configId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        provider: params.provider,
-        configEncrypted: "test-config",
-        status: "active",
-      },
-    ],
-    wallets: [
-      {
-        id: params.custodyWalletId,
-        owner: { kind: "config", custodyConfigId: params.configId },
-        walletId: "wallet_resolved",
-        publicKey: params.publicKey,
-        label: null,
-        purpose: null,
-        status: "active",
-      },
-    ],
-  });
-}

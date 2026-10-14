@@ -239,14 +239,12 @@ async function deleteTestOrganization() {
  * after the next request's authentication read, which is that race.
  */
 function deleteTestOrganizationAfterAuth() {
-  const authenticate = organizationAccess.enforceApiKeyOrganizationAccess;
-  vi.spyOn(organizationAccess, "enforceApiKeyOrganizationAccess").mockImplementationOnce(
-    async (...args) => {
-      const settings = await authenticate(...args);
-      await deleteTestOrganization();
-      return settings;
-    }
-  );
+  const authenticate = organizationAccess.authorizeApiKey;
+  vi.spyOn(organizationAccess, "authorizeApiKey").mockImplementationOnce(async (...args) => {
+    const settings = await authenticate(...args);
+    await deleteTestOrganization();
+    return settings;
+  });
 }
 
 async function collectionAttempts(subscriptionId: string) {

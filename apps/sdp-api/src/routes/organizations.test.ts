@@ -9,7 +9,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 
 const TEST_PROJECT = {
   id: "prj_test_organizations",
@@ -50,7 +50,7 @@ describe("Organizations routes", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
     });
     it("returns organization details", async () => {
       const res = await app.request(
@@ -139,13 +139,11 @@ describe("Organizations routes", () => {
       expect(body.error.code).toBe("FORBIDDEN");
     });
     it("refuses a key whose organization does not exist", async () => {
-      const nonExistentOrgId = "org_nonexistent123";
-      await seedCachedApiKey(env, validKeyHash, {
-        ...TEST_CACHED_API_KEY,
-        organizationId: nonExistentOrgId,
-      });
+      // A key row cannot outlive its organization (ON DELETE CASCADE), so a
+      // deleted organization row leaves an unknown key.
+      await getDb(env).prepare("DELETE FROM organizations WHERE id = ?").bind(TEST_ORG.id).run();
       const res = await app.request(
-        `/v1/organizations/${nonExistentOrgId}`,
+        `/v1/organizations/${TEST_ORG.id}`,
         {
           headers: {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -162,7 +160,7 @@ describe("Organizations routes", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
         .run();
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
       });
@@ -226,7 +224,7 @@ describe("Organizations routes", () => {
     });
     it("requires org:write permission", async () => {
       await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["org:read"],
       });
@@ -285,7 +283,7 @@ describe("Organizations routes", () => {
             "active"
           ),
       ]);
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
       });
@@ -397,7 +395,7 @@ describe("Organizations routes", () => {
     });
     it("requires org:admin permission", async () => {
       await clearKVStores(env);
-      await seedCachedApiKey(env, validKeyHash, {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["org:read", "org:write"],
       });

@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CustodyMode } from "@sdp/types";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -19,7 +19,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -47,7 +47,7 @@ const API_KEY = {
   raw: "sk_test_custody_connection_wallets",
   prefix: "sk_test_ccw",
 };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
@@ -65,7 +65,7 @@ const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
 
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare(

@@ -68,12 +68,20 @@ export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 
 /**
  * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
- * traffic gets its real limit per key id after auth (enforceRateLimit in the
- * auth middleware), so the anonymous limit must not apply — it would cap
- * every tier at 20/min per IP. The key is unverified at this point, so a high
- * IP ceiling still bounds invalid-key spray against the KV/DB lookup in auth.
+ * traffic gets its real limit per key hash in the auth middleware, so the
+ * anonymous limit must not apply — it would cap every tier at 20/min per IP.
+ * The key is unverified at this point, so a high IP ceiling still bounds
+ * invalid-key spray (a fresh hash per request) against the DB read in auth.
  */
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
+
+/**
+ * Per-key-hash ceiling admitted before the auth middleware reads the key's row:
+ * the highest tier, since the key's own tier is not known until that read. It
+ * bounds the DB reads one credential can cost; the row's tier is then judged
+ * against the same admission (`judgeRateLimit`).
+ */
+export const API_KEY_PRE_READ_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS));
 
 /**
  * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
@@ -86,7 +94,7 @@ export const CLERK_USER_MAX_REQUESTS = 600;
 /**
  * Builds the KV key for one identifier's counter in one window bucket.
  *
- * @param identifier - Counter scope (client IP or API key id).
+ * @param identifier - Counter scope (client IP, API key hash, actor, org).
  * @param windowStart - Bucket start in epoch ms, as produced by getWindowStart.
  * @returns The `ratelimit:<identifier>:<windowStart>` KV key.
  */
@@ -205,8 +213,20 @@ async function verifiedClerkUserId(
   }
 }
 
+/** One counter admission, kept so a caller can judge it against a tighter limit. */
+export interface RateLimitAdmission {
+  /** Whether the counter store admitted (and counted) the request. */
+  admitted: boolean;
+  /** The window's request count after this admission, sliding-window weighted. */
+  estimatedCount: number;
+  /** The limit the counter admitted the request under. */
+  limit: number;
+  windowEndMs: number;
+  now: number;
+}
+
 /**
- * Enforces an approximate sliding-window rate limit for the identifier.
+ * Admits one request against an approximate sliding-window counter.
  *
  * Time is bucketed into fixed RATE_LIMIT_WINDOW_MS windows. The trailing
  * window ending "now" covers all of the current bucket plus a slice of the
@@ -217,27 +237,149 @@ async function verifiedClerkUserId(
  * (a full burst just before the boundary plus another just after) at the cost
  * of two counter reads instead of one true log of timestamps.
  *
- * Side effects: sets the X-RateLimit-Limit/-Remaining/-Reset response headers
- * (Remaining reserves one slot for the in-flight request), and on admission
- * increments the current bucket's counter with a 2x-window TTL so it survives
- * long enough to serve as the next bucket's "previous". Rejected requests do
- * not increment the counter.
+ * On admission the current bucket's counter is incremented with a 2x-window
+ * TTL so it survives long enough to serve as the next bucket's "previous".
+ * Rejected requests do not increment the counter. Sets no headers and throws
+ * nothing on a refusal: {@link judgeRateLimit} does both.
  *
  * Storage failure semantics are chosen per call site: by default a failed
- * counter read/write logs and fails open, keeping cheap traffic flowing
- * through a KV outage. Costly or side-effecting operations pass
- * `failClosed: true`, which turns a missing KV binding or a storage error
- * into a 503 — an unmetered request to a paid upstream is worse than a
+ * counter read/write logs and fails open (returns null), keeping cheap
+ * traffic flowing through a KV outage. Costly or side-effecting operations
+ * pass `failClosed: true`, which turns a missing KV binding or a storage
+ * error into a 503 — an unmetered request to a paid upstream is worse than a
  * refused one.
  *
  * @param c - Request context; c.var.kv must be populated by kvStoreMiddleware.
- * @param identifier - Counter scope: client IP for anonymous traffic, API key
- *   id for keyed traffic.
- * @param maxRequests - Maximum admitted requests per window; the auth
- *   middleware passes RATE_LIMIT_TIERS[key.rateLimitTier].
+ * @param identifier - Counter scope (client IP, API key hash, actor, org).
+ * @param maxRequests - Maximum admitted requests per window.
  * @param options - failClosed: reject with 503 instead of admitting when the
  *   counter store is unavailable.
- * @returns Resolves once the request is admitted and the counter incremented.
+ * @returns The admission, or null when the store is unavailable and the call
+ *   fails open.
+ * @throws AppError SERVICE_UNAVAILABLE (503) when failClosed is set and the
+ *   counter store is unavailable.
+ */
+export async function admitRateLimit(
+  c: Context<{ Bindings: Env }>,
+  identifier: string,
+  maxRequests: number,
+  options: {
+    failClosed?: boolean;
+    cost?: number;
+    windowMs?: number;
+  } = {}
+): Promise<RateLimitAdmission | null> {
+  const kv = c.var.kv?.rateLimits;
+  if (!kv) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "kv_missing" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
+    return null;
+  }
+
+  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS;
+  const now = Date.now();
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const previousWindowStart = windowStart - windowMs;
+
+  const windowKey = getWindowKey(identifier, windowStart);
+  const previousWindowKey = getWindowKey(identifier, previousWindowStart);
+
+  const elapsed = now - windowStart;
+  const previousWeight = Math.max(0, 1 - elapsed / windowMs);
+  const cost = Math.max(1, Math.floor(options.cost ?? 1));
+
+  const admission = await kv
+    .admitSlidingWindow(windowKey, previousWindowKey, {
+      maxRequests,
+      previousWeight,
+      expirationTtl: Math.ceil((windowMs * 2) / 1000),
+      cost,
+    })
+    .catch((err) => {
+      getLogger().error({ error: err, identifier }, "Failed to update rate limit");
+      return null;
+    });
+
+  if (!admission) {
+    if (options.failClosed) {
+      getLogger().error(
+        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "storage_error" },
+        "Rate limit store unavailable; failing closed"
+      );
+      throw serviceUnavailable("Rate limiting is unavailable; request refused");
+    }
+    return null;
+  }
+
+  return {
+    admitted: admission.admitted,
+    estimatedCount: admission.current + admission.previous * previousWeight,
+    limit: maxRequests,
+    windowEndMs: windowStart + windowMs,
+    now,
+  };
+}
+
+/**
+ * Judges an admission against `maxRequests`, which may be lower than the
+ * limit it was admitted under: API-key auth admits against the highest tier
+ * before it reads the key's row, then judges the row's own tier here, with no
+ * second counter call. The test matches the counter script's own: a request
+ * is refused when the window, counting it, holds more than `maxRequests`.
+ *
+ * Sets the X-RateLimit-Limit/-Remaining/-Reset response headers (Remaining
+ * reserves one slot for the in-flight request).
+ *
+ * @throws AppError RATE_LIMITED (429) with a Retry-After header when refused.
+ */
+export function judgeRateLimit(
+  c: Context<{ Bindings: Env }>,
+  admission: RateLimitAdmission,
+  maxRequests: number,
+  metricTier = "default"
+): void {
+  c.header("X-RateLimit-Limit", maxRequests.toString());
+  c.header(
+    "X-RateLimit-Remaining",
+    Math.max(0, Math.floor(maxRequests - admission.estimatedCount)).toString()
+  );
+  c.header("X-RateLimit-Reset", Math.ceil(admission.windowEndMs / 1000).toString());
+
+  // The counter's verdict stands for any limit at least the one it admitted
+  // under. A tighter limit reuses the script's test: it refused when
+  // `count + cost - 1 >= max`, and an admitted count already includes the
+  // cost, so the same bound reads `count - 1 >= max` here.
+  const withinLimit =
+    admission.admitted &&
+    (maxRequests >= admission.limit || admission.estimatedCount - 1 < maxRequests);
+  if (!withinLimit) {
+    const retryAfter = Math.max(1, Math.ceil((admission.windowEndMs - admission.now) / 1000));
+    c.header("Retry-After", retryAfter.toString());
+    getLogger().warn(
+      {
+        event: "sdp_api_rate_limit_rejected",
+        tier: metricTier,
+        method: c.req.method,
+        route: c.req.path,
+        limit: maxRequests,
+      },
+      "Rate limit rejected request"
+    );
+    throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
+  }
+}
+
+/**
+ * Enforces an approximate sliding-window rate limit for the identifier:
+ * {@link admitRateLimit} then {@link judgeRateLimit} against the same limit.
+ *
+ * @returns Resolves once the request is admitted and the counter incremented,
+ *   or when the store is unavailable and the call fails open.
  * @throws AppError RATE_LIMITED (429) with a Retry-After header when the
  *   estimated count has reached maxRequests; AppError SERVICE_UNAVAILABLE
  *   (503) when failClosed is set and the counter store is unavailable.
@@ -253,76 +395,9 @@ export async function enforceRateLimit(
     metricTier?: string;
   } = {}
 ): Promise<void> {
-  const kv = c.var.kv?.rateLimits;
-  if (!kv) {
-    if (options.failClosed) {
-      getLogger().error(
-        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "kv_missing" },
-        "Rate limit store unavailable; failing closed"
-      );
-      throw serviceUnavailable("Rate limiting is unavailable; request refused");
-    }
-    return;
-  }
-
-  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS;
-  const now = Date.now();
-  const windowStart = Math.floor(now / windowMs) * windowMs;
-  const previousWindowStart = windowStart - windowMs;
-
-  const windowKey = getWindowKey(identifier, windowStart);
-  const previousWindowKey = getWindowKey(identifier, previousWindowStart);
-
-  const elapsed = now - windowStart;
-  const previousWeight = Math.max(0, 1 - elapsed / windowMs);
-
-  const admission = await kv
-    .admitSlidingWindow(windowKey, previousWindowKey, {
-      maxRequests,
-      previousWeight,
-      expirationTtl: Math.ceil((windowMs * 2) / 1000),
-      ...(options.cost === undefined ? {} : { cost: options.cost }),
-    })
-    .catch((err) => {
-      getLogger().error({ error: err, identifier }, "Failed to update rate limit");
-      return null;
-    });
-
-  if (!admission) {
-    if (options.failClosed) {
-      getLogger().error(
-        { event: "sdp_api_rate_limit_unavailable", identifier, reason: "storage_error" },
-        "Rate limit store unavailable; failing closed"
-      );
-      throw serviceUnavailable("Rate limiting is unavailable; request refused");
-    }
-    return;
-  }
-
-  const estimatedCount = admission.current + admission.previous * previousWeight;
-
-  c.header("X-RateLimit-Limit", maxRequests.toString());
-  c.header(
-    "X-RateLimit-Remaining",
-    Math.max(0, Math.floor(maxRequests - estimatedCount)).toString()
-  );
-  const windowEndMs = windowStart + windowMs;
-  c.header("X-RateLimit-Reset", Math.ceil(windowEndMs / 1000).toString());
-
-  if (!admission.admitted) {
-    const retryAfter = Math.max(1, Math.ceil((windowEndMs - now) / 1000));
-    c.header("Retry-After", retryAfter.toString());
-    getLogger().warn(
-      {
-        event: "sdp_api_rate_limit_rejected",
-        tier: options.metricTier ?? "default",
-        method: c.req.method,
-        route: c.req.path,
-        limit: maxRequests,
-      },
-      "Rate limit rejected request"
-    );
-    throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
+  const admission = await admitRateLimit(c, identifier, maxRequests, options);
+  if (admission) {
+    judgeRateLimit(c, admission, maxRequests, options.metricTier);
   }
 }
 
@@ -333,7 +408,7 @@ export async function enforceRateLimit(
  * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
  * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
  * sk_-shaped requests get the high per-IP backstop (their real limit is
- * enforced per key after auth via enforceRateLimit), and everything else gets
+ * enforced per key hash in the auth middleware), and everything else gets
  * the anonymous per-IP limit.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt

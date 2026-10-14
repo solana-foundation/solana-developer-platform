@@ -1,15 +1,17 @@
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { currentDatabaseIdentity } from "@/db/identity";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
+import * as organizationAccess from "@/lib/organization-access";
 import { optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
   ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
   ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
+  API_KEY_PRE_READ_MAX_REQUESTS,
   enforceRateLimit,
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
 } from "@/middleware/rate-limit";
@@ -18,12 +20,7 @@ import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import {
-  clearKVStores,
-  readRateLimitCount,
-  seedCachedApiKey,
-  seedRateLimit,
-} from "@/test/mocks/kv";
+import { clearKVStores, readRateLimitCount, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 /**
@@ -63,13 +60,17 @@ describe("Rate limiting", () => {
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   });
 
+  /** Keyed traffic counts per key hash, before the key's row is read. */
+  const keyCounter = () => `api-key:${validKeyHash}`;
+
   afterEach(async () => {
+    vi.restoreAllMocks();
     await clearKVStores(env);
   });
 
   describe("per-key tier limits", () => {
     it("allows a standard-tier key under its limit and reports tier headers", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await keyedRequest();
 
@@ -78,8 +79,8 @@ describe("Rate limiting", () => {
     });
 
     it("returns 429 when a standard-tier key exceeds its limit", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 100);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(env, keyCounter(), 100);
 
       const res = await keyedRequest();
 
@@ -89,12 +90,12 @@ describe("Rate limiting", () => {
       expect(body.error.code).toBe("RATE_LIMITED");
     });
 
-    it("honors the elevated tier from the cached key", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("honors the elevated tier from the key row", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         rateLimitTier: "elevated",
       });
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 100);
+      await seedRateLimit(env, keyCounter(), 100);
 
       const res = await keyedRequest();
 
@@ -102,12 +103,12 @@ describe("Rate limiting", () => {
       expect(res.headers.get("X-RateLimit-Limit")).toBe("500");
     });
 
-    it("honors the unlimited tier from the cached key", async () => {
-      await seedCachedApiKey(env, validKeyHash, {
+    it("honors the unlimited tier from the key row", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
         rateLimitTier: "unlimited",
       });
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 600);
+      await seedRateLimit(env, keyCounter(), 600);
 
       const res = await keyedRequest();
 
@@ -116,26 +117,61 @@ describe("Rate limiting", () => {
     });
 
     it("counts the previous window proportionally (sliding window)", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 1_000_000, 1);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(env, keyCounter(), 1_000_000, 1);
 
       const res = await keyedRequest();
 
       expect(res.status).toBe(429);
     });
 
-    it("does not consume quota on rejected requests", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 100);
+    // The tier is only known once the row is read, so a request is counted
+    // against the highest tier first: one refused for its own tier still
+    // counts, which is what bounds a flooding key's DB reads.
+    it("counts a request refused for its tier toward the window", async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(env, keyCounter(), 100);
 
       const res = await keyedRequest();
 
       expect(res.status).toBe(429);
-      expect(await readRateLimitCount(env, TEST_CACHED_API_KEY.id)).toBe(100);
+      expect(await readRateLimitCount(env, keyCounter())).toBe(101);
+    });
+
+    it("refuses a flooding key at the highest tier before reading its row", async () => {
+      // No row: a read would answer INVALID_API_KEY, so a 429 proves none ran.
+      await seedRateLimit(env, keyCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
+      const readSpy = vi.spyOn(organizationAccess, "authorizeApiKey");
+
+      const res = await keyedRequest();
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).not.toBeNull();
+      expect(readSpy).not.toHaveBeenCalled();
+      expect(await readRateLimitCount(env, keyCounter())).toBe(API_KEY_PRE_READ_MAX_REQUESTS);
+    });
+
+    it("caps the unlimited tier at the same ceiling", async () => {
+      await seedApiKeyRow(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        rateLimitTier: "unlimited",
+      });
+      await seedRateLimit(env, keyCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
+
+      const res = await keyedRequest();
+
+      expect(res.status).toBe(429);
+    });
+
+    it("bounds an unknown key's reads like a valid one's", async () => {
+      await seedRateLimit(env, keyCounter(), API_KEY_PRE_READ_MAX_REQUESTS - 1);
+
+      expect((await keyedRequest()).status).toBe(401);
+      expect((await keyedRequest()).status).toBe(429);
     });
 
     it("reports remaining quota against the tier limit", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await keyedRequest();
 
@@ -183,7 +219,7 @@ describe("Rate limiting", () => {
     });
 
     it("does not let an anonymous Earn rejection consume a keyed caller's tier", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
       await seedRateLimit(
         env,
         `anonymous:earn:build:ip:${CLIENT_IP}`,
@@ -222,7 +258,7 @@ describe("Rate limiting", () => {
     });
 
     it("does not cap keyed requests at the anonymous limit", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
       await seedRateLimit(env, CLIENT_IP, 20);
 
       const res = await keyedRequest();
@@ -231,7 +267,7 @@ describe("Rate limiting", () => {
     });
 
     it("still caps keyed requests at the per-IP backstop", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
       await seedRateLimit(env, CLIENT_IP, KEYED_IP_BACKSTOP_MAX_REQUESTS);
 
       const res = await keyedRequest();
@@ -313,8 +349,8 @@ describe("Rate limiting", () => {
     });
 
     it("rethrows RATE_LIMITED instead of degrading to anonymous", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
-      await seedRateLimit(env, TEST_CACHED_API_KEY.id, 100);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(env, keyCounter(), 100);
 
       const res = await optionalAuthApp().request(
         "/resource",
@@ -326,7 +362,7 @@ describe("Rate limiting", () => {
     });
 
     it("runs a keyless route under the presented key's tenant identity", async () => {
-      await seedCachedApiKey(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
 
       const res = await optionalAuthApp().request(
         "/resource",

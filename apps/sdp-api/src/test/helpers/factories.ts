@@ -5,7 +5,8 @@
  * Use these instead of verbose inline object creation in tests.
  */
 
-import type { CachedApiKey, Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { Token, TokenAllowlistEntry, TokenTransaction } from "@sdp/types";
+import type { SeededApiKey } from "@/test/mocks/kv";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Counters for unique IDs
@@ -167,15 +168,15 @@ export function createApiKey(overrides: ApiKeyOverrides = {}): ApiKey {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Cached API Key
+// Seeded API Key
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface CachedApiKeyOverrides {
+export interface SeededApiKeyOverrides {
   id?: string;
   organizationId?: string;
   projectId?: string;
   role?: "api_admin" | "api_developer" | "api_readonly";
-  permissions?: CachedApiKey["permissions"];
+  permissions?: SeededApiKey["permissions"];
   environment?: "sandbox" | "production";
   rateLimitTier?: "standard" | "elevated" | "unlimited";
   allowedIps?: string[] | null;
@@ -185,7 +186,7 @@ export interface CachedApiKeyOverrides {
   rotationDeadline?: string | null;
 }
 
-export function createCachedApiKey(overrides: CachedApiKeyOverrides = {}): CachedApiKey {
+export function createSeededApiKey(overrides: SeededApiKeyOverrides = {}): SeededApiKey {
   const n = keyCounter; // Use current counter without incrementing
   return {
     id: `key_factory_${n.toString().padStart(8, "0")}`,

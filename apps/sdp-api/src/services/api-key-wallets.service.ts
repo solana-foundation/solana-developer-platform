@@ -111,7 +111,8 @@ function resolveBindingCandidate(candidates: ApiKeyWalletCandidate[]): string | 
  * Resolve binding rows to exact custody wallets. A binding that names no
  * wallet, or is ambiguous, hydrates as deny-only: the key stays selected
  * scope, with no usable wallet there. Pure, because authentication runs it on
- * every request; the cache fill reports unresolved bindings to operators.
+ * every request; {@link warnUnresolvedApiKeyWalletBindings} reports unresolved
+ * bindings to operators.
  */
 export function resolveApiKeyWalletAuthorization(
   rows: ApiKeyWalletBindingCandidates[],
@@ -127,6 +128,26 @@ export function resolveApiKeyWalletAuthorization(
     ),
     preferredSigningWalletId
   );
+}
+
+/**
+ * Report each binding that names no single custody wallet: it hydrates as
+ * deny-only, so the key silently loses that wallet. Authentication calls it on
+ * every request that reads such a binding, so a misconfigured key logs at most
+ * its rate limit per minute.
+ */
+export function warnUnresolvedApiKeyWalletBindings(
+  rows: ApiKeyWalletBindingCandidates[],
+  key: { apiKeyId: string; organizationId: string; projectId: string }
+): void {
+  for (const row of rows) {
+    if (resolveBindingCandidate(row.candidates) === null) {
+      getLogger().warn(
+        { ...key, walletId: row.wallet_id, candidateCount: row.candidates.length },
+        "api_key_wallet_binding_unresolved"
+      );
+    }
+  }
 }
 
 export async function loadApiKeyWalletAuthorization(
@@ -191,22 +212,7 @@ export async function loadApiKeyWalletAuthorization(
     permissions: row.permissions,
     candidates: candidatesByWalletId.get(row.wallet_id) ?? [],
   }));
-  // Once per cache fill, not per request: the binding hydrates as deny-only, so
-  // the key silently loses that wallet.
-  for (const row of rows) {
-    if (resolveBindingCandidate(row.candidates) === null) {
-      getLogger().warn(
-        {
-          apiKeyId,
-          organizationId,
-          projectId,
-          walletId: row.wallet_id,
-          candidateCount: row.candidates.length,
-        },
-        "api_key_wallet_binding_unresolved"
-      );
-    }
-  }
+  warnUnresolvedApiKeyWalletBindings(rows, { apiKeyId, organizationId, projectId });
   return resolveApiKeyWalletAuthorization(rows, preferredSigningWalletId);
 }
 

@@ -5,7 +5,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { Env } from "@/types/env";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "../fixtures/api-keys";
-import { seedCachedApiKey } from "../mocks/kv";
+import { seedApiKeyRow } from "../mocks/kv";
 
 /**
  * Sets up authentication for a test request
@@ -28,7 +28,7 @@ export async function setupTestAuth(
     cachedKey.status = "revoked";
   }
 
-  await seedCachedApiKey(env, keyHash, cachedKey);
+  await seedApiKeyRow(env, keyHash, cachedKey);
 
   return {
     header: `Bearer ${TEST_API_KEY.raw}`,

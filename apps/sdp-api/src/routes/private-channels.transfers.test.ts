@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, PrivateChannelTransfer } from "@sdp/types";
+import type { PrivateChannelTransfer } from "@sdp/types";
 import { PrivySigner } from "@solana/keychain-privy";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -22,7 +22,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const { createChannelTransferMock, resolveGatewayAuthMock } = vi.hoisted(() => ({
   createChannelTransferMock: vi.fn(),
@@ -225,7 +225,7 @@ function transferDto(overrides: Partial<PrivateChannelTransfer>): PrivateChannel
 async function seedRouteState(): Promise<void> {
   const db = getDb(env);
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  const cachedApiKey: CachedApiKey = {
+  const cachedApiKey: SeededApiKey = {
     id: API_KEY.id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -238,8 +238,8 @@ async function seedRouteState(): Promise<void> {
     status: "active",
     expiresAt: null,
   };
-  await seedCachedApiKey(env, keyHash, cachedApiKey);
-  await seedCachedApiKey(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
+  await seedApiKeyRow(env, keyHash, cachedApiKey);
+  await seedApiKeyRow(env, await hashString(SCOPED_API_KEY.raw, env.API_KEY_PEPPER), {
     ...cachedApiKey,
     id: SCOPED_API_KEY.id,
     walletScope: "selected",

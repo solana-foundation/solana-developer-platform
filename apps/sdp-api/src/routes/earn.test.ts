@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import { type CachedApiKey, type SolanaCluster, wellKnownMint } from "@sdp/types";
+import { type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +30,12 @@ import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, readRateLimitCount, seedCachedApiKey } from "@/test/mocks/kv";
+import {
+  clearKVStores,
+  readRateLimitCount,
+  type SeededApiKey,
+  seedApiKeyRow,
+} from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_test_earn_routes",
@@ -50,7 +55,7 @@ const TEST_API_KEY = {
   raw: "sk_test_earn_routes",
   prefix: "sk_test_ear",
 };
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -75,7 +80,7 @@ let originalEarnEnabled: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -737,7 +742,8 @@ describe("Earn route middleware isolation", () => {
     const res = await getEarn("/v1/earn/movements", {});
 
     expect(res.status).toBe(200);
-    expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    expect(await readRateLimitCount(env, `api-key:${keyHash}`)).toBe(1);
   });
 });
 

@@ -1,4 +1,3 @@
-import type { CachedApiKey } from "@sdp/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +13,7 @@ import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
@@ -36,7 +35,7 @@ function buildApp(setup: (c: Context<{ Bindings: Env }>) => void) {
   return app;
 }
 
-function apiKeyContext(environment: "sandbox" | "production"): CachedApiKey {
+function apiKeyContext(environment: "sandbox" | "production"): SeededApiKey {
   return { ...TEST_CACHED_API_KEY, environment };
 }
 

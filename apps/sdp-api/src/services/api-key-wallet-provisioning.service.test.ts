@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -22,7 +21,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
 
@@ -44,7 +43,7 @@ const USER_ID = "usr_api_key_provisioning";
 const CREDENTIAL_ID = "pcred_api_key_provisioning";
 const FOREIGN_CREDENTIAL_ID = "pcred_api_key_provisioning_foreign";
 const API_KEY = { id: "key_api_key_provisioning", raw: "sk_test_api_key_provisioning" };
-const CACHED_API_KEY: CachedApiKey = {
+const CACHED_API_KEY: SeededApiKey = {
   id: API_KEY.id,
   organizationId: ORGANIZATION_ID,
   projectId: PROJECT_ID,
@@ -554,7 +553,7 @@ describe("provisionApiKeyWallet", () => {
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await db.batch([
     db
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")

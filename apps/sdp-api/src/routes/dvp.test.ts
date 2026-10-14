@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -10,7 +10,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -25,7 +25,7 @@ const TEST_PROJECT = { id: "prj_dvp_test", slug: "dvp-test-project" };
 const TEST_USER = { id: "usr_dvp_test", email: "dvp-test@example.com" };
 const TEST_API_KEY = { id: "key_dvp_test", raw: "sk_test_dvp_routes", prefix: "sk_test_dvp" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -54,7 +54,7 @@ const PARTY_API_KEY = {
   prefix: "sk_test_dvp_party",
 };
 
-const PARTY_CACHED_API_KEY: CachedApiKey = {
+const PARTY_CACHED_API_KEY: SeededApiKey = {
   id: PARTY_API_KEY.id,
   organizationId: PARTY_ORG.id,
   projectId: PARTY_PROJECT.id,
@@ -76,7 +76,7 @@ let originalMarkets: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -170,7 +170,7 @@ async function seedPartyOrg(): Promise<void> {
       )
       .bind("cwlt_dvp_party", "cust_dvp_party", "dvp_party_wallet", PARTY_A_ADDRESS),
   ]);
-  await seedCachedApiKey(env, keyHash, PARTY_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, PARTY_CACHED_API_KEY);
 }
 
 /** Seeds an admitted Connection holding the party address, independent of the Config. */
@@ -294,7 +294,7 @@ async function seedWalletScopedKey(
     .run();
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     walletScope: "selected",
     signingWalletId: wallet.walletId,
@@ -993,7 +993,7 @@ describe("DvP routes", () => {
           )
         );
         const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
-        await seedCachedApiKey(env, keyHash, {
+        await seedApiKeyRow(env, keyHash, {
           ...PARTY_CACHED_API_KEY,
           walletScope: "selected",
           walletBindings: wallets.map((wallet) => ({
@@ -1055,7 +1055,7 @@ describe("DvP routes", () => {
         expect(fetch).not.toHaveBeenCalled();
 
         // The other wallet remains admitted and authorized after either change.
-        await seedCachedApiKey(env, keyHash, {
+        await seedApiKeyRow(env, keyHash, {
           ...PARTY_CACHED_API_KEY,
           walletScope: "selected",
           walletBindings: wallets.map((wallet) => ({
@@ -1139,7 +1139,7 @@ describe("DvP routes", () => {
 
     it("keeps a read-only caller's party visible without offering a funding wallet", async () => {
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
+      await seedApiKeyRow(env, keyHash, {
         ...TEST_CACHED_API_KEY,
         permissions: ["payments:read", "wallets:read"],
       });
@@ -1178,7 +1178,7 @@ describe("DvP routes", () => {
         .run();
       await seedWalletScopedKey(BOUND_WALLET, ["payments:read", "wallets:read"]);
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
+      await seedApiKeyRow(env, keyHash, {
         ...TEST_CACHED_API_KEY,
         walletScope: "selected",
         walletBindings: [
@@ -1945,7 +1945,7 @@ describe("DvP routes", () => {
         )
         .run();
       const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
+      await seedApiKeyRow(env, keyHash, {
         ...PARTY_CACHED_API_KEY,
         walletScope: "selected",
         signingWalletId: walletId,

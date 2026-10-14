@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -14,7 +14,7 @@ import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
@@ -47,7 +47,7 @@ const TEST_API_KEY = {
   prefix: "sk_test_cus",
 };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -66,7 +66,7 @@ const PARA_CONFIG_ID = "cust_cfg_wallet_by_id_para";
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -141,9 +141,9 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
 }
 
-async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+async function seedCachedKey(override: Partial<SeededApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
   });

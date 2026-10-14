@@ -2,7 +2,7 @@ import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { getBase58Codec } from "@solana/codecs";
 import {
   address,
@@ -30,7 +30,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
@@ -136,7 +136,7 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
   });
 }
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -173,7 +173,7 @@ let originalMoonPayOfframpUrl: string | undefined;
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
 
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -258,9 +258,9 @@ export async function updateSeededWalletPublicKey(publicKey: string): Promise<vo
     .run();
 }
 
-export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+export async function seedCachedKey(override: Partial<SeededApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
   });

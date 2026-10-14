@@ -1,12 +1,12 @@
 import { hashString } from "@sdp/payments/hash";
-import type { AllowedOperation, CachedApiKey } from "@sdp/types";
+import type { AllowedOperation } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const TEST_ORG = { id: "org_allowed_ops", name: "Allowed Ops Org", slug: "allowed-ops-org" };
 const TEST_PROJECT = { id: "prj_allowed_ops", slug: "allowed-ops-project" };
@@ -30,7 +30,7 @@ const ISSUANCE_ONLY_KEY = {
   allowedOperations: ["issuance"] as AllowedOperation[],
 };
 
-function cachedKey(id: string, allowedOperations: AllowedOperation[] | null): CachedApiKey {
+function cachedKey(id: string, allowedOperations: AllowedOperation[] | null): SeededApiKey {
   return {
     id,
     organizationId: TEST_ORG.id,
@@ -52,7 +52,7 @@ async function seedKey(
   allowedOperations: AllowedOperation[] | null
 ): Promise<void> {
   const keyHash = await hashString(key.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, cachedKey(key.id, allowedOperations));
+  await seedApiKeyRow(env, keyHash, cachedKey(key.id, allowedOperations));
   await getDb(env)
     .prepare(
       `INSERT INTO api_keys

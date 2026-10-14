@@ -15,7 +15,7 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { credentialAdminAuthMiddleware } from "./credential-admin-auth";
 
@@ -106,7 +106,7 @@ describe("credentialAdminAuthMiddleware", () => {
     "rejects a valid %s API key before the handler",
     async (_label, role, permissions) => {
       const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedCachedApiKey(env, keyHash, {
+      await seedApiKeyRow(env, keyHash, {
         ...TEST_CACHED_API_KEY,
         role,
         permissions: [...permissions],

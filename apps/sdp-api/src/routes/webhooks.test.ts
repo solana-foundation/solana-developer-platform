@@ -10,7 +10,7 @@ import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types", async (importOriginal) => {
   const { mockProviderStages } = await import("@/test/helpers/provider-stages");
@@ -226,7 +226,7 @@ describe("Clerk webhooks", () => {
            VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`)
         .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
     ]);
-    await seedCachedApiKey(env, keyHash, {
+    await seedApiKeyRow(env, keyHash, {
       id: keyId,
       organizationId: orgId,
       projectId,

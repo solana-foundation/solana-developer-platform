@@ -113,11 +113,6 @@ describe("Counterparties Routes", () => {
       )
       .run();
 
-    await kv.apiKeys.put(
-      `key:${apiKeyHash}`,
-      JSON.stringify({ ...TEST_CACHED_API_KEY, projectId: TEST_PROJECT_ID })
-    );
-
     const seededAt = new Date().toISOString();
     await seedTestCustodySetup(
       env,

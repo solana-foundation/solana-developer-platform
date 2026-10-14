@@ -22,7 +22,7 @@ import {
 } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -346,7 +346,7 @@ async function seedApiKey(
     role,
     permissions,
   });
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     id: key.id,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_IDS[environment],
@@ -695,7 +695,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
   });
 
-  it("returns 404 to an API key bound to an archived project", async () => {
+  // Authentication refuses a key whose project is not active (HOO-2099).
+  it("refuses an API key bound to an archived project", async () => {
     await archiveProject(getDb(env), PROJECT_IDS.sandbox);
 
     const response = await read(
@@ -704,8 +705,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       deploymentEnv({})
     );
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "REVOKED_API_KEY" } });
   });
 
   it("returns 404 to a dashboard session of an archived project's members", async () => {

@@ -1,12 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const TEST_ORG = {
   id: "org_api_key_privilege",
@@ -21,7 +20,7 @@ const WRITER_KEY = { id: "key_privilege_writer", raw: "sk_test_privilege_writer"
 const ADMIN_TARGET_KEY = { id: "key_privilege_admin_target", raw: "sk_test_privilege_admin" };
 const READONLY_TARGET_KEY = { id: "key_privilege_ro_target", raw: "sk_test_privilege_ro" };
 
-const WRITER_CACHED: CachedApiKey = {
+const WRITER_CACHED: SeededApiKey = {
   id: WRITER_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -110,13 +109,13 @@ describe("API key privilege guards", () => {
       .run();
 
     const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, writerHash, WRITER_CACHED);
+    await seedApiKeyRow(env, writerHash, WRITER_CACHED);
     await seedKeyRow(WRITER_KEY, "api_developer", null);
   });
 
   async function reseedActor() {
     const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, writerHash, WRITER_CACHED);
+    await seedApiKeyRow(env, writerHash, WRITER_CACHED);
   }
 
   it("refuses to rotate a key whose permissions exceed the actor's", async () => {
@@ -166,7 +165,7 @@ describe("API key privilege guards", () => {
 
   it("refuses a wallet-scoped key granting a wallet outside its own scope", async () => {
     const scopedHash = await hashString("sk_test_privilege_scoped", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped",
       walletScope: "selected",
@@ -199,7 +198,7 @@ describe("API key privilege guards", () => {
 
   it("refuses a wallet-scoped key minting an all-wallets key", async () => {
     const scopedHash = await hashString("sk_test_privilege_scoped3", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped3",
       walletScope: "selected",
@@ -244,7 +243,7 @@ describe("API key privilege guards", () => {
       )
       .run();
     const scopedHash = await hashString("sk_test_privilege_scoped2", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped2",
       walletScope: "selected",
@@ -283,7 +282,7 @@ describe("API key privilege guards", () => {
     // The key's own binding must resolve, or it holds nothing on the wallet.
     await seedOwnScopeWallet();
     const scopedHash = await hashString("sk_test_privilege_scoped6", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped6",
       walletScope: "selected",
@@ -321,7 +320,7 @@ describe("API key privilege guards", () => {
       .bind("wal_scope_other", READONLY_TARGET_KEY.id)
       .run();
     const scopedHash = await hashString("sk_test_privilege_scoped4", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped4",
       walletScope: "selected",
@@ -354,7 +353,7 @@ describe("API key privilege guards", () => {
 
   it("refuses a wallet-scoped key provisioning a wallet", async () => {
     const scopedHash = await hashString("sk_test_privilege_scoped5", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
+    await seedApiKeyRow(env, scopedHash, {
       ...WRITER_CACHED,
       id: "key_privilege_scoped5",
       permissions: [...WRITER_CACHED.permissions, "custody:admin"],
@@ -411,7 +410,7 @@ describe("API key privilege guards", () => {
   it("refuses a non-admin key holding a custom org:admin permission from minting api_admin", async () => {
     await reseedActor();
     const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, writerHash, {
+    await seedApiKeyRow(env, writerHash, {
       ...WRITER_CACHED,
       permissions: [...WRITER_CACHED.permissions, "org:admin"],
     });

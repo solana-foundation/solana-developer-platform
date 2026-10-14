@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -17,7 +16,8 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import {
   clearKVStores,
   readRateLimitCount,
-  seedCachedApiKey,
+  type SeededApiKey,
+  seedApiKeyRow,
   seedRateLimit,
 } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -104,7 +104,7 @@ const TEST_USER = { id: "usr_earn_ext", email: "earn-ext@example.com" };
 const TEST_API_KEY = { id: "key_earn_ext", raw: "sk_test_earn_ext", prefix: "sk_test_ear" };
 const PROD_API_KEY = { id: "key_earn_ext_prod", raw: "sk_live_earn_ext", prefix: "sk_live_ear" };
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -117,7 +117,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
-const PROD_CACHED_API_KEY: CachedApiKey = {
+const PROD_CACHED_API_KEY: SeededApiKey = {
   ...TEST_CACHED_API_KEY,
   id: PROD_API_KEY.id,
   projectId: TEST_PRODUCTION_PROJECT.id,
@@ -135,9 +135,9 @@ let originalEarnEnabled: string | undefined;
 async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   const entitled = options.entitled ?? true;
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, prodKeyHash, PROD_CACHED_API_KEY);
+  await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)

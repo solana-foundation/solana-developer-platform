@@ -1,9 +1,9 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, Permission } from "@sdp/types";
+import type { Permission } from "@sdp/types";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedCachedApiKey } from "@/test/mocks/kv";
+import { type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 export interface EarnTestApiKey {
@@ -34,7 +34,7 @@ export async function seedEarnAuthzTenant(
   env: Env,
   tag: string,
   options: {
-    environment: CachedApiKey["environment"];
+    environment: SeededApiKey["environment"];
   }
 ): Promise<EarnAuthzTenant> {
   const environment = options.environment;
@@ -84,11 +84,11 @@ export async function seedEarnApiKey(
   key: {
     id: string;
     permissions: Permission[];
-    environment: CachedApiKey["environment"];
+    environment: SeededApiKey["environment"];
   }
 ): Promise<EarnTestApiKey> {
   const raw = `sk_test_${key.id}`;
-  const cached: CachedApiKey = {
+  const cached: SeededApiKey = {
     id: key.id,
     organizationId: tenant.org.id,
     projectId: tenant.project.id,
@@ -101,7 +101,7 @@ export async function seedEarnApiKey(
     status: "active",
     expiresAt: null,
   };
-  await seedCachedApiKey(env, await hashString(raw, env.API_KEY_PEPPER), cached);
+  await seedApiKeyRow(env, await hashString(raw, env.API_KEY_PEPPER), cached);
   await getDb(env)
     .prepare(`INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)

@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, SdpEnvironment, SignerCheckRequest } from "@sdp/types";
+import type { SdpEnvironment, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -30,7 +30,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+import { clearKVStores, type SeededApiKey, seedApiKeyRow } from "@/test/mocks/kv";
 
 const signerCheckMocks = vi.hoisted(() => ({
   createExactSigner: vi.fn(),
@@ -91,7 +91,7 @@ const TEST_API_KEY = {
 
 const TEST_SIGNATURE = signature("1".repeat(64));
 
-const TEST_CACHED_API_KEY: CachedApiKey = {
+const TEST_CACHED_API_KEY: SeededApiKey = {
   id: TEST_API_KEY.id,
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
@@ -110,7 +110,7 @@ const PARA_CONFIG_ID = "cust_cfg_scope_para";
 
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+  await seedApiKeyRow(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
@@ -200,7 +200,7 @@ async function seedAuthAndConfigs(): Promise<void> {
   });
 }
 
-async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
+async function seedCachedKey(override: Partial<SeededApiKey>): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   const walletBindings = override.walletBindings
     ? await Promise.all(
@@ -216,7 +216,7 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
         })
       )
     : undefined;
-  await seedCachedApiKey(env, keyHash, {
+  await seedApiKeyRow(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
     ...(walletBindings ? { walletBindings } : {}),
@@ -728,7 +728,7 @@ describe("Custody wallet scope routes", () => {
   ])(
     "preserves signer-check selection with $label and no walletId",
     async ({ walletIds, preferred, status, walletId, recordId }) => {
-      const bindings: NonNullable<CachedApiKey["walletBindings"]> = walletIds.map((walletId) => ({
+      const bindings: NonNullable<SeededApiKey["walletBindings"]> = walletIds.map((walletId) => ({
         walletId,
         permissions: ["wallets:write"],
       }));

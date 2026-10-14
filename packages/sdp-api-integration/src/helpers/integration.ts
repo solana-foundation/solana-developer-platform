@@ -125,7 +125,7 @@ export async function resetIntegrationState(
 async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   cachedCustodyWallet = null;
   const db = getDb(env);
-  const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
+  const { rateLimits: rateLimitKV } = createKVStoreSet(env);
 
   const rateLimitKeys = await rateLimitKV.list();
   for (const key of rateLimitKeys.keys) {
@@ -219,8 +219,6 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
       apiKeyHash
     )
     .run();
-
-  await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
 }
 
 export async function cleanupIntegrationSuite() {

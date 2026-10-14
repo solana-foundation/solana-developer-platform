@@ -115,7 +115,6 @@ export interface RotateApiKeyResult {
     id: string;
     rotationDeadline: string;
   };
-  previousKeyHash: string;
 }
 
 /**
@@ -199,7 +198,6 @@ type RotationTargetRow = {
   id: string;
   name: string;
   description: string | null;
-  key_hash: string;
   role: ApiKeyRole;
   permissions: string | null;
   environment: ApiKeyEnvironment;
@@ -530,7 +528,7 @@ export class ApiKeyService {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
       .prepare(
-        `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
+        `SELECT ak.id, ak.name, ak.description, ak.role, ak.permissions,
                 p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
                 ak.signing_wallet_id, ak.created_by, ak.expires_at
          FROM api_keys ak
@@ -601,7 +599,7 @@ export class ApiKeyService {
         // lock is createApiKey's: a replacement can't commit under an
         // organization a concurrent deletion has already revoked (APE-358).
         const target = await tx.queryOne<RotationTargetRow>(
-          `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
+          `SELECT ak.id, ak.name, ak.description, ak.role, ak.permissions,
                   p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
                   ak.signing_wallet_id, ak.created_by, ak.expires_at
            FROM api_keys ak
@@ -729,70 +727,19 @@ export class ApiKeyService {
         id: keyId,
         rotationDeadline,
       },
-      previousKeyHash: rotated.key_hash,
     };
-  }
-
-  /**
-   * Compensating undo for a rotation whose cache invalidation could not be
-   * applied. The stale cached entry describes the PRE-rotation key — active,
-   * no deadline — so rather than leave the old key authorizing past a
-   * deadline the cache will never carry, put Postgres back into the state
-   * that entry already describes: clear the deadline and retire the
-   * replacement nobody received a secret for.
-   *
-   * The rotation becomes a no-op instead of a half-applied one, and because
-   * the replacement is no longer active the caller's retry is admitted by
-   * the duplicate guard rather than refused.
-   */
-  async undoRotation(keyId: string, replacementKeyId: string): Promise<void> {
-    assertTenantClaim(
-      this.scope,
-      { organizationId: this.scope.organizationId, projectId: this.scope.projectId },
-      "ApiKeyService.undoRotation"
-    );
-
-    await this.db.transaction(async (tx) => {
-      await tx
-        .prepare(
-          `UPDATE api_keys
-           SET rotation_deadline = NULL
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(keyId, this.scope.organizationId, this.scope.projectId)
-        .run();
-
-      await tx
-        .prepare(
-          `UPDATE api_keys
-           SET status = 'revoked', revoked_at = ?
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(
-          new Date().toISOString(),
-          replacementKeyId,
-          this.scope.organizationId,
-          this.scope.projectId
-        )
-        .run();
-    });
   }
 
   async revokeApiKey(
     keyId: string,
     organizationId: string,
     projectId: string
-  ): Promise<{
-    keyHash: string;
-    revokedAt: string;
-  } | null> {
+  ): Promise<{ revokedAt: string } | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.revokeApiKey");
     const key = await this.db
-      .prepare(
-        "SELECT id, key_hash FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?"
-      )
+      .prepare("SELECT id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?")
       .bind(keyId, organizationId, projectId)
-      .first<{ id: string; key_hash: string }>();
+      .first<{ id: string }>();
 
     if (!key) {
       return null;
@@ -808,7 +755,7 @@ export class ApiKeyService {
       .bind(now, keyId, this.scope.organizationId, this.scope.projectId)
       .run();
 
-    return { keyHash: key.key_hash, revokedAt: now };
+    return { revokedAt: now };
   }
 
   private mapListRow(row: ApiKeyListRow): ApiKeyListItem {
