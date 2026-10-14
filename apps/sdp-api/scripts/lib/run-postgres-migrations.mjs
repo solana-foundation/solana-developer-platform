@@ -8,7 +8,7 @@ const NON_TRANSACTIONAL_DIRECTIVE = /^--\s*sdp:migration-mode:\s*non-transaction
 // DDL waiting on a lock queues every later query on that table behind it, so a
 // migration gives up its place after this long instead of stalling live traffic.
 const DEFAULT_LOCK_TIMEOUT = "5s";
-// Five attempts take at most about 40 s, well inside the migrate job's timeout.
+// Up to four retries after a lock timeout, with 15 s of backoff in all.
 const DEFAULT_LOCK_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const LOCK_NOT_AVAILABLE = "55P03";
 
