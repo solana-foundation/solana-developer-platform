@@ -53,11 +53,11 @@ const IDEMPOTENCY_CONTRACT =
   "Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. " +
   "A replay is a snapshot of the original response: read the current state with GET instead of sending the request again.";
 
-const SERVER_ERROR_RETRY: Record<IdempotencyDocumentation["serverErrors"], string> = {
+const SERVER_ERROR_RETRY = {
   store: "A 5xx is stored and replayed like any other answer; retry it with a new key.",
   rerun:
-    "After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer carries no `Idempotent-Replayed` header.",
-};
+    "After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.",
+} as const satisfies Record<IdempotencyDocumentation["serverErrors"], string>;
 
 const ANSWER_AFTER_RECORD =
   "Once the request has written its record, its answer is stored whatever its status: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. To try again, send the request with a new key.";

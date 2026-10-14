@@ -5,6 +5,7 @@ import {
   SDP_RELEASE_CHANNELS,
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { declaredIdempotency } from "@/middleware/idempotency";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
@@ -921,9 +922,28 @@ describe("OpenAPI spec", () => {
  * required where the chain requires it, optional where it accepts it, and
  * absent on every other mutating route of a `stable` module.
  */
+const MUTATING_OPERATION_KEYS = {
+  DELETE: "delete",
+  PATCH: "patch",
+  POST: "post",
+  PUT: "put",
+} as const satisfies Record<string, string>;
+
+/** A `"METHOD /path"` route key, split into its method and path. */
+const mutatingRouteSchema = z.tuple([
+  z.enum(["DELETE", "PATCH", "POST", "PUT"]),
+  z.string().startsWith("/"),
+]);
+
+/** The OpenAPI operation a `"METHOD /path"` route key names, if the document has one. */
+function operationFor(document: ReturnType<typeof createOpenApiDocument>, route: string) {
+  const [method, path] = mutatingRouteSchema.parse(route.split(" "));
+  return document.paths?.[path]?.[MUTATING_OPERATION_KEYS[method]];
+}
+
 describe("OpenAPI Idempotency-Key headers", () => {
   // Declared routes with no public operation yet; adding one is deliberate.
-  const UNDOCUMENTED = ["POST /v1/payments/requests"];
+  const UNDOCUMENTED: readonly string[] = ["POST /v1/payments/requests"];
 
   function declaredModes() {
     const modes = new Map<string, ReturnType<typeof declaredIdempotency>>();
@@ -938,9 +958,7 @@ describe("OpenAPI Idempotency-Key headers", () => {
   const doc = createOpenApiDocument();
 
   function documentedHeader(route: string) {
-    const [method, path] = route.split(" ") as [string, string];
-    const operation =
-      doc.paths?.[path]?.[method.toLowerCase() as "post" | "patch" | "put" | "delete"];
+    const operation = operationFor(doc, route);
     if (operation === undefined) return undefined;
     const header = (operation.parameters ?? []).find(
       (parameter) =>
@@ -953,14 +971,13 @@ describe("OpenAPI Idempotency-Key headers", () => {
   const modes = declaredModes();
 
   it("documents the header as each route's chain declares it", () => {
-    const documented = [...modes].map(([route, mode]) => [
-      route,
-      documentedHeader(route) ?? "undocumented",
-      mode ?? "absent",
-    ]);
+    const documented = [...modes].map(
+      ([route, mode]) =>
+        [route, documentedHeader(route) ?? "undocumented", mode ?? "absent"] as const
+    );
     const drift = documented.filter(([route, header, mode]) =>
       header === "undocumented"
-        ? mode !== "absent" && !UNDOCUMENTED.includes(route as string)
+        ? mode !== "absent" && !UNDOCUMENTED.includes(route)
         : header !== mode
     );
     expect(drift).toEqual([]);
@@ -972,10 +989,7 @@ describe("OpenAPI Idempotency-Key headers", () => {
     const missing = [...modes]
       .filter(([route, mode]) => mode !== undefined && !UNDOCUMENTED.includes(route))
       .flatMap(([route]) => {
-        const [method, path] = route.split(" ") as [string, string];
-        const responses =
-          doc.paths?.[path]?.[method.toLowerCase() as "post" | "patch" | "put" | "delete"]
-            ?.responses ?? {};
+        const responses = operationFor(doc, route)?.responses ?? {};
         return ["400", "409", "422"]
           .filter((status) => !(status in responses))
           .map((status) => `${route} ${status}`);
@@ -992,18 +1006,23 @@ describe("OpenAPI Idempotency-Key headers", () => {
  * to the list fails here until each surface says so.
  */
 describe("Idempotency-Key required routes on public surfaces", () => {
-  interface PostmanItem {
-    item?: PostmanItem[];
-    request?: {
-      method: string;
-      url: string | { raw?: string };
-      header?: { key: string; value: string }[];
-    };
-  }
+  const postmanItemSchema = z.object({
+    get item() {
+      return z.array(postmanItemSchema).optional();
+    },
+    request: z
+      .object({
+        method: z.string(),
+        url: z.union([z.string(), z.object({ raw: z.string().optional() })]),
+        header: z.array(z.object({ key: z.string(), value: z.string() })).optional(),
+      })
+      .optional(),
+  });
+  type PostmanItem = z.infer<typeof postmanItemSchema>;
 
   const toOpenApiPath = (path: string) => path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
   const required = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
-    const [method, path] = route.split(" ") as [string, string];
+    const [method, path] = mutatingRouteSchema.parse(route.split(" "));
     return { route, method, path: toOpenApiPath(path) };
   });
   const readDocsFile = (relative: string) =>
@@ -1013,10 +1032,7 @@ describe("Idempotency-Key required routes on public surfaces", () => {
     const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
     const notRequired = required
       .filter(({ method, path }) => {
-        const operation =
-          publicDocument.paths?.[path]?.[
-            method.toLowerCase() as "post" | "patch" | "put" | "delete"
-          ];
+        const operation = operationFor(publicDocument, `${method} ${path}`);
         const header = (operation?.parameters ?? []).find(
           (parameter) =>
             "in" in parameter && parameter.in === "header" && parameter.name === "Idempotency-Key"
@@ -1028,9 +1044,11 @@ describe("Idempotency-Key required routes on public surfaces", () => {
   });
 
   it("sends a saved per-operation key from the Postman collection", () => {
-    const collection = JSON.parse(
-      readDocsFile("public/postman/solana-developer-platform-public.postman_collection.json")
-    ) as PostmanItem;
+    const collection = postmanItemSchema.parse(
+      JSON.parse(
+        readDocsFile("public/postman/solana-developer-platform-public.postman_collection.json")
+      )
+    );
     const keyed = new Set<string>();
     const walk = (items: PostmanItem[]) => {
       for (const item of items) {
