@@ -1,5 +1,6 @@
 import { SDP_RAMP_PROVIDER_STAGES, SDP_RELEASE_CHANNELS, type SdpModule } from "@sdp/types";
 import { createApp } from "@/app";
+import type { RouteHandler } from "@/middleware/authorize";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { noopObservability } from "@/runtime/observability";
 
@@ -12,7 +13,7 @@ export interface StableMutatingRouteStep {
   route: string;
   /** The step's position across the whole app, so steps of one route compare by order. */
   position: number;
-  handler: object;
+  handler: RouteHandler;
 }
 
 /**

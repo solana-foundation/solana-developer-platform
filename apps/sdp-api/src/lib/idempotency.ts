@@ -119,7 +119,8 @@ export function canonicalJson(value: JsonValue): string {
     return `[${value.map(canonicalJson).join(",")}]`;
   }
   const members = Object.keys(value)
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    // With no comparator, sort orders strings by UTF-16 code unit: RFC 8785's order.
+    .sort()
     // SAFETY: every key comes from Object.keys(value), so the member is present.
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] as JsonValue)}`);
   return `{${members.join(",")}}`;

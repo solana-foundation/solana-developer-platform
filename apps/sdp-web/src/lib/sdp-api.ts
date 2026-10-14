@@ -227,23 +227,23 @@ export function extractSdpApiError(error: unknown): { status: number | null; mes
  * `Idempotent-Replayed` through a server action, and needs both to apply
  * `answerRetiresKey`.
  *
- * @param error - What the sdp-api call threw.
+ * @param cause - What the sdp-api call threw, as a `catch` hands it over.
  */
-export function sdpApiAnswer(error: unknown): ApiAnswer {
-  if (error instanceof SdpApiResponseError) {
+export function sdpApiAnswer(cause: unknown): ApiAnswer {
+  if (cause instanceof SdpApiResponseError) {
     return {
-      status: error.status,
-      replayed: error.replayed,
-      code: apiErrorCodeOfText(error.responseBody),
+      status: cause.status,
+      replayed: cause.replayed,
+      code: apiErrorCodeOfText(cause.responseBody),
     };
   }
   // Crossed a server-action boundary: the body survives only in the message.
   const body =
-    error instanceof Error
-      ? /^SDP API request failed \(\d+\): ([\s\S]*)$/.exec(error.message)
+    cause instanceof Error
+      ? /^SDP API request failed \(\d+\): ([\s\S]*)$/.exec(cause.message)
       : null;
   return {
-    status: extractSdpApiError(error).status,
+    status: extractSdpApiError(cause).status,
     replayed: false,
     code: body?.[1] === undefined ? null : apiErrorCodeOfText(body[1]),
   };

@@ -5,7 +5,7 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
-import { isCustodyWalletIdempotencyViolation } from "@/db/postgres-utils";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -383,7 +383,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
     return created(c, response);
   } catch (error) {
-    if (idempotency !== null && isCustodyWalletIdempotencyViolation(error)) {
+    if (idempotency !== null && isPostgresUniqueViolation(error)) {
       // A concurrent attempt under this key recorded the wallet first: answer from its row.
       const replay = await findCustodyWalletCreateReplay(c);
       if (replay !== null) {

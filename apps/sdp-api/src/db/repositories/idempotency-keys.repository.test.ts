@@ -133,6 +133,46 @@ describe("idempotency keys repository", () => {
     });
   });
 
+  it.each([
+    { claim: "lapsed, on a route that may take it over", release: false, takeOverLapsed: true },
+    { claim: "released, on any route", release: true, takeOverLapsed: false },
+  ])(
+    "claims again when a $claim claim's lease ends between the takeover and the read",
+    async ({ release, takeOverLapsed }) => {
+      const first = claimInput();
+      await repository().claim(first);
+      if (release) {
+        await repository().unlock(first.id, first.claimToken);
+      } else {
+        await getDb(env).execute(
+          `UPDATE idempotency_keys SET locked_until = now() - interval '1 second' WHERE id = ?`,
+          [first.id]
+        );
+      }
+      // The first takeover statement still saw the lease live.
+      const db = getDb(env);
+      const prepare = db.prepare.bind(db);
+      let raced = false;
+      const spy = vi.spyOn(db, "prepare").mockImplementation((query) => {
+        const statement = prepare(query);
+        if (!raced && query.includes("SET id = ?, claim_token = ?")) {
+          raced = true;
+          vi.spyOn(statement, "bind").mockReturnValue(statement);
+          vi.spyOn(statement, "first").mockResolvedValue(null);
+        }
+        return statement;
+      });
+      try {
+        expect(
+          await createPostgresIdempotencyKeyRepository(db).claim(claimInput({ takeOverLapsed }))
+        ).toEqual({ kind: "claimed", fresh: false, replacedUnfinished: false });
+        expect(raced).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    }
+  );
+
   it("stores and replays a bodyless response", async () => {
     const first = claimInput();
     await repository().claim(first);

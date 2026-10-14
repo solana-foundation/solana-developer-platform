@@ -445,16 +445,37 @@ describe("Custody wallet owner contract", () => {
       ).toEqual({ status: "completed", response_status: 503 });
     });
 
+    // Privy dedupes on the request id, so the loser usually gets the winner's
+    // own wallet back, and its insert can fail on the owner-and-wallet unique
+    // constraint rather than the request id's.
     it.each([
-      ["Managed", { provider: "privy", label: "Treasury" }, { custodyConfigId: CONFIG_ID }],
+      [
+        "Managed",
+        "another",
+        { provider: "privy", label: "Treasury" },
+        { custodyConfigId: CONFIG_ID },
+      ],
+      [
+        "Managed",
+        "the same",
+        { provider: "privy", label: "Treasury" },
+        { custodyConfigId: CONFIG_ID },
+      ],
       [
         "BYOK",
+        "another",
+        { connectionId: CONNECTION_ID, label: "Settlement" },
+        { custodyConnectionId: CONNECTION_ID },
+      ],
+      [
+        "BYOK",
+        "the same",
         { connectionId: CONNECTION_ID, label: "Settlement" },
         { custodyConnectionId: CONNECTION_ID },
       ],
     ])(
-      "answers a %s create that loses the race for its request id from the row that won",
-      async (_kind, body, owner) => {
+      "answers a %s create that loses the race for its request id, holding %s provider wallet, from the row that won",
+      async (_kind, loserWallet, body, owner) => {
         provisionPrivyWalletMock.mockImplementationOnce(async () => {
           // A concurrent attempt under the same key recorded its wallet first.
           const claim = await getDb(env).queryOne<{ fingerprint: string }>(
@@ -483,7 +504,10 @@ describe("Custody wallet owner contract", () => {
               WHERE id = 'cwlt_raced_winner'`,
             [requestId(KEY), claim?.fingerprint ?? null]
           );
-          return { walletId: "raced_loser", address: CREATED_PUBLIC_KEY };
+          return {
+            walletId: loserWallet === "the same" ? "raced_winner" : "raced_loser",
+            address: CREATED_PUBLIC_KEY,
+          };
         });
 
         const response = await createWallet(body, KEY);

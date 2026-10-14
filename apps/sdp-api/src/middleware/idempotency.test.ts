@@ -103,8 +103,10 @@ function post(
   );
 }
 
+const errorBodySchema = z.object({ error: z.object({ code: z.string() }) });
+
 async function errorCode(res: Response): Promise<string> {
-  return ((await res.json()) as { error: { code: string } }).error.code;
+  return errorBodySchema.parse(await res.json()).error.code;
 }
 
 async function storedRows(): Promise<Array<Record<string, unknown>>> {

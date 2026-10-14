@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import {
   createProviderWallet,
   privyWalletExternalId,
@@ -8,18 +9,11 @@ import type { Env } from "@/types/env";
 const createWalletMock = vi.hoisted(() => vi.fn());
 const createDfnsApiClientMock = vi.hoisted(() => vi.fn());
 const createIbmHavenApiClientMock = vi.hoisted(() => vi.fn());
-const provisionPrivyWalletMock = vi.hoisted(() => vi.fn());
-const provisionCoinbaseCdpAccountMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/services/custody/provisioning", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/custody/provisioning")>();
-
-  return {
-    ...actual,
-    provisionPrivyWallet: provisionPrivyWalletMock,
-    provisionCoinbaseCdpAccount: provisionCoinbaseCdpAccountMock,
-  };
-});
+const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
+const provisionCoinbaseCdpAccountMock = vi.spyOn(
+  custodyProvisioning,
+  "provisionCoinbaseCdpAccount"
+);
 
 vi.mock("@sdp/custody/dfns", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/custody/dfns")>();

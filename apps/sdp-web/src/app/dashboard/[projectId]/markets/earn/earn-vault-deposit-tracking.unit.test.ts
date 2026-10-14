@@ -9,6 +9,13 @@ import {
   vaultDepositIdempotencyKeyStore,
   vaultDepositRequestFingerprint,
 } from "./earn-vault-deposit-tracking";
+import {
+  forgetVaultWithdrawalFloor,
+  recallVaultWithdrawalFloor,
+  rememberVaultWithdrawalFloor,
+  vaultWithdrawalIdempotencyKeyStore,
+  vaultWithdrawalRequestFingerprint,
+} from "./earn-vault-withdraw-tracking";
 
 const IDEMPOTENCY_STORE_KEY = "sdp:earn:vault-deposit:idempotency:v1";
 
@@ -239,6 +246,42 @@ describe("the floor memo", () => {
     expect(recallVaultDepositFloor(fingerprint)).toBeNull();
     forgetVaultDepositFloor(fingerprint);
     expect(recallVaultDepositFloor(fingerprint)).toBeUndefined();
+  });
+
+  // Greptile (#2333): a late answer to an earlier attempt retired nothing new,
+  // yet erased the floor the newer kept key replays, so its retry stopped.
+  it("keeps a newer key's floor when a late answer settles an earlier attempt", () => {
+    const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
+    rememberVaultDepositFloor(fingerprint, "0.9");
+    // A retry under the same key is answered first and retires it.
+    vaultDepositIdempotencyKeyStore.release(fingerprint, first);
+    forgetVaultDepositFloor(fingerprint);
+    rememberVaultDepositFloor(fingerprint, "0.8");
+    vaultDepositIdempotencyKeyStore.claim(fingerprint);
+
+    // The first attempt's late answer.
+    vaultDepositIdempotencyKeyStore.release(fingerprint, first);
+    forgetVaultDepositFloor(fingerprint);
+
+    expect(recallVaultDepositFloor(fingerprint)).toBe("0.8");
+  });
+
+  it("keeps a newer withdrawal key's floor on the same rule", () => {
+    const exit = vaultWithdrawalRequestFingerprint({
+      projectId: "prj_1",
+      positionId: "pos_1",
+      shares: "1",
+      toleranceBps: 10,
+    });
+    const first = vaultWithdrawalIdempotencyKeyStore.claim(exit).key;
+    vaultWithdrawalIdempotencyKeyStore.release(exit, first);
+    rememberVaultWithdrawalFloor(exit, "0.8");
+    vaultWithdrawalIdempotencyKeyStore.claim(exit);
+
+    vaultWithdrawalIdempotencyKeyStore.release(exit, first);
+    forgetVaultWithdrawalFloor(exit);
+
+    expect(recallVaultWithdrawalFloor(exit)).toBe("0.8");
   });
 
   it("keeps serving in memory when the browser refuses to store anything", () => {

@@ -4635,6 +4635,57 @@ describe("Payments routes — recurring", () => {
       expect(send).toHaveBeenCalledTimes(sendsBefore);
     });
 
+    it("resumes a PATCH that crashed after its claim when the same key retries it after the stale timeout", async () => {
+      recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const metadataUri = "https://example.com/recurring/resumed.json";
+      const request = () =>
+        app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+          env
+        );
+      expect((await request()).status).toBe(200);
+      // The process died right after the claim: the schedule is `updating` with
+      // its old terms, the attempt is in flight at its first stage, and the key
+      // never recorded an outcome. The cron does not recover `updating`.
+      const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'updating', metadata_uri = ?, updated_at = ?
+            WHERE id = ?`
+        )
+        .bind(activated.metadataUri, staleAt, activated.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payment_update_attempts
+              SET status = 'processing', stage = 'claim', plan_update_signature = NULL, updated_at = ?
+            WHERE idempotency_key = ?`
+        )
+        .bind(staleAt, recordKey(key))
+        .run();
+      await crashIdempotencyKey(key);
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        status: "active",
+        metadataUri,
+      });
+      const attempts = await getDb(env)
+        .prepare(
+          `SELECT status, stage, plan_update_signature IS NOT NULL AS signed
+             FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .all<{ status: string; stage: string; signed: boolean }>();
+      expect(attempts.results).toEqual([{ status: "confirmed", stage: "finalize", signed: true }]);
+    });
+
     it("answers a collect retry after the due date advanced without pulling a second period", async () => {
       recurringExecution.signAndSendMock();
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
