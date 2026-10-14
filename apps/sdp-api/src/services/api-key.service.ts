@@ -16,7 +16,7 @@ import type {
   Permission,
 } from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import { apiKeyRowRefusal, isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
@@ -640,14 +640,14 @@ export class ApiKeyService {
   }
 
   /**
-   * Revoke a key, and with it the replacement of a rotation still in flight.
-   * Runs on the caller's transaction. The conditional update takes the key's
-   * row lock, so it waits for a rotation that holds it and then sees that
-   * rotation's replacement: revoking a key while its replacement is active
-   * and its grace period is still running revokes the replacement too, so a
-   * revocation can never leave a live child of the revoked key (APE-345). A
-   * predecessor already past its deadline is retired, not in flight: revoking
-   * it leaves its replacement alone.
+   * Revoke one key, and only that key: a replacement minted by rotating it
+   * stays alive, so a user can rotate, deploy the replacement and then retire
+   * the predecessor before its grace deadline. Runs on the caller's
+   * transaction. The conditional update takes the key's row lock, so a
+   * rotation of the same key either finished before it (its replacement
+   * survives, as intended) or waits and then finds no active key to rotate.
+   * Keys cannot manage keys (HOO-2099), so only a signed-in person reaches
+   * either side of that race.
    *
    * @returns The revocation, `alreadyRevoked` for a key no longer active, or
    *   null when no such key exists in this project.
@@ -657,18 +657,17 @@ export class ApiKeyService {
     organizationId: string,
     projectId: string
   ): Promise<
-    | { revokedAt: string; alreadyRevoked: false; revokedReplacementIds: string[] }
+    | { revokedAt: string; alreadyRevoked: false }
     | { revokedAt: string | null; alreadyRevoked: true }
     | null
   > {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.revokeApiKey");
-    const now = new Date();
-    const revokedAt = now.toISOString();
-    const revoked = await this.db.queryOne<{ rotation_deadline: string | null }>(
+    const revokedAt = new Date().toISOString();
+    const revoked = await this.db.queryOne<{ id: string }>(
       `UPDATE api_keys
           SET status = 'deactivated', revoked_at = ?
         WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
-        RETURNING rotation_deadline`,
+        RETURNING id`,
       [revokedAt, keyId, organizationId, projectId]
     );
 
@@ -680,24 +679,7 @@ export class ApiKeyService {
       return existing ? { revokedAt: existing.revoked_at, alreadyRevoked: true } : null;
     }
 
-    const rotationInFlight =
-      revoked.rotation_deadline !== null &&
-      !isRotationDeadlineReached(revoked.rotation_deadline, now.getTime());
-    const replacements = rotationInFlight
-      ? await this.db.queryMany<{ id: string }>(
-          `UPDATE api_keys
-              SET status = 'deactivated', revoked_at = ?
-            WHERE rotated_from = ? AND organization_id = ? AND project_id = ? AND status = 'active'
-            RETURNING id`,
-          [revokedAt, keyId, organizationId, projectId]
-        )
-      : [];
-
-    return {
-      revokedAt,
-      alreadyRevoked: false,
-      revokedReplacementIds: replacements.map((row) => row.id),
-    };
+    return { revokedAt, alreadyRevoked: false };
   }
 
   private mapListRow(row: ApiKeyListRow): ApiKeyListItem {

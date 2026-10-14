@@ -427,8 +427,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw badRequest("Confirmation did not match the key name");
   }
 
-  // The revocation, any in-flight replacement it cascades to, and the audit
-  // record commit together.
+  // The revocation and the audit record commit together.
   const revokedKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const result = await new ApiKeyService(txDb, getRequestTenantScope(c)).revokeApiKey(
       keyId,
@@ -444,10 +443,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
               action: "delete",
               resourceType: "api_key",
               resourceId: keyId,
-              metadata: {
-                action: "deactivate",
-                revokedReplacementIds: result.revokedReplacementIds,
-              },
+              metadata: { action: "deactivate" },
             },
     };
   });

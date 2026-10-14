@@ -253,7 +253,8 @@ describe("API key lifecycle", () => {
   });
 
   describe("revocation", () => {
-    it("revokes the replacement of a rotation still in flight", async () => {
+    // Rotate, deploy the replacement, then retire the old key early.
+    it("revokes only the predecessor during its grace period", async () => {
       await insertKey({ id: TARGET_KEY_ID });
       expect((await rotate(TARGET_KEY_ID)).status).toBe(201);
       const [replacement] = await replacementsOf(TARGET_KEY_ID);
@@ -261,11 +262,10 @@ describe("API key lifecycle", () => {
       expect((await revoke(TARGET_KEY_ID)).status).toBe(200);
 
       expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
-      expect((await readKey(replacement?.id ?? ""))?.status).toBe("deactivated");
-      const audit = (await apiKeyAudits()).at(-1);
-      expect(audit).toMatchObject({ action: "delete", resource_id: TARGET_KEY_ID });
-      expect(JSON.parse(audit?.metadata ?? "{}")).toMatchObject({
-        revokedReplacementIds: [replacement?.id],
+      expect((await readKey(replacement?.id ?? ""))?.status).toBe("active");
+      expect((await apiKeyAudits()).at(-1)).toMatchObject({
+        action: "delete",
+        resource_id: TARGET_KEY_ID,
       });
     });
 
@@ -281,7 +281,7 @@ describe("API key lifecycle", () => {
       expect((await readKey("key_lifecycle_live_child"))?.status).toBe("active");
     });
 
-    it("waits for a rotation holding the key and then revokes its replacement", async () => {
+    it("waits for a rotation holding the key and then revokes only the predecessor", async () => {
       await insertKey({ id: TARGET_KEY_ID });
       let commitRotation: () => void = () => {};
       const rotationMayCommit = new Promise<void>((resolve) => {
@@ -312,9 +312,10 @@ describe("API key lifecycle", () => {
       await rotation;
 
       expect((await revocation).status).toBe(200);
+      expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
       const replacements = await replacementsOf(TARGET_KEY_ID);
       expect(replacements).toHaveLength(1);
-      expect(replacements[0]?.status).toBe("deactivated");
+      expect(replacements[0]?.status).toBe("active");
     });
 
     it("makes a rotation waiting on a revocation find no key to rotate", async () => {
