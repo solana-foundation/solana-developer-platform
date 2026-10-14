@@ -4,7 +4,7 @@ import {
   type FeePaymentPort,
   resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
-} from "@sdp/payments/fee-payment";
+} from "@sdp/fee-payment";
 import type { MovementId, ProjectEnvironment, SolanaCluster } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";

@@ -1,5 +1,5 @@
 import type { CustodyProvider } from "@sdp/custody";
-import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
+import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/fee-payment";
 import {
   type CustodyMode,
   isModuleInReleaseChannel,
