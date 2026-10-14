@@ -187,6 +187,7 @@ describe("organization roles", () => {
         "organizations.manage",
         "projects.manage",
         "wallets.manage",
+        "wallets.execute",
         "wallets.configure",
         "issuance.enforce",
         "issuance.authority",

@@ -247,7 +247,9 @@ export function apiKeyMayPerform(grants: readonly Action[], action: Action): boo
  * Actions an organization `member` does not hold: key, member, organization
  * and project administration, every `configure`, and the actions whose routes
  * were organization-admin-only before actions existed (issuance `enforce` and
- * `authority` were `tokens:admin`; wallet lifecycle was `custody:admin`).
+ * `authority` were `tokens:admin`; wallet lifecycle was `custody:admin`, and
+ * `wallets.execute` now covers deleting a wallet at its custody provider, so
+ * the signer check that shares it goes admin-only with it).
  */
 function isAdminOnlyAction(action: Action): boolean {
   return (
@@ -258,6 +260,7 @@ function isAdminOnlyAction(action: Action): boolean {
     action === "issuance.enforce" ||
     action === "issuance.authority" ||
     action === "wallets.manage" ||
+    action === "wallets.execute" ||
     actionVerbOf(action) === "configure"
   );
 }

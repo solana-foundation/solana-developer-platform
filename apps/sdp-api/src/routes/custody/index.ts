@@ -67,9 +67,10 @@ wallets.post(
   replayFromRecord(findCustodyWalletCreateReplay),
   createWallet
 );
+// Deleting a wallet deletes it at the custody provider too: irreversible.
 wallets.delete(
   "/",
-  requireAction("wallets.manage"),
+  requireAction("wallets.execute"),
   validateBody(deleteWalletSchema),
   authorize(authorizeDeleteWallet),
   idempotent({ key: "accepted", serverErrors: "store" }),
