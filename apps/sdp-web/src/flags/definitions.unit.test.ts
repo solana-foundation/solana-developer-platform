@@ -27,12 +27,10 @@ const FLAG_CAPS = {
   newDesignContacts: "uncapped",
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
-  custody: { module: "custody" },
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
   privateChannels: { module: "private_channels" },
   heliusRings: { module: "helius_rings" },
-  payments: { module: "payments" },
   markets: { module: "markets" },
   dvp: { module: "dvp" },
   earn: { module: "earn" },
@@ -106,12 +104,11 @@ describe("defineDashboardFlags", () => {
     expect(values[name]).toBe(false);
   });
 
-  it("keeps stable modules and uncapped flags on Vercel's decision on stable", async () => {
+  it("keeps uncapped flags on Vercel's decision on stable", async () => {
     const values = await decideAll(defineFlags("stable"));
     const delegated = Object.keys(FLAG_CAPS).filter((name) => !EXCLUDED_FROM_STABLE.includes(name));
     expect(delegated.sort()).toEqual(
       [
-        "custody",
         "homepageOpenSignup",
         "newDesign",
         "paymentsDemoMode",
@@ -119,7 +116,6 @@ describe("defineDashboardFlags", () => {
         "newDesignContacts",
         "newDesignPayDeposit",
         "newDesignActivity",
-        "payments",
       ].sort()
     );
     for (const name of delegated) {
