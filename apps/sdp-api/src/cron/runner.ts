@@ -93,6 +93,11 @@ function isCronDisabled(env: Env): boolean {
   );
 }
 
+/** Throws on an invalid DISABLE_CRON, so the entrypoint fails before it opens sockets. */
+export function assertCronConfig(env: Env): void {
+  isCronDisabled(env);
+}
+
 const IN_PROCESS_CHECKIN_MARGIN_MINUTES = 3;
 
 function withCheckinMargin(observability: Observability): Observability {

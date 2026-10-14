@@ -40,6 +40,11 @@ export const healthReadyResponseSchema = z
           description: "Redis connectivity status.",
           example: "ok",
         }),
+        egress: z.enum(["ok", "pending", "unverified"]).optional().openapi({
+          description:
+            "Outbound internet connectivity of this instance. `pending` (not ready) while a fresh instance waits for working egress, `ok` once an outbound call succeeded, `unverified` when it stopped waiting and serves anyway. Absent where the deployment does not wait for egress.",
+          example: "ok",
+        }),
       })
       .openapi({ description: "Dependency health checks." }),
   })

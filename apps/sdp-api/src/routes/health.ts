@@ -34,10 +34,12 @@ health.get("/ready", async (c) => {
   const checks = {
     database: database.status === "fulfilled" ? ("ok" as const) : ("error" as const),
     redis: redis.status === "fulfilled" ? ("ok" as const) : ("error" as const),
+    // Undefined where nothing gates on egress, so the JSON omits it.
+    egress: c.get("egressReadiness")?.(),
   };
   const body = {
     status:
-      checks.database === "ok" && checks.redis === "ok"
+      checks.database === "ok" && checks.redis === "ok" && checks.egress !== "pending"
         ? ("ready" as const)
         : ("not_ready" as const),
     timestamp: new Date().toISOString(),

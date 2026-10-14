@@ -11,6 +11,7 @@ import type {
 } from "@sdp/types";
 import type { ManagedRpcEnv } from "@sdp/rpc";
 import type { RequestGateContext } from "@/middleware/request-gate";
+import type { EgressReadiness } from "@/runtime/egress-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
 
@@ -338,6 +339,8 @@ declare module "hono" {
     observability?: Observability;
     // Set by createApp on every request; see AppDeps.rampProviderStages
     rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.egressReadiness
+    egressReadiness?: () => EgressReadiness;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

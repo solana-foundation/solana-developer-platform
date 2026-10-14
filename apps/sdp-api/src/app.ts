@@ -62,6 +62,7 @@ import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
+import type { EgressReadiness } from "@/runtime/egress-gate";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
@@ -82,6 +83,12 @@ export interface AppDeps {
    * leave another out, which today's all-`experimental` stages cannot show.
    */
   rampProviderStages: SdpRampProviderStages;
+  /**
+   * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
+   * out of rotation until it can reach the internet. Absent where nothing gates
+   * on egress (the Workers entrypoint, tests).
+   */
+  egressReadiness?: () => EgressReadiness;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -308,6 +315,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
     c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 
