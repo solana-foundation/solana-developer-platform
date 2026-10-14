@@ -61,7 +61,7 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `@sdp/kamino` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/ondo` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
-- `@sdp/payments` -> `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/payments` -> `@sdp/redaction`, `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
 - `@sdp/redaction` -> None
 - `@sdp/rpc` -> `@sdp/types`
