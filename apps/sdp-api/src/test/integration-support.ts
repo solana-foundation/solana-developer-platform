@@ -45,6 +45,7 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
+import { ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -66,6 +67,7 @@ export const apiTestSupport = {
   createVaultDeadline,
   depositIntoVault,
   CustodyConfigStore,
+  ensureTestClerkIssuer,
   DVP_SWAP_PROGRAM_PROGRAM_ADDRESS,
   EARN_PROVIDERS,
   findAssociatedTokenPda,
@@ -77,6 +79,7 @@ export const apiTestSupport = {
   resolveEarnExecutionClient,
   resolveKoraEndpoint,
   seedTestDatabase,
+  signTestClerkJwt,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
   supportsVaultDirect,
