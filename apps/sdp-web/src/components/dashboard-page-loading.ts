@@ -9,7 +9,7 @@ import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
 import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
-  IntegrationsSkeleton,
+  IntegrationsFlagsSkeleton,
 } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
 import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
 import { IssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
@@ -66,10 +66,13 @@ import {
   WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
   WalletConnectionsListSkeleton,
 } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";
+import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
 interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
+  /** The shell's flag snapshot, for skeletons that draw only what the page will render. */
+  flags?: DashboardFlags;
 }
 
 // The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
@@ -112,7 +115,7 @@ function resolveCurrentPageLoadingComponent(
     case "home":
       return DashboardLoading;
     case "integrations":
-      return IntegrationsSkeleton;
+      return IntegrationsFlagsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
     case "private-channels-setup":
