@@ -2,6 +2,7 @@ import type { MoonpayRampSettlement } from "@sdp/types";
 import { z } from "zod";
 import { decimalStringFromNumber } from "../../../decimal";
 import type { RampOnchainTransfer, RampSettlementEvent } from "../../types";
+import { moonpayCryptoRail } from "./client";
 
 export type MoonpaySettlementEvent =
   | ({ provider: "moonpay" } & Extract<RampSettlementEvent, { kind: "ignore" }>)
@@ -41,6 +42,7 @@ export const moonpayBuyTransactionSchema = z.object({
   walletAddress: z.string().nullish(),
   cryptoTransactionId: z.string().nullish(),
   baseCurrency: z.object({ code: z.string() }).optional(),
+  /** The crypto bought; settlement checks it against the transfer's asset. */
   currency: z.object({ code: z.string() }).optional(),
 });
 export type MoonpayBuyTransactionData = z.infer<typeof moonpayBuyTransactionSchema>;
@@ -167,6 +169,7 @@ export function moonpayTransactionSettlementEvent(
         ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
         : {}),
       ...(settlement ? { settlement } : {}),
+      ...(data.currency ? { deliveredAssetRail: moonpayCryptoRail(data.currency.code) } : {}),
     };
   }
   return {
@@ -201,6 +204,8 @@ export const moonpaySellTransactionSchema = z.object({
   refundWalletAddress: z.string().nullish(),
   depositHash: z.string().nullish(),
   depositWallet: z.object({ walletAddress: z.string() }).nullish(),
+  /** The crypto sold; settlement checks it against the transfer's asset. */
+  baseCurrency: z.object({ code: z.string() }).optional(),
 });
 export type MoonpaySellTransactionData = z.infer<typeof moonpaySellTransactionSchema>;
 
@@ -297,6 +302,9 @@ export function moonpaySellTransactionSettlementEvent(
         ...providerCustomer,
         ...(data.quoteCurrencyAmount !== undefined
           ? { receivedAmount: decimalStringFromNumber(data.quoteCurrencyAmount) }
+          : {}),
+        ...(data.baseCurrency
+          ? { deliveredAssetRail: moonpayCryptoRail(data.baseCurrency.code) }
           : {}),
       };
     case "failed":

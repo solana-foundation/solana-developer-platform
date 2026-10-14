@@ -13,6 +13,7 @@ describe("moonpayTransactionSettlementEvent", () => {
       id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
       status: "pending",
+      currency: { code: "sol" },
     });
 
     assert.deepEqual(moonpayTransactionSettlementEvent(data), {
@@ -28,6 +29,7 @@ describe("moonpayTransactionSettlementEvent", () => {
       id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
       externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
       status: "completed",
+      currency: { code: "sol" },
       quoteCurrencyAmount: 0.206,
       walletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
       cryptoTransactionId:
@@ -46,7 +48,46 @@ describe("moonpayTransactionSettlementEvent", () => {
         destinationAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
         amount: "0.206",
       },
+      deliveredAssetRail: "sol.solana",
     });
+  });
+
+  it("reports the crypto bought as the delivered rail, null for one SDP has no rail for", () => {
+    const completed = (code: string) =>
+      moonpayTransactionSettlementEvent(
+        moonpayBuyTransactionSchema.parse({
+          id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+          externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+          status: "completed",
+          currency: { code },
+        })
+      );
+
+    assert.deepEqual(completed("usdc_sol"), {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      deliveredAssetRail: "usdc.solana",
+    });
+    assert.deepEqual(completed("eth"), {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+      transferId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+      deliveredAssetRail: null,
+    });
+  });
+
+  it("reports no rail when the transaction does not name its crypto", () => {
+    const event = moonpayTransactionSettlementEvent(
+      moonpayBuyTransactionSchema.parse({
+        id: "772f7a7f-142e-43cf-824f-8d861aefe8bd",
+        externalTransactionId: "xfr_157805c4-5d9f-404c-b206-1b59b13b492e",
+        status: "completed",
+      })
+    );
+    assert.equal("deliveredAssetRail" in event, false);
   });
 });
 
@@ -64,6 +105,7 @@ const waitingForDepositPayload = {
   customerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
   refundWalletAddress: "FqHmHATxb6esTj7noZE6j7ZTzCqeZjAc9Ao3wfGA6WGP",
   externalTransactionId: SDP_TRANSFER_ID,
+  baseCurrency: { code: "sol" },
   failureReason: null,
   depositHash: null,
   depositWallet: {
@@ -133,6 +175,7 @@ describe("moonpaySellTransactionSettlementEvent", () => {
         destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
         amount: "0.2",
       },
+      deliveredAssetRail: "sol.solana",
     });
   });
 
@@ -147,7 +190,35 @@ describe("moonpaySellTransactionSettlementEvent", () => {
       transferId: SDP_TRANSFER_ID,
       providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
       receivedAmount: "16.31",
+      deliveredAssetRail: "sol.solana",
     });
+  });
+
+  it("reports the crypto sold as the rail, null for one SDP has no rail for", () => {
+    const completedSale = (code: string) =>
+      moonpaySellTransactionSettlementEvent(
+        parseSell({ ...waitingForDepositPayload, status: "completed", baseCurrency: { code } })
+      );
+    const expected = (deliveredAssetRail: string | null) => ({
+      provider: "moonpay",
+      kind: "settled",
+      reference: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+      transferId: SDP_TRANSFER_ID,
+      providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
+      receivedAmount: "16.31",
+      deliveredAssetRail,
+    });
+
+    assert.deepEqual(completedSale("usdc_sol"), expected("usdc.solana"));
+    assert.deepEqual(completedSale("eth"), expected(null));
+  });
+
+  it("reports no rail when the sale does not name its crypto", () => {
+    const { baseCurrency: _omitted, ...withoutCrypto } = waitingForDepositPayload;
+    const event = moonpaySellTransactionSettlementEvent(
+      parseSell({ ...withoutCrypto, status: "completed" })
+    );
+    assert.equal("deliveredAssetRail" in event, false);
   });
 
   it("maps failed to failed with the failure reason", () => {

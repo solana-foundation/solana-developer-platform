@@ -57,6 +57,23 @@ function parseMoonpaySignatureV2Header(
   return timestamp && signature ? { timestamp, signature } : null;
 }
 
+/**
+ * A completed MoonPay transaction must name the crypto it moved, so settlement
+ * can refuse another asset. Earlier events may omit it; a completed one that
+ * does is malformed, and the 400 makes MoonPay redeliver it.
+ */
+function requireSettledAsset(type: string, event: MoonpaySettlementEvent): MoonpaySettlementEvent {
+  if (event.kind === "settled" && event.deliveredAssetRail === undefined) {
+    throw badRequest(
+      `MoonPay "${type}" webhook carries a completed transaction without its crypto`,
+      {
+        provider: event.provider,
+      }
+    );
+  }
+  return event;
+}
+
 export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, MoonpaySettlementEvent> {
   readonly provider = "moonpay";
 
@@ -117,7 +134,10 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
           errors: sellTransactionData.error.issues,
         });
       }
-      return moonpaySellTransactionSettlementEvent(sellTransactionData.data);
+      return requireSettledAsset(
+        type,
+        moonpaySellTransactionSettlementEvent(sellTransactionData.data)
+      );
     }
 
     if (
@@ -135,7 +155,7 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
         errors: transactionData.error.issues,
       });
     }
-    return moonpayTransactionSettlementEvent(transactionData.data);
+    return requireSettledAsset(type, moonpayTransactionSettlementEvent(transactionData.data));
   }
 
   async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {

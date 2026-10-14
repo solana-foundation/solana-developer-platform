@@ -3,6 +3,7 @@ import {
   RETIRED_RAMP_PROVIDERS,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpRampProviderStages,
+  wellKnownMint,
 } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +38,13 @@ describe("Ramp webhook event inbox", () => {
   const TRANSFER_ID = "xfr_ramp_inbox";
   const MOONPAY_TRANSACTION_ID = "e3a1f7cb-42c1-4a08-9d5f-0d51e94eb1af";
   const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  function solMint(): string {
+    const mint = wellKnownMint("SOL", "devnet");
+    if (mint === undefined) {
+      throw new Error("SOL has no devnet mint in the catalogue");
+    }
+    return mint;
+  }
 
   function moonpaySignatureHeader(body: string, timestampSeconds: number) {
     const s = createHmac("sha256", MOONPAY_WEBHOOK_KEY)
@@ -108,7 +116,7 @@ describe("Ramp webhook event inbox", () => {
         null,
         null,
         "DestinationSolanaWallet111111111111111111111111",
-        "SOL",
+        solMint(),
         null,
         null,
         "onramp",
