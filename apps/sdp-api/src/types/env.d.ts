@@ -356,6 +356,8 @@ declare module "hono" {
     idempotencyClaimedKey?: string;
     // Set by markIdempotencyCommitted() once the handler wrote its domain row
     idempotencyCommitted?: boolean;
+    // Set by replayFromRecord when the key's domain row records another request
+    idempotencyRecordMismatch?: boolean;
     apiKey?: {
       id: string;
       organizationId: string;

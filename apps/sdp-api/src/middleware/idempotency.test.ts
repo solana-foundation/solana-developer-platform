@@ -559,6 +559,45 @@ describe("idempotent()", () => {
       });
     });
 
+    it("never stores a record mismatch, so the original request's retry is still answered", async () => {
+      const rows = new Map<string, { fingerprint: string; row: { thing: string } }>();
+      const create = vi.fn((c: Context<{ Bindings: Env }>) => {
+        const recordKey = getIdempotencyRecordKey(c);
+        const fingerprint = getIdempotencyFingerprint(c);
+        if (recordKey === undefined || fingerprint === undefined)
+          throw new Error("expected a claim");
+        rows.set(recordKey, { fingerprint, row: { thing: "original" } });
+        return c.json({ thing: "original" }, 201);
+      });
+      const app = testApp();
+      app.post(
+        "/v1/other",
+        idempotent({ key: "required", serverErrors: "store", recovery: "record" }),
+        replayFromRecord(async (c, _input, recordKey) => {
+          const found = rows.get(recordKey);
+          return found === undefined
+            ? null
+            : { fingerprint: found.fingerprint, respond: () => c.json(found.row, 201) };
+        }),
+        (c) => create(c)
+      );
+
+      expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
+      // The key's 24 hours pass; the domain row remains.
+      await getDb(env).execute(
+        "UPDATE idempotency_keys SET expires_at = now() - interval '1 second'"
+      );
+      const changed = await post(app, "/v1/other", { a: 2 }, KEY);
+      expect(changed.status).toBe(422);
+      expect(await errorCode(changed)).toBe("IDEMPOTENCY_KEY_REUSED");
+      const original = await post(app, "/v1/other", { a: 1 }, KEY);
+
+      expect(original.status).toBe(201);
+      expect(await original.json()).toEqual({ thing: "original" });
+      expect(original.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
     it("refuses the takeover without the option", async () => {
       await withFailingCompletes(async () => {
         const { app, create } = recoveringApp(undefined);
