@@ -11,6 +11,7 @@ import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
@@ -241,8 +242,11 @@ describe("createApp plugin registration", () => {
 });
 
 describe("createApp onError capture", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // These requests are anonymous, so they share the per-IP anonymous window
+    // with every suite this worker ran in the same minute; start it empty.
+    await clearKVStores(baseEnv);
   });
 
   it("captures unexpected errors through the injected observability", async () => {
