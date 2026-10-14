@@ -740,7 +740,7 @@ transaction signed by the organization custody wallet or external owner.
     money-OUT path, the one failure ADR 0002 rules out.
     `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
     from CONFIGURATION: the flag, plus a Kora for that cluster
-    (`isFeePaymentConfiguredForCluster`, @sdp/payments): `KORA_RPC_URL` serves
+    (`isFeePaymentConfiguredForCluster`, @sdp/fee-payment): `KORA_RPC_URL` serves
     the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
     the other; there is no built-in default URL. The bare trio is legacy: the
     project's environment picks the cluster, so a deployment wires BOTH suffix

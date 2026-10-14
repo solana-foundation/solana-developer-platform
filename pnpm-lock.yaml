@@ -959,9 +959,6 @@ importers:
       '@sdp/redaction':
         specifier: workspace:*
         version: link:../sdp-redaction
-      '@sdp/rpc':
-        specifier: workspace:*
-        version: link:../sdp-rpc
       '@sdp/solana':
         specifier: workspace:*
         version: link:../sdp-solana
@@ -969,9 +966,6 @@ importers:
         specifier: workspace:*
         version: link:../sdp-types
       '@solana/addresses':
-        specifier: 'catalog:'
-        version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/codecs':
         specifier: 'catalog:'
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/fixed-points':

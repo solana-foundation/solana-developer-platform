@@ -228,7 +228,7 @@ export interface Env extends ManagedRpcEnv {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
-  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
+  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/fee-payment `resolveKoraEndpoint`). */
   KORA_RPC_URL_DEVNET?: string;
   KORA_API_KEY_DEVNET?: string;
   KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
