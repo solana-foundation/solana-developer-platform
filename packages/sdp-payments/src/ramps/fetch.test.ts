@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { z } from "zod";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 import {
   classifyProviderFailure,
   isDefinitiveProviderRejection,
@@ -226,7 +226,10 @@ describe("providerFetchJson failures", () => {
 });
 
 describe("providerFetch request headers", () => {
-  async function sentHeaders(body: unknown, headers?: HeadersInit): Promise<Headers> {
+  async function sentHeaders(
+    body: Record<string, string> | URLSearchParams | undefined,
+    headers?: HeadersInit
+  ): Promise<Headers> {
     let sent: Headers | undefined;
     globalThis.fetch = async (input, init) => {
       sent = new Request(input, init).headers;
@@ -319,10 +322,10 @@ describe("providerFetch fences", () => {
     });
   }
 
-  function failsWith(message: string) {
+  function failsWith(message: string, code: SdpPaymentsErrorCode = "PROVIDER_UNAVAILABLE") {
     return (cause: unknown) => {
       assert.ok(cause instanceof SdpPaymentsError);
-      assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+      assert.equal(cause.code, code);
       assert.equal(cause.message, message);
       return true;
     };
@@ -378,7 +381,10 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("stripe", "https://api.example.test/slow", { method: "GET" }),
-      failsWith(`The stripe API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+      failsWith(
+        `The stripe API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`,
+        "PROVIDER_RESPONSE_INVALID"
+      )
     );
   });
 
@@ -398,8 +404,34 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("moonpay", "https://api.example.test/huge", { method: "GET" }),
-      failsWith(`moonpay returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`)
+      failsWith(
+        `moonpay returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`,
+        "PROVIDER_RESPONSE_INVALID"
+      )
     );
     assert.ok(pulled <= PROVIDER_MAX_RESPONSE_BYTES / chunk.byteLength + 2);
+  });
+
+  it("keeps a refusal's meaning when its body is unreadable", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(chunk);
+          },
+        }),
+        { status: 400 }
+      );
+
+    await assert.rejects(
+      providerFetch("moonpay", "https://api.example.test/huge", { method: "GET" }),
+      (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "BAD_REQUEST");
+        assert.equal(cause.details?.outcome, "rejected");
+        return true;
+      }
+    );
   });
 });

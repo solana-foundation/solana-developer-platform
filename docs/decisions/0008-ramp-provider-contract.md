@@ -56,7 +56,7 @@ stateful providers fit the model at all.
   `resolveRampProviderClient` answers 503 for any id that is not live, retired
   ids included.
 - **Provider responses are validated.** `providerFetchJson` takes a zod schema,
-  and a success that does not match, or is not JSON, is
+  and a success that does not match, is not JSON, or cannot be read is
   `PROVIDER_RESPONSE_INVALID` (502). A schema requires exactly what the adapter
   reads, no more.
 - **Every provider failure records its outcome.** `details.outcome` is

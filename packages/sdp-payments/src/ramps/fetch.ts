@@ -62,7 +62,7 @@ function providerReadFailure(provider: RampProviderId, cause: unknown): string {
 }
 
 /** The body to send and the Content-Type it needs; fetch types a form body itself. */
-function serializeProviderBody(body: unknown): {
+function serializeProviderBody<TBody>(body: TBody | undefined): {
   body: BodyInit | undefined;
   contentType: string | undefined;
 } {
@@ -216,10 +216,15 @@ export async function providerFetch<TBody = never>(
   try {
     raw = await readProviderBody(response);
   } catch (cause) {
+    // The status line already arrived: a success may have acted, and a refusal
+    // still proves what its status proves, readable body or not.
+    const failure: { code: SdpPaymentsErrorCode; outcome: ProviderCallOutcome } = response.ok
+      ? { code: "PROVIDER_RESPONSE_INVALID", outcome: "unknown" }
+      : classifyProviderFailure(response.status);
     throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
+      failure.code,
       providerReadFailure(provider, cause),
-      { provider, providerStatus: response.status, outcome: "unknown" },
+      { provider, providerStatus: response.status, outcome: failure.outcome },
       transportDiagnostics(cause)
     );
   }
