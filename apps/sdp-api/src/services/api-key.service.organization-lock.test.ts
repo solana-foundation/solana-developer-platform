@@ -177,11 +177,14 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
 
     try {
       await deletionWritten;
+      // Rotation runs on its caller's transaction, as the handler runs it.
       const rotation = runWithTenantDatabaseIdentity({ organizationId: TEST_ORG.id }, () =>
-        new ApiKeyService(
-          getDb(env),
-          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-        ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"])
+        getDb(env).transaction((tx) =>
+          new ApiKeyService(
+            asTransactionalClient(tx),
+            createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"])
+        )
       ).then(
         (result) => result,
         (error: unknown) => error

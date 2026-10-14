@@ -1,7 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
+import { getDb } from "@/db";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -170,8 +170,9 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     organizationId: actor.organizationId,
     projectId,
   });
-  const createdKey = await getDb(c.env).transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The key, its bindings and its audit record commit together: if the audit
+  // write fails nothing commits, and the secret is never returned.
+  const createdKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
       organizationId: actor.organizationId,
       projectId,
@@ -190,25 +191,24 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     if (resolvedWalletBindings.length > 0) {
       await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
     }
-    return key;
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: createdKey.id,
-    metadata: {
-      projectId,
-      name,
-      role,
-      environment: createdKey.environment,
-      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
-      signingWalletId: resolvedSigningWalletId,
-      signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      provisionedWallet: provisionWalletRequested,
-    },
+    return {
+      result: key,
+      entry: {
+        action: "create",
+        resourceType: "api_key",
+        resourceId: key.id,
+        metadata: {
+          projectId,
+          name,
+          role,
+          environment: key.environment,
+          walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
+          signingWalletId: resolvedSigningWalletId,
+          signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
+          provisionedWallet: provisionWalletRequested,
+        },
+      },
+    };
   });
 
   const response: CreateApiKeyResponse = {

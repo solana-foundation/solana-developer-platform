@@ -7,14 +7,13 @@ import type {
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
-import { asTransactionalClient, getDb } from "@/db";
+import { getDb } from "@/db";
 import { requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
@@ -164,9 +163,9 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     );
   }
 
-  const db = getDb(c.env);
-  const createdKey = await db.transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The key, its bindings and its audit record commit together: if the audit
+  // write fails nothing commits, and the secret is never returned.
+  const createdKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     const key = await new ApiKeyService(txDb, getRequestTenantScope(c)).createApiKey({
       organizationId: orgId,
       projectId,
@@ -185,25 +184,24 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     if (resolvedWalletBindings.length > 0) {
       await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
     }
-    return key;
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: createdKey.id,
-    metadata: {
-      name,
-      role,
-      environment: createdKey.environment,
-      walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
-      signingWalletId: resolvedSigningWalletId,
-      signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
-      allowedOperations: allowedOperations ?? [],
-      provisionedWallet: provisionWalletRequested,
-    },
+    return {
+      result: key,
+      entry: {
+        action: "create",
+        resourceType: "api_key",
+        resourceId: key.id,
+        metadata: {
+          name,
+          role,
+          environment: key.environment,
+          walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
+          signingWalletId: resolvedSigningWalletId,
+          signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
+          allowedOperations: allowedOperations ?? [],
+          provisionedWallet: provisionWalletRequested,
+        },
+      },
+    };
   });
 
   const response: CreateApiKeyResponse = {
@@ -299,8 +297,8 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     );
   }
 
-  await getDb(c.env).transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
+  // The change and its audit record commit together.
+  await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
     await new ApiKeyService(txDb, getRequestTenantScope(c)).updateApiKey({
       keyId,
       organizationId: actor.organizationId,
@@ -320,15 +318,10 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
     if (walletSelection.touched) {
       await replaceApiKeyWalletBindings(txDb, keyId, resolvedWalletBindings);
     }
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: body,
+    return {
+      result: undefined,
+      entry: { action: "update", resourceType: "api_key", resourceId: keyId, metadata: body },
+    };
   });
 
   return success(c, { success: true });
@@ -342,15 +335,36 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
   const body = c.req.valid("json");
   const gracePeriodHours = body.gracePeriodHours ?? 24;
 
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  const rotation = await apiKeyService.rotateApiKey(
-    keyId,
-    actor.organizationId,
-    projectId,
-    gracePeriodHours,
-    actor.permissions,
-    c.env.API_KEY_PEPPER
-  );
+  // The replacement, the target's deadline and the audit record commit
+  // together: if the audit write fails nothing commits, and the new secret is
+  // never returned (APE-418).
+  const rotation = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
+    const result = await new ApiKeyService(txDb, getRequestTenantScope(c)).rotateApiKey(
+      keyId,
+      actor.organizationId,
+      projectId,
+      gracePeriodHours,
+      actor.permissions,
+      c.env.API_KEY_PEPPER
+    );
+    return {
+      result,
+      entry:
+        result === null || isApiKeyAlreadyRotated(result)
+          ? null
+          : {
+              action: "update",
+              resourceType: "api_key",
+              resourceId: keyId,
+              metadata: {
+                action: "rotate",
+                newKeyId: result.apiKey.id,
+                gracePeriodHours,
+                rotationDeadline: result.previousKey.rotationDeadline,
+              },
+            },
+    };
+  });
 
   if (!rotation) {
     throw notFound("API key");
@@ -364,20 +378,6 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     throw new AppError(
       "CONFLICT",
       `This API key was already rotated; its replacement is ${rotation.alreadyRotatedTo}. Revoke that key and rotate again if its secret was never received.`
-    );
-  }
-
-  try {
-    await new AuditService(getDb(c.env)).log(c, {
-      action: "update",
-      resourceType: "api_key",
-      resourceId: keyId,
-      metadata: { action: "rotate", newKeyId: rotation.apiKey.id, gracePeriodHours },
-    });
-  } catch (error) {
-    getLogger().error(
-      { error, keyId, newKeyId: rotation.apiKey.id },
-      "Failed to audit an API key rotation that already committed"
     );
   }
 
@@ -427,24 +427,37 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw badRequest("Confirmation did not match the key name");
   }
 
-  const apiKeyService = new ApiKeyService(getDb(c.env), getRequestTenantScope(c));
-  const revokedKey = await apiKeyService.revokeApiKey(keyId, actor.organizationId, projectId);
+  // The revocation, any in-flight replacement it cascades to, and the audit
+  // record commit together.
+  const revokedKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
+    const result = await new ApiKeyService(txDb, getRequestTenantScope(c)).revokeApiKey(
+      keyId,
+      actor.organizationId,
+      projectId
+    );
+    return {
+      result,
+      entry:
+        result === null || result.alreadyRevoked
+          ? null
+          : {
+              action: "delete",
+              resourceType: "api_key",
+              resourceId: keyId,
+              metadata: {
+                action: "deactivate",
+                revokedReplacementIds: result.revokedReplacementIds,
+              },
+            },
+    };
+  });
 
   if (!revokedKey) {
     throw notFound("API key");
   }
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "delete",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "deactivate" },
-  });
-
   return success(c, {
     success: true,
-    revokedAt: revokedKey.revokedAt,
+    revokedAt: revokedKey.revokedAt ?? new Date().toISOString(),
   });
 };
