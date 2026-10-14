@@ -7,10 +7,7 @@ import {
   fetchIssuanceTokensPage,
 } from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { IssuanceWorkspace } from "@/app/dashboard/[projectId]/issuance/issuance-workspace.redesign";
-import {
-  fetchActiveApiKeys,
-  resolvePlaygroundApiBaseUrl,
-} from "@/app/dashboard/[projectId]/playground-api-data";
+import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -70,7 +67,7 @@ export async function IssuancePage({ searchParams }: IssuancePageProps) {
   const apiClient = await trace.step("create_sdp_api_client", () =>
     createSdpApiClient(trace.childContext("dashboard.issuance.api"))
   );
-  const [templatesResult, tokensPage, facets, apiKeysResult] = await Promise.all([
+  const [templatesResult, tokensPage, facets] = await Promise.all([
     trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
     trace.step("fetch_tokens", () =>
       fetchIssuanceTokensPage(apiClient.request, listQuery, {
@@ -78,7 +75,6 @@ export async function IssuancePage({ searchParams }: IssuancePageProps) {
       })
     ),
     trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
-    trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
   ]);
   trace.log({
     ok: true,
@@ -97,7 +93,6 @@ export async function IssuancePage({ searchParams }: IssuancePageProps) {
       templatesError={
         templatesResult.failed ? t("DashboardIssuance.errors.unableToLoadTemplates") : null
       }
-      apiKeys={apiKeysResult.data ?? []}
       apiBaseUrl={resolvePlaygroundApiBaseUrl()}
       tokensNotice={tokensPage.error ? t("DashboardIssuance.errors.tokenListRetry") : null}
     />

@@ -9,6 +9,7 @@ import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
 import {
   filterPlaygroundEndpointsToReleaseChannel,
+  findPublishedPlaygroundOperation,
   getOpenApiPlaygroundEndpoints,
 } from "./api-playground-openapi-catalog";
 
@@ -144,3 +145,48 @@ describe("API playground release channel", () => {
     }
   });
 });
+
+describe("API playground allowlist", () => {
+  const messages = getMessages("en");
+  const t = (
+    key: Parameters<typeof translate<typeof messages>>[1],
+    values?: Record<string, string | number>
+  ) => translate(messages, key, values);
+
+  it("matches a concrete path to its catalog operation, a literal segment first", () => {
+    expect(
+      findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
+    ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
+    expect(findPublishedPlaygroundOperation("GET", "/v1/wallets/configs", "stable")).toMatchObject({
+      pathTemplate: "/v1/wallets/configs",
+    });
+  });
+
+  it("refuses what the catalog does not publish on the channel", () => {
+    expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
+    expect(
+      findPublishedPlaygroundOperation("POST", "/v1/payments/requests", "experimental")
+    ).toBeUndefined();
+    expect(
+      findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/", "experimental")
+    ).toBeUndefined();
+    expect(
+      findPublishedPlaygroundOperation("POST", "/v1/issuance/tokens", "stable")
+    ).toBeUndefined();
+    expect(
+      findPublishedPlaygroundOperation("POST", "/v1/issuance/tokens", "experimental")
+    ).toBeDefined();
+  });
+
+  it("does not offer a hand-authored form whose operation is not published", () => {
+    const payments = buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t);
+    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/quote");
+    expect(
+      paths(filterPlaygroundEndpointsToReleaseChannel(payments, "experimental"))
+    ).not.toContain("/v1/payments/ramps/offramp/quote");
+  });
+});
+
+function paths(endpoints: ApiPlaygroundEndpointConfig[]) {
+  return endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
+}

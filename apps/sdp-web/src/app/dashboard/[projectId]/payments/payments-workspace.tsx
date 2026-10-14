@@ -2,9 +2,7 @@
 
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -13,16 +11,8 @@ const PaymentsPlayground = dynamic(
   }
 );
 
-interface PaymentsApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
-
 interface PaymentsPlaygroundWorkspaceProps {
   apiBaseUrl: string | null;
-  apiKeys: PaymentsApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   transfers: PaymentTransferSummary[];
@@ -31,27 +21,14 @@ interface PaymentsPlaygroundWorkspaceProps {
 
 export function PaymentsPlaygroundWorkspace({
   apiBaseUrl,
-  apiKeys,
   wallets,
   walletsError,
   transfers,
   transfersError,
 }: PaymentsPlaygroundWorkspaceProps) {
-  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
-
-  useEffect(() => {
-    setPlaygroundApiKeys(apiKeys);
-  }, [apiKeys, setPlaygroundApiKeys]);
-
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
   return (
     <PaymentsPlayground
       apiBaseUrl={apiBaseUrl}
-      apiKeyId={selectedPlaygroundApiKey?.id ?? null}
-      hasActiveApiKeys={apiKeys.length > 0}
       transfers={transfers}
       transfersError={transfersError}
       wallets={wallets}

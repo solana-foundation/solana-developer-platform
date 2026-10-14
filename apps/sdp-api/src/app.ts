@@ -55,7 +55,6 @@ import { organizations } from "@/routes/organizations";
 import { pay } from "@/routes/pay";
 import { payments } from "@/routes/payments";
 import { places } from "@/routes/places";
-import { playgroundInternal } from "@/routes/playground-internal";
 import { privateChannels } from "@/routes/private-channels";
 import { projects } from "@/routes/projects";
 import { rpc } from "@/routes/rpc";
@@ -362,7 +361,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
-  app.route("/internal/playground", playgroundInternal);
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);

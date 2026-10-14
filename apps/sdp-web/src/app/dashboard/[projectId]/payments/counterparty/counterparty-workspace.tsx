@@ -35,7 +35,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
-import { syncPlaygroundApiKeysForActiveTab } from "@/app/dashboard/[projectId]/payments/payments-playground-api-key-state";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
@@ -55,31 +54,21 @@ const CounterpartyPlayground = dynamic(
   { loading: () => <CounterpartyPlaygroundLoading /> }
 );
 
-interface CounterpartyApiKeyOption {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  environment: string;
-}
-
 interface CounterpartyWorkspaceProps {
   initialCounterparties: Counterparty[];
   initialTotal: number;
-  apiKeys: CounterpartyApiKeyOption[];
   apiBaseUrl: string | null;
 }
 
 export function CounterpartyWorkspace({
   initialCounterparties,
   initialTotal,
-  apiKeys,
   apiBaseUrl,
 }: CounterpartyWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
   const href = useProjectHref();
-  const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
   const isPlaygroundTab = useDashboardTab() === "playground";
 
   const {
@@ -91,10 +80,6 @@ export function CounterpartyWorkspace({
     summary: pageSummary,
     removeOptimistic,
   } = useCounterpartyDirectory(initialCounterparties, initialTotal);
-
-  useEffect(() => {
-    syncPlaygroundApiKeysForActiveTab(isPlaygroundTab, apiKeys, setPlaygroundApiKeys);
-  }, [apiKeys, isPlaygroundTab, setPlaygroundApiKeys]);
 
   useEffect(() => {
     if (isPlaygroundTab) return;
@@ -111,11 +96,6 @@ export function CounterpartyWorkspace({
     const timeoutId = globalThis.setTimeout(preload, 600);
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
-
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
 
   const playgroundCounterparties = useMemo<CounterpartyPlaygroundView[]>(
     () => counterparties.map((cp) => ({ id: cp.id, displayName: cp.displayName })),
@@ -331,8 +311,6 @@ export function CounterpartyWorkspace({
             content: (
               <CounterpartyPlayground
                 apiBaseUrl={apiBaseUrl}
-                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
-                hasActiveApiKeys={apiKeys.length > 0}
                 counterparties={playgroundCounterparties}
               />
             ),

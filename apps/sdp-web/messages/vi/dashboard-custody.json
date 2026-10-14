@@ -68,7 +68,6 @@
     "apiKeyGenerated": "Đã tạo khóa API",
     "keyPrefix": "Tiền tố khóa",
     "fullKeyShownOnce": "Khóa đầy đủ (chỉ hiện một lần)",
-    "apiKeyPlaygroundSession": "Phiên trình duyệt này có thể dùng khóa trong API Playground mà không cần dán lại.",
     "dismiss": "Đóng",
     "copyValue": "Sao chép",
     "copied": "Đã sao chép",

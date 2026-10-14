@@ -1,39 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { deploymentReleaseChannel } from "@/flags/release-channel";
+import { findPublishedPlaygroundOperation } from "@/lib/api-playground-openapi-catalog";
 import {
   IDEMPOTENCY_KEY_HEADER,
   IDEMPOTENCY_KEY_PATTERN,
   type IdempotencyKeyHeaders,
 } from "@/lib/idempotency";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
-
-const PUBLIC_API_PATH_PREFIX = "/v1/";
-const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";
-const REDACTED_SECRET = "[REDACTED]";
-
-function redactSecretFromString(value: string, secret: string): string {
-  return value.split(secret).join(REDACTED_SECRET);
-}
-
-function redactSecret(value: unknown, secret: string): unknown {
-  if (typeof value === "string") {
-    return redactSecretFromString(value, secret);
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => redactSecret(entry, secret));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        redactSecretFromString(key, secret),
-        redactSecret(entry, secret),
-      ])
-    );
-  }
-  return value;
-}
 
 /**
  * Response headers the playground shows under Headers. An allowlist, not a denylist: anything
@@ -56,46 +33,47 @@ const FORWARDED_RESPONSE_HEADERS = new Set([
   "x-sdp-trace-id",
 ]);
 
-function forwardedResponseHeaders(headers: Headers, secret: string): Record<string, string> {
+function forwardedResponseHeaders(headers: Headers): Record<string, string> {
   const forwarded: Record<string, string> = {};
   for (const [name, value] of headers) {
     if (FORWARDED_RESPONSE_HEADERS.has(name)) {
-      forwarded[name] = redactSecretFromString(value, secret);
+      forwarded[name] = value;
     }
   }
   return forwarded;
 }
 
-function normalizePublicApiPath(path: string, requestUrl: string): string | null {
+/**
+ * The requested path, parsed as a URL against this request's origin so fetch
+ * cannot reinterpret `..` or backslash segments after the allowlist check, or
+ * null when it is not an absolute path on that origin.
+ */
+function normalizeRequestedPath(
+  path: string,
+  requestUrl: string
+): { pathname: string; search: string } | null {
   if (!path.startsWith("/")) return null;
-
   try {
-    const normalizedUrl = new URL(path, requestUrl);
-    if (!normalizedUrl.pathname.startsWith(PUBLIC_API_PATH_PREFIX)) return null;
-    return `${normalizedUrl.pathname}${normalizedUrl.search}`;
+    const base = new URL(requestUrl);
+    const normalizedUrl = new URL(path, base);
+    if (normalizedUrl.origin !== base.origin) return null;
+    return { pathname: normalizedUrl.pathname, search: normalizedUrl.search };
   } catch {
     return null;
   }
 }
 
 /**
- * Playground request envelope. The path is restricted to public /v1 mounts so
- * the proxy cannot replay keys against internal or admin routes. It is parsed
- * as a URL before the mount check so fetch cannot reinterpret traversal
- * segments after validation. apiKey must be non-empty — an absent key
- * previously fell back to the caller's dashboard session, escalating scope
- * past the selected key. idempotencyKey is the one client header the proxy
- * forwards (as Idempotency-Key, non-GET only): the shell mints one per Send,
- * so the money routes that require it can be called from the playground.
+ * Playground request envelope. Strict: an envelope from a tab that still sends
+ * an `apiKey` (the retired key-paste mode) is refused rather than silently run
+ * as the dashboard session. idempotencyKey is the one client-owned header the
+ * proxy forwards (as Idempotency-Key, non-GET only): the shell mints one per
+ * Send, so the money routes that require it can be called from the playground.
  */
-const playgroundExecuteSchema = z.object({
+const playgroundExecuteSchema = z.strictObject({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"], { error: "Invalid method" }),
   path: z.string({ error: "Invalid path" }),
   body: z.unknown().optional(),
-  apiKey: z
-    .string({ error: "API key is required" })
-    .trim()
-    .min(1, { error: "API key is required" }),
   idempotencyKey: z
     .string({ error: "Invalid idempotency key" })
     .trim()
@@ -123,6 +101,7 @@ function failureResponse(
     {
       status,
       headers: {
+        "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },
@@ -130,6 +109,21 @@ function failureResponse(
   );
 }
 
+/**
+ * Runs one playground request as the signed-in dashboard user, against the
+ * Project the calling tab sent as `x-project-id`: the same Clerk session and
+ * project header every other dashboard route uses (`createSdpApiClient`), so
+ * sdp-api's project context decides whether this member may act on it and
+ * their role's permissions apply. No API key is involved, so neither a key's
+ * IP allowlist nor its scopes can be bypassed through this hop.
+ *
+ * Only a published playground catalog operation on this deployment's release
+ * channel runs (`findPublishedPlaygroundOperation`); anything else is 404.
+ * The only client-owned header forwarded is `Idempotency-Key`, on non-GET
+ * requests: the shell mints one per Send and reuses it on a retry, so an
+ * ambiguous answer retried cannot become a second transfer. Authorization,
+ * project and tracing headers are server-owned.
+ */
 export async function POST(request: Request) {
   const trace = createTimedTrace("route.playground.execute", request);
 
@@ -140,6 +134,9 @@ export async function POST(request: Request) {
     }
     if (!orgId) {
       return failureResponse(trace, 403, "Active organization required");
+    }
+    if (request.headers.get(PROJECT_HEADER_NAME) === null) {
+      return failureResponse(trace, 400, `${PROJECT_HEADER_NAME} header required`);
     }
 
     const rawBody = await request.text();
@@ -158,30 +155,25 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return failureResponse(trace, 400, parsed.error.issues[0].message);
     }
-    const { method, path: requestedPath, body: requestBody, apiKey, idempotencyKey } = parsed.data;
-    const path = normalizePublicApiPath(requestedPath, request.url);
-    if (!path) {
-      return failureResponse(trace, 400, INVALID_PATH_MESSAGE);
+    const { method, path: requestedPath, body: requestBody, idempotencyKey } = parsed.data;
+    const target = normalizeRequestedPath(requestedPath, request.url);
+    const operation =
+      target === null
+        ? undefined
+        : findPublishedPlaygroundOperation(method, target.pathname, deploymentReleaseChannel());
+    if (target === null || operation === undefined) {
+      return failureResponse(trace, 404, "Not a playground operation");
+    }
+
+    const upstreamHeaders: Partial<IdempotencyKeyHeaders> = {};
+    if (method !== "GET" && idempotencyKey) {
+      upstreamHeaders[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
     }
 
     const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
-    const verification = await client.request("/internal/playground/api-key/verify", {
-      method: "POST",
-      body: JSON.stringify({ apiKey }),
-    });
-    if (!verification.ok) {
-      return failureResponse(trace, 403, "API key is not available for the selected project");
-    }
-
-    const headers: { Authorization: string } & Partial<IdempotencyKeyHeaders> = {
-      Authorization: `Bearer ${apiKey}`,
-    };
-    if (method !== "GET" && idempotencyKey) {
-      headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
-    }
-    const response = await client.request(path, {
+    const response = await client.request(`${target.pathname}${target.search}`, {
       method,
-      headers,
+      headers: upstreamHeaders,
       body:
         method !== "GET" && requestBody !== null && requestBody !== undefined
           ? JSON.stringify(requestBody)
@@ -189,7 +181,7 @@ export async function POST(request: Request) {
     });
 
     const text = await response.text();
-    const rawResponseBody = text
+    const body = text
       ? (() => {
           try {
             return JSON.parse(text) as unknown;
@@ -198,18 +190,18 @@ export async function POST(request: Request) {
           }
         })()
       : {};
-    const body = redactSecret(rawResponseBody, apiKey);
 
     const nextResponse = NextResponse.json(
       {
         ok: response.ok,
         status: response.status,
-        statusText: redactSecretFromString(response.statusText, apiKey),
+        statusText: response.statusText,
         body,
-        headers: forwardedResponseHeaders(response.headers, apiKey),
+        headers: forwardedResponseHeaders(response.headers),
       },
       {
         headers: {
+          "Cache-Control": "private, no-store",
           "X-SDP-Trace-ID": trace.traceId,
           "Server-Timing": trace.serverTiming(),
         },
@@ -218,29 +210,13 @@ export async function POST(request: Request) {
 
     logRouteResult(trace, response.status, {
       method,
-      // The query string is user-authored and may carry a pasted secret; log
-      // the route only.
-      path: path.split("?", 1)[0],
+      // Log the operation, not the user-authored path and query.
+      operation: operation.pathTemplate,
       ok: response.ok,
     });
 
     return nextResponse;
   } catch {
-    const response = NextResponse.json(
-      {
-        error: "Playground execution failed",
-      },
-      {
-        status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
-      }
-    );
-    logRouteResult(trace, 500, {
-      error: "Playground execution failed",
-    });
-    return response;
+    return failureResponse(trace, 500, "Playground execution failed");
   }
 }

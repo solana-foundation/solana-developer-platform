@@ -17,7 +17,7 @@ import {
 
 import { valueGates } from "@/openapi/release-channel-values";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
-import { ROUTE_OWNERS, type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
+import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
@@ -390,9 +390,9 @@ function generateCatalog(): string {
           Object.entries(modules).map(([module, endpoints]) => [module, endpoints.length])
         ),
       },
+      // Also the dashboard playground's allowlist: its execute route runs only
+      // these operations, and a hand-authored form outside them is not offered.
       modules,
-      // Route ownership, for hand-authored forms the catalog does not carry.
-      routeOwners: ROUTE_OWNERS.map(([pattern, owner]) => ({ pattern: pattern.source, owner })),
       // Which module or ramp provider owns a field value, so the dashboard drops
       // options, defaults and example values its channel does not run.
       valueGates: valueGates(),

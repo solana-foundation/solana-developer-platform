@@ -12,6 +12,7 @@ import { z } from "zod";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
+  ApiPlaygroundMethod,
 } from "@/components/api-playground-shell";
 import generatedCatalog from "./api-playground-catalog.generated.json";
 
@@ -20,10 +21,12 @@ type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
 type RouteOwner = SdpModule | "core";
 type ValueGate = { module: SdpModule } | { rampProvider: RampProviderId };
 
+type GeneratedPlaygroundOperation = ApiPlaygroundEndpointConfig & {
+  releaseModule: string;
+};
+
 interface GeneratedPlaygroundCatalog {
-  modules: Record<PlaygroundModule, (ApiPlaygroundEndpointConfig & { releaseModule: string })[]>;
-  /** apps/sdp-api/src/routes/route-modules.ts, first match wins. */
-  routeOwners: { pattern: string; owner: string }[];
+  modules: Record<PlaygroundModule, GeneratedPlaygroundOperation[]>;
   /** apps/sdp-api/src/openapi/release-channel-values.ts: the owner of each module value. */
   valueGates: Record<string, { module?: string; rampProvider?: string }>;
 }
@@ -62,31 +65,89 @@ function operationKey(endpoint: ApiPlaygroundEndpointConfig): string {
   return `${endpoint.method} ${endpoint.path.split("?", 1)[0]}`;
 }
 
-/** An operation key that ignores path parameter names, so curated forms match the catalog. */
-function routeKey(endpoint: ApiPlaygroundEndpointConfig): string {
-  return operationKey(endpoint).replace(/\{[^}/]*\}/g, "{}");
+/** A published operation, as the playground's execute route and forms match it. */
+export interface PlaygroundCatalogOperation {
+  method: ApiPlaygroundMethod;
+  /** The OpenAPI path template, without its query (`/v1/x/{id}`). */
+  pathTemplate: string;
+  releaseModule: RouteOwner;
 }
 
-const RELEASE_MODULE_BY_ROUTE = new Map(
-  Object.values(catalog.modules)
-    .flat()
-    .map((endpoint) => [routeKey(endpoint), parseRouteOwner(endpoint.releaseModule)] as const)
-);
+/** A path template's segments: a `{name}` segment is a parameter, any other is literal. */
+type TemplateSegment = { parameter: true } | { parameter: false; literal: string };
 
-const ROUTE_OWNERS = catalog.routeOwners.map(
-  ({ pattern, owner }) => [new RegExp(pattern), parseRouteOwner(owner)] as const
-);
+function templateSegments(pathTemplate: string): TemplateSegment[] {
+  return pathTemplate
+    .split("/")
+    .map((segment) =>
+      /^\{[^{}/]+\}$/.test(segment) ? { parameter: true } : { parameter: false, literal: segment }
+    );
+}
+
+/**
+ * Whether `pathname` is an instance of the template, segment for segment: a
+ * parameter segment takes exactly one non-empty segment, every other segment
+ * must be equal. Callers hand in a pathname that has already been through URL
+ * parsing, so `..` and backslash segments are resolved before this compares.
+ */
+function matchesTemplate(segments: readonly TemplateSegment[], pathname: string): boolean {
+  const parts = pathname.split("/");
+  if (parts.length !== segments.length) return false;
+  return segments.every((segment, index) => {
+    const part = parts[index];
+    return segment.parameter ? part !== "" : part === segment.literal;
+  });
+}
+
+const CATALOG_OPERATIONS: readonly (PlaygroundCatalogOperation & {
+  segments: readonly TemplateSegment[];
+})[] = Object.values(catalog.modules)
+  .flat()
+  .map((endpoint) => {
+    const pathTemplate = endpoint.path.split("?", 1)[0];
+    return {
+      method: endpoint.method,
+      pathTemplate,
+      releaseModule: parseRouteOwner(endpoint.releaseModule),
+      segments: templateSegments(pathTemplate),
+    };
+  });
 
 const VALUE_GATES = new Map(
   Object.entries(catalog.valueGates).map(([value, gate]) => [value, parseValueGate(gate)])
 );
 
-/** The module that owns an endpoint: the catalog's, else the API's route ownership table. */
-function releaseModuleOf(endpoint: ApiPlaygroundEndpointConfig): RouteOwner | undefined {
-  const known = RELEASE_MODULE_BY_ROUTE.get(routeKey(endpoint));
-  if (known !== undefined) return known;
-  const pattern = endpoint.path.split("?", 1)[0].replace(/\/\{([^}/]+)\}/g, "/:$1");
-  return ROUTE_OWNERS.find(([owner]) => owner.test(pattern))?.[1];
+/**
+ * The published playground operation `method pathname` is on `releaseChannel`,
+ * or undefined. This is the playground's allowlist: the execute route refuses
+ * anything it does not return and the forms offer nothing it does not return,
+ * so the two cannot disagree. The catalog holds the public OpenAPI document's
+ * API-key operations (Earn held out), so an internal, admin or undocumented
+ * route is never reachable through the playground.
+ *
+ * @param method - The HTTP method.
+ * @param pathname - A concrete pathname (`/v1/x/abc`) or a form's template (`/v1/x/{id}`), no query.
+ * @param releaseChannel - The deployment's release channel (`SDP_RELEASE_CHANNEL`).
+ */
+export function findPublishedPlaygroundOperation(
+  method: string,
+  pathname: string,
+  releaseChannel: SdpReleaseChannel
+): PlaygroundCatalogOperation | undefined {
+  // A literal segment beats a parameter, as in the API's router: `/v1/wallets/configs`
+  // is the configs read, not a wallet named "configs".
+  const operation = CATALOG_OPERATIONS.filter(
+    (candidate) => candidate.method === method && matchesTemplate(candidate.segments, pathname)
+  ).sort((left, right) => parameterCount(left.segments) - parameterCount(right.segments))[0];
+  if (operation === undefined) return undefined;
+  const modules: ReadonlySet<string> = new Set(SDP_RELEASE_CHANNELS[releaseChannel]);
+  return operation.releaseModule === "core" || modules.has(operation.releaseModule)
+    ? operation
+    : undefined;
+}
+
+function parameterCount(segments: readonly TemplateSegment[]): number {
+  return segments.filter((segment) => segment.parameter).length;
 }
 
 type Published = (value: string) => boolean;
@@ -173,9 +234,10 @@ function pruneFields(
 }
 
 /**
- * Drops every endpoint whose module is outside the deployment's release channel,
- * the catalog's operations and the hand-authored forms alike, so the playground
- * never offers a request the API refuses with 403. Inside the endpoints it
+ * Drops every endpoint that is not a published catalog operation on the
+ * deployment's release channel ({@link findPublishedPlaygroundOperation}), the
+ * catalog's operations and the hand-authored forms alike, so the playground
+ * never offers a request the execute route or the API refuses. Inside the endpoints it
  * keeps, select options, defaults and example responses lose the values of
  * modules and ramp providers the channel does not run. The catalog holds every
  * channel's operations; this is where a deployment narrows it.
@@ -187,15 +249,16 @@ export function filterPlaygroundEndpointsToReleaseChannel(
   endpoints: ApiPlaygroundEndpointConfig[],
   releaseChannel: SdpReleaseChannel
 ): ApiPlaygroundEndpointConfig[] {
-  const modules: ReadonlySet<string> = new Set(SDP_RELEASE_CHANNELS[releaseChannel]);
   const published = publishedIn(releaseChannel);
   return endpoints
-    .filter((endpoint) => {
-      // Every API route is filed under a module (route-modules.test.ts), so a path no
-      // module owns is not an API route the release channel could refuse.
-      const releaseModule = releaseModuleOf(endpoint);
-      return releaseModule === undefined || releaseModule === "core" || modules.has(releaseModule);
-    })
+    .filter(
+      (endpoint) =>
+        findPublishedPlaygroundOperation(
+          endpoint.method,
+          endpoint.path.split("?", 1)[0],
+          releaseChannel
+        ) !== undefined
+    )
     .map((endpoint) => ({
       ...endpoint,
       pathFields: pruneFields(endpoint.pathFields, published),

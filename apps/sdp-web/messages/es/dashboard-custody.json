@@ -67,7 +67,6 @@
     "apiKeyGenerated": "Clave de API generada",
     "keyPrefix": "Prefijo de la clave",
     "fullKeyShownOnce": "Tu clave completa (se muestra una sola vez)",
-    "apiKeyPlaygroundSession": "Esta sesión del navegador ya puede usar esta clave en el API Playground sin pegarla de nuevo.",
     "dismiss": "Descartar",
     "copyValue": "Copiar",
     "copied": "Copiado",

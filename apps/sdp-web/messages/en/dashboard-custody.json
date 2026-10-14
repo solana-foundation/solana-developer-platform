@@ -133,7 +133,6 @@
     "apiKeyGenerated": "API key generated",
     "keyPrefix": "Key prefix",
     "fullKeyShownOnce": "Your full key (shown once)",
-    "apiKeyPlaygroundSession": "This browser session can now use this key in the API Playground without pasting it again.",
     "dismiss": "Dismiss",
     "copyValue": "Copy",
     "copied": "Copied",

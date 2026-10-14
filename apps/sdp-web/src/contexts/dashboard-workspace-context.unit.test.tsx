@@ -6,11 +6,6 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
-  clearStoredApiKeySecrets,
-  getStoredApiKeySecret,
-  storeApiKeySecret,
-} from "@/lib/playground-api-keys";
-import {
   dashboardRouter,
   resetDashboardNavigation,
   setDashboardUrl,
@@ -90,7 +85,6 @@ function WorkspaceFixture() {
 
 beforeEach(() => {
   cleanup();
-  clearStoredApiKeySecrets();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
   clerk.auth = { isLoaded: true, userId: "user_test", orgId: "org_test" };
@@ -98,7 +92,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  clearStoredApiKeySecrets();
 });
 
 describe("DashboardWorkspaceProvider project selection", () => {
@@ -141,42 +134,5 @@ describe("DashboardWorkspaceProvider project selection", () => {
 
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
     expect(screen.getByText("Refreshing scope")).toBeTruthy();
-  });
-});
-
-describe("DashboardWorkspaceProvider playground secret boundaries", () => {
-  it("clears only playground secrets when the project changes", async () => {
-    const user = userEvent.setup();
-    render(<WorkspaceFixture />);
-    storeApiKeySecret({ value: "sk_test_project_sandbox", apiKeyId: "key_test_sandbox" });
-    await user.click(screen.getByRole("button", { name: "Increment unrelated state" }));
-
-    await user.click(screen.getByRole("button", { name: "Switch project" }));
-
-    expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBeNull();
-    expect(screen.getByLabelText("unrelated state").textContent).toBe("1");
-  });
-
-  it("keeps the secret when the current project is selected again", async () => {
-    const user = userEvent.setup();
-    render(<WorkspaceFixture />);
-    storeApiKeySecret({ value: "sk_test_project_sandbox", apiKeyId: "key_test_sandbox" });
-
-    await user.click(screen.getByRole("button", { name: "Keep project" }));
-
-    expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBe("sk_test_project_sandbox");
-  });
-
-  it("clears playground secrets on sign-out without resetting sibling state", async () => {
-    const user = userEvent.setup();
-    const view = render(<WorkspaceFixture />);
-    storeApiKeySecret({ value: "sk_test_user", apiKeyId: "key_test_sandbox" });
-    await user.click(screen.getByRole("button", { name: "Increment unrelated state" }));
-
-    clerk.auth = { isLoaded: true, userId: null, orgId: null };
-    view.rerender(<WorkspaceFixture />);
-
-    await waitFor(() => expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBeNull());
-    expect(screen.getByLabelText("unrelated state").textContent).toBe("1");
   });
 });
