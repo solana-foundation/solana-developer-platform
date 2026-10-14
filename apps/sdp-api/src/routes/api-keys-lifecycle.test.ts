@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { asTransactionalClient, getDb } from "@/db";
+import { getDb } from "@/db";
 import app from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { ApiKeyService } from "@/services/api-key.service";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -104,24 +102,53 @@ function revoke(keyId: string) {
   );
 }
 
-/** Lets a blocked statement reach its lock wait before the holder commits. */
-async function untilWaitingOnLock(): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+/**
+ * Waits until a statement containing `fragment` is blocked on a lock in this
+ * worker's database. Matching the statement text, not any lock waiter, keeps
+ * an unrelated wait from satisfying it.
+ */
+async function untilWaitingOn(fragment: string): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt++) {
     const waiting = await getDb(env).queryOne<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM pg_stat_activity
-        WHERE wait_event_type = 'Lock' AND datname = current_database()`
+        WHERE wait_event_type = 'Lock'
+          AND datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND position($1 in query) > 0`,
+      [fragment]
     );
     if ((waiting?.count ?? 0) > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("No statement started waiting on a lock");
+  throw new Error(`No statement containing ${fragment} started waiting on a lock`);
 }
 
-const service = (db: DatabaseClient) =>
-  new ApiKeyService(
-    db,
-    createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
-  );
+/**
+ * Holds the target key's row lock in a transaction of its own until
+ * `release` is called, so real requests queue behind it in a chosen order.
+ */
+async function holdKeyRow(keyId: string): Promise<{ release: () => Promise<void> }> {
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked: () => void = () => {};
+  const holding = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const transaction = getDb(env).transaction(async (tx) => {
+    await tx.execute("SELECT id FROM api_keys WHERE id = ? FOR UPDATE", [keyId]);
+    locked();
+    await released;
+  });
+  await holding;
+  return {
+    release: async () => {
+      release();
+      await transaction;
+    },
+  };
+}
 
 describe("API key lifecycle", () => {
   beforeEach(async () => {
@@ -283,70 +310,35 @@ describe("API key lifecycle", () => {
       expect((await readKey("key_lifecycle_live_child"))?.status).toBe("active");
     });
 
-    it("waits for a rotation holding the key and then revokes only the predecessor", async () => {
+    // Both requests run through their real handlers (rotation inside the
+    // audit ledger's transaction) and queue on the key's row lock in order.
+    it("revokes only the predecessor when a rotation queued first", async () => {
       await insertKey({ id: TARGET_KEY_ID });
-      let commitRotation: () => void = () => {};
-      const rotationMayCommit = new Promise<void>((resolve) => {
-        commitRotation = resolve;
-      });
-      let rotationHoldsLock: () => void = () => {};
-      const lockHeld = new Promise<void>((resolve) => {
-        rotationHoldsLock = resolve;
-      });
-
-      const rotation = getDb(env).transaction(async (tx) => {
-        const result = await service(asTransactionalClient(tx)).rotateApiKey(
-          TARGET_KEY_ID,
-          ORGANIZATION_ID,
-          PROJECT_ID,
-          24,
-          ["*"]
-        );
-        rotationHoldsLock();
-        await rotationMayCommit;
-        return result;
-      });
-      await lockHeld;
-
-      const revocation = revoke(TARGET_KEY_ID);
-      await untilWaitingOnLock();
-      commitRotation();
-      await rotation;
-
-      expect((await revocation).status).toBe(200);
-      expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
-      const replacements = await replacementsOf(TARGET_KEY_ID);
-      expect(replacements).toHaveLength(1);
-      expect(replacements[0]?.status).toBe("active");
-    });
-
-    it("makes a rotation waiting on a revocation find no key to rotate", async () => {
-      await insertKey({ id: TARGET_KEY_ID });
-      let commitRevocation: () => void = () => {};
-      const revocationMayCommit = new Promise<void>((resolve) => {
-        commitRevocation = resolve;
-      });
-      let revocationHoldsLock: () => void = () => {};
-      const lockHeld = new Promise<void>((resolve) => {
-        revocationHoldsLock = resolve;
-      });
-
-      const revocation = getDb(env).transaction(async (tx) => {
-        await service(asTransactionalClient(tx)).revokeApiKey(
-          TARGET_KEY_ID,
-          ORGANIZATION_ID,
-          PROJECT_ID
-        );
-        revocationHoldsLock();
-        await revocationMayCommit;
-      });
-      await lockHeld;
+      const holder = await holdKeyRow(TARGET_KEY_ID);
 
       const rotation = rotate(TARGET_KEY_ID);
-      await untilWaitingOnLock();
-      commitRevocation();
-      await revocation;
+      await untilWaitingOn("FOR UPDATE OF ak");
+      const revocation = revoke(TARGET_KEY_ID);
+      await untilWaitingOn("SET status = 'deactivated'");
+      await holder.release();
 
+      expect((await rotation).status).toBe(201);
+      expect((await revocation).status).toBe(200);
+      expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
+      expect((await replacementsOf(TARGET_KEY_ID)).map((key) => key.status)).toEqual(["active"]);
+    });
+
+    it("rotates nothing when a revocation queued first", async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      const holder = await holdKeyRow(TARGET_KEY_ID);
+
+      const revocation = revoke(TARGET_KEY_ID);
+      await untilWaitingOn("SET status = 'deactivated'");
+      const rotation = rotate(TARGET_KEY_ID);
+      await untilWaitingOn("FOR UPDATE OF ak");
+      await holder.release();
+
+      expect((await revocation).status).toBe(200);
       expect((await rotation).status).toBe(404);
       expect(await replacementsOf(TARGET_KEY_ID)).toEqual([]);
     });
