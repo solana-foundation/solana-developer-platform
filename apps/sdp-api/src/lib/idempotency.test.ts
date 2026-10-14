@@ -5,10 +5,19 @@ import {
   buildEarnVaultParRedemptionFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
+  canonicalJson,
   normalizeForFingerprint,
   resolveIdempotencyReplay,
   resolveIdentityBoundIdempotencyReplay,
 } from "./idempotency";
+
+describe("canonicalJson", () => {
+  it("orders keys by UTF-16 code unit at every depth, whatever their insertion order", () => {
+    expect(canonicalJson({ b: 1, B: 2, a: { é: 1, z: [2, 1] }, "10": 0, "9": 0 })).toBe(
+      '{"10":0,"9":0,"B":2,"a":{"z":[2,1],"é":1},"b":1}'
+    );
+  });
+});
 
 describe("buildEarnVaultDepositFingerprint", () => {
   const base = {

@@ -35,40 +35,46 @@ export interface IdempotencyKeyClaimInput {
 }
 
 /** What a completed request answered, replayed as-is. */
-export interface StoredIdempotentResponse {
-  status: number;
-  headers: Record<string, string>;
+export const storedIdempotentResponseSchema = z.object({
+  status: z.number().int(),
+  headers: z.record(z.string(), z.string()),
   /** Null for a response without a body (204, 205, 304). */
-  body: string | null;
-}
+  body: z.string().nullable(),
+});
 
-export type IdempotencyKeyClaim =
+export type StoredIdempotentResponse = z.infer<typeof storedIdempotentResponseSchema>;
+
+/** The result of claiming a key. */
+export const idempotencyKeyClaimSchema = z.discriminatedUnion("kind", [
   /**
    * This request holds the key. `fresh` is false when it took over an
    * `in_progress` row whose lease had ended, which an earlier attempt may have
    * partly executed, so releasing it must keep the row bound to its
    * fingerprint.
    */
-  | {
-      kind: "claimed";
-      fresh: boolean;
-      /**
-       * The key's earlier row had expired while still `in_progress` with a lease
-       * that lapsed rather than was released: a request that crashed before
-       * recording an outcome. The new claim replaces it; callers alert.
-       */
-      replacedUnfinished: boolean;
-    }
-  | { kind: "completed"; response: StoredIdempotentResponse }
+  z.object({
+    kind: z.literal("claimed"),
+    fresh: z.boolean(),
+    /**
+     * The key's earlier row had expired while still `in_progress` with a lease
+     * that lapsed rather than was released: a request that crashed before
+     * recording an outcome. The new claim replaces it; callers alert.
+     */
+    replacedUnfinished: z.boolean(),
+  }),
+  z.object({ kind: z.literal("completed"), response: storedIdempotentResponseSchema }),
   /** The key was first used for a different request or by another credential. */
-  | { kind: "mismatch" }
+  z.object({ kind: z.literal("mismatch") }),
   /** Another request holds a live lease on the key. */
-  | { kind: "in_flight"; retryAfterSeconds: number }
+  z.object({ kind: z.literal("in_flight"), retryAfterSeconds: z.number().int() }),
   /**
    * The key's request lapsed without recording an outcome or being released,
    * and this route may not take it over: whether it ran is unknown.
    */
-  | { kind: "outcome_unknown" };
+  z.object({ kind: z.literal("outcome_unknown") }),
+]);
+
+export type IdempotencyKeyClaim = z.infer<typeof idempotencyKeyClaimSchema>;
 
 export interface IdempotencyKeyRepository {
   claim(input: IdempotencyKeyClaimInput): Promise<IdempotencyKeyClaim>;
@@ -97,7 +103,8 @@ const existingRowSchema = z.discriminatedUnion("status", [
     principal: z.string(),
     fingerprint: z.string(),
     retry_after_seconds: z.number().int(),
-    lapsed_unreleased: z.boolean(),
+    lapsed: z.boolean(),
+    released: z.boolean(),
   }),
   z.object({
     status: z.literal("completed"),
@@ -220,7 +227,7 @@ export function createPostgresIdempotencyKeyRepository(
         `SELECT principal, fingerprint, status, response_status, response_headers, response_body,
                 GREATEST(1, CEIL(EXTRACT(EPOCH FROM (locked_until - now()))))::int
                   AS retry_after_seconds,
-                (locked_until <= now() AND NOT released) AS lapsed_unreleased
+                locked_until <= now() AS lapsed, released
            FROM idempotency_keys
           WHERE ${scope.sql} AND expires_at > now()`
       )
@@ -244,8 +251,12 @@ export function createPostgresIdempotencyKeyRepository(
         },
       };
     }
-    if (row.lapsed_unreleased) {
-      // Reached only when the takeover above was not allowed.
+    if (row.lapsed) {
+      if (row.released || input.takeOverLapsed) {
+        // The lease ran out (or was released) after the takeover above saw it
+        // live: this request may take it over, so claim again.
+        return null;
+      }
       return { kind: "outcome_unknown" };
     }
     return { kind: "in_flight", retryAfterSeconds: row.retry_after_seconds };
@@ -253,11 +264,11 @@ export function createPostgresIdempotencyKeyRepository(
 
   return {
     async claim(input) {
-      // One retry covers a row that vanished mid-claim; the second attempt's
-      // insert then succeeds.
+      // One retry covers a row that vanished, or whose lease ran out, mid-claim;
+      // the second attempt's insert or takeover then succeeds.
       const claim = (await tryClaim(input)) ?? (await tryClaim(input));
       if (claim === null) {
-        throw new Error("idempotency key vanished twice during one claim");
+        throw new Error("idempotency key changed twice during one claim");
       }
       return claim;
     },
