@@ -5199,15 +5199,17 @@ describe("Payments routes — recurring", () => {
       expect(schedules).toEqual({ count: 1 });
     });
 
-    const storedKeyCount = async (key: string) =>
-      (
-        await getDb(env)
-          .prepare(
-            "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
-          )
-          .bind(key)
-          .first<{ count: number }>()
-      )?.count;
+    /** How many shared key records exist for the key; a missing COUNT row fails the test. */
+    const storedKeyCount = async (key: string): Promise<number> => {
+      const row = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
+        )
+        .bind(key)
+        .first<{ count: number }>();
+      if (row === null) throw new Error("COUNT(*) returned no row");
+      return row.count;
+    };
 
     const recurringMetadataUri = async (id: string) =>
       (

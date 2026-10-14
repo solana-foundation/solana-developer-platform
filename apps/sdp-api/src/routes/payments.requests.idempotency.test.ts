@@ -30,7 +30,8 @@ async function storedKeyCount(idempotencyKey: string): Promise<number> {
     .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
     .bind(idempotencyKey)
     .first<{ count: number }>();
-  return row?.count ?? -1;
+  if (row === null) throw new Error("COUNT(*) returned no row");
+  return row.count;
 }
 
 describe("Payments routes — payment request access before the key", () => {
