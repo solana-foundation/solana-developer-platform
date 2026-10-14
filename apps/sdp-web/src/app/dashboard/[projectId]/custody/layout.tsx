@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { custody } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 export default async function CustodyLayout({ children }: { children: ReactNode }) {
-  if (!(await custody())) {
+  if (!isModuleInDeploymentReleaseChannel("custody")) {
     notFound();
   }
 

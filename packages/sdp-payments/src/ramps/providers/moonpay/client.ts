@@ -158,6 +158,11 @@ function isMoonpayCryptoCode(value: string): value is MoonpayCryptoCode {
   return (MOONPAY_CRYPTO_CODES as readonly string[]).includes(value);
 }
 
+/** The rail a MoonPay crypto code settles on, or null for an asset SDP has no rail for. */
+export function moonpayCryptoRail(code: string): CryptoRailId | null {
+  return isMoonpayCryptoCode(code) ? MOONPAY_CRYPTO_CODE_TO_RAIL[code] : null;
+}
+
 const MOONPAY_RAIL_TO_CODE: ReadonlyMap<CryptoRailId, MoonpayCryptoCode> = new Map(
   MOONPAY_CRYPTO_CODES.map((code): [CryptoRailId, MoonpayCryptoCode] => [
     MOONPAY_CRYPTO_CODE_TO_RAIL[code],

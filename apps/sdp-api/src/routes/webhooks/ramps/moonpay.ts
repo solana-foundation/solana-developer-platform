@@ -1,4 +1,5 @@
 import { readRecord, readString } from "@sdp/payments/json";
+import { moonpayCryptoRail } from "@sdp/payments/ramps/providers/moonpay/client";
 import {
   type MoonpaySettlementEvent,
   moonpayBuyTransactionSchema,
@@ -8,6 +9,7 @@ import {
 } from "@sdp/payments/ramps/providers/moonpay/event-status-mapping";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { z } from "zod";
 import { createSystemPaymentsRepository } from "@/db/repositories";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
@@ -55,6 +57,35 @@ function parseMoonpaySignatureV2Header(
   }
 
   return timestamp && signature ? { timestamp, signature } : null;
+}
+
+/** The crypto a MoonPay sale moves. Earlier sell events may omit it. */
+const moonpaySoldCryptoSchema = z.object({
+  baseCurrency: z.object({ code: z.string() }).optional(),
+});
+
+/**
+ * A completed MoonPay transaction names the crypto it moved, so settlement can
+ * refuse another asset. Earlier events may omit it; a completed one that does
+ * is malformed, and the 400 makes MoonPay redeliver it.
+ */
+function withSettledAsset(
+  type: string,
+  event: MoonpaySettlementEvent,
+  cryptoCode: string | undefined
+): MoonpaySettlementEvent {
+  if (event.kind !== "settled") {
+    return event;
+  }
+  if (cryptoCode === undefined) {
+    throw badRequest(
+      `MoonPay "${type}" webhook carries a completed transaction without its crypto`,
+      {
+        provider: event.provider,
+      }
+    );
+  }
+  return { ...event, deliveredAssetRail: moonpayCryptoRail(cryptoCode) };
 }
 
 export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, MoonpaySettlementEvent> {
@@ -117,7 +148,18 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
           errors: sellTransactionData.error.issues,
         });
       }
-      return moonpaySellTransactionSettlementEvent(sellTransactionData.data);
+      const soldCrypto = moonpaySoldCryptoSchema.safeParse(root.data);
+      if (!soldCrypto.success) {
+        throw badRequest(`MoonPay "${type}" webhook carries a malformed baseCurrency`, {
+          provider: this.provider,
+          errors: soldCrypto.error.issues,
+        });
+      }
+      return withSettledAsset(
+        type,
+        moonpaySellTransactionSettlementEvent(sellTransactionData.data),
+        soldCrypto.data.baseCurrency?.code
+      );
     }
 
     if (
@@ -135,7 +177,11 @@ export class MoonpayWebhookProcessor implements WebhookProcessor<unknown, Moonpa
         errors: transactionData.error.issues,
       });
     }
-    return moonpayTransactionSettlementEvent(transactionData.data);
+    return withSettledAsset(
+      type,
+      moonpayTransactionSettlementEvent(transactionData.data),
+      transactionData.data.currency?.code
+    );
   }
 
   async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {

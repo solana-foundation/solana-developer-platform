@@ -1,14 +1,12 @@
 import type { SdpReleaseChannel } from "@sdp/types";
 import {
   assetProfiles,
-  custody,
   dvp,
   earn,
   heliusRings,
   issuance,
   markets,
   newDesign,
-  payments,
   paymentsDemoMode,
   privateChannels,
 } from "@/flags";
@@ -56,7 +54,6 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
-    custodyEnabled,
     dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
@@ -64,13 +61,11 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     marketsEnabled,
     newDesignEnabled,
     newDesignModules,
-    paymentsEnabled,
     paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
-    custody(),
     dvp(),
     earn(),
     heliusRings(),
@@ -78,7 +73,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets(),
     newDesign(),
     getDesignModuleFlags(),
-    payments(),
     paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
@@ -87,7 +81,8 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
   return {
     assetProfiles: assetProfilesEnabled,
     compliance: isModuleInDeploymentReleaseChannel("compliance"),
-    custody: custodyEnabled,
+    // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
+    custody: isModuleInDeploymentReleaseChannel("custody"),
     dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
@@ -95,7 +90,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets: marketsEnabled,
     newDesign: newDesignEnabled,
     newDesignModules,
-    payments: paymentsEnabled,
+    payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,

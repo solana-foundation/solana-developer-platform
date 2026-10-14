@@ -1,5 +1,8 @@
 import {
   isModuleInReleaseChannel,
+  isRampProviderInReleaseChannel,
+  RAMP_PROVIDERS,
+  type RampProviderId,
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
@@ -40,4 +43,14 @@ export function deploymentReleaseChannel(): SdpReleaseChannel {
  */
 export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
   return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_STAGES);
+}
+
+/**
+ * The ramp providers `releaseChannel` runs, in canonical order. Pure, so a client
+ * component can call it with the channel from the dashboard's flag snapshot.
+ */
+export function rampProvidersInReleaseChannel(releaseChannel: SdpReleaseChannel): RampProviderId[] {
+  return RAMP_PROVIDERS.filter((provider) =>
+    isRampProviderInReleaseChannel(releaseChannel, provider, SDP_RAMP_PROVIDER_STAGES)
+  );
 }

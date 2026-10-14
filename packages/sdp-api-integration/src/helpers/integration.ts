@@ -166,6 +166,7 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
     .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
     .run()
     .catch(() => {});
+  await db.prepare("DELETE FROM sponsorship_budget_reservations").run();
   await db
     .prepare("DELETE FROM projects")
     .run()

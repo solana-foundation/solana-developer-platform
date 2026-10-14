@@ -16,6 +16,51 @@ export interface ProviderResponse {
   parsed: unknown;
 }
 
+/** How long one provider call may take, request and response body together. */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Ramp provider bodies are small JSON documents; a larger one is refused. */
+export const PROVIDER_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+class ProviderResponseTooLargeError extends Error {}
+
+/** Reads the body as text, refusing it once it passes the byte cap. */
+async function readProviderBody(response: Response): Promise<string> {
+  if (response.body === null) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    received += value.byteLength;
+    if (received > PROVIDER_MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new ProviderResponseTooLargeError();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+function isProviderTimeout(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === "TimeoutError";
+}
+
+function providerReadFailure(provider: RampProviderId, cause: unknown): string {
+  if (cause instanceof ProviderResponseTooLargeError) {
+    return `${provider} returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`;
+  }
+  if (isProviderTimeout(cause)) {
+    return `The ${provider} API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`;
+  }
+  return `Failed to read the ${provider} API response`;
+}
+
 function serializeProviderBody(body: unknown): BodyInit | undefined {
   if (body === undefined) {
     return undefined;
@@ -85,11 +130,11 @@ export const providerErrorMessageSchema = z
 
 /**
  * Performs a provider HTTP request and returns the raw response plus its
- * parsed JSON body. The optional `signal` is forwarded to the underlying
- * fetch call; the fetch covers the request and, for the undici/Node runtime,
- * the response body read (a supplied signal is the only fence a hung body
- * read needs). A non-JSON body yields `parsed: undefined` rather than a parse
- * failure.
+ * parsed JSON body. Every call is fenced by PROVIDER_REQUEST_TIMEOUT_MS,
+ * which covers the request and the body read, so a stalled provider cannot
+ * hold a request open; a caller's own `signal` can only cut it shorter. A
+ * body over PROVIDER_MAX_RESPONSE_BYTES is refused. A non-JSON body yields
+ * `parsed: undefined` rather than a parse failure.
  *
  * @param provider - Ramp provider id, used in errors and telemetry.
  * @param url - Request URL.
@@ -101,29 +146,35 @@ export async function providerFetch<TBody = never>(
   url: string,
   init: ProviderRequestInit<TBody>
 ): Promise<ProviderResponse> {
+  const signals = [AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS)];
+  if (init.signal !== undefined) {
+    signals.push(init.signal);
+  }
   let response: Response;
   try {
     response = await fetch(url, {
       method: init.method,
       headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
       body: serializeProviderBody(init.body),
-      signal: init.signal,
+      signal: AbortSignal.any(signals),
     });
-  } catch {
-    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, {
-      provider,
-    });
+  } catch (cause) {
+    throw new SdpPaymentsError(
+      "PROVIDER_UNAVAILABLE",
+      isProviderTimeout(cause)
+        ? `The ${provider} API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`
+        : `Failed to reach the ${provider} API`,
+      { provider }
+    );
   }
 
   let raw: string;
   try {
-    raw = await response.text();
-  } catch {
-    throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
-      `Failed to read the ${provider} API response`,
-      { provider }
-    );
+    raw = await readProviderBody(response);
+  } catch (cause) {
+    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", providerReadFailure(provider, cause), {
+      provider,
+    });
   }
 
   let parsed: unknown;

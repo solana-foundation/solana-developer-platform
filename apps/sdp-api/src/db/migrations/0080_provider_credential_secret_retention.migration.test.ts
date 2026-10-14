@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_credential_secret_retention";
+const PROJECT_ID = "prj_credential_secret_retention";
 const USER_ID = "usr_credential_secret_retention";
 
 async function insertCredential(params: {
@@ -20,14 +22,15 @@ async function insertCredential(params: {
   await getDb(env)
     .prepare(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, secret_version_ref, encrypted_secret_payload, status, deactivated_at,
          secret_retention_expires_at, rotated_from_provider_credential_id, created_by
-       ) VALUES (?, ?, 'privy', 'Privy', 'organization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, 'privy', 'Privy', 'project', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
       ORGANIZATION_ID,
+      PROJECT_ID,
       runtime ? "runtime" : "stored",
       backend,
       gcp ? `projects/p/secrets/${params.id}` : null,
@@ -59,6 +62,12 @@ describe("0080 provider Credential secret retention", () => {
       )
       .bind(USER_ID)
       .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORGANIZATION_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
   });
 
   it("requires ciphertext while a retired encrypted-db Credential is rollback-retained", async () => {

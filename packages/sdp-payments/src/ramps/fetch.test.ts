@@ -4,6 +4,8 @@ import { z } from "zod";
 import { SdpPaymentsError } from "../errors";
 import {
   isDefinitiveProviderRejection,
+  PROVIDER_MAX_RESPONSE_BYTES,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   providerErrorMessageSchema,
   providerFetch,
   providerFetchJson,
@@ -116,7 +118,11 @@ describe("providerFetch abort signal", () => {
       signal: controller.signal,
     });
 
-    assert.equal(capturedSignal, controller.signal);
+    // The caller's signal joins the timeout: aborting it aborts the request.
+    assert.ok(capturedSignal instanceof AbortSignal);
+    assert.equal(capturedSignal.aborted, false);
+    controller.abort();
+    assert.equal(capturedSignal.aborted, true);
     assert.deepEqual(result.parsed, { ok: true });
     assert.equal(result.raw, '{"ok":true}');
   });
@@ -211,5 +217,98 @@ describe("providerFetchJson response schema", () => {
         return true;
       }
     );
+  });
+});
+
+describe("providerFetch fences", () => {
+  /** A provider that accepts the request and never answers, as real fetch does on abort. */
+  function hangUntilAborted(_input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    });
+  }
+
+  function failsWith(message: string) {
+    return (cause: unknown) => {
+      assert.ok(cause instanceof SdpPaymentsError);
+      assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+      assert.equal(cause.message, message);
+      return true;
+    };
+  }
+
+  // A dropped timeout hangs these; the test timeout turns that into a failure.
+  it("gives up on a provider that never answers once the timeout passes", {
+    timeout: 5_000,
+  }, async (t) => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const requested: number[] = [];
+    t.mock.method(AbortSignal, "timeout", (ms: number) => {
+      requested.push(ms);
+      return timeout(10);
+    });
+    globalThis.fetch = hangUntilAborted;
+
+    await assert.rejects(
+      providerFetch("stripe", "https://api.example.test/hang", { method: "GET" }),
+      failsWith(`The stripe API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+    );
+    assert.deepEqual(requested, [PROVIDER_REQUEST_TIMEOUT_MS]);
+  });
+
+  it("still honors the caller's own signal", async () => {
+    const caller = new AbortController();
+    globalThis.fetch = hangUntilAborted;
+
+    const pending = providerFetch("moonpay", "https://api.example.test/hang", {
+      method: "GET",
+      signal: caller.signal,
+    });
+    caller.abort();
+
+    await assert.rejects(pending, failsWith("Failed to reach the moonpay API"));
+  });
+
+  it("gives up on a body that stops arriving once the timeout passes", {
+    timeout: 5_000,
+  }, async (t) => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    t.mock.method(AbortSignal, "timeout", () => timeout(10));
+    globalThis.fetch = async (_input, init) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"partial":'));
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          },
+        }),
+        { status: 200 }
+      );
+
+    await assert.rejects(
+      providerFetch("stripe", "https://api.example.test/slow", { method: "GET" }),
+      failsWith(`The stripe API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+    );
+  });
+
+  it("refuses a body over the byte cap without reading the rest", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let pulled = 0;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(chunk);
+          },
+        }),
+        { status: 200 }
+      );
+
+    await assert.rejects(
+      providerFetch("moonpay", "https://api.example.test/huge", { method: "GET" }),
+      failsWith(`moonpay returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`)
+    );
+    assert.ok(pulled <= PROVIDER_MAX_RESPONSE_BYTES / chunk.byteLength + 2);
   });
 });
