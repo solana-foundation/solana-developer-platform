@@ -4863,7 +4863,8 @@ describe("Payments routes — recurring", () => {
         )
         .bind(key)
         .first<{ count: number }>();
-      return row?.count ?? 0;
+      if (row === null) throw new Error("COUNT(*) returned no row");
+      return row.count;
     }
 
     /** The create body the default fixture sends, for a schedule it made. */
@@ -5069,6 +5070,59 @@ describe("Payments routes — recurring", () => {
         .all<{ idempotency_key: string | null }>();
       expect(attempts.results).toEqual([{ idempotency_key: recordKey(firstKey) }]);
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers an account-only PATCH retry after a later edit moved the schedule to another counterparty", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const other = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      // A second account under the schedule's own counterparty.
+      const sameCounterpartyAccountId = `counterparty_account_${crypto.randomUUID()}`;
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparty_accounts (
+             id, organization_id, project_id, counterparty_id, account_kind, label,
+             details, provider_account_data, status, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'crypto_wallet', 'Second wallet', ?, '{}', 'active', ?, ?)`
+        )
+        .bind(
+          sameCounterpartyAccountId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          created.counterpartyId,
+          JSON.stringify({ network: "solana", address: TEST_SOLANA_ADDRESSES.wallet3 }),
+          now,
+          now
+        )
+        .run();
+      const patch = (key: string, body: Record<string, string>) =>
+        app.request(
+          actionPath(created.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify(body) },
+          env
+        );
+      const accountOnlyKey = crypto.randomUUID();
+      const accountOnly = { counterpartyAccountId: sameCounterpartyAccountId };
+      expect((await patch(accountOnlyKey, accountOnly)).status).toBe(200);
+      // A later edit points the schedule at another counterparty and its account.
+      expect(
+        (
+          await patch(crypto.randomUUID(), {
+            counterpartyId: other.counterpartyId,
+            counterpartyAccountId: other.counterpartyAccountId,
+          })
+        ).status
+      ).toBe(200);
+      await forgetIdempotencyKey(accountOnlyKey);
+
+      const retry = await patch(accountOnlyKey, accountOnly);
+
+      expect(retry.status).toBe(200);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        counterpartyId: other.counterpartyId,
+        counterpartyAccountId: other.counterpartyAccountId,
+      });
     });
 
     it("journals a pending schedule's PATCH as a keyed attempt and answers its retry from it", async () => {
