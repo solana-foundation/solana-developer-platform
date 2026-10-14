@@ -10,7 +10,7 @@ import type {
 import type { CollectedFieldData, RampDirection } from "@sdp/types/ramp-requirements";
 import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import type { z } from "zod";
@@ -19,12 +19,9 @@ import {
   type CounterpartiesResult,
   cancelRampTransfer,
   fetchAllCounterparties,
-  getApiError,
   simulateDemoVerification,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
@@ -36,8 +33,7 @@ import { type MemoRow, memoRowsToRecord, validateMemoRows } from "../memo";
 import { type RampFields, rampSelectionSchema } from "../schema";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
-
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
+import { useRampQuote } from "./use-ramp-quote";
 
 export type RampWizardStep<TId extends string = string> = {
   id: TId;
@@ -82,39 +78,6 @@ export interface RampWizardConfig<TId extends string = string> {
   onQuoteCreated?: (quote: PaymentRampQuote) => void;
 }
 
-async function createRampQuote(
-  endpoint: string,
-  payload: Record<string, unknown>,
-  t: Translate
-): Promise<{ quote: PaymentRampQuote; transferId: string }> {
-  const response = await dashboardRequest(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    const errorBody = (await response.json().catch(() => ({}))) as {
-      error?: { message?: string };
-    };
-    throw new Error(
-      getApiError(
-        errorBody,
-        t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
-      )
-    );
-  }
-
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote; transferId?: string };
-  };
-
-  if (!body.data?.quote || !body.data.transferId) {
-    throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
-  }
-
-  return { quote: body.data.quote, transferId: body.data.transferId };
-}
-
 export interface UseRampWizardProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
@@ -148,12 +111,6 @@ export function useRampWizard<TId extends string>(
   const [stepIndex, setStepIndex] = useState(0);
   const [selectedRampPair, setSelectedRampPair] = useState<SelectedRampPair>(DEFAULT_RAMP_PAIR);
   const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
-  const [createdQuote, setCreatedQuote] = useState<{
-    quote: PaymentRampQuote;
-    transferId: string;
-  } | null>(null);
-  const quote = createdQuote === null ? null : createdQuote.quote;
-  const quoteTransferId = createdQuote === null ? null : createdQuote.transferId;
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
@@ -291,73 +248,34 @@ export function useRampWizard<TId extends string>(
 
   const isLastStep = stepIndex === steps.length - 1;
 
-  const createQuoteForCurrentSelection = async (): Promise<{
-    quote: PaymentRampQuote;
-    transferId: string;
-  } | null> => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
-      return null;
-    }
-    const created = await createRampQuote(
-      config.quoteEndpoint,
-      config.buildQuotePayload({
-        fields,
-        selectedWallet,
-        provider: fields.provider,
-        selectedRampPair,
-        assetRail: selectedRampPair.assetRail,
-        collectedData: requirements.collectedData,
-        rampsMemo: memoRowsToRecord(memoRows),
-      }),
-      t
-    );
-    setCreatedQuote(created);
-    return created;
-  };
-
-  // Only auto-fire the quote while the user sits on the transaction stage —
-  // stepping back to edit selections must not create a quote from mid-edit state.
-  // Once per wizard instance, held in local state (never a shared cache: a
-  // remounted wizard — cancel and come back — must fire its own quote); the
-  // quote POST persists the transfer and the transfer-status poll owns the
-  // flow from there. A failed attempt surfaces through quoteCreationError
-  // with an explicit retry.
-  const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
-  const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
-  const quoteCreationAttempted = useRef(false);
-  const runQuoteCreation = async () => {
-    setQuoteCreationRetrying(true);
-    try {
-      await createQuoteForCurrentSelection();
-      setQuoteCreationError(null);
-    } catch (error) {
-      setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
-    } finally {
-      setQuoteCreationRetrying(false);
-    }
-  };
-  const retryQuoteCreation = () => void runQuoteCreation();
-  const maybeCreateQuote = () => {
-    if (quoteCreationAttempted.current) {
-      return;
-    }
-    quoteCreationAttempted.current = true;
-    void runQuoteCreation();
-  };
-
-  // Readiness observed by the status poll while the user sits on the transaction
-  // stage fires the deferred quote. Readiness is derived corridor-addressed data,
-  // so a stale corridor can never reach here; `maybeCreateQuote` still guarantees
-  // at most one quote per wizard instance. A genuine network side effect on data
-  // arrival — not derived state — hence the effect.
+  // The quote fires only while the user sits on the transaction stage with the
+  // provider ready, so a selection mid-edit never reaches the quote endpoint.
+  const quotePayload =
+    config.selectionSchema.safeParse(fields).success && fields.provider && selectedWallet
+      ? config.buildQuotePayload({
+          fields,
+          selectedWallet,
+          provider: fields.provider,
+          selectedRampPair,
+          assetRail: selectedRampPair.assetRail,
+          collectedData: requirements.collectedData,
+          rampsMemo: memoRowsToRecord(memoRows),
+        })
+      : null;
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
-  // react-doctor-disable-next-line no-fetch-in-effect, no-set-state-after-await-in-effect -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
-  useEffect(() => {
-    if (!isLastStep || onboardingStatus !== "ready") {
-      return;
-    }
-    // react-doctor-disable-next-line no-pass-live-state-to-parent -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
-    maybeCreateQuote();
+  const {
+    quote,
+    quoteTransferId,
+    quoteCreationError,
+    quoteCreationRetrying,
+    quoteInFlight,
+    retryQuoteCreation,
+    resetQuoteCreation,
+  } = useRampQuote({
+    endpoint: config.quoteEndpoint,
+    payload: quotePayload,
+    shouldCreate: isLastStep && onboardingStatus === "ready",
+    onCreated: config.onQuoteCreated,
   });
 
   const advanceRequirementsAndProceed = async () => {
@@ -486,6 +404,11 @@ export function useRampWizard<TId extends string>(
       finish();
       return;
     }
+    // Previous is disabled while the quote is in flight, so leaving the transaction stage
+    // drops at most a failed attempt, and returning quotes the edited selection.
+    if (isLastStep) {
+      resetQuoteCreation();
+    }
     setStepIndex((current) => Math.max(0, current - 1));
   };
 
@@ -554,6 +477,7 @@ export function useRampWizard<TId extends string>(
     setMemoRows,
     quoteCreationError,
     quoteCreationRetrying,
+    quoteInFlight,
     retryQuoteCreation,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,

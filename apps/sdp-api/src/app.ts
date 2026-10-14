@@ -1,4 +1,4 @@
-import type { SdpRampProviderStages } from "@sdp/types";
+import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -82,6 +82,12 @@ export interface AppDeps {
    * leave another out, which today's all-`experimental` stages cannot show.
    */
   rampProviderStages: SdpRampProviderStages;
+  /**
+   * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
+   * out of rotation until it can reach the internet. Absent where nothing gates
+   * on egress (the Workers entrypoint, tests).
+   */
+  egressReadiness?: () => EgressReadiness;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -308,6 +314,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
     c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 

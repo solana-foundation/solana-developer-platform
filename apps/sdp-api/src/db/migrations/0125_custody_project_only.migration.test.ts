@@ -8,6 +8,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate,
   NOT_NULL_VIOLATION,
+  RAISE_EXCEPTION,
   seedOrgProject,
   UNIQUE_VIOLATION,
 } from "@/test/helpers/migration-db";
@@ -20,7 +21,6 @@ import {
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationFile = "0125_custody_project_only.sql";
-const RAISE_EXCEPTION = "P0001";
 const seededAt = "2026-01-01T00:00:00.000Z";
 let client: Client;
 

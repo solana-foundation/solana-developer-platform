@@ -36,7 +36,7 @@ import {
   runRevokedApiKeyCacheReconciliation,
 } from "./revoked-api-key-cache";
 import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
-import { startCron, startEarnCatalogueBootSync } from "./runner";
+import { assertCronConfig, startCron, startEarnCatalogueBootSync } from "./runner";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
 // Release channel required by the module checks the scheduler makes.
@@ -199,6 +199,14 @@ describe("startCron", () => {
   it("returns null and does not schedule when DISABLE_CRON=1", () => {
     const result = startCron({ env: { ...CHANNEL, DISABLE_CRON: "1" } as Env, bg: makeBg() });
     expect(result).toBeNull();
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
+
+  it("validates DISABLE_CRON up front without scheduling anything", () => {
+    expect(() => assertCronConfig({ DISABLE_CRON: "treu" })).toThrow(
+      'Invalid DISABLE_CRON: "treu"'
+    );
+    expect(() => assertCronConfig({ DISABLE_CRON: "false" })).not.toThrow();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 

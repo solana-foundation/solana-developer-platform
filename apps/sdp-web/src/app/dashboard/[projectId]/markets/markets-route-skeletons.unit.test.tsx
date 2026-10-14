@@ -47,7 +47,7 @@ function textOutsideTags(markup: string): string {
 }
 
 const SKELETONS = [
-  ["MarketsLanding", MarketsLandingSkeleton],
+  ["MarketsLanding", () => <MarketsLandingSkeleton earn dvp />],
   ["TreasurySolutions", TreasurySolutionsSkeleton],
   ["EmbeddedYieldPortfolio", EmbeddedYieldPortfolioSkeleton],
   ["EarnIntegrationGuide", EarnIntegrationGuideSkeleton],
@@ -109,5 +109,14 @@ describe("DvP route skeletons", () => {
     // WizardFrame's default width, on the stepper, the stage and the footer alike.
     expect(occurrences(html, "max-w-3xl")).toBe(3);
     expect(html).not.toContain("max-w-6xl");
+  });
+
+  it.each([
+    [{ earn: true, dvp: true }, 3],
+    [{ earn: true, dvp: false }, 2],
+    [{ earn: false, dvp: true }, 1],
+  ])("draws a landing path block per card the page renders for %o", (modules, cards) => {
+    const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
+    expect(html.match(/h-40 w-full rounded-2xl/g)).toHaveLength(cards);
   });
 });

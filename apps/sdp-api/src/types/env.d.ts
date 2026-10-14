@@ -4,6 +4,7 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
   AllowedOperation,
   ApiKeyEnvironment,
+  EgressReadiness,
   OrganizationEntitlements,
   OrganizationRpcProvider,
   Permission,
@@ -338,6 +339,8 @@ declare module "hono" {
     observability?: Observability;
     // Set by createApp on every request; see AppDeps.rampProviderStages
     rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.egressReadiness
+    egressReadiness?: () => EgressReadiness;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

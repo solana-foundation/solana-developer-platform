@@ -31,6 +31,7 @@ import {
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
 import { env as testEnv } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -76,6 +77,34 @@ function otherTransaction(): Uint8Array {
       )
   );
   return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+}
+
+async function seedSponsorshipProject(): Promise<void> {
+  await seedTestDatabase(testEnv);
+  const db = getDb(testEnv);
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        "org_test_sponsorship",
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        TEST_ORG.tier,
+        TEST_ORG.status,
+        TEST_ORG.settings
+      ),
+    db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: "org_test_sponsorship",
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: "project_1", production: "project_1_production" },
+  });
 }
 
 describe("sponsorship identity boundary", () => {
@@ -148,7 +177,7 @@ describe("sponsorship identity boundary", () => {
     );
   });
   it("continues a real legacy reservation and its Kora identity without admitting the exact actor again", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     const getNetworkFee = vi.spyOn(solanaRpc, "getTransactionNetworkFee").mockResolvedValue(5_000n);
     const provider: FeePaymentPort = {
       providerId: "kora",
@@ -226,7 +255,7 @@ describe("sponsorship identity boundary", () => {
   });
 
   it("refuses a historical managed reservation on self-hosted continuation instead of ignoring its charge", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     await new SponsorshipBudgetRepository(getDb(testEnv)).createReservation({
       id: "sbr_historic_managed",
       network: "devnet",
@@ -405,7 +434,7 @@ describe("sponsorship identity boundary", () => {
   );
 
   it("fences concurrent compatible writers while the real reservation waits for domain linkage", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     vi.spyOn(solanaRpc, "getTransactionNetworkFee").mockResolvedValue(5_000n);
     const provider: FeePaymentPort = {
       providerId: "kora",
