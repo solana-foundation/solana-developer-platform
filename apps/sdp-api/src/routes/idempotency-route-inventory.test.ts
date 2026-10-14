@@ -17,7 +17,9 @@ import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
  * - validates its params, query and body before `authorize`, which reads them
  *   as validated, so an invalid request claims nothing;
  * - declares `recovery: "record"` exactly when it mounts `replayFromRecord`,
- *   so a lapsed claim is taken over only where the domain row answers it.
+ *   so a lapsed claim is taken over only where the domain row answers it;
+ * - runs under project context, because every key is scoped to a project
+ *   (`idempotency_keys.project_id` is NOT NULL; the step 500s without one).
  *
  * The module comes from the route-ownership table and the stage from the
  * `stable` release channel, so promoting a module to `stable` fails this test
@@ -74,6 +76,8 @@ interface RouteSteps {
   validateAt: number[];
   recovery: ReturnType<typeof declaredIdempotencyRecovery>;
   replaysFromRecord: boolean;
+  /** Position of the `projectContext` step that covers the route, -1 if none. */
+  projectContextAt: number;
 }
 
 function stableMutatingRoutes(): Map<string, RouteSteps> {
@@ -87,6 +91,7 @@ function stableMutatingRoutes(): Map<string, RouteSteps> {
       validateAt: [],
       recovery: undefined,
       replaysFromRecord: false,
+      projectContextAt: -1,
     };
     const idempotency = declaredIdempotency(handler);
     if (idempotency !== undefined) {
@@ -96,6 +101,9 @@ function stableMutatingRoutes(): Map<string, RouteSteps> {
     }
     if (declaresRecordReplay(handler)) {
       steps.replaysFromRecord = true;
+    }
+    if (handler.name === "projectContext") {
+      steps.projectContextAt = position;
     }
     const authorization = declaredAuthorization(handler);
     if (authorization !== undefined) {
@@ -153,6 +161,16 @@ describe("idempotency route inventory", () => {
       .sort();
     expect(mismatched).toEqual([]);
     expect(idempotent.filter(([, steps]) => steps.replaysFromRecord).length).toBeGreaterThan(0);
+  });
+
+  it("runs project context before the idempotency step on every idempotent route", () => {
+    const unscoped = idempotent
+      .filter(
+        ([, steps]) => steps.projectContextAt === -1 || steps.projectContextAt > steps.idempotentAt
+      )
+      .map(([route]) => route)
+      .sort();
+    expect(unscoped).toEqual([]);
   });
 
   it("pins every route that names no resource, with its reason", () => {

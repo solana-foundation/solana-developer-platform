@@ -16,11 +16,20 @@ export interface StableMutatingRouteStep {
   handler: RouteHandler;
 }
 
+/** Whether a `use()` pattern such as `/v1/wallets/*` covers a route path. */
+function covers(pattern: string, path: string): boolean {
+  if (pattern === "/*" || pattern === "*") return true;
+  if (!pattern.endsWith("/*")) return pattern === path;
+  const base = pattern.slice(0, -2);
+  return path === base || path.startsWith(`${base}/`);
+}
+
 /**
  * Every step of every POST, PATCH, PUT and DELETE route owned by a module at
- * `stable`, in mount order. The Idempotency-Key inventories (HOO-1918) read
- * the markers `idempotent()`, `authorize()`, `replayFromRecord()` and the
- * validators leave on these handlers.
+ * `stable`, in mount order, including the `use()` middleware whose pattern
+ * covers the route. The Idempotency-Key inventories (HOO-1918) read the
+ * markers `idempotent()`, `authorize()`, `replayFromRecord()` and the
+ * validators leave on these handlers, and the named `projectContext` step.
  */
 export function stableMutatingRouteSteps(): StableMutatingRouteStep[] {
   const app = createApp({
@@ -28,14 +37,29 @@ export function stableMutatingRouteSteps(): StableMutatingRouteStep[] {
     rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   });
   const steps: StableMutatingRouteStep[] = [];
+  const middleware: { pattern: string; position: number; handler: RouteHandler }[] = [];
+  const withMiddleware = new Set<string>();
   let position = 0;
   for (const route of app.routes) {
     position += 1;
     const method = route.method.toUpperCase();
+    if (method === "ALL") {
+      middleware.push({ pattern: route.path, position, handler: route.handler });
+      continue;
+    }
     if (!MUTATING_METHODS.has(method)) continue;
     const owner = routeOwnerOf(route.path);
     if (owner === undefined || owner === "core" || !STABLE_MODULES.has(owner)) continue;
-    steps.push({ route: `${method} ${route.path}`, position, handler: route.handler });
+    const key = `${method} ${route.path}`;
+    if (!withMiddleware.has(key)) {
+      withMiddleware.add(key);
+      for (const step of middleware) {
+        if (covers(step.pattern, route.path)) {
+          steps.push({ route: key, position: step.position, handler: step.handler });
+        }
+      }
+    }
+    steps.push({ route: key, position, handler: route.handler });
   }
   return steps;
 }
