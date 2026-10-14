@@ -25,7 +25,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
-import { hasAuthorized, validatedInput } from "./authorize";
+import { hasAuthorized, type RouteHandler, validatedInput } from "./authorize";
 import { parseIdempotencyKey } from "./idempotency-key";
 
 /** Set on a response replayed from a stored one. */
@@ -525,7 +525,7 @@ export function declaredIdempotencyRecovery(handler: object): "record" | undefin
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
-export function declaredIdempotency(handler: object): IdempotencyKeyMode | undefined {
+export function declaredIdempotency(handler: RouteHandler): IdempotencyKeyMode | undefined {
   // SAFETY: the marker is a registered symbol only idempotent() sets, always to
   // an IdempotencyKeyMode; any other handler lacks it and reads undefined.
   return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode })[IDEMPOTENCY_MARKER];

@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
+import { z } from "zod";
 import { internalError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 
@@ -44,13 +45,19 @@ type ValidatedRequestContext = Context<
  */
 export type Authorizer<T> = (c: AuthorizeContext, input: AuthorizeInput) => T | Promise<T>;
 
+/** Any handler a route mounts, as route inventories read them. */
+export type RouteHandler = (...args: never[]) => unknown;
+
 /** Marks an {@link authorize} handler, for route inventory tests. */
 export const AUTHORIZE_MARKER = Symbol.for("sdp.authorize");
 
-export type AuthorizeDeclaration =
-  | { kind: "checked" }
+export const authorizeDeclarationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("checked") }),
   /** The route names no resource beyond the caller's own scope. */
-  | { kind: "none"; reason: string };
+  z.object({ kind: z.literal("none"), reason: z.string() }),
+]);
+
+export type AuthorizeDeclaration = z.infer<typeof authorizeDeclarationSchema>;
 
 /**
  * Reads the validated request a route's validators stored; a target with no
@@ -108,7 +115,7 @@ export function getAuthorized<T>(c: AuthorizeContext): T {
 }
 
 /** Reads what an {@link authorize} or {@link authorizeNone} handler declares. */
-export function declaredAuthorization(handler: object): AuthorizeDeclaration | undefined {
+export function declaredAuthorization(handler: RouteHandler): AuthorizeDeclaration | undefined {
   // SAFETY: the marker is a registered symbol only authorize() and
   // authorizeNone() set, always to an AuthorizeDeclaration; any other handler
   // lacks it and reads undefined.

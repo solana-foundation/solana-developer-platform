@@ -56,7 +56,11 @@ export function recallVaultWithdrawalFloor(fingerprint: string): string | null |
   return vaultWithdrawalFloorMemo.recall(fingerprint);
 }
 
-/** Drop a retired key's floor so the next fresh derivation cannot inherit it. */
+/**
+ * Drop a retired key's floor so the next fresh derivation cannot inherit it,
+ * only once no key is kept for the fingerprint (see `forgetVaultDepositFloor`).
+ */
 export function forgetVaultWithdrawalFloor(fingerprint: string): void {
+  if (vaultWithdrawalIdempotencyKeyStore.has(fingerprint)) return;
   vaultWithdrawalFloorMemo.forget(fingerprint);
 }
