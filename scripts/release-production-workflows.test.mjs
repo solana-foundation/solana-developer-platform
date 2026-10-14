@@ -149,10 +149,7 @@ test("the deploy job exposes the revision it promoted, and the rollout completes
     /\n {10}echo "revision=\$\{CANDIDATE_REVISION\}" >> "\$\{GITHUB_OUTPUT\}"\n/
   );
   assert.doesNotMatch(promote, /ROLLOUT_COMPLETE/);
-  assert.match(
-    stepBlock(deploy, "Run prod canary against the promoted revision"),
-    /\n {10}echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n/
-  );
+  assertLine(deploy, `      rollout_complete: ${expression("steps.canary.outcome == 'success'")}`);
 });
 
 test("release-web posts the gate once when production serves the deployed revision", () => {
@@ -187,10 +184,10 @@ test("release-web fails after three rejected gate posts", () => {
 
 test("a deploy whose web release did not succeed reports web-held", () => {
   const notifyResult = jobBlock(readWorkflow(prodDeployFile), "notify-result");
-  assertLine(notifyResult, "    needs: [deploy, release-web]");
+  assertLine(notifyResult, "    needs: [deploy, rollback, release-web]");
   assert.match(
     notifyResult,
-    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.deploy\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
+    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.rollback\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
   );
   assert.match(
     fs.readFileSync(path.join(here, "notify-slack.sh"), "utf8"),

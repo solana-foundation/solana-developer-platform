@@ -246,7 +246,7 @@ jobs:
     name: sdp-api + worker + cron — prod
     needs: [changes, deploy-api-stage, schema]
     # Explicit results instead of the implicit success(), so cancelling the run
-    # cannot cancel the prod deploy before its rollback guard runs.
+    # cannot take the prod workflow's rollback job down with this caller.
     if: >-
       always() &&
       needs.changes.result == 'success' &&

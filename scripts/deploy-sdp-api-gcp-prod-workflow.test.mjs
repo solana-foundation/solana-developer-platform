@@ -12,11 +12,11 @@ test("a rolled-back deploy says so in Slack for approval, manual and merge deplo
   assert.match(workflow, /rolled_back: \$\{\{ steps\.rollback_guard\.outputs\.rolled_back \}\}/);
   assert.match(
     workflow,
-    /workflow_call:[\s\S]*?outputs:\n\s+rolled_back:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.deploy\.outputs\.rolled_back \}\}\n\s+workflow_dispatch:/
+    /workflow_call:[\s\S]*?outputs:\n\s+rolled_back:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.rollback\.outputs\.rolled_back \}\}\n\s+workflow_dispatch:/
   );
   assert.match(
     workflow,
-    /'web-held' \|\|\n\s+needs\.deploy\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|\n\s+'failure' \}\}/
+    /'web-held' \|\|\n\s+needs\.rollback\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|\n\s+'failure' \}\}/
   );
   assert.doesNotMatch(workflow, /canary-failed|tail_clean|canary_outcome/);
   const notifier = fs.readFileSync(path.resolve(here, "notify-slack.sh"), "utf8");
@@ -37,15 +37,21 @@ test("a rolled-back deploy says so in Slack for approval, manual and merge deplo
 test("the rollout completes only once the canary passes", () => {
   const promote = workflow.indexOf("- name: Promote service and cron with rollback");
   const canary = workflow.indexOf("- name: Run prod canary against the promoted revision");
-  assert.doesNotMatch(workflow.slice(promote, canary), /ROLLOUT_COMPLETE/);
   assert.match(
     workflow,
-    /- name: Run prod canary against the promoted revision\n\s+id: canary\n\s+if: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n\s+timeout-minutes: 5\n\s+run: \|\n\s+set -euo pipefail\n\s+gcloud run jobs execute sdp-prod-canary \\\n\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --wait\n\s+echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n/
+    /- name: Run prod canary against the promoted revision\n\s+id: canary\n\s+if: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n\s+timeout-minutes: 5\n\s+run: \|\n\s+set -euo pipefail\n\s+gcloud run jobs execute sdp-prod-canary \\\n\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --wait\n\n/
   );
-  assert.equal(workflow.match(/ROLLOUT_COMPLETE=true/g).length, 1);
+  assert.match(
+    workflow,
+    /\n {6}rollout_complete: \$\{\{ steps\.canary\.outcome == 'success' \}\}\n/
+  );
+  assert.match(
+    workflow,
+    /- name: Record managed monitor migration gate\n\s+if: \$\{\{ steps\.canary\.outcome == 'success' \}\}\n/
+  );
   const monitorNote = workflow.indexOf("- name: Record managed monitor migration gate");
-  const guard = workflow.indexOf("- name: Roll back incomplete rollout");
-  assert.ok(promote < canary && canary < monitorNote && monitorNote < guard);
+  const rollbackJob = workflow.indexOf("\n  rollback:\n");
+  assert.ok(promote < canary && canary < monitorNote && monitorNote < rollbackJob);
 });
 
 test("manual production deploy requires an immutable SHA-tagged image", () => {
@@ -67,7 +73,7 @@ test("automatic production deploys are called from main with a required image SH
   assert.doesNotMatch(workflow, /\n\s+release:\n/);
   assert.match(
     workflow,
-    /name: Deploy production image\n(?:\s+#[^\n]*\n)*\s+if: >-\n\s+always\(\) &&\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.ref == 'refs\/heads\/main' &&\n\s+\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n\s+runs-on:/
+    /name: Deploy production image\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.ref == 'refs\/heads\/main' &&\n\s+\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n\s+runs-on:/
   );
 });
 
@@ -94,7 +100,7 @@ test("manual redeploys verify the promoted image signature before rollout", () =
 test("candidate is revision-specific and Cloud Run-ready before promotion", () => {
   assert.match(workflow, /echo "IMAGE=\$\{resolved_image\}" >> "\$\{GITHUB_ENV\}"/);
   assert.match(workflow, /--no-traffic --tag "\$\{candidate_tag\}"/);
-  assert.match(workflow, /CANDIDATE_TAG=\$\{candidate_tag\}/);
+  assert.match(workflow, /echo "tag=\$\{candidate_tag\}" >> "\$\{GITHUB_OUTPUT\}"/);
   assert.match(workflow, /status\.imageDigest/);
   assert.match(
     workflow,
@@ -141,14 +147,31 @@ test("managed cadence parity is verified before production promotion", () => {
 
 test("cancellation-safe rollback restores resolved traffic and cron together", () => {
   assert.match(workflow, /if: >-\n\s+always\(\) &&/);
-  assert.match(workflow, /PREVIOUS_TRAFFIC=/);
-  assert.match(workflow, /PREVIOUS_CRON_IMAGE=/);
   assert.match(
     workflow,
     /--format='value\(spec\.template\.spec\.template\.spec\.containers\[0\]\.image\)'/
   );
-  assert.match(workflow, /ROLLOUT_STARTED=true/);
-  assert.match(workflow, /ROLLOUT_COMPLETE=true/);
+  for (const [output, step, key] of [
+    ["previous_traffic", "capture", "traffic"],
+    ["previous_cron_image", "capture", "cron_image"],
+    ["previous_worker_image", "capture", "worker_image"],
+    ["candidate_tag", "candidate", "tag"],
+    ["breaking_migrations", "breaking", "migrations"],
+  ]) {
+    assert.match(
+      workflow,
+      new RegExp(`\\n {6}${output}: \\$\\{\\{ steps\\.${step}\\.outputs\\.${key} \\}\\}\\n`)
+    );
+    const env = output.toUpperCase();
+    assert.match(
+      workflow,
+      new RegExp(`\\n {6}${env}: \\$\\{\\{ needs\\.deploy\\.outputs\\.${output} \\}\\}\\n`)
+    );
+  }
+  assert.match(
+    workflow,
+    /\n {6}rollout_started: \$\{\{ steps\.candidate\.outcome == 'success' \|\| steps\.candidate\.outcome == 'failure' \|\| steps\.candidate\.outcome == 'cancelled' \}\}\n/
+  );
   assert.match(
     workflow,
     /- name: Roll back incomplete rollout\n\s+id: rollback_guard\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
@@ -158,19 +181,19 @@ test("cancellation-safe rollback restores resolved traffic and cron together", (
   assert.match(workflow, /--image "\$\{PREVIOUS_CRON_IMAGE\}"/);
 
   const candidateStep = workflow.indexOf("- name: Deploy candidate without production traffic");
-  const rolloutStarted = workflow.indexOf("ROLLOUT_STARTED=true", candidateStep);
   const candidateDeploy = workflow.indexOf("gcloud run services update", candidateStep);
   const promotionStep = workflow.indexOf("- name: Promote service and cron with rollback");
   const promotion = workflow.indexOf("--to-revisions", promotionStep);
   const canonicalReadiness = workflow.indexOf('"https://api.solana.com/health/ready"', promotion);
   const cronUpdate = workflow.indexOf("gcloud run jobs update", canonicalReadiness);
-  const rolloutComplete = workflow.indexOf("ROLLOUT_COMPLETE=true", cronUpdate);
-  const rollback = workflow.indexOf("- name: Roll back incomplete rollout", rolloutComplete);
-  assert.ok(candidateStep !== -1 && candidateStep < rolloutStarted);
-  assert.ok(rolloutStarted < candidateDeploy);
-  assert.ok(promotion !== -1 && promotion < canonicalReadiness);
-  assert.ok(canonicalReadiness < cronUpdate);
-  assert.ok(cronUpdate < rolloutComplete && rolloutComplete < rollback);
+  const canary = workflow.indexOf(
+    "- name: Run prod canary against the promoted revision",
+    cronUpdate
+  );
+  const rollback = workflow.indexOf("- name: Roll back incomplete rollout", canary);
+  assert.ok(candidateStep !== -1 && candidateStep < candidateDeploy);
+  assert.ok(candidateDeploy < promotion && promotion < canonicalReadiness);
+  assert.ok(canonicalReadiness < cronUpdate && cronUpdate < canary && canary < rollback);
 });
 
 test("rollback targets resolved pre-candidate revisions instead of LATEST", () => {
@@ -650,7 +673,7 @@ test("a passed canary completes the rollout, so the guard leaves prod alone", ()
   });
   assert.equal(canary.code, 0, canary.out);
   assert.deepEqual(canary.calls, [`gcloud run jobs execute sdp-prod-canary ${scope} --wait`]);
-  assert.match(canary.env, /^ROLLOUT_COMPLETE=true\n$/);
+  assert.equal(canary.env, "");
 
   for (const env of [
     { ...rollbackEnv, ROLLOUT_COMPLETE: "true" },
@@ -725,7 +748,7 @@ test("merge and approval deploys refuse while prod is held; a manual dispatch ca
   assert.doesNotMatch(orchestrator, /clear_hold/);
   assert.match(
     workflow,
-    /- name: Lift the prod hold\n\s+if: \$\{\{ env\.ROLLOUT_COMPLETE == 'true' && inputs\.clear_hold \}\}\n/
+    /- name: Lift the prod hold\n\s+if: \$\{\{ steps\.canary\.outcome == 'success' && inputs\.clear_hold \}\}\n/
   );
   assert.ok(
     workflow.indexOf("- name: Run prod canary against the promoted revision") <
@@ -766,7 +789,7 @@ const gateStep = "Refuse a breaking migration until prod serves its parent";
 test("breaking migrations are ordered before any image or schema change", () => {
   assert.match(
     workflow,
-    /- name: Refuse a breaking migration until prod serves its parent\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}\n/
+    /- name: Refuse a breaking migration until prod serves its parent\n\s+id: breaking\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}\n/
   );
   const gate = workflow.indexOf(`- name: ${gateStep}`);
   assert.ok(workflow.indexOf("- name: Refuse a deploy that is behind prod") < gate);
@@ -880,8 +903,8 @@ test("a breaking migration deploys once prod serves its parent, and the run reco
   const run = runGate(repo, { applied: repo.base, serving: repo.stopReading });
   assert.equal(run.code, 0, run.out);
   assert.equal(
-    run.env,
-    "BREAKING_MIGRATIONS=apps/sdp-api/src/db/migrations/postgres/0002_drop_legacy.sql\n"
+    run.output,
+    "migrations=apps/sdp-api/src/db/migrations/postgres/0002_drop_legacy.sql\n"
   );
 });
 
@@ -895,7 +918,7 @@ test("a breaking migration is refused while prod serves a commit older than its 
       `0002_drop_legacy\\.sql is marked breaking, so it runs only once prod serves ${repo.drop}\\^`
     )
   );
-  assert.equal(run.env, "");
+  assert.equal(run.output, "");
 });
 
 test("a deploy with no breaking migration pending never reads the serving commit", () => {
@@ -903,7 +926,7 @@ test("a deploy with no breaking migration pending never reads the serving commit
   const run = runGate(repo, { applied: repo.drop, serving: repo.base });
   assert.equal(run.code, 0, run.out);
   assert.deepEqual(run.calls, []);
-  assert.equal(run.env, "");
+  assert.equal(run.output, "");
 });
 
 test("with the schema position unknown, the gate checks breaking migrations since the last release tag", () => {
@@ -924,7 +947,7 @@ test("the gate fails closed when it cannot tell which commit prod serves", () =>
     const run = runGate(repo, { applied: repo.base, healthJson });
     assert.equal(run.code, 1, healthJson);
     assert.match(run.out, /Could not read the commit sdp-prod-api-public-00041-old serves/);
-    assert.equal(run.env, "");
+    assert.equal(run.output, "");
   }
   const split = runGate(repo, {
     applied: repo.base,
@@ -936,7 +959,7 @@ test("the gate fails closed when it cannot tell which commit prod serves", () =>
   });
   assert.notEqual(split.code, 0);
   assert.match(split.out, /production traffic is not on exactly one revision/);
-  assert.equal(split.env, "");
+  assert.equal(split.output, "");
 });
 
 test("a breaking edit to a repeatable view waits for the code before that edit, not the first one", () => {
@@ -999,29 +1022,29 @@ test("an approval run deploys while prod is held only when dispatched with clear
   assert.equal(unheld.code, 0, unheld.out);
 });
 
-test("cancelling a run cannot cut the rollback short or start a deploy late", () => {
-  const job = workflow.slice(
-    workflow.indexOf("\n  deploy:\n"),
+test("a cancel stops the forward deploy, and the rollback runs in its own job", () => {
+  const deployJob = workflow
+    .slice(workflow.indexOf("\n  deploy:\n"), workflow.indexOf("\n  rollback:\n"))
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.doesNotMatch(deployJob, /always\(\)|cancelled\(\)|failure\(\)|success\(\)/);
+  const rollbackJob = workflow.slice(
+    workflow.indexOf("\n  rollback:\n"),
     workflow.indexOf("\n  release-web:\n")
   );
-  const steps = [
-    ...job.matchAll(/\n {6}- name: ([^\n]+)\n(?: {8}id: [^\n]+\n)?(?: {8}if: ([^\n]+)\n)?/g),
-  ];
-  assert.equal(steps[0][1], "Stop a deploy whose run was cancelled before it started");
-  assert.equal(steps[0][2], "${{ cancelled() }}");
-  const statusSteps = steps
-    .filter(([, , condition]) =>
-      /always\(\)|cancelled\(\)|failure\(\)|success\(\)/.test(condition ?? "")
-    )
-    .map(([, name]) => name);
-  assert.deepEqual(statusSteps, [
-    "Stop a deploy whose run was cancelled before it started",
+  assert.match(
+    rollbackJob,
+    /\n {4}needs: deploy\n {4}if: \$\{\{ always\(\) && needs\.deploy\.outputs\.rollout_started == 'true' \}\}\n/
+  );
+  assert.match(rollbackJob, /\n {4}environment: production\n/);
+  const steps = [...rollbackJob.matchAll(/\n {6}- name: ([^\n]+)\n/g)].map(([, name]) => name);
+  assert.deepEqual(steps, [
+    "Authenticate to GCP",
+    "Set up gcloud",
     "Roll back incomplete rollout",
     "Remove candidate traffic tag",
   ]);
-  const stop = runStep("Stop a deploy whose run was cancelled before it started", {});
-  assert.equal(stop.code, 1);
-  assert.deepEqual(stop.calls, []);
 
   const approval = fs.readFileSync(
     path.resolve(here, "../.github/workflows/apply-prod-migrations.yml"),

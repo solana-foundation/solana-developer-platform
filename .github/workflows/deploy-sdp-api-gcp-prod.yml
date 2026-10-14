@@ -20,7 +20,7 @@ on:
     outputs:
       rolled_back:
         description: "'true' when the deploy restored the previous production revision and set the prod hold"
-        value: ${{ jobs.deploy.outputs.rolled_back }}
+        value: ${{ jobs.rollback.outputs.rolled_back }}
   workflow_dispatch:
     inputs:
       image_sha:
@@ -42,6 +42,14 @@ permissions:
 concurrency:
   group: sdp-api-gcp-deploy-prod
   cancel-in-progress: false
+
+env:
+  PROJECT_ID: solana-developer-platform
+  REGION: us-central1
+  SERVICE: sdp-prod-api-public
+  JOB: sdp-prod-api-public-cron
+  WORKER_SERVICE: sdp-prod-worker
+  MIGRATE_JOB: sdp-prod-api-public-migrate
 
 jobs:
   notify-start:
@@ -84,14 +92,15 @@ jobs:
   deploy:
     outputs:
       revision: ${{ steps.promote.outputs.revision }}
-      rolled_back: ${{ steps.rollback_guard.outputs.rolled_back }}
+      rollout_started: ${{ steps.candidate.outcome == 'success' || steps.candidate.outcome == 'failure' || steps.candidate.outcome == 'cancelled' }}
+      rollout_complete: ${{ steps.canary.outcome == 'success' }}
+      candidate_tag: ${{ steps.candidate.outputs.tag }}
+      previous_traffic: ${{ steps.capture.outputs.traffic }}
+      previous_cron_image: ${{ steps.capture.outputs.cron_image }}
+      previous_worker_image: ${{ steps.capture.outputs.worker_image }}
+      breaking_migrations: ${{ steps.breaking.outputs.migrations }}
     name: Deploy production image
-    # always(): GitHub force-kills a job it marks for cancellation five minutes
-    # after a cancel, which could cut the rollback guard short. Steps that move
-    # prod forward keep their implicit success(), so a cancel stops them and the
-    # always() steps roll back; the first step stops a job that starts after one.
     if: >-
-      always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true')
@@ -99,21 +108,9 @@ jobs:
     timeout-minutes: 150
     environment: production
     env:
-      PROJECT_ID: solana-developer-platform
-      REGION: us-central1
       REPO: sdp-prod
-      SERVICE: sdp-prod-api-public
-      JOB: sdp-prod-api-public-cron
-      WORKER_SERVICE: sdp-prod-worker
-      MIGRATE_JOB: sdp-prod-api-public-migrate
       BUILD_IMAGE: ${{ (github.event_name != 'workflow_dispatch' || inputs.approved_schema) && 'true' || 'false' }}
     steps:
-      - name: Stop a deploy whose run was cancelled before it started
-        if: ${{ cancelled() }}
-        run: |
-          echo "This run was cancelled before the deploy started; nothing was changed." >&2
-          exit 1
-
       - name: Validate deploy image SHA
         env:
           DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
@@ -242,6 +239,7 @@ jobs:
       # runs before the candidate takes traffic. Apply one only while prod serves
       # the commit before its last pending edit, which no longer reads what it drops.
       - name: Refuse a breaking migration until prod serves its parent
+        id: breaking
         if: ${{ env.BUILD_IMAGE == 'true' }}
         run: |
           set -euo pipefail
@@ -292,7 +290,7 @@ jobs:
               exit 1
             fi
           done
-          echo "BREAKING_MIGRATIONS=${breaking[*]}" >> "${GITHUB_ENV}"
+          echo "migrations=${breaking[*]}" >> "${GITHUB_OUTPUT}"
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -422,6 +420,7 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" --update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"
 
       - name: Capture rollback state
+        id: capture
         run: |
           set -euo pipefail
           service_json="$(
@@ -447,8 +446,8 @@ jobs:
             echo "Could not resolve the current cron job image." >&2
             exit 1
           fi
-          echo "PREVIOUS_TRAFFIC=${previous_traffic}" >> "${GITHUB_ENV}"
-          echo "PREVIOUS_CRON_IMAGE=${previous_cron_image}" >> "${GITHUB_ENV}"
+          echo "traffic=${previous_traffic}" >> "${GITHUB_OUTPUT}"
+          echo "cron_image=${previous_cron_image}" >> "${GITHUB_OUTPUT}"
           worker_describe_err="$(mktemp)"
           previous_worker_image="$(
             gcloud run services describe "${WORKER_SERVICE}" \
@@ -462,7 +461,7 @@ jobs:
               exit 1
             fi
           }
-          echo "PREVIOUS_WORKER_IMAGE=${previous_worker_image}" >> "${GITHUB_ENV}"
+          echo "worker_image=${previous_worker_image}" >> "${GITHUB_OUTPUT}"
 
       - name: Hold prod for a manual deploy
         if: ${{ env.BUILD_IMAGE != 'true' && !inputs.clear_hold }}
@@ -474,12 +473,12 @@ jobs:
           echo "Holding prod at ${DEPLOY_IMAGE_SHA}: merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Deploy candidate without production traffic
+        id: candidate
         timeout-minutes: 5
         run: |
           set -euo pipefail
           candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"
-          echo "CANDIDATE_TAG=${candidate_tag}" >> "${GITHUB_ENV}"
-          echo "ROLLOUT_STARTED=true" >> "${GITHUB_ENV}"
+          echo "tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
           gcloud run services update "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}" \
             --no-traffic --tag "${candidate_tag}"
@@ -602,7 +601,7 @@ jobs:
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
       # The rollout is complete only once the canary passes; until then the
-      # rollback guard below restores the previous revision.
+      # rollback job restores the previous revision.
       - name: Run prod canary against the promoted revision
         id: canary
         if: ${{ steps.promote.outcome == 'success' }}
@@ -611,10 +610,9 @@ jobs:
           set -euo pipefail
           gcloud run jobs execute sdp-prod-canary \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
-          echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
 
       - name: Record managed monitor migration gate
-        if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
+        if: ${{ steps.canary.outcome == 'success' }}
         run: |
           {
             echo "### Managed reconciliation monitor follow-up"
@@ -625,12 +623,42 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Lift the prod hold
-        if: ${{ env.ROLLOUT_COMPLETE == 'true' && inputs.clear_hold }}
+        if: ${{ steps.canary.outcome == 'success' && inputs.clear_hold }}
         run: |
           set -euo pipefail
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_hold
           echo "Lifted sdp_prod_hold: merge and approval deploys resume." >> "${GITHUB_STEP_SUMMARY}"
+
+  # Its own job, so a cancel cannot cut it short: the deploy job stays
+  # cancellable, and this one starts once it ends, under always().
+  rollback:
+    name: Roll back an incomplete rollout and untag the candidate
+    needs: deploy
+    if: ${{ always() && needs.deploy.outputs.rollout_started == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    outputs:
+      rolled_back: ${{ steps.rollback_guard.outputs.rolled_back }}
+    env:
+      DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
+      ROLLOUT_STARTED: ${{ needs.deploy.outputs.rollout_started }}
+      ROLLOUT_COMPLETE: ${{ needs.deploy.outputs.rollout_complete }}
+      BREAKING_MIGRATIONS: ${{ needs.deploy.outputs.breaking_migrations }}
+      PREVIOUS_TRAFFIC: ${{ needs.deploy.outputs.previous_traffic }}
+      PREVIOUS_CRON_IMAGE: ${{ needs.deploy.outputs.previous_cron_image }}
+      PREVIOUS_WORKER_IMAGE: ${{ needs.deploy.outputs.previous_worker_image }}
+      CANDIDATE_TAG: ${{ needs.deploy.outputs.candidate_tag }}
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Roll back incomplete rollout
         id: rollback_guard
@@ -736,7 +764,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
-    needs: [deploy, release-web]
+    needs: [deploy, rollback, release-web]
     if: >-
       always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
@@ -761,7 +789,7 @@ jobs:
           STATUS: >-
             ${{ needs.deploy.result == 'success' && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
                 needs.deploy.result == 'success' && 'web-held' ||
-                needs.deploy.outputs.rolled_back == 'true' && 'rolled-back' ||
+                needs.rollback.outputs.rolled_back == 'true' && 'rolled-back' ||
                 needs.deploy.result == 'cancelled' && 'cancelled' ||
                 'failure' }}
           VERSION: ${{ inputs.image_sha }}
