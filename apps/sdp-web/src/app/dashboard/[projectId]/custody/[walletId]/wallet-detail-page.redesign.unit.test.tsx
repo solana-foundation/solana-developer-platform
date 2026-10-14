@@ -210,14 +210,26 @@ describe("WalletDetailPage", () => {
     expect(requested("/payments/")).toBe(false);
   });
 
-  it.each([404, "wrong-wallet", "missing-identity", "invalid-balance"] as const)(
+  it("preserves the empty balance display for a missing tracked balance", async () => {
+    const base = mockRequest.getMockImplementation();
+    if (!base) throw new Error("Wallet detail request fixture is missing");
+    mockRequest.mockImplementation(async (path: string) =>
+      path.includes("/balances") ? new Response(null, { status: 404 }) : base(path)
+    );
+
+    const props = await renderPage();
+
+    await expect(props.balancesPromise).resolves.toEqual({ balances: [], error: null });
+    expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
+  });
+
+  it.each(["wrong-wallet", "missing-identity", "invalid-balance"] as const)(
     "reports an unavailable balance for %s instead of an empty wallet",
     async (failure) => {
       const base = mockRequest.getMockImplementation();
       if (!base) throw new Error("Wallet detail request fixture is missing");
       mockRequest.mockImplementation(async (path: string) => {
         if (!path.includes("/balances")) return base(path);
-        if (failure === 404) return new Response(null, { status: 404 });
         const custodyWalletId = (() => {
           switch (failure) {
             case "missing-identity":

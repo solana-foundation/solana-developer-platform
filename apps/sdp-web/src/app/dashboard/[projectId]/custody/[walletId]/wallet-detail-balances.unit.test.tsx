@@ -31,7 +31,24 @@ afterEach(() => {
 });
 
 describe("wallet detail balances", () => {
-  it("shows unavailable without cached token rows or an empty-wallet label after a poll fails", () => {
+  it("keeps the initial error and empty-wallet display when no poll has succeeded", () => {
+    mockUseSWR.mockReturnValue({ data: undefined, error: new Error("RPC unavailable") });
+
+    const rows = renderBalanceView(
+      <WalletBalanceRows
+        walletId="wallet-1"
+        initial={trackedBalances([], "Balances unavailable")}
+        tokenRoutes={{}}
+        issuanceEnabled={false}
+        emptyLabel="No balances"
+      />
+    );
+
+    expect(rows).toContain("Balances unavailable");
+    expect(rows).toContain("No balances");
+  });
+
+  it("keeps previously loaded token rows after a poll fails", () => {
     const cached = solBalance("2");
     mockUseSWR.mockReturnValue({ data: [cached], error: new Error("RPC unavailable") });
 
@@ -45,9 +62,9 @@ describe("wallet detail balances", () => {
       />
     );
 
-    expect(rows).toContain("Unavailable");
+    expect(rows).not.toContain("Unavailable");
     expect(rows).not.toContain("No balances");
-    expect(rows).not.toContain(cached.mint);
+    expect(rows).toContain(cached.mint);
   });
   it("shows the empty-wallet label only after a successful empty read", () => {
     mockUseSWR.mockReturnValue({ data: [] });
@@ -143,7 +160,7 @@ describe("wallet detail balances", () => {
     expect(recovered).not.toContain("Balances unavailable");
     expect(recovered).toContain("150");
   });
-  it("hides cached amounts when a poll fails", () => {
+  it("keeps the cached total when a poll fails", () => {
     mockUseSWR.mockReturnValue({
       data: [{ ...solBalance("1"), usdValue: 150 }],
       error: new Error("Unavailable"),
@@ -154,7 +171,7 @@ describe("wallet detail balances", () => {
         initial={trackedBalances([{ ...solBalance("1"), usdValue: 150 }], null)}
       />
     );
-    expect(total).not.toContain("150");
-    expect(total).toContain("Unavailable");
+    expect(total).toContain("150");
+    expect(total).not.toContain("Unavailable");
   });
 });

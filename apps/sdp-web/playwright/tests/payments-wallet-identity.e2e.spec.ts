@@ -1,4 +1,10 @@
 import { expect as playwrightExpect, test } from "@playwright/test";
+import {
+  formatCurrencyAmount,
+  formatDisplayAmount,
+  isSolBalance,
+  resolveTotalBalance,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
@@ -22,6 +28,7 @@ test.describe
       page,
     }) => {
       const { api, projectId, walletA, walletB } = fixture;
+      const snapshots: Array<ReturnType<typeof parseWalletBalanceResponse>> = [];
       for (const wallet of [walletA, walletB]) {
         const walletBalances = parseWalletBalanceResponse(
           {
@@ -33,20 +40,50 @@ test.describe
         );
         expect(walletBalances.walletId).toBe(wallet.walletId);
         expect(walletBalances.address).toBe(wallet.publicKey);
+        snapshots.push(walletBalances);
       }
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
       await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"));
       await expect(page.getByText("Wallet Identity A", { exact: true }).first()).toBeVisible({
         timeout: TIMEOUT,
       });
-      for (const wallet of [walletA, walletB]) {
-        const card = page.locator(`[data-wallet-card="${wallet.id}"]`);
+      for (const snapshot of snapshots) {
+        const card = page.locator(`[data-wallet-card="${snapshot.custodyWalletId}"]`);
         await expect(card).toBeVisible({ timeout: 15_000 });
         await expect(card.getByRole("link", { name: /^(Open .+|Manage)$/ })).toHaveAttribute(
           "href",
-          projectHref(projectId, `/dashboard/wallets/${wallet.id}`)
+          projectHref(projectId, `/dashboard/wallets/${snapshot.custodyWalletId}`)
         );
+        await expect(
+          card.getByText(formatCurrencyAmount(resolveTotalBalance(snapshot.balances), "en"), {
+            exact: true,
+          })
+        ).toBeVisible();
       }
+      const walletBSnapshot = snapshots.find((snapshot) => snapshot.custodyWalletId === walletB.id);
+      const solBalance = walletBSnapshot?.balances.find(isSolBalance);
+      if (!walletBSnapshot || !solBalance) {
+        throw new Error("Wallet Identity B balance response did not include native SOL");
+      }
+      const expectedTotal = formatCurrencyAmount(
+        resolveTotalBalance(walletBSnapshot.balances),
+        "en"
+      );
+      const expectDetailBalances = async () => {
+        const legacyTotal = page
+          .locator("section")
+          .filter({ has: page.getByText("Total balance", { exact: true }) })
+          .getByText(expectedTotal, { exact: true });
+        await expect(page.locator("[data-wallet-balance]").or(legacyTotal)).toHaveText(
+          expectedTotal
+        );
+        await expect(page.getByText(solBalance.token, { exact: true })).toBeVisible();
+        await expect(
+          page.getByText(formatDisplayAmount(solBalance.uiAmount, solBalance.token, "en"), {
+            exact: true,
+          })
+        ).toBeVisible();
+      };
       await page
         .locator(`[data-wallet-card="${walletB.id}"]`)
         .getByRole("link", { name: /^(Open .+|Manage)$/ })
@@ -55,11 +92,13 @@ test.describe
       await expect(
         page.getByRole("heading", { name: "Wallet Identity B", exact: true })
       ).toBeVisible();
+      await expectDetailBalances();
       await page.reload();
       await expect(page).toHaveURL(projectHref(projectId, `/dashboard/wallets/${walletB.id}`));
       await expect(
         page.getByRole("heading", { name: "Wallet Identity B", exact: true })
       ).toBeVisible();
+      await expectDetailBalances();
     });
 
     test("keeps wallet selection and links scoped when switching projects", async ({ page }) => {

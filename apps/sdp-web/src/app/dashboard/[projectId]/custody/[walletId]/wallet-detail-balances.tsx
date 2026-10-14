@@ -9,7 +9,6 @@ import {
   fetchWalletBalance,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.data";
 import { TokenMark } from "@/components/token-mark";
-import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatCurrencyAmount,
@@ -40,8 +39,7 @@ function useWalletDetailBalances(
 ): WalletTrackedBalancesResult {
   // A per-read key rather than seeding the cache in an effect (as the issuance list
   // does): effects run after paint, so a return visit would still flash the old balance.
-  const t = useTranslations();
-  const { data, error } = useSWR(
+  const { data } = useSWR(
     custodyQueryKeys.walletBalances({ walletId, readAt: initial.readAt }),
     () => fetchWalletBalance(walletId),
     {
@@ -57,7 +55,6 @@ function useWalletDetailBalances(
       // would keep the previous key's balance instead of the fresh fallback.
     }
   );
-  if (error) return { ...initial, balances: [], error: t("DashboardCustody.unavailable") };
   // A successful refresh supersedes a failed server read.
   return data ? { ...initial, balances: data, error: null } : initial;
 }
@@ -103,26 +100,11 @@ export function WalletBalanceRows({
   const { balances, error } = useWalletDetailBalances(walletId, initial);
   const href = useProjectHref();
 
-  let view: "unavailable" | "empty" | "balances";
-  if (error) {
-    view = "unavailable";
-  } else if (balances.length === 0) {
-    view = "empty";
-  } else {
-    view = "balances";
-  }
+  return (
+    <>
+      {error ? <p className="text-sm text-tertiary">{error}</p> : null}
 
-  switch (view) {
-    case "unavailable":
-      return <p className="text-sm text-tertiary">{error}</p>;
-    case "empty":
-      return (
-        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
-          {emptyLabel}
-        </div>
-      );
-    case "balances":
-      return (
+      {balances.length > 0 ? (
         <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           {balances.map((balance) => {
             const ownedToken = balance.token === "SOL" ? null : (tokenRoutes[balance.mint] ?? null);
@@ -142,12 +124,13 @@ export function WalletBalanceRows({
             );
           })}
         </div>
-      );
-    default: {
-      const exhaustive: never = view;
-      return exhaustive;
-    }
-  }
+      ) : (
+        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
+          {emptyLabel}
+        </div>
+      )}
+    </>
+  );
 }
 
 function WalletBalanceRow({

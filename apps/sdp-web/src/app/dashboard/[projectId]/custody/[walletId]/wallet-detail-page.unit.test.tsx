@@ -224,6 +224,18 @@ async function defaultApiResponse(path: string): Promise<Response> {
 }
 
 describe("WalletDetailPage critical path", () => {
+  it("preserves the empty balance display for a missing tracked balance", async () => {
+    mockRequest.mockImplementation(async (path: string) =>
+      path.includes("/balances") ? new Response(null, { status: 404 }) : defaultApiResponse(path)
+    );
+
+    const summary = findElementProps(await renderPage(), WalletBalanceSummary);
+    if (!summary) throw new Error("Wallet balance summary is missing");
+
+    await expect(summary.balancesPromise).resolves.toMatchObject({ balances: [], error: null });
+    expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
+  });
+
   it("preserves a bookmarked tab and repeated query values when canonicalizing", async () => {
     mockRequest.mockImplementation(async () => walletMetadataResponse());
     await expect(

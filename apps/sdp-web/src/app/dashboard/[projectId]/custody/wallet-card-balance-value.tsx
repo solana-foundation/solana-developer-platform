@@ -70,13 +70,13 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
     : (batchBalances?.[walletId] ?? initialBalances);
   const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
-  if (balances === undefined || hasError) {
-    return <span className="font-medium text-muted">{t("DashboardCustody.unavailable")}</span>;
-  }
+  // shortcut: preserve the legacy zero/stale display until balance-state UX is changed separately.
+  const totalBalance = resolveTotalBalance(balances ?? []);
 
   return (
-    <span className="font-medium text-primary">
-      {formatCurrencyAmount(resolveTotalBalance(balances))}
+    <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>
+      {formatCurrencyAmount(totalBalance)}
+      {hasError ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
     </span>
   );
 }

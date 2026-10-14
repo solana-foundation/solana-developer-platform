@@ -59,6 +59,10 @@ async function getWalletTrackedBalances(
 ): Promise<WalletBalancesResult> {
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
+    // shortcut: preserve the legacy 404 display until balance-state UX is changed separately.
+    if (response.status === 404) {
+      return { balances: [], error: null };
+    }
     if (!response.ok) {
       return { balances: [], error: unavailableMessage };
     }

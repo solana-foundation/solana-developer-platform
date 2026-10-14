@@ -48,6 +48,34 @@ afterEach(() => {
 });
 
 describe("WalletCardBalanceValue", () => {
+  it("keeps the legacy zero display while the first balance is loading", () => {
+    mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined, error: undefined });
+
+    const markup = renderToStaticMarkup(<WalletCardBalanceValue walletId={WALLET_ID} />);
+
+    expect(markup).toContain("$0.00");
+    expect(markup).not.toContain("DashboardCustody.unavailable");
+    expect(markup).not.toContain("DashboardCustody.stale");
+  });
+
+  it("retains the initial amount while balances refresh", () => {
+    mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined, error: undefined });
+
+    expect(renderBalance([balance(7)])).toContain("$7.00");
+  });
+
+  it("does not use another wallet's amount when this wallet's read fails", () => {
+    mockUsePersistedDashboardSWR
+      .mockReturnValueOnce({ data: { "other-wallet": [balance(99)] }, error: undefined })
+      .mockReturnValueOnce({ data: undefined, error: new Error("wallet unavailable") });
+
+    const markup = renderToStaticMarkup(<WalletCardBalanceValue walletId={WALLET_ID} />);
+
+    expect(markup).toContain("$0.00");
+    expect(markup).toContain("DashboardCustody.stale");
+    expect(markup).not.toContain("$99.00");
+  });
+
   it("excludes unavailable balances while preserving a known empty wallet", async () => {
     mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined });
     vi.stubGlobal(
@@ -105,7 +133,7 @@ describe("WalletCardBalanceValue", () => {
     expect(markup).not.toContain("DashboardCustody.stale");
   });
 
-  it("shows unavailable when both reads fail, even with a cached amount", () => {
+  it("keeps the cached amount marked stale when both reads fail", () => {
     mockUsePersistedDashboardSWR
       .mockReturnValueOnce({
         data: { [WALLET_ID]: [balance(3)] },
@@ -115,7 +143,9 @@ describe("WalletCardBalanceValue", () => {
 
     const markup = renderBalance();
 
-    expect(markup).not.toContain("$3.00");
-    expect(markup).toContain("DashboardCustody.unavailable");
+    expect(markup).toContain("$3.00");
+    expect(markup).toContain("text-muted");
+    expect(markup).toContain("DashboardCustody.stale");
+    expect(markup).not.toContain("DashboardCustody.unavailable");
   });
 });
