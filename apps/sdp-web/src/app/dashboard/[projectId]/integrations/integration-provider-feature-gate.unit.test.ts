@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
@@ -17,7 +18,7 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("server-only", () => ({}));
 // Custody and Payments have no flag of their own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({
-  isModuleInDeploymentReleaseChannel: (module: string) => {
+  isModuleInDeploymentReleaseChannel: (module: SdpModule) => {
     if (module === "custody") return mocks.custody();
     if (module === "payments") return mocks.payments();
     return module === "compliance" && mocks.complianceInChannel();

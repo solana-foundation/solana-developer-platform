@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 
 const flagMocks = vi.hoisted(() => ({
@@ -5,7 +6,9 @@ const flagMocks = vi.hoisted(() => ({
   issuance: vi.fn(),
 }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
-const channelMocks = vi.hoisted(() => ({ isModuleInDeploymentReleaseChannel: vi.fn() }));
+const channelMocks = vi.hoisted(() => ({
+  isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(),
+}));
 
 vi.mock("@/flags", () => flagMocks);
 vi.mock("@/flags/release-channel", () => channelMocks);

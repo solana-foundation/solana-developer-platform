@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -22,7 +23,7 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: authMock }));
 vi.mock("@/flags", () => ({ issuance: issuanceMock }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({
-  isModuleInDeploymentReleaseChannel: (module: string) => module !== "custody" || custodyMock(),
+  isModuleInDeploymentReleaseChannel: (module: SdpModule) => module !== "custody" || custodyMock(),
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: createSdpApiClientMock }));
