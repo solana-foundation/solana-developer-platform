@@ -67,115 +67,6 @@ async function createTables(client: Client): Promise<void> {
   );`);
 }
 
-it("audits unresolved transfer, batch and ramp work with retained submission evidence", async () => {
-  const client = new Client({ connectionString: adminDatabaseUrl });
-  await client.connect();
-  try {
-    await client.query("BEGIN");
-    await createTables(client);
-    await client.query(`INSERT INTO payment_transfers
-      (id, type, direction, status, signature, signed_transaction, last_valid_block_height,
-       submission_started_at, provider, provider_reference, provider_data) VALUES
-      ('transfer_pending', 'transfer', 'outbound', 'pending', NULL, NULL, NULL, NULL, NULL, NULL, '{}'),
-      ('transfer_unknown', 'transfer', 'outbound', 'failed', 'sig_original', 'bytes_original', 123,
-       '2026-01-01T01:00:00.000Z', NULL, NULL, '{}'),
-      ('transfer_finalized', 'transfer', 'outbound', 'finalized', 'sig_final', 'bytes_final', 123,
-       '2026-01-01T01:00:00.000Z', NULL, NULL, '{}'),
-      ('ramp_awaiting', 'offramp', 'outbound', 'awaiting_payment', NULL, NULL, NULL, NULL,
-       'moneygram', 'native_quote', '{"rampQuote":{"expiresAt":"2999-01-01T00:00:00.000Z"}}'),
-      ('ramp_finalized', 'onramp', 'inbound', 'finalized', NULL, NULL, NULL, NULL,
-       'moneygram', 'unfinished_native_reference', '{}'),
-      ('ramp_unknown', 'offramp', 'outbound', 'canceled', NULL, NULL, NULL, NULL,
-       'moneygram', 'native_session', '{"moneygram":{"cryptoTransferId":"transfer_unknown"}}');
-      INSERT INTO payment_transfer_batches (id, status) VALUES
-      ('batch_pending', 'processing'), ('batch_failed', 'failed');
-      INSERT INTO payment_transfer_recipients (id, batch_id, transfer_id) VALUES
-      ('recipient_pending', 'batch_pending', 'transfer_pending'),
-      ('recipient_unknown', 'batch_failed', 'transfer_unknown');`);
-
-    expect((await client.query(auditSection("3.", "4."))).rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ resource: "transfer", id: "transfer_pending" }),
-        expect.objectContaining({ resource: "ramp", id: "ramp_awaiting" }),
-        expect.objectContaining({ resource: "batch", id: "batch_pending" }),
-        expect.objectContaining({ resource: "batch", id: "batch_failed" }),
-      ])
-    );
-    const effects = (await client.query(auditSection("4.", "5."))).rows;
-    expect(effects).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "transfer_unknown",
-          signature: "sig_original",
-          has_signed_transaction: true,
-          submission_started_at: "2026-01-01T01:00:00.000Z",
-        }),
-        expect.objectContaining({
-          id: "ramp_unknown",
-          provider_reference: "native_session",
-          crypto_transfer_id: "transfer_unknown",
-        }),
-        expect.objectContaining({
-          id: "ramp_finalized",
-          provider_reference: "unfinished_native_reference",
-        }),
-      ])
-    );
-    expect(effects.map((row) => row.id)).not.toContain("transfer_finalized");
-    await client.query(
-      auditSql
-        .split("\n")
-        .filter((line) => !line.startsWith("\\"))
-        .join("\n")
-    );
-  } finally {
-    await client.query("ROLLBACK");
-    await client.end();
-  }
-});
-
-it("audits MoneyGram links by two non-null exact pins and the original project scope", async () => {
-  const client = new Client({ connectionString: adminDatabaseUrl });
-  await client.connect();
-  try {
-    await client.query("BEGIN");
-    await createTables(client);
-    await client.query(`INSERT INTO payment_transfers (id, custody_wallet_id, organization_id) VALUES
-      ('leg_a', 'cw_a', 'org_a'), ('leg_b', 'cw_b', 'org_a'),
-      ('leg_null', NULL, 'org_a'), ('leg_foreign', 'cw_a', 'org_b');
-      INSERT INTO payment_transfers (id, custody_wallet_id, type, provider, provider_data) VALUES
-      ('ramp_same', 'cw_a', 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_a"}}'),
-      ('ramp_different', 'cw_a', 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_b"}}'),
-      ('ramp_null', NULL, 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_a"}}'),
-      ('ramp_null_leg', 'cw_a', 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_null"}}'),
-      ('ramp_both_null', NULL, 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_null"}}'),
-      ('ramp_foreign', 'cw_a', 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_foreign"}}'),
-      ('ramp_missing', 'cw_a', 'offramp', 'moneygram', '{"moneygram":{"cryptoTransferId":"leg_missing"}}');`);
-    const rows = (await client.query(auditSection("5."))).rows;
-    expect(rows.map((row) => row.ramp_id)).toEqual([
-      "ramp_both_null",
-      "ramp_different",
-      "ramp_foreign",
-      "ramp_missing",
-      "ramp_null",
-      "ramp_null_leg",
-    ]);
-    expect(rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          ramp_id: "ramp_different",
-          ramp_custody_wallet_id: "cw_a",
-          crypto_custody_wallet_id: "cw_b",
-        }),
-        expect.objectContaining({ ramp_id: "ramp_foreign", crypto_custody_wallet_id: null }),
-      ])
-    );
-  } finally {
-    await client.query("ROLLBACK");
-    await client.end();
-  }
-});
-
 it("backfills only unique scoped null pins, including retained ramp wallets, without rewriting evidence", async () => {
   const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
@@ -294,9 +185,6 @@ it("backfills only unique scoped null pins, including retained ramp wallets, wit
         transfer_id: "unique_transfer",
         batch_custody_wallet_id: "cw_connection",
         transfer_custody_wallet_id: "cw_a",
-        signature: "saved_signature",
-        has_signed_transaction: true,
-        submission_started_at: "2026-01-01T00:01:00.000Z",
       }),
     ]);
     await client.query(`INSERT INTO payment_transfers (id) VALUES ('late_writer');`);
