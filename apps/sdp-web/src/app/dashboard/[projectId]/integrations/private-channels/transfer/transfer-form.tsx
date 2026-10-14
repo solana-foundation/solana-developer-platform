@@ -19,6 +19,7 @@ import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
+  movementAnswer,
   privateChannelTransferIdempotencyKeyStore,
   privateChannelTransferRequestFingerprint,
 } from "../value-movement-tracking";
@@ -369,11 +370,8 @@ function TransferFormState({
         settleIdempotencyKey(
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,
-          result.ok
-            ? { status: 200, replayed: false }
-            : result.kind === "server"
-              ? result.answer
-              : { status: null, replayed: false }
+          idempotencyKey,
+          movementAnswer(result)
         );
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });

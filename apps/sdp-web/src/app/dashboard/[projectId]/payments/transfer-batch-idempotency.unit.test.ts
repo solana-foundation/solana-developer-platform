@@ -91,7 +91,7 @@ describe("claim / release", () => {
     const first = claimTransferBatchIdempotencyKey(fingerprint);
     expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(first);
 
-    releaseTransferBatchIdempotencyKey(fingerprint);
+    releaseTransferBatchIdempotencyKey(fingerprint, first);
     expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(first);
   });
 
@@ -211,7 +211,7 @@ describe("degraded storage", () => {
   it("prefers memory over stale readable storage after a failed write", () => {
     const fingerprint = "fingerprint-diverged";
     const stale = claimTransferBatchIdempotencyKey(fingerprint);
-    releaseTransferBatchIdempotencyKey(fingerprint);
+    releaseTransferBatchIdempotencyKey(fingerprint, stale);
 
     // The release reached storage; now the NEXT claim's write fails, leaving
     // storage stale while memory holds the fresh key.

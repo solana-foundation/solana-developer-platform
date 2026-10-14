@@ -141,6 +141,18 @@ the row was written leaves an orphan provider wallet, and the retry creates anot
 is an intent row written before the provider call, which the retry finds and completes instead of
 calling the provider again.
 
+A claim whose lease lapsed without being released (a crash, a failed write of the outcome, a
+request past the renewal cap) is taken over only on a route that recovers from its domain row: a
+`rerun` route, or a `store` route declared `idempotent({ ..., recovery: "record" })` because it
+mounts `replayFromRecord`, which answers the takeover from the row. Every route that mounts
+`replayFromRecord` sets it, and the route inventory pins that. On any other route nothing would
+stop the retry from running the handler twice, so it gets the terminal 409
+`IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`: the caller reads the resource with GET to
+see whether it ran, then sends again with a new key. That answer is not stored and the claim is
+left as it is, so every retry with the key gets it until the key expires (or until a hung original
+records its outcome after all, which is then replayed). A released claim (a refusal, an error the
+app maps itself) is taken over on any route.
+
 **Outcomes.**
 
 | Case | Stored? | Answer |
@@ -149,6 +161,8 @@ calling the provider again.
 | Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
+| Original's lease lapsed unreleased, `rerun` or `recovery: "record"` | Taken over | Answered from the domain row (or run again on `rerun`) |
+| Original's lease lapsed unreleased, other `store` route | No; the claim is left as is | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key |
 | 400, 401, 403, 409, 429 refused before the handler writes its domain row (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
 | Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
 | 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
@@ -178,9 +192,10 @@ calling the provider again.
   (204, 205, 304) replays without one.
 
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
-handler runs. A crashed request's key frees when the lease runs out. A request still running after
-15 minutes (`maxLeaseRenewalSeconds`) is treated as hung: renewal stops and logs
-`sdp_idempotency_lease_renewal_cap`, so a retry can take over once the lease lapses. Statement and
+handler runs. On a route that recovers from its row a crashed request's key frees when the lease
+runs out. A request still running after 15 minutes (`maxLeaseRenewalSeconds`) is treated as hung:
+renewal stops and logs `sdp_idempotency_lease_renewal_cap`, so a retry can take over once the lease
+lapses on such a route, and gets `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` on any other. Statement and
 signing timeouts end requests well before that.
 
 **No bypass.** Every request on a route with the step goes through it. (Approved-operation
@@ -217,6 +232,16 @@ lives in `@sdp/types`.
   become the backstop.
 - `PATCH /v1/payments/recurring-payments/{id}` requires the key with the other money routes:
   editing an active schedule signs and broadcasts a replacement subscription.
+
+### Known risks
+
+- An error that is not an `AppError` thrown on a `store` route is mapped by the app's handler, which
+  this step cannot see, so the claim is unlocked and a same-key retry runs the handler again. A
+  handler that moved something before throwing such an error can therefore run twice unless its
+  own row stops it.
+- A hung `store` request past the renewal cap is answered `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, but it
+  can still finish and record its outcome. A caller that already retried with a new key may then
+  have caused the operation twice.
 
 ## Follow-ups
 

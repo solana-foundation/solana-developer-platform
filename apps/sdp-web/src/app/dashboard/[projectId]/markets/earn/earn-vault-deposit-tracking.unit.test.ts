@@ -87,7 +87,7 @@ describe("vault deposit idempotency keys", () => {
     const fingerprint = vaultDepositRequestFingerprint(request);
     const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
-    vaultDepositIdempotencyKeyStore.release(fingerprint);
+    vaultDepositIdempotencyKeyStore.release(fingerprint, first);
 
     // Not a retry any more: depositing the same amount from the same wallet
     // again is a SECOND deposit, and replaying the old key would silently
@@ -131,7 +131,7 @@ describe("vault deposit idempotency keys", () => {
     const fingerprint = vaultDepositRequestFingerprint({ ...request, amount: "13" });
     const first = vaultDepositIdempotencyKeyStore.claim(fingerprint).key;
 
-    vaultDepositIdempotencyKeyStore.release(fingerprint);
+    vaultDepositIdempotencyKeyStore.release(fingerprint, first);
 
     expect(first).toBe("00000000-0000-4000-8000-000000000001");
     expect(vaultDepositIdempotencyKeyStore.claim(fingerprint).key).not.toBe(first);

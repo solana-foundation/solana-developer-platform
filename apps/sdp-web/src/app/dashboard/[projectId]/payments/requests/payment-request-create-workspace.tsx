@@ -464,7 +464,7 @@ function PaymentRequestCreateForm({
           },
         }
       );
-      settleExpiresAt(input, res);
+      settleExpiresAt(input, expiresAt, res);
       if (!res.ok) {
         toast.error(res.error);
         return;

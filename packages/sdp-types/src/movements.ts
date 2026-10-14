@@ -1,9 +1,10 @@
 /**
- * Money movements (HOO-1955): every reason SDP asks a custody wallet to sign
- * or sponsors a transaction's fees, and whether it starts new exposure or
- * takes money already committed back out. The custody signer and the fee
- * sponsor are each handed the movement they serve and decide when asked to
- * sign, against the organization's live state, whether to.
+ * Money movements (HOO-1955): every reason SDP asks a custody wallet to sign,
+ * sponsors a transaction's fees or opens a provider ramp, and whether it
+ * starts new exposure or takes money already committed back out. The custody
+ * signer and the fee sponsor are each handed the movement they serve and
+ * decide when asked to sign, against the organization's live state, whether
+ * to. A ramp quote signs nothing, so it is decided before the provider call.
  *
  * - `start`: anything that opens new exposure, supply, authority or
  *   delegation, including a signature that moves nothing (a signer check).
@@ -35,6 +36,11 @@ export const MOVEMENTS = {
   "payments.transfer_batch": { module: "payments", kind: "start" },
   /** `/pay`: SDP sponsors the payer's transaction for the organization's request. */
   "payments.pay_request": { module: "payments", kind: "start" },
+
+  /** A provider onramp quote or session: the provider takes the buyer's fiat against it. */
+  "ramps.onramp_quote": { module: "ramps", kind: "start" },
+  /** A provider offramp quote: the organization starts selling crypto for fiat. */
+  "ramps.offramp_quote": { module: "ramps", kind: "start" },
 
   "recurring.activate": { module: "recurring_payments", kind: "start" },
   "recurring.update": { module: "recurring_payments", kind: "start" },

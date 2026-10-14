@@ -43,12 +43,14 @@ export interface RecordAnswer {
 
 /**
  * Answers a request whose Idempotency-Key already has a domain row, from that
- * row: after a takeover of a crashed attempt, or past the key's 24 hours. The
- * finder looks the row up by the credential-bound record key and returns it
- * with its stored fingerprint; a matching fingerprint is answered from the row
- * and nothing runs again, another is 422 `IDEMPOTENCY_KEY_REUSED`, and null
- * means the key has no row yet. A row's answer, success or failure, is marked
- * `Idempotent-Replayed` and stored under the key.
+ * row: after a takeover of a crashed attempt (the route declares
+ * `idempotent({ ..., recovery: "record" })` so that takeover is allowed), or
+ * past the key's 24 hours. The finder looks the row up by the credential-bound
+ * record key and returns it with its stored fingerprint; a matching fingerprint
+ * is answered from the row and nothing runs again, another is 422
+ * `IDEMPOTENCY_KEY_REUSED`, and null means the key has no row yet. A row's
+ * answer, success or failure, is marked `Idempotent-Replayed` and stored under
+ * the key.
  *
  * It works from the validated request and what `authorize` loaded only: no
  * RPC, nothing that can change after the original ran (a token account closed,

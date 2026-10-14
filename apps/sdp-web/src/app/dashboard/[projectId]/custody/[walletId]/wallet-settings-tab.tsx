@@ -36,16 +36,13 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
     });
     const input = JSON.stringify([wallet.walletId, draft.trim()]);
     startTransition(async () => {
-      const result = await updateWalletLabelAction(
-        wallet.walletId,
-        draft,
-        actionKey.keyFor(input)
-      ).catch((error) => ({
+      const key = actionKey.keyFor(input);
+      const result = await updateWalletLabelAction(wallet.walletId, draft, key).catch((error) => ({
         status: "error" as const,
         message:
           error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),
       }));
-      actionKey.settled(input, result);
+      actionKey.settled(input, key, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

@@ -28,16 +28,21 @@ export function expiresAtForAction(
 ): string | null | undefined {
   const expiresAt = frozenExpiries.valueFor(input, () => resolve()?.toISOString() ?? null);
   if (expiresAt !== null && Date.parse(expiresAt) <= Date.now()) {
-    frozenExpiries.settle(input, { status: 200, replayed: false });
+    frozenExpiries.settle(input, expiresAt, { status: 200, replayed: false, code: null });
     return undefined;
   }
   return expiresAt;
 }
 
-/** Record the create's answer, forgetting the expiry on the rule that retires its key. */
+/**
+ * Record the create's answer, forgetting the expiry on the rule that retires its key.
+ *
+ * @param expiresAt - What `expiresAtForAction` returned for the answered send.
+ */
 export function settleExpiresAt(
   input: string,
-  result: { ok: boolean; status: number | null; replayed?: boolean }
+  expiresAt: string | null,
+  result: { ok: boolean; status: number | null; replayed?: boolean; body?: unknown }
 ) {
-  frozenExpiries.settle(input, fetchResultAnswer(result));
+  frozenExpiries.settle(input, expiresAt, fetchResultAnswer(result));
 }

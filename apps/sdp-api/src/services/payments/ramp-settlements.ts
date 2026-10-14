@@ -1,8 +1,11 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
 import {
+  type CryptoRailId,
+  getCryptoRailAssetLabel,
   isTerminalRampTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferTransitionId,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
 import type {
@@ -98,6 +101,14 @@ function buildRampSettlementUpdate(
   return update;
 }
 
+/** Whether the rail a provider reports delivering is the transfer's own asset. */
+function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId | null): boolean {
+  if (rail === null) {
+    return false;
+  }
+  return WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token)?.symbol === getCryptoRailAssetLabel(rail);
+}
+
 /**
  * Applies a provider settlement event to the transfer it references. The
  * transition is a compare-and-swap, so concurrent or redelivered events lose
@@ -143,6 +154,26 @@ export async function applyRampSettlementEvent(
   // Out-of-order or redelivered events must not regress a settled transfer
   // (e.g. a retried PENDING arriving after COMPLETED).
   if (isSettlementFinalStatus(transfer.status)) {
+    return { applied: false };
+  }
+  // A lock the provider did not enforce must not write another asset's amount
+  // onto the row, so a delivery the provider reports must be the transfer's asset.
+  if (
+    event.kind === "settled" &&
+    event.deliveredAssetRail !== undefined &&
+    !deliversTransferAsset(transfer, event.deliveredAssetRail)
+  ) {
+    logEvent("error", {
+      event: "sdp_api_ramp_settlement_asset_mismatch",
+      flow: "ramp-settlement",
+      organization_id: transfer.organization_id,
+      project_id: transfer.project_id,
+      transfer_id: transfer.id,
+      provider: transfer.provider,
+      provider_reference: event.reference,
+      delivered_asset_rail: event.deliveredAssetRail,
+      transfer_token: transfer.token,
+    });
     return { applied: false };
   }
 

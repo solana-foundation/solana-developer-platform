@@ -54,8 +54,8 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
 }
 
 /** Retire the key once an answer retires it (`answerRetiresKey`). */
-export function releaseTransferIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
+export function releaseTransferIdempotencyKey(fingerprint: string, key: string): void {
+  store.release(fingerprint, key);
 }
 
 /**
@@ -84,14 +84,18 @@ async function performTransferUnderKey(
     // and its session always names the same payment, so its key is never
     // released. Otherwise the dashboard-wide rule decides (`answerRetiresKey`).
     if (!providerSession && error instanceof TransferRequestError) {
-      settleIdempotencyKey(store, fingerprint, { status: error.status, replayed: error.replayed });
+      settleIdempotencyKey(store, fingerprint, key, {
+        status: error.status,
+        replayed: error.replayed,
+        code: error.code,
+      });
     }
     throw error;
   }
   if (!providerSession) {
     // The transfer row exists, so the key is spent: the next identical send is a
     // new payment rather than a retry of this one.
-    releaseTransferIdempotencyKey(fingerprint);
+    releaseTransferIdempotencyKey(fingerprint, key);
   }
   return { transfer, fingerprint };
 }

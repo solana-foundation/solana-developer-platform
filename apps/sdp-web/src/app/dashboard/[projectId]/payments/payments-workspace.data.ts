@@ -39,6 +39,7 @@ import {
   dashboardRequest,
   dashboardRequestUnderOwnKey,
 } from "@/lib/dashboard-fetch";
+import { apiErrorCode } from "@/lib/idempotency";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -481,12 +482,15 @@ export interface CreateTransferInput {
 export class TransferRequestError extends Error {
   readonly status: number;
   readonly replayed: boolean;
+  /** sdp-api's error code, or `null` when the body names none. */
+  readonly code: string | null;
 
-  constructor(message: string, status: number, replayed = false) {
+  constructor(message: string, status: number, replayed: boolean, code: string | null) {
     super(message);
     this.name = "TransferRequestError";
     this.status = status;
     this.replayed = replayed;
+    this.code = code;
   }
 }
 
@@ -533,7 +537,8 @@ export async function createTransfer(
         t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
       ),
       response.status,
-      isReplayed(response)
+      isReplayed(response),
+      apiErrorCode(body)
     );
   }
 
@@ -627,12 +632,15 @@ export interface CreateTransferBatchResult {
 export class TransferBatchRequestError extends Error {
   readonly status: number;
   readonly replayed: boolean;
+  /** sdp-api's error code, or `null` when the body names none. */
+  readonly code: string | null;
 
-  constructor(message: string, status: number, replayed = false) {
+  constructor(message: string, status: number, replayed: boolean, code: string | null) {
     super(message);
     this.name = "TransferBatchRequestError";
     this.status = status;
     this.replayed = replayed;
+    this.code = code;
   }
 }
 
@@ -663,7 +671,8 @@ export async function createTransferBatch(
         t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
       ),
       response.status,
-      isReplayed(response)
+      isReplayed(response),
+      apiErrorCode(body)
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;

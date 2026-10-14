@@ -3,7 +3,7 @@ import {
   FeePaymentError,
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
-} from "@sdp/payments/fee-payment";
+} from "@sdp/fee-payment";
 import { resolveDefaultCluster } from "@sdp/rpc";
 import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {

@@ -20,6 +20,7 @@ import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
 import {
+  movementAnswer,
   privateChannelDepositIdempotencyKeyStore,
   privateChannelDepositRequestFingerprint,
 } from "../value-movement-tracking";
@@ -181,11 +182,8 @@ export function DepositForm({
       settleIdempotencyKey(
         privateChannelDepositIdempotencyKeyStore,
         fingerprint,
-        result.ok
-          ? { status: 200, replayed: false }
-          : result.kind === "server"
-            ? result.answer
-            : { status: null, replayed: false }
+        idempotencyKey,
+        movementAnswer(result)
       );
       if (result.ok) {
         updateState({ deposit: result.deposit });
