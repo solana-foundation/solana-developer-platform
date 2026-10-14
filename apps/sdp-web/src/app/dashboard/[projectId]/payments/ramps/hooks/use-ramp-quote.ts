@@ -2,10 +2,7 @@
 
 import type { PaymentRampQuote } from "@sdp/types";
 import { useEffect, useRef, useState } from "react";
-import {
-  cancelRampTransfer,
-  getApiError,
-} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { getApiError } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -60,11 +57,9 @@ interface UseRampQuoteOptions {
  * transfer-status poll owns the flow from there. A failed attempt surfaces
  * through `quoteCreationError` with an explicit retry.
  *
- * A response commits only while its request is still the latest one, so a
- * request the user navigated away from never becomes the quote, and
- * `invalidateQuote` (Previous from the transaction stage) abandons it and lets
- * the next arrival quote the edited selection. The server persisted the
- * abandoned request's transfer, so it is canceled when the response lands.
+ * The wizard disables Previous while `quoteInFlight`, so every response lands on
+ * the selection that requested it. Previous after a failed attempt calls
+ * `resetQuoteCreation`, and the next arrival quotes the edited selection.
  */
 export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: UseRampQuoteOptions) {
   const t = useTranslations();
@@ -72,34 +67,22 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const attempted = useRef(false);
-  const latestRequest = useRef(0);
+  const readyToCreate = shouldCreate && payload !== null;
 
   const runQuoteCreation = async () => {
     if (payload === null) {
       return;
     }
-    const request = ++latestRequest.current;
     setQuoteCreationRetrying(true);
     try {
       const next = await createRampQuote(endpoint, payload, t);
-      if (request !== latestRequest.current) {
-        // Nobody will see this transfer. A cancel that fails leaves it to expiry (HOO-2040).
-        void cancelRampTransfer({ transferId: next.transferId }, t).catch((cause: unknown) => {
-          console.error("Failed to cancel the transfer of an abandoned ramp quote", cause);
-        });
-        return;
-      }
       setCreated(next);
       setQuoteCreationError(null);
       onCreated?.(next.quote);
     } catch (error) {
-      if (request === latestRequest.current) {
-        setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
-      }
+      setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
     } finally {
-      if (request === latestRequest.current) {
-        setQuoteCreationRetrying(false);
-      }
+      setQuoteCreationRetrying(false);
     }
   };
 
@@ -107,7 +90,7 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
   // the quote is a network side effect of that data arriving, not derived state.
   // react-doctor-disable-next-line no-fetch-in-effect, no-set-state-after-await-in-effect -- the quote is a side effect of readiness arriving; `attempted` bounds it to one request per selection
   useEffect(() => {
-    if (!shouldCreate || attempted.current) {
+    if (!readyToCreate || attempted.current) {
       return;
     }
     attempted.current = true;
@@ -115,12 +98,10 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
     void runQuoteCreation();
   });
 
-  const invalidateQuote = () => {
-    latestRequest.current += 1;
+  /** Forgets a failed attempt, so the next arrival on the transaction stage quotes again. */
+  const resetQuoteCreation = () => {
     attempted.current = false;
-    setCreated(null);
     setQuoteCreationError(null);
-    setQuoteCreationRetrying(false);
   };
 
   return {
@@ -128,7 +109,10 @@ export function useRampQuote({ endpoint, payload, shouldCreate, onCreated }: Use
     quoteTransferId: created === null ? null : created.transferId,
     quoteCreationError,
     quoteCreationRetrying,
+    // Also true in the render that schedules the request, before the effect starts it.
+    quoteInFlight:
+      quoteCreationRetrying || (readyToCreate && created === null && quoteCreationError === null),
     retryQuoteCreation: () => void runQuoteCreation(),
-    invalidateQuote,
+    resetQuoteCreation,
   };
 }

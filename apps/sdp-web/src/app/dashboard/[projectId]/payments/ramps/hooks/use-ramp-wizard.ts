@@ -255,8 +255,9 @@ export function useRampWizard<TId extends string>(
     quoteTransferId,
     quoteCreationError,
     quoteCreationRetrying,
+    quoteInFlight,
     retryQuoteCreation,
-    invalidateQuote,
+    resetQuoteCreation,
   } = useRampQuote({
     endpoint: config.quoteEndpoint,
     payload: quotePayload,
@@ -381,10 +382,10 @@ export function useRampWizard<TId extends string>(
       finish();
       return;
     }
-    // Leaving the transaction stage before a quote exists abandons the request in
-    // flight, so the quote that commits is for the selection the user returns with.
+    // Previous is disabled while the quote is in flight, so leaving the transaction stage
+    // drops at most a failed attempt, and returning quotes the edited selection.
     if (isLastStep) {
-      invalidateQuote();
+      resetQuoteCreation();
     }
     setStepIndex((current) => Math.max(0, current - 1));
   };
@@ -435,6 +436,7 @@ export function useRampWizard<TId extends string>(
     setMemoRows,
     quoteCreationError,
     quoteCreationRetrying,
+    quoteInFlight,
     retryQuoteCreation,
     onboarding: requirements.onboarding,
     isAdvancing: requirements.isAdvancing,
