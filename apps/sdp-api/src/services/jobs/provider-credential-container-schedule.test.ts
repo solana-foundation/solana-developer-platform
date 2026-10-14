@@ -6,10 +6,12 @@ import type {
   ListCredentialSecretVersionsParams,
 } from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { scanGcpCredentialContainers } from "./provider-credential-container-cleanup";
 
 const ORG = "org_scan_schedule_prototype";
+const PROJECT = "prj_scan_schedule_prototype";
 const USER = "usr_scan_schedule_prototype";
 const NOW = new Date("2030-01-01T10:00:00.000Z");
 const later = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000);
@@ -52,11 +54,11 @@ async function seedContainer(suffix: string, due = NOW): Promise<string> {
   const parent = `projects/p/secrets/sdp-provider-credentials-${id}`;
   await getDb(env).execute(
     `INSERT INTO provider_credentials
-       (id, organization_id, provider, label, scope, source, storage_backend,
+       (id, organization_id, project_id, provider, label, scope, source, storage_backend,
         secret_ref, secret_version_ref, status, created_by, secret_next_scan_at)
-     VALUES (?, ?, 'privy', 'Schedule prototype', 'organization', 'stored',
+     VALUES (?, ?, ?, 'privy', 'Schedule prototype', 'project', 'stored',
              'gcp_secret_manager', ?, ?, 'pending', ?, ?::timestamptz)`,
-    [id, ORG, parent, `${parent}/versions/1`, USER, due.toISOString()]
+    [id, ORG, PROJECT, parent, `${parent}/versions/1`, USER, due.toISOString()]
   );
   return parent;
 }
@@ -73,6 +75,12 @@ describe("single-column container scan scheduling", () => {
       "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'scan-schedule-prototype@example.test', 1, 'active')",
       [USER]
     );
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    });
   });
 
   it("scans a due container, skips it before the next interval, then finds a later orphan", async () => {
@@ -246,11 +254,11 @@ describe("single-column container scan scheduling", () => {
     );
     await getDb(env).execute(
       `INSERT INTO provider_credentials
-         (id, organization_id, provider, label, scope, source, storage_backend,
+         (id, organization_id, project_id, provider, label, scope, source, storage_backend,
           secret_ref, secret_version_ref, status, created_by, credential_version, rotated_from_provider_credential_id)
-       VALUES ('pcred_scan_schedule_current', ?, 'privy', 'Current', 'organization', 'stored',
+       VALUES ('pcred_scan_schedule_current', ?, ?, 'privy', 'Current', 'project', 'stored',
                'gcp_secret_manager', ?, ?, 'active', ?, 2, 'pcred_scan_schedule_retired_owner')`,
-      [ORG, parent, `${parent}/versions/2`, USER]
+      [ORG, PROJECT, parent, `${parent}/versions/2`, USER]
     );
     await getDb(env).execute("UPDATE organizations SET status = 'deleted' WHERE id = ?", [ORG]);
     for (const version of [1, 2, 3]) gcp.versions.set(`${parent}/versions/${version}`, "ENABLED");
