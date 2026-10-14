@@ -20,6 +20,7 @@ import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
 import {
+  claimMovementKey,
   movementAnswer,
   privateChannelDepositIdempotencyKeyStore,
   privateChannelDepositRequestFingerprint,
@@ -172,7 +173,11 @@ export function DepositForm({
       recipient: recipient.trim() || undefined,
     };
     const fingerprint = privateChannelDepositRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelDepositIdempotencyKeyStore.claim(fingerprint).key;
+    const idempotencyKey = claimMovementKey(privateChannelDepositIdempotencyKeyStore, fingerprint);
+    if (idempotencyKey === null) {
+      updateState({ error: t("Shared.idempotency.keyNotPersisted") });
+      return;
+    }
 
     startTransition(async () => {
       const result = await createDepositAction({ ...requestPayload, idempotencyKey });

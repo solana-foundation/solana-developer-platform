@@ -223,9 +223,10 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
         ...entries.filter((entry) => entry.id !== fingerprint),
         { id: fingerprint, value: key },
       ]);
-      // Adopted from an earlier build: removed there only once it is kept here.
+      // Adopted from an earlier build: removed there only once storage keeps it
+      // here. A refused write leaves the old entry for the next page to adopt.
       const legacyName = legacyKey(storeKey);
-      if (legacyName !== null && legacy.some((entry) => entry.id === fingerprint)) {
+      if (persisted && legacyName !== null && legacy.some((entry) => entry.id === fingerprint)) {
         writeEntries(
           legacyName,
           legacy.filter((entry) => entry.id !== fingerprint)

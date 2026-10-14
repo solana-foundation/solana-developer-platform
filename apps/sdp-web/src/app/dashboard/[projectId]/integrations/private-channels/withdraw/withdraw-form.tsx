@@ -20,6 +20,7 @@ import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
 import {
+  claimMovementKey,
   movementAnswer,
   privateChannelWithdrawalIdempotencyKeyStore,
   privateChannelWithdrawalRequestFingerprint,
@@ -174,7 +175,14 @@ export function WithdrawForm({
       destination: destination.trim() || undefined,
     };
     const fingerprint = privateChannelWithdrawalRequestFingerprint(requestPayload);
-    const idempotencyKey = privateChannelWithdrawalIdempotencyKeyStore.claim(fingerprint).key;
+    const idempotencyKey = claimMovementKey(
+      privateChannelWithdrawalIdempotencyKeyStore,
+      fingerprint
+    );
+    if (idempotencyKey === null) {
+      updateState({ error: t("Shared.idempotency.keyNotPersisted") });
+      return;
+    }
 
     startTransition(async () => {
       const result = await createWithdrawalAction({ ...requestPayload, idempotencyKey });
