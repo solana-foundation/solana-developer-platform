@@ -52,11 +52,14 @@ Access is checked before the key on every request, so a retry passes exactly the
 | --- | --- |
 | Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
+| Same key, original never recorded its outcome (it crashed) | Transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
 | A recurring-payment action failed | A failed attempt leaves the schedule as it was. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
+| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; the schedule finishes on its own, so read it with `GET`. A `PATCH` may finish that attempt and then applies its own change. |
+| A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
 | Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
@@ -89,6 +92,7 @@ The [Postman collection](/docs/reference/postman-collection) saves one key per o
 
 - Send a key on every mutation that accepts one, not only where it is required.
 - Retry timeouts, connection errors and `409 IDEMPOTENCY_KEY_IN_FLIGHT` with backoff, reusing the key.
+- Treat `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` as final for that key: check with `GET`, then use a new key.
 - After a `5xx`, retry with the same key on the routes that move money; elsewhere, use a new key.
 - Outside a key rotation, treat `422 IDEMPOTENCY_KEY_REUSED` as a bug in your client: the key was attached to two different operations.
 - Persist the returned resource ID before moving to the next operation, so a restarted worker can resume without guessing.

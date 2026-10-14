@@ -208,6 +208,7 @@ export const errorCodeSchema = z
     "IDEMPOTENCY_KEY_REQUIRED",
     "IDEMPOTENCY_KEY_REUSED",
     "IDEMPOTENCY_KEY_IN_FLIGHT",
+    "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
   ])
   .openapi({ description: "Machine-readable error code." });
 

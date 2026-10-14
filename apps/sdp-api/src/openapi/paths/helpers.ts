@@ -29,13 +29,19 @@ export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.ex
 });
 
 /**
- * How a route's `idempotent({ key, serverErrors })` step behaves (ADR 0008),
- * restated for its OpenAPI header. `spec.test.ts` checks that every route's
- * documented header matches the mode its chain declares.
+ * How a route's `idempotent({ key, serverErrors, recovery })` step behaves
+ * (ADR 0008), restated for its OpenAPI header. `spec.test.ts` checks that every
+ * route's documented header matches the mode and recovery its chain declares.
  */
 export interface IdempotencyDocumentation {
   key: IdempotencyKeyMode;
   serverErrors: "store" | "rerun";
+  /**
+   * The chain declares `recovery: "record"` (it mounts `replayFromRecord`), so
+   * a retry after the original never recorded its outcome is answered from the
+   * domain row instead of 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`.
+   */
+  recovery?: "record";
   /**
    * The handler marks its domain row written (`markIdempotencyCommitted`), so
    * from then on any status is stored: transfers and transfer batches.
@@ -59,6 +65,12 @@ const SERVER_ERROR_RETRY = {
     "After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.",
 } as const satisfies Record<IdempotencyDocumentation["serverErrors"], string>;
 
+const UNRECORDED_OUTCOME = {
+  record:
+    "If the original request crashed before recording its outcome, a same-key retry takes over and is answered from the record it wrote.",
+  none: "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, and so does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key.",
+} as const satisfies Record<"record" | "none", string>;
+
 const ANSWER_AFTER_RECORD =
   "Once the request has written its record, its answer is stored whatever its status: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. To try again, send the request with a new key.";
 
@@ -66,6 +78,7 @@ const ANSWER_AFTER_RECORD =
 export function idempotencyKeyDescription({
   key,
   serverErrors,
+  recovery,
   storesAnswerAfterRecord,
 }: IdempotencyDocumentation) {
   const lead =
@@ -73,7 +86,8 @@ export function idempotencyKeyDescription({
       ? "Required: a request without one returns 400 `IDEMPOTENCY_KEY_REQUIRED`."
       : "Optional, and honored when sent.";
   const afterRecord = storesAnswerAfterRecord ? ` ${ANSWER_AFTER_RECORD}` : "";
-  return `${lead} ${IDEMPOTENCY_CONTRACT}${afterRecord} ${SERVER_ERROR_RETRY[serverErrors]}`;
+  const unrecorded = UNRECORDED_OUTCOME[recovery ?? "none"];
+  return `${lead} ${IDEMPOTENCY_CONTRACT} ${unrecorded}${afterRecord} ${SERVER_ERROR_RETRY[serverErrors]}`;
 }
 
 /**

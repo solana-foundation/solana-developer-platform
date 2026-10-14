@@ -68,11 +68,13 @@ import {
 const movementKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "required",
   serverErrors: "rerun",
+  recovery: "record",
   storesAnswerAfterRecord: true,
 });
 const keyRequiredRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "required",
   serverErrors: "rerun",
+  recovery: "record",
 });
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",

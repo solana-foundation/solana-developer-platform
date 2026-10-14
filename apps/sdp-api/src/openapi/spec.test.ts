@@ -6,7 +6,7 @@ import {
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { declaredIdempotency } from "@/middleware/idempotency";
+import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 import { classifiedValues, isValuePublished, publishedModules } from "./release-channel-values";
@@ -957,18 +957,26 @@ describe("OpenAPI Idempotency-Key headers", () => {
 
   const doc = createOpenApiDocument();
 
-  function documentedHeader(route: string) {
-    const operation = operationFor(doc, route);
-    if (operation === undefined) return undefined;
-    const header = (operation.parameters ?? []).find(
+  function idempotencyHeaderOf(route: string) {
+    return (operationFor(doc, route)?.parameters ?? []).find(
       (parameter) =>
         "in" in parameter && parameter.in === "header" && parameter.name === "Idempotency-Key"
     );
+  }
+
+  function documentedHeader(route: string) {
+    if (operationFor(doc, route) === undefined) return undefined;
+    const header = idempotencyHeaderOf(route);
     if (header === undefined) return "absent";
     return "required" in header && header.required ? "required" : "accepted";
   }
 
   const modes = declaredModes();
+  const recovering = new Set(
+    stableMutatingRouteSteps()
+      .filter((step) => declaredIdempotencyRecovery(step.handler) === "record")
+      .map((step) => step.route.replace(/:([A-Za-z0-9_]+)/g, "{$1}"))
+  );
 
   it("documents the header as each route's chain declares it", () => {
     const documented = [...modes].map(
@@ -995,6 +1003,20 @@ describe("OpenAPI Idempotency-Key headers", () => {
           .map((status) => `${route} ${status}`);
       });
     expect(missing).toEqual([]);
+  });
+
+  it("documents IDEMPOTENCY_KEY_OUTCOME_UNKNOWN only where the chain does not recover from its record", () => {
+    const drift = [...modes]
+      .filter(([route, mode]) => mode !== undefined && !UNDOCUMENTED.includes(route))
+      .filter(([route]) => {
+        const header = idempotencyHeaderOf(route);
+        const description =
+          header !== undefined && "description" in header ? header.description : "";
+        return description?.includes("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN") === recovering.has(route);
+      })
+      .map(([route]) => route);
+    expect(drift).toEqual([]);
+    expect(recovering.size).toBeGreaterThan(0);
   });
 });
 
