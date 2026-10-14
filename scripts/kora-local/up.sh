@@ -13,8 +13,15 @@ DEVNET_ENV_FILE="${STATE_DIR}/devnet.env"
 MAINNET_STATE_DIR="${STATE_DIR}/mainnet"
 API_ENV_FILE="${STATE_DIR}/api.env"
 
-KORA_LOCAL_DEVNET_PORT="${KORA_LOCAL_DEVNET_PORT:-18080}"
-KORA_LOCAL_MAINNET_PORT="${KORA_LOCAL_MAINNET_PORT:-18081}"
+# Mainnet keeps the harness default (18080) so its Linux Docker-to-Surfpool
+# forwarder stays on; devnet takes the next port.
+KORA_LOCAL_DEVNET_PORT="${KORA_LOCAL_DEVNET_PORT:-18081}"
+KORA_LOCAL_MAINNET_PORT=18080
+# Surfpool forks this upstream; without it the harness picks a devnet provider.
+SURFPOOL_REMOTE_RPC_URL="${SURFPOOL_REMOTE_RPC_URL:-${SOLANA_MAINNET_RPC_URL:-}}"
+# Compose interpolates the shell before --env-file; drop inherited values so the
+# ports and RPC below are the ones the services actually get.
+unset KORA_PORT RPC_URL
 # Off the default 6379 so the stack's own Redis keeps its port.
 KORA_LOCAL_DEVNET_REDIS_PORT="${KORA_LOCAL_DEVNET_REDIS_PORT:-16379}"
 KORA_LOCAL_MAINNET_REDIS_PORT="${KORA_LOCAL_MAINNET_REDIS_PORT:-16380}"
@@ -23,6 +30,7 @@ mkdir -p "${STATE_DIR}"
 chmod 700 "${STATE_DIR}"
 
 command -v docker >/dev/null 2>&1 || { echo "docker is required for local Kora." >&2; exit 1; }
+[ -n "${SURFPOOL_REMOTE_RPC_URL}" ] || { echo "Set SOLANA_MAINNET_RPC_URL (Doppler dev has it) or SURFPOOL_REMOTE_RPC_URL; the mainnet Kora needs a mainnet fork." >&2; exit 1; }
 
 # --- devnet -----------------------------------------------------------------
 devnet_signer="${KORA_SIGNER_PRIVATE_KEY:-}"
@@ -35,8 +43,9 @@ if [ -z "${devnet_signer}" ]; then
   fresh_devnet_signer=1
 fi
 
+devnet_rpc="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"
 {
-  echo "RPC_URL=${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}"
+  echo "RPC_URL=${devnet_rpc}"
   echo "SIGNER_PRIVATE_KEY=${devnet_signer}"
   echo "KORA_PORT=${KORA_LOCAL_DEVNET_PORT}"
   echo "KORA_REDIS_PORT=${KORA_LOCAL_DEVNET_REDIS_PORT}"
@@ -44,14 +53,15 @@ fi
 chmod 600 "${DEVNET_ENV_FILE}"
 
 echo "Starting devnet Kora on 127.0.0.1:${KORA_LOCAL_DEVNET_PORT}."
-COMPOSE_PROJECT_NAME=kora-devnet docker compose --env-file "${DEVNET_ENV_FILE}" \
-  -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
+COMPOSE_PROJECT_NAME=kora-devnet RPC_URL="${devnet_rpc}" SIGNER_PRIVATE_KEY="${devnet_signer}" \
+  KORA_PORT="${KORA_LOCAL_DEVNET_PORT}" KORA_REDIS_PORT="${KORA_LOCAL_DEVNET_REDIS_PORT}" \
+  docker compose --env-file "${DEVNET_ENV_FILE}" -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
 
 # --- mainnet (Surfpool fork) ------------------------------------------------
 echo "Starting mainnet Kora on 127.0.0.1:${KORA_LOCAL_MAINNET_PORT} against a Surfpool fork."
 COMPOSE_PROJECT_NAME=kora-mainnet \
   KORA_SURFPOOL_MODE=docker \
-  KORA_SURFPOOL_KORA_RPC_URL="http://127.0.0.1:${KORA_LOCAL_MAINNET_PORT}" \
+  SURFPOOL_REMOTE_RPC_URL="${SURFPOOL_REMOTE_RPC_URL}" \
   KORA_REDIS_PORT="${KORA_LOCAL_MAINNET_REDIS_PORT}" \
   KORA_SURFPOOL_STATE_DIR="${MAINNET_STATE_DIR}" \
   "${ROOT_DIR}/scripts/kora-surfpool/up.sh"
