@@ -22,6 +22,10 @@ function familyCardCount(family: IntegrationFamily, layout: IntegrationsSkeleton
       return COMPLIANCE_PROVIDERS.length;
     case "privacy":
       return 1;
+    default: {
+      const unhandledFamily: never = family;
+      throw new Error(`Unhandled integration family: ${unhandledFamily}`);
+    }
   }
 }
 

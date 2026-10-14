@@ -2,6 +2,8 @@ import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
+import type { DashboardFlags } from "@/flags/dashboard";
 import IntegrationDetailLoading from "./[provider]/loading";
 import { integrationsSkeletonLayout } from "./integration-feature-gates";
 import { INTEGRATION_FAMILIES } from "./integrations-filter";
@@ -114,5 +116,39 @@ describe("integration detail skeleton", () => {
 
     const markup = renderToStaticMarkup(<IntegrationsSkeleton layout={EVERY_FAMILY} />);
     expect(markup.match(CARD)).toHaveLength(expected);
+  });
+
+  describe("client loading path", () => {
+    // The shell's flag snapshot on `stable`: every non-stable module capped off.
+    const STABLE_FLAGS: DashboardFlags = {
+      assetProfiles: false,
+      compliance: true,
+      custody: true,
+      dvp: false,
+      earn: false,
+      heliusRings: false,
+      issuance: false,
+      markets: false,
+      payments: true,
+      privateChannels: false,
+      ramps: false,
+      releaseChannel: "stable",
+    };
+
+    function renderClientPath(flags: DashboardFlags): string {
+      const PageLoading = resolvePageLoadingComponent("integrations");
+      return renderToStaticMarkup(<PageLoading flags={flags} />);
+    }
+
+    it("draws the stable families through the shell's loading switch", () => {
+      expect(renderClientPath(STABLE_FLAGS)).toBe(
+        renderToStaticMarkup(<IntegrationsSkeleton layout={STABLE} />)
+      );
+    });
+
+    it("drops a family its flag hides inside the release channel", () => {
+      const markup = renderClientPath({ ...STABLE_FLAGS, compliance: false });
+      expect(markup.match(SECTION)).toHaveLength(1);
+    });
   });
 });
