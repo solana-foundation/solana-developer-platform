@@ -1791,9 +1791,6 @@ export async function updateRecurringPayment(input: {
     recurringPayment: settled.recurringPayment,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
-  if (sourceChanged) {
-  }
-
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;

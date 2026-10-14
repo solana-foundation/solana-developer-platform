@@ -357,7 +357,7 @@ describe("Custody wallet owner contract", () => {
       ["Managed", { provider: "privy", label: "Treasury" }],
       ["BYOK", { connectionId: CONNECTION_ID, label: "Settlement" }],
     ])(
-      "answers a retry after a crash from the %s wallet row without calling the provider",
+      "takes over a crashed create and answers it from the %s wallet row, not the terminal 409, without calling the provider",
       async (_kind, body) => {
         provisionPrivyWalletMock.mockResolvedValueOnce({
           walletId: "keyed_created",
@@ -372,7 +372,10 @@ describe("Custody wallet owner contract", () => {
 
         const retry = await createWallet(body, KEY);
 
+        // recovery: "record" lets the lapsed claim be taken over; without it a
+        // store route answers 409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN.
         expect(retry.status).toBe(201);
+        expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
         expect(((await retry.json()) as { data: unknown }).data).toEqual(created.data);
         expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
         expect(await readWalletRows()).toEqual(rowsBefore);

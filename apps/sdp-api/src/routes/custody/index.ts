@@ -61,8 +61,8 @@ wallets.post(
   requirePermissions("custody:admin"),
   validateBody(createWalletSchema),
   authorize(authorizeCreateWallet),
-  idempotent({ key: "accepted", serverErrors: "store" }),
   // A retry the key could not answer (a crash, a takeover) finds the wallet row.
+  idempotent({ key: "accepted", serverErrors: "store", recovery: "record" }),
   replayFromRecord(findCustodyWalletCreateReplay),
   createWallet
 );

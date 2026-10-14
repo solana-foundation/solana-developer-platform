@@ -50,7 +50,12 @@ recurringPayments.post(
   validateBody(createRecurringPaymentSchema),
   authorize(authorizeRecurringPaymentCreate),
   // The schedule row carries its key (0129), so a 5xx re-runs and the row answers.
-  idempotent({ key: "required", serverErrors: "rerun", canonicalize: canonicalAmount }),
+  idempotent({
+    key: "required",
+    serverErrors: "rerun",
+    recovery: "record",
+    canonicalize: canonicalAmount,
+  }),
   replayFromRecord(findRecurringPaymentCreateReplay),
   createRecurringPayment
 );
@@ -66,7 +71,12 @@ recurringPayments.patch(
   // so a retry without the key could broadcast twice: the key is required.
   // Each lifecycle attempt carries its key (0130), so a takeover or a 5xx re-run
   // is answered from the attempt instead of a 409 for the schedule mid-change.
-  idempotent({ key: "required", serverErrors: "rerun", canonicalize: canonicalAmount }),
+  idempotent({
+    key: "required",
+    serverErrors: "rerun",
+    recovery: "record",
+    canonicalize: canonicalAmount,
+  }),
   replayFromRecord(findRecurringPaymentUpdateReplay),
   updateRecurringPayment
 );
@@ -76,7 +86,7 @@ recurringPayments.post(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(activateRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentActivateReplay),
   activateRecurringPayment
 );
@@ -86,7 +96,7 @@ recurringPayments.post(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(cancelRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCancelReplay),
   cancelRecurringPayment
 );
@@ -97,7 +107,7 @@ recurringPayments.post(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(collectRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCollectReplay),
   collectRecurringPayment
 );
@@ -107,7 +117,7 @@ recurringPayments.post(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(resumeRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentResumeReplay),
   resumeRecurringPayment
 );

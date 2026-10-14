@@ -36,6 +36,8 @@ export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
  * tests.
  */
 export const IDEMPOTENCY_MARKER = Symbol.for("sdp.idempotency");
+/** Marks an {@link idempotent} handler with its `recovery` option, for route inventory tests. */
+const IDEMPOTENCY_RECOVERY_MARKER = Symbol.for("sdp.idempotency.recovery");
 
 export interface IdempotencyOptions {
   key: IdempotencyKeyMode;
@@ -510,7 +512,16 @@ async function settle(write: () => Promise<unknown>, operation: string): Promise
 export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bindings: Env }> {
   const middleware: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
     runIdempotency(c, next, options);
-  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: options.key });
+  return Object.assign(middleware, {
+    [IDEMPOTENCY_MARKER]: options.key,
+    [IDEMPOTENCY_RECOVERY_MARKER]: options.recovery,
+  });
+}
+
+/** Whether an {@link idempotent} handler declares `recovery: "record"`, for route inventories. */
+export function declaredIdempotencyRecovery(handler: object): "record" | undefined {
+  if (!(IDEMPOTENCY_RECOVERY_MARKER in handler)) return undefined;
+  return handler[IDEMPOTENCY_RECOVERY_MARKER] === "record" ? "record" : undefined;
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */

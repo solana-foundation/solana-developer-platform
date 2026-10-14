@@ -3,7 +3,7 @@
  */
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction";
-import type { CountryCode } from "@sdp/types";
+import type { CountryCode, IdempotencyErrorCode } from "@sdp/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 
@@ -57,10 +57,7 @@ export type ErrorCode =
   // Earn volume caps (ADR 0004)
   | "VAULT_EXPOSURE_CAP"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
-  | "IDEMPOTENCY_KEY_REQUIRED"
-  | "IDEMPOTENCY_KEY_REUSED"
-  | "IDEMPOTENCY_KEY_IN_FLIGHT"
-  | "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
+  | IdempotencyErrorCode;
 
 export interface ApiError {
   code: ErrorCode;

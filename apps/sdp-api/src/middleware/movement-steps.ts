@@ -29,6 +29,9 @@ function stepInput<TAuthorized>(c: StepContext): MovementStepInput<TAuthorized> 
   return { ...validatedInput(c), authorized: getAuthorized<TAuthorized>(c) };
 }
 
+/** Marks a {@link replayFromRecord} step, for route inventory tests. */
+const RECORD_REPLAY_MARKER = Symbol.for("sdp.replayFromRecord");
+
 /** A domain row's answer to a keyed request, from {@link replayFromRecord}'s finder. */
 export interface RecordAnswer {
   /**
@@ -65,7 +68,7 @@ export function replayFromRecord<TAuthorized>(
     recordKey: string
   ) => Promise<RecordAnswer | null>
 ): MiddlewareHandler<{ Bindings: Env }> {
-  return async (c, next: Next) => {
+  const middleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next: Next) => {
     // The credential-bound record key (`getIdempotencyRecordKey`), never the raw header.
     const recordKey = getIdempotencyRecordKey(c);
     if (recordKey !== undefined) {
@@ -84,6 +87,12 @@ export function replayFromRecord<TAuthorized>(
     }
     await next();
   };
+  return Object.assign(middleware, { [RECORD_REPLAY_MARKER]: true });
+}
+
+/** Whether a route step is {@link replayFromRecord}, for route inventory tests. */
+export function declaresRecordReplay(handler: object): boolean {
+  return RECORD_REPLAY_MARKER in handler;
 }
 
 /**
