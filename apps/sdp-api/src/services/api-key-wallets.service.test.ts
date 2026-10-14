@@ -1,8 +1,8 @@
 import { expect, it, vi } from "vitest";
 import {
   hydrateApiKeyWalletAuthorization,
-  loadApiKeyWalletAuthorization,
   resolveApiKeyWalletAuthorization,
+  warnUnresolvedApiKeyWalletBindings,
 } from "./api-key-wallets.service";
 
 const { warn } = vi.hoisted(() => ({ warn: vi.fn() }));
@@ -48,31 +48,29 @@ it("keeps unresolved wallet selectors selected and fail-closed", () => {
   });
 });
 
-it("warns once per selector that does not resolve to exactly one active wallet", async () => {
+it("warns for each selector that does not resolve to exactly one active wallet", () => {
   warn.mockClear();
-  const responses = [
-    {
-      results: [
-        { wallet_id: "wallet_zero", permissions: '["*"]' },
-        { wallet_id: "wallet_multi", permissions: '["*"]' },
-        { wallet_id: "wallet_ok", permissions: '["*"]' },
-      ],
-    },
-    {
-      results: [
-        { custody_wallet_id: "cwlt_multi_1", wallet_id: "wallet_multi", status: "active" },
-        { custody_wallet_id: "cwlt_multi_2", wallet_id: "wallet_multi", status: "active" },
-        { custody_wallet_id: "cwlt_ok", wallet_id: "wallet_ok", status: "active" },
-      ],
-    },
-  ];
-  const db = {
-    prepare: () => ({ bind: () => ({ all: async () => responses.shift() }) }),
-  } as unknown as Parameters<typeof loadApiKeyWalletAuthorization>[0];
 
-  const auth = await loadApiKeyWalletAuthorization(db, "key_1", "org_1", "prj_1", null);
+  warnUnresolvedApiKeyWalletBindings(
+    [
+      { wallet_id: "wallet_zero", permissions: '["*"]', candidates: [] },
+      {
+        wallet_id: "wallet_multi",
+        permissions: '["*"]',
+        candidates: [
+          { id: "cwlt_multi_1", status: "active" },
+          { id: "cwlt_multi_2", status: "active" },
+        ],
+      },
+      {
+        wallet_id: "wallet_ok",
+        permissions: '["*"]',
+        candidates: [{ id: "cwlt_ok", status: "active" }],
+      },
+    ],
+    { apiKeyId: "key_1", organizationId: "org_1", projectId: "prj_1" }
+  );
 
-  expect(auth.walletBindings.map((binding) => binding.walletId)).toEqual(["wallet_ok"]);
   expect(warn).toHaveBeenCalledTimes(2);
   expect(warn).toHaveBeenCalledWith(
     {

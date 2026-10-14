@@ -14,8 +14,10 @@ import type { Env } from "@/types/env";
 /**
  * Refresh the key's role and permissions before authorizing a specific
  * operation or wallet, and its liveness from the same row, so a key revoked
- * between authentication and this read signs nothing. Wallet bindings need no
- * re-read: authentication read them fresh for this request.
+ * between authentication and this read signs nothing. Authentication already
+ * read all of it fresh (HOO-2099); this is the deliberate re-check right before
+ * a private-channel movement signs, not a cache workaround. Wallet bindings
+ * need no re-read: authentication read them fresh for this request.
  */
 export async function refreshPrivateChannelAuth(
   env: Env,

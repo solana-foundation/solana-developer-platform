@@ -22,12 +22,6 @@ export interface ApiKeyWalletPermissionRow {
   permissions: unknown;
 }
 
-interface CustodyWalletCandidateRow {
-  custody_wallet_id: string;
-  wallet_id: string;
-  status: string;
-}
-
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
 
 export function normalizeApiKeyWalletPermissions(permissions?: Permission[] | null): Permission[] {
@@ -148,72 +142,6 @@ export function warnUnresolvedApiKeyWalletBindings(
       );
     }
   }
-}
-
-export async function loadApiKeyWalletAuthorization(
-  db: DatabaseClient,
-  apiKeyId: string,
-  organizationId: string,
-  projectId: string,
-  preferredSigningWalletId: string | null
-) {
-  const permissionResult = await db
-    .prepare(
-      `SELECT wallet_id, permissions
-       FROM api_key_wallet_permissions
-       WHERE api_key_id = ?
-       ORDER BY created_at ASC`
-    )
-    .bind(apiKeyId)
-    .all<Omit<ApiKeyWalletPermissionRow, "custody_wallet_id">>();
-
-  const permissionRows = permissionResult.results ?? [];
-  if (permissionRows.length === 0 && preferredSigningWalletId) {
-    permissionRows.push({ wallet_id: preferredSigningWalletId, permissions: ["*"] });
-  }
-  if (permissionRows.length === 0) {
-    return hydrateApiKeyWalletAuthorization([], preferredSigningWalletId);
-  }
-
-  const walletIds = permissionRows.map((row) => row.wallet_id);
-  const placeholders = walletIds.map(() => "?").join(", ");
-  const candidates = await db
-    .prepare(
-      `SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
-       FROM custody_wallets w
-       JOIN custody_configs c ON c.id = w.custody_config_id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         AND c.status = 'active'
-         AND w.wallet_id IN (${placeholders})
-
-       UNION ALL
-
-       SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
-       FROM custody_wallets w
-       JOIN custody_connections c ON c.id = w.custody_connection_id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         AND c.status = 'active'
-         AND w.wallet_id IN (${placeholders})`
-    )
-    .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
-    .all<CustodyWalletCandidateRow>();
-
-  const candidatesByWalletId = new Map<string, ApiKeyWalletCandidate[]>();
-  for (const candidate of candidates.results ?? []) {
-    const matches = candidatesByWalletId.get(candidate.wallet_id) ?? [];
-    matches.push({ id: candidate.custody_wallet_id, status: candidate.status });
-    candidatesByWalletId.set(candidate.wallet_id, matches);
-  }
-
-  const rows = permissionRows.map((row) => ({
-    wallet_id: row.wallet_id,
-    permissions: row.permissions,
-    candidates: candidatesByWalletId.get(row.wallet_id) ?? [],
-  }));
-  warnUnresolvedApiKeyWalletBindings(rows, { apiKeyId, organizationId, projectId });
-  return resolveApiKeyWalletAuthorization(rows, preferredSigningWalletId);
 }
 
 export async function listApiKeyWalletBindings(

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
-import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
@@ -289,23 +288,6 @@ describe("provisionApiKeyWallet", () => {
         resolved_custody_wallet_id: expect.any(String),
         custody_connection_id: CONNECTION_ID,
       });
-      await expect(
-        loadApiKeyWalletAuthorization(
-          getDb(env),
-          body.data.apiKey.id,
-          ORGANIZATION_ID,
-          PROJECT_ID,
-          "privy_endpoint_api_key_wallet"
-        )
-      ).resolves.toMatchObject({
-        walletScope: "selected",
-        walletBindings: [
-          {
-            walletId: "privy_endpoint_api_key_wallet",
-            custodyWalletId: binding?.resolved_custody_wallet_id,
-          },
-        ],
-      });
       expect(createConfigWalletMock).not.toHaveBeenCalled();
     }
   );
@@ -504,29 +486,16 @@ describe("provisionApiKeyWallet", () => {
       expect(
         await db
           .prepare(
-            `SELECT wallet_id
-           FROM api_key_wallet_permissions
-           WHERE api_key_id = ?`
+            `SELECT p.wallet_id, w.id AS custody_wallet_id
+           FROM api_key_wallet_permissions p
+           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
+           WHERE p.api_key_id = ?`
           )
           .bind(body.data.apiKey.id)
           .first()
-      ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
-      await expect(
-        loadApiKeyWalletAuthorization(
-          db,
-          body.data.apiKey.id,
-          ORGANIZATION_ID,
-          PROJECT_ID,
-          "para_api_key_config_provisioned"
-        )
-      ).resolves.toMatchObject({
-        walletScope: "selected",
-        walletBindings: [
-          {
-            walletId: "para_api_key_config_provisioned",
-            custodyWalletId: "cwlt_api_key_config_provisioned",
-          },
-        ],
+      ).toEqual({
+        wallet_id: "para_api_key_config_provisioned",
+        custody_wallet_id: "cwlt_api_key_config_provisioned",
       });
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
     }
