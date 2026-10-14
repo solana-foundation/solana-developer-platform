@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { currentDatabaseIdentity } from "@/db/identity";
 import app from "@/index";
-import { AppError } from "@/lib/errors";
+import { AppError, rateLimited } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";
-import { optionalAuth } from "@/middleware/auth";
+import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
   ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
@@ -14,7 +14,9 @@ import {
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,
   enforceRateLimit,
+  InProcessRateLimiter,
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
+  RATE_LIMIT_WINDOW_MS,
 } from "@/middleware/rate-limit";
 import type { KVStoreSet } from "@/runtime/kv";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
@@ -409,6 +411,8 @@ describe("Rate limiting", () => {
     function enforcementApp(options: {
       kv: "broken" | "missing";
       failClosed: boolean;
+      fallback?: InProcessRateLimiter;
+      maxRequests?: number;
     }): Hono<{ Bindings: Env }> {
       const mini = new Hono<{ Bindings: Env }>();
       mini.onError((err, c) => {
@@ -428,8 +432,9 @@ describe("Rate limiting", () => {
         });
       }
       mini.get("/resource", async (c) => {
-        await enforceRateLimit(c, "storage-failure-test", 5, {
+        await enforceRateLimit(c, "storage-failure-test", options.maxRequests ?? 5, {
           failClosed: options.failClosed,
+          fallback: options.fallback,
         });
         return c.text("ok");
       });
@@ -466,6 +471,84 @@ describe("Rate limiting", () => {
       );
 
       expect(res.status).toBe(503);
+    });
+
+    it("counts in this instance's memory while the store is broken", async () => {
+      const app = enforcementApp({
+        kv: "broken",
+        failClosed: false,
+        fallback: new InProcessRateLimiter("test", 10),
+        maxRequests: 2,
+      });
+
+      const statuses: number[] = [];
+      for (let i = 0; i < 3; i++) statuses.push((await app.request("/resource", {}, env)).status);
+
+      expect(statuses).toEqual([200, 200, 429]);
+    });
+
+    it("bounds the in-process fallback's memory, forgetting the coldest counts", async () => {
+      const limiter = new InProcessRateLimiter("test", 2);
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError ? c.json(err.toResponse(), 429) : c.text("error", 500)
+      );
+      app.get("/:identifier", (c) => {
+        limiter.enforce(c, c.req.param("identifier"), 1, RATE_LIMIT_WINDOW_MS);
+        return c.text("ok");
+      });
+      const status = async (identifier: string) =>
+        (await app.request(`/${identifier}`, {}, env)).status;
+
+      expect(await status("a")).toBe(200);
+      expect(await status("a")).toBe(429);
+      expect(await status("b")).toBe(200);
+      expect(await status("c")).toBe(200);
+      // "a" was the coldest of three in a map of two, so it starts again.
+      expect(await status("a")).toBe(200);
+    });
+
+    it("guards the API-key auth read in memory while Redis is down", async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      const fallback = vi.spyOn(apiKeyFloodGuardFallback, "enforce");
+      const read = vi.spyOn(organizationAccess, "authorizeApiKey");
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError
+          ? c.json(err.toResponse(), err.statusCode as 401 | 429)
+          : c.text("error", 500)
+      );
+      app.use("*", async (c, next) => {
+        c.set("kv", {
+          rateLimits: { admitSlidingWindow: () => Promise.reject(new Error("kv down")) },
+        } as unknown as KVStoreSet);
+        await next();
+      });
+      app.use("*", authMiddleware());
+      app.get("/resource", (c) => c.text("ok"));
+      const request = () =>
+        app.request(
+          "/resource",
+          {
+            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, "x-forwarded-for": CLIENT_IP },
+          },
+          env
+        );
+
+      expect((await request()).status).toBe(200);
+      expect(fallback).toHaveBeenCalledWith(
+        expect.anything(),
+        floodCounter(),
+        API_KEY_PRE_READ_MAX_REQUESTS,
+        RATE_LIMIT_WINDOW_MS
+      );
+
+      fallback.mockImplementationOnce(() => {
+        throw rateLimited("Rate limit exceeded.");
+      });
+      read.mockClear();
+      expect((await request()).status).toBe(429);
+      expect(read).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,6 +1,7 @@
 import type { RateLimitTier } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
 import { rateLimited, serviceUnavailable } from "@/lib/errors";
@@ -224,6 +225,61 @@ async function verifiedClerkUserId(
 }
 
 /**
+ * A fixed-window limiter held in this instance's memory, used only while the
+ * shared counter store is unavailable, so a Redis outage leaves a bound in
+ * place instead of none. It counts per identifier, per instance, with the
+ * same ceiling the store would apply; the map is LRU-bounded, so a spray of
+ * identifiers cannot grow it, at the cost of forgetting the coldest counts.
+ */
+export class InProcessRateLimiter {
+  private readonly windows: BoundedLruMap<string, { windowStart: number; count: number }>;
+
+  constructor(
+    private readonly name: string,
+    maxTrackedIdentifiers: number
+  ) {
+    this.windows = new BoundedLruMap(maxTrackedIdentifiers);
+  }
+
+  /**
+   * @throws AppError RATE_LIMITED (429) with a Retry-After header once the
+   *   identifier has used `maxRequests` in the current window on this instance.
+   */
+  enforce(
+    c: Context<{ Bindings: Env }>,
+    identifier: string,
+    maxRequests: number,
+    windowMs: number
+  ): void {
+    const now = Date.now();
+    const windowStart = Math.floor(now / windowMs) * windowMs;
+    const current = this.windows.get(identifier);
+    const count = current?.windowStart === windowStart ? current.count : 0;
+    if (count >= maxRequests) {
+      const retryAfter = Math.max(1, Math.ceil((windowStart + windowMs - now) / 1000));
+      c.header("Retry-After", retryAfter.toString());
+      getLogger().warn(
+        {
+          event: "sdp_api_rate_limit_rejected",
+          tier: `${this.name}_in_process_fallback`,
+          method: c.req.method,
+          route: c.req.path,
+          limit: maxRequests,
+        },
+        "In-process fallback rate limit rejected request"
+      );
+      throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
+    }
+    this.windows.set(identifier, { windowStart, count: count + 1 });
+  }
+
+  /** Forget every count, so a test starts from an empty instance. */
+  resetForTesting(): void {
+    this.windows.clear();
+  }
+}
+
+/**
  * Enforces an approximate sliding-window rate limit for the identifier.
  *
  * Time is bucketed into fixed RATE_LIMIT_WINDOW_MS windows. The trailing
@@ -269,6 +325,8 @@ export async function enforceRateLimit(
     cost?: number;
     windowMs?: number;
     metricTier?: string;
+    /** Counts in this instance's memory when the counter store is unavailable. */
+    fallback?: InProcessRateLimiter;
   } = {}
 ): Promise<void> {
   const kv = c.var.kv?.rateLimits;
@@ -280,6 +338,7 @@ export async function enforceRateLimit(
       );
       throw serviceUnavailable("Rate limiting is unavailable; request refused");
     }
+    options.fallback?.enforce(c, identifier, maxRequests, options.windowMs ?? RATE_LIMIT_WINDOW_MS);
     return;
   }
 
@@ -314,6 +373,7 @@ export async function enforceRateLimit(
       );
       throw serviceUnavailable("Rate limiting is unavailable; request refused");
     }
+    options.fallback?.enforce(c, identifier, maxRequests, windowMs);
     return;
   }
 

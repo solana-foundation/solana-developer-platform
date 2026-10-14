@@ -32,10 +32,20 @@ import {
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,
   enforceRateLimit,
+  InProcessRateLimiter,
   RATE_LIMIT_TIERS,
 } from "./rate-limit";
 
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
+
+/** Distinct (key hash, client IP) pairs the fallback flood guard remembers. */
+const FLOOD_GUARD_FALLBACK_MAX_TRACKED = 10_000;
+
+/** The flood guard's in-process stand-in while the shared counter store is down. */
+export const apiKeyFloodGuardFallback = new InProcessRateLimiter(
+  "api_key_flood_guard",
+  FLOOD_GUARD_FALLBACK_MAX_TRACKED
+);
 
 interface LastUsedWriteState {
   lastSucceededAt: number | null;
@@ -213,13 +223,13 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // client IP too, so a leaked key used from outside its IP allowlist only
   // ever exhausts its own bucket, never the owner's. Random-key spray (a
   // fresh hash each time) is bounded by the per-IP backstop in front of auth.
+  // While Redis is down the guard counts in this instance's memory instead,
+  // so the auth read below never goes unbounded.
   await enforceRateLimit(
     c,
     apiKeyFloodGuardIdentifier(keyHash, getClientIp(c)),
     API_KEY_PRE_READ_MAX_REQUESTS,
-    {
-      metricTier: "api_key_flood_guard",
-    }
+    { metricTier: "api_key_flood_guard", fallback: apiKeyFloodGuardFallback }
   );
 
   // The authoritative read: every authorization field from the key's live
