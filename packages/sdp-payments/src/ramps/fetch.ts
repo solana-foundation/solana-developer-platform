@@ -47,15 +47,15 @@ async function readProviderBody(response: Response): Promise<string> {
   }
 }
 
-function isProviderTimeout(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "TimeoutError";
+function isProviderTimeout(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === "TimeoutError";
 }
 
-function providerReadFailure(provider: RampProviderId, error: unknown): string {
-  if (error instanceof ProviderResponseTooLargeError) {
+function providerReadFailure(provider: RampProviderId, cause: unknown): string {
+  if (cause instanceof ProviderResponseTooLargeError) {
     return `${provider} returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`;
   }
-  if (isProviderTimeout(error)) {
+  if (isProviderTimeout(cause)) {
     return `The ${provider} API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`;
   }
   return `Failed to read the ${provider} API response`;
@@ -158,10 +158,10 @@ export async function providerFetch<TBody = never>(
       body: serializeProviderBody(init.body),
       signal: AbortSignal.any(signals),
     });
-  } catch (error) {
+  } catch (cause) {
     throw new SdpPaymentsError(
       "PROVIDER_UNAVAILABLE",
-      isProviderTimeout(error)
+      isProviderTimeout(cause)
         ? `The ${provider} API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`
         : `Failed to reach the ${provider} API`,
       { provider }
@@ -171,8 +171,8 @@ export async function providerFetch<TBody = never>(
   let raw: string;
   try {
     raw = await readProviderBody(response);
-  } catch (error) {
-    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", providerReadFailure(provider, error), {
+  } catch (cause) {
+    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", providerReadFailure(provider, cause), {
       provider,
     });
   }
