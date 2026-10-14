@@ -30,7 +30,8 @@ one table, `idempotency_keys` (migration 0128). It follows three sources:
 - Brandur Leach's [Postgres design](https://brandur.org/idempotency-keys) for the locked key: a
   lease plus a claim token, compare-and-swapped on every write.
 
-**Scope.** Organization, project, and operation. The operation is the HTTP method plus the Hono
+**Scope.** Organization, project, and operation. Every keyed route runs under project context, and
+the step refuses to run without it (`project_id` is NOT NULL). The operation is the HTTP method plus the Hono
 route pattern, read with `routePath(c)`, so it needs no shared vocabulary that could drift from
 `OPERATION_TYPES`.
 

@@ -76,9 +76,6 @@ describe("0124 BYOK RPC removal", () => {
 
   afterEach(async () => {
     await runPostgresMigrations({ databaseUrl, migrationsDir });
-    await client.query("DELETE FROM secret_retirements WHERE secret_version_ref = ANY($1)", [
-      [quicknodeSecretVersionRef, privySecretVersionRef],
-    ]);
     await seedTestDatabase(env);
   });
 
@@ -92,7 +89,7 @@ describe("0124 BYOK RPC removal", () => {
     const otherTenant = await seedOrgProject(client, "0124_other");
     const rpcOnlyTenant = await seedOrgProject(client, "0124_rpc_only");
 
-    for (const provider of ["helius", "nodit", "triton", "validationcloud"]) {
+    for (const provider of ["alchemy", "helius", "nodit", "triton", "validationcloud"]) {
       await seedStoredProviderCredential(client, {
         id: `pcred_0124_${provider}`,
         label: provider,
@@ -102,14 +99,6 @@ describe("0124 BYOK RPC removal", () => {
         provider,
       });
     }
-    await client.query(
-      `INSERT INTO provider_credentials (
-         id, organization_id, project_id, provider, label, scope, source,
-         storage_backend, encrypted_secret_payload, status, created_by
-       ) VALUES ('pcred_0124_alchemy', $1, NULL, 'alchemy', 'alchemy', 'organization', 'stored',
-                 'encrypted_db', 'test-only', 'active', $2)`,
-      [tenant.organizationId, tenant.userId]
-    );
     await client.query(
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,

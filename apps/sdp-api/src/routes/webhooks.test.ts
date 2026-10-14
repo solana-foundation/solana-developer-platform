@@ -14,7 +14,7 @@ import {
   bvnkLedgerWallet,
   bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS, type PaymentTransferStatus } from "@sdp/types";
+import { BVNK_FUNDING_WALLET_STATUS, type PaymentTransferStatus, wellKnownMint } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -2355,6 +2355,7 @@ describe("MoonPay ramp webhook", () => {
   const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
   const COUNTERPARTY_ID = "cpty_moonpay_webhook";
   const MOONPAY_CUSTOMER_ID = "6e9fd8db-98e4-46f4-bd6e-6a3c30fdda19";
+  const SOL_MINT = required(wellKnownMint("SOL", "devnet"));
   function moonpaySignatureHeader(
     body: string,
     timestampSeconds: number,
@@ -2428,7 +2429,7 @@ describe("MoonPay ramp webhook", () => {
         COUNTERPARTY_ID,
         null,
         "DestinationSolanaWallet111111111111111111111111",
-        "SOL",
+        SOL_MINT,
         null,
         null,
         "onramp",
@@ -2515,6 +2516,60 @@ describe("MoonPay ramp webhook", () => {
       networkFeeAmount: 0.27,
     });
   });
+  async function readMoonpayTransferStatus(): Promise<PaymentTransferStatus> {
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: PaymentTransferStatus }>();
+    return required(row).status;
+  }
+  it("refuses a completed transaction that does not name its crypto", async () => {
+    const { currency: _currency, ...withoutCrypto } = completedPayload.data;
+    const res = await sendMoonpayWebhook({ ...completedPayload, data: withoutCrypto });
+    expect(res.status).toBe(400);
+    expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+  });
+  it("does not complete a transfer when MoonPay delivered another crypto", async () => {
+    const res = await sendMoonpayWebhook({
+      ...completedPayload,
+      data: { ...completedPayload.data, currency: { code: "usdc_sol" } },
+    });
+    expect(res.status).toBe(200);
+    expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+  });
+  it("refuses a completed sale that does not name its crypto", async () => {
+    const res = await sendMoonpayWebhook({
+      type: "sell_transaction_updated",
+      data: {
+        id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+        status: "completed",
+        externalTransactionId: TRANSFER_ID,
+        quoteCurrencyAmount: 16.31,
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+  });
+  it("does not complete a sale of another crypto", async () => {
+    await getDb(env)
+      .prepare(`UPDATE payment_transfers SET type = 'offramp', direction = 'outbound' WHERE id = ?`)
+      .bind(TRANSFER_ID)
+      .run();
+    const res = await sendMoonpayWebhook({
+      type: "sell_transaction_updated",
+      data: {
+        id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+        status: "completed",
+        customerId: MOONPAY_CUSTOMER_ID,
+        externalTransactionId: TRANSFER_ID,
+        baseCurrencyAmount: 0.2,
+        quoteCurrencyAmount: 16.31,
+        baseCurrency: { code: "usdc_sol" },
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+  });
   it("records a completed sell deposit on the correlated SDP transfer", async () => {
     const sourceAddress = "WebhookSourceSolanaWallet111111111111111111111";
     const destinationAddress = "WebhookMoonPayDepositWallet1111111111111111111";
@@ -2542,6 +2597,7 @@ describe("MoonPay ramp webhook", () => {
         refundWalletAddress: sourceAddress,
         depositHash: providerSignature,
         depositWallet: { walletAddress: destinationAddress },
+        baseCurrency: { code: "sol" },
       },
     });
     expect(res.status).toBe(200);

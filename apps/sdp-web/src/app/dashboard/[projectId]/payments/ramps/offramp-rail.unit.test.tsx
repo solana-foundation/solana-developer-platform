@@ -100,6 +100,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     setMemoRows: noop,
     quoteCreationError: null,
     quoteCreationRetrying: false,
+    quoteInFlight: false,
     retryQuoteCreation: noop,
     onboarding: null,
     isAdvancing: false,
@@ -168,5 +169,35 @@ describe("OfframpRail final step", () => {
     expect(screen.queryByText(/before the quote expires/)).not.toBeNull();
     expect(screen.getByRole("button", { name: "Send 250 USDC" })).toHaveProperty("disabled", false);
     expect(container.querySelector(".animate-spin")).not.toBeNull();
+  });
+});
+
+describe("OfframpRail final step before the quote lands", () => {
+  const awaitingQuote: Partial<OfframpWizard> = {
+    stepIndex: 1,
+    steps: [
+      { id: "MEMO", label: "Memo", title: "Add a memo" },
+      { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
+    ],
+    onTransactionStage: false,
+    quote: null,
+    quoteTransferId: null,
+    transferStatus: undefined,
+    depositTarget: null,
+    hasCryptoDepositInstruction: false,
+  };
+
+  it("disables Previous while the quote is in flight", () => {
+    renderRail(offrampWizard({ ...awaitingQuote, quoteInFlight: true }));
+
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", true);
+  });
+
+  it("frees Previous once the quote failed", () => {
+    renderRail(
+      offrampWizard({ ...awaitingQuote, quoteCreationError: new Error("Provider unavailable") })
+    );
+
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", false);
   });
 });

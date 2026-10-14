@@ -1023,7 +1023,10 @@ export function DashboardShell({
                           <span className="sr-only">
                             {t("Shared.dashboardShell.loadingDashboard")}
                           </span>
-                          <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+                          <PageLoadingComponent
+                            assetProfilesEnabled={assetProfilesEnabled}
+                            flags={flags}
+                          />
                         </div>
                       ) : (
                         // Switching demo mode remounts the page, so nothing a form or flow

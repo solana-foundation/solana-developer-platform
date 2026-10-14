@@ -337,6 +337,11 @@ export async function runIdempotency(
   }
 
   const auth = getAuth(c);
+  const projectId = c.get("projectId");
+  if (projectId === undefined) {
+    // Keys are scoped to a project, like every project-scoped row.
+    throw internalError("idempotent() must run under project context");
+  }
   const operation = idempotencyOperation(c);
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
   const validatedParams = validatedInput(c).params;
@@ -355,7 +360,7 @@ export async function runIdempotency(
     id,
     claimToken,
     organizationId: auth.organizationId,
-    projectId: c.get("projectId") ?? null, // null only on routes without project context
+    projectId,
     operation,
     idempotencyKey,
     // Another credential reusing the key is refused (422), so it never reads a

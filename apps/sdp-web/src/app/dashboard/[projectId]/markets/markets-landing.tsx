@@ -12,6 +12,7 @@ import {
   providerSelectionCardTitleClassName,
   providerSelectionCardTitleUnderlineClassName,
 } from "@/components/ui/provider-selection-card";
+import { dvp, earn } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { requestProjectHref } from "@/lib/sdp-api";
@@ -69,53 +70,57 @@ function MarketsPathCard({
 
 /**
  * The Markets entry chooser: routes a visitor to the surface built for them
- * before either workspace loads. A server component with static links only;
- * the segment layout enforces the markets and earn gates for every surface it
- * offers, so nothing here checks a flag or fetches data.
+ * before either workspace loads. Markets runs when Earn or DvP does, so each
+ * section shows only when its sub-module's flag (capped at the release channel)
+ * is on: the same check its segment layout 404s on.
  */
 export async function MarketsLanding() {
-  const t = await getTranslations();
+  const [t, earnEnabled, dvpEnabled] = await Promise.all([getTranslations(), earn(), dvp()]);
 
   return (
     <DashboardWorkspaceOverviewPanel>
       <div className="mx-auto w-full max-w-4xl space-y-10">
-        <section aria-labelledby="markets-earn-heading" className="space-y-4">
-          <h2 className="text-lg font-medium leading-6 text-primary" id="markets-earn-heading">
-            {t("DashboardMarkets.landing.earnHeading")}
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <MarketsPathCard
-              audience={t("DashboardMarkets.landing.treasuryAudience")}
-              description={t("DashboardMarkets.landing.treasuryDescription")}
-              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions)}
-              icon={LandmarkIcon}
-              title={t("Shared.dashboardShell.treasurySolutions")}
-            />
-            <MarketsPathCard
-              audience={t("DashboardMarkets.landing.programAudience")}
-              description={t("DashboardMarkets.landing.programDescription")}
-              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram)}
-              icon={UsersRoundIcon}
-              title={t("Shared.dashboardShell.earnProgram")}
-            />
-          </div>
-        </section>
-        <section aria-labelledby="markets-settlement-heading" className="space-y-4">
-          <h2
-            className="text-lg font-medium leading-6 text-primary"
-            id="markets-settlement-heading"
-          >
-            {t("DashboardMarkets.landing.settlementHeading")}
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <MarketsPathCard
-              description={t("DashboardMarkets.dvp.landingDescription")}
-              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)}
-              icon={ArrowLeftRightIcon}
-              title={t("DashboardMarkets.dvp.navLabel")}
-            />
-          </div>
-        </section>
+        {earnEnabled ? (
+          <section aria-labelledby="markets-earn-heading" className="space-y-4">
+            <h2 className="text-lg font-medium leading-6 text-primary" id="markets-earn-heading">
+              {t("DashboardMarkets.landing.earnHeading")}
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              <MarketsPathCard
+                audience={t("DashboardMarkets.landing.treasuryAudience")}
+                description={t("DashboardMarkets.landing.treasuryDescription")}
+                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions)}
+                icon={LandmarkIcon}
+                title={t("Shared.dashboardShell.treasurySolutions")}
+              />
+              <MarketsPathCard
+                audience={t("DashboardMarkets.landing.programAudience")}
+                description={t("DashboardMarkets.landing.programDescription")}
+                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram)}
+                icon={UsersRoundIcon}
+                title={t("Shared.dashboardShell.earnProgram")}
+              />
+            </div>
+          </section>
+        ) : null}
+        {dvpEnabled ? (
+          <section aria-labelledby="markets-settlement-heading" className="space-y-4">
+            <h2
+              className="text-lg font-medium leading-6 text-primary"
+              id="markets-settlement-heading"
+            >
+              {t("DashboardMarkets.landing.settlementHeading")}
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              <MarketsPathCard
+                description={t("DashboardMarkets.dvp.landingDescription")}
+                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)}
+                icon={ArrowLeftRightIcon}
+                title={t("DashboardMarkets.dvp.navLabel")}
+              />
+            </div>
+          </section>
+        ) : null}
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

@@ -19,10 +19,12 @@ import {
 import type { Address } from "@solana/addresses";
 import type { RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import app from "@/index";
+import { errorResponseSchema } from "@/openapi/schemas/base";
 import { noopObservability } from "@/runtime/observability";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -743,6 +745,63 @@ describe("Payments routes — ramps", () => {
       provider_reference: null,
     });
   });
+
+  it("quotes MoonPay USDC on Solana in both directions", async () => {
+    const counterpartyId = await seedCounterparty({ externalId: "moonpay_usdc_quotes" });
+    const hostedQuoteSchema = z.object({
+      data: z.object({ quote: z.object({ hostedUrl: z.string() }) }),
+    });
+    const quoteUsdc = async ({
+      direction,
+      ...fields
+    }:
+      | { direction: "onramp"; destinationCustodyWalletId: string; fiatAmount: string }
+      | {
+          direction: "offramp";
+          sourceCustodyWalletId: string;
+          cryptoAmount: string;
+        }): Promise<URL> => {
+      const response = await app.request(
+        `/v1/payments/ramps/${direction}/quote`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            ...fields,
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      return new URL(hostedQuoteSchema.parse(await response.json()).data.quote.hostedUrl);
+    };
+
+    const onrampUrl = await quoteUsdc({
+      direction: "onramp",
+      destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      fiatAmount: "50",
+    });
+    expect(onrampUrl.searchParams.get("currencyCode")).toBe("usdc_sol");
+    expect(onrampUrl.searchParams.get("baseCurrencyCode")).toBe("usd");
+    assertMoonPaySignature(onrampUrl);
+
+    const offrampUrl = await quoteUsdc({
+      direction: "offramp",
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      cryptoAmount: "75.25",
+    });
+    expect(offrampUrl.searchParams.get("baseCurrencyCode")).toBe("usdc_sol");
+    expect(offrampUrl.searchParams.get("quoteCurrencyCode")).toBe("usd");
+    assertMoonPaySignature(offrampUrl);
+  });
+
   it("rejects a ramp quote memo with more than 20 fields", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_memo_limit" });
     const rampsMemo = Object.fromEntries(
@@ -790,7 +849,8 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
+          // MoonPay offers no USDG on Solana in either direction.
+          assetRail: "usdg.solana",
           fiatCurrency: "USD",
           fiatAmount: "120.50",
         }),
@@ -799,7 +859,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(onrampRes.status).toBe(400);
-    const onrampBody = (await onrampRes.json()) as { error: { code: string } };
+    const onrampBody = errorResponseSchema.parse(await onrampRes.json());
     expect(onrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
 
     const offrampRes = await app.request(
@@ -814,7 +874,7 @@ describe("Payments routes — ramps", () => {
           provider: "moonpay",
           counterpartyId,
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
+          assetRail: "usdg.solana",
           fiatCurrency: "USD",
           cryptoAmount: "75.25",
         }),
@@ -823,7 +883,7 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(offrampRes.status).toBe(400);
-    const offrampBody = (await offrampRes.json()) as { error: { code: string } };
+    const offrampBody = errorResponseSchema.parse(await offrampRes.json());
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
 

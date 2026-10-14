@@ -37,6 +37,7 @@ const POSTGRES_TEST_TABLES = [
   "api_key_wallet_permissions",
   "custody_connections",
   "provider_credentials",
+  "secret_retirements",
   "custody_wallets",
   "custody_configs",
   "payment_recurring_payment_update_events",
@@ -78,8 +79,6 @@ const POSTGRES_TEST_TABLES = [
   // helius_rings_asset_allowlist is deliberately absent: it is platform
   // reference data seeded by migration 0057, not per-test state. Truncating it
   // would empty it for the rest of the run, and nothing re-seeds it.
-  "magic_links",
-  "sessions",
   "project_members",
   "api_keys",
   "projects",
