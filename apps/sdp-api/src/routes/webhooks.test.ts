@@ -2516,11 +2516,11 @@ describe("MoonPay ramp webhook", () => {
       networkFeeAmount: 0.27,
     });
   });
-  async function readMoonpayTransferStatus(): Promise<string> {
+  async function readMoonpayTransferStatus(): Promise<PaymentTransferStatus> {
     const row = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string }>();
+      .first<{ status: PaymentTransferStatus }>();
     return required(row).status;
   }
   it("refuses a completed transaction that does not name its crypto", async () => {
@@ -2535,6 +2535,19 @@ describe("MoonPay ramp webhook", () => {
       data: { ...completedPayload.data, currency: { code: "usdc_sol" } },
     });
     expect(res.status).toBe(200);
+    expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+  });
+  it("refuses a completed sale that does not name its crypto", async () => {
+    const res = await sendMoonpayWebhook({
+      type: "sell_transaction_updated",
+      data: {
+        id: "cca8ef45-4aac-4a91-851a-02ff991eeef9",
+        status: "completed",
+        externalTransactionId: TRANSFER_ID,
+        quoteCurrencyAmount: 16.31,
+      },
+    });
+    expect(res.status).toBe(400);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
   });
   it("does not complete a sale of another crypto", async () => {

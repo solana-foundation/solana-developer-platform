@@ -749,10 +749,16 @@ describe("Payments routes — ramps", () => {
     const hostedQuoteSchema = z.object({
       data: z.object({ quote: z.object({ hostedUrl: z.string() }) }),
     });
-    const quoteUsdc = async (
-      direction: "onramp" | "offramp",
-      body: Record<string, string>
-    ): Promise<URL> => {
+    const quoteUsdc = async ({
+      direction,
+      ...fields
+    }:
+      | { direction: "onramp"; destinationCustodyWalletId: string; fiatAmount: string }
+      | {
+          direction: "offramp";
+          sourceCustodyWalletId: string;
+          cryptoAmount: string;
+        }): Promise<URL> => {
       const response = await app.request(
         `/v1/payments/ramps/${direction}/quote`,
         {
@@ -766,7 +772,7 @@ describe("Payments routes — ramps", () => {
             counterpartyId,
             assetRail: "usdc.solana",
             fiatCurrency: "USD",
-            ...body,
+            ...fields,
           }),
         },
         env
@@ -775,7 +781,8 @@ describe("Payments routes — ramps", () => {
       return new URL(hostedQuoteSchema.parse(await response.json()).data.quote.hostedUrl);
     };
 
-    const onrampUrl = await quoteUsdc("onramp", {
+    const onrampUrl = await quoteUsdc({
+      direction: "onramp",
       destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       fiatAmount: "50",
     });
@@ -783,7 +790,8 @@ describe("Payments routes — ramps", () => {
     expect(onrampUrl.searchParams.get("baseCurrencyCode")).toBe("usd");
     assertMoonPaySignature(onrampUrl);
 
-    const offrampUrl = await quoteUsdc("offramp", {
+    const offrampUrl = await quoteUsdc({
+      direction: "offramp",
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       cryptoAmount: "75.25",
     });
