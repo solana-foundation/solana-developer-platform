@@ -29,8 +29,7 @@ describe("unresolved Treasury intent identity", () => {
 
   it("retires a key on a 409 whose outcome is unknown, so the next press mints a fresh one", () => {
     const store = createIdempotencyKeyStore("test:outcome-unknown");
-    const conflict = (code: string) =>
-      fetchResultAnswer({ ok: false, status: 409, body: { error: { code, message: "conflict" } } });
+    const conflict = (code: string) => fetchResultAnswer({ ok: false, status: 409, code });
     const original = store.claim("same-intent").key;
 
     expect(

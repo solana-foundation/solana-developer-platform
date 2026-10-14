@@ -3,6 +3,7 @@ import { validator } from "hono/validator";
 import { z } from "zod";
 import { type AppError, badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
+import type { RouteHandler } from "./authorize";
 
 const VALIDATED_TARGETS = ["json", "query", "param"] as const;
 type ValidatedTarget = (typeof VALIDATED_TARGETS)[number];
@@ -15,8 +16,8 @@ function markValidation<H extends object>(handler: H, target: ValidatedTarget): 
 }
 
 /** The target a route step validates, when it is one of these validators. */
-export function declaredValidation(handler: unknown): ValidatedTarget | undefined {
-  if (typeof handler !== "function" || !(VALIDATION_MARKER in handler)) return undefined;
+export function declaredValidation(handler: RouteHandler): ValidatedTarget | undefined {
+  if (!(VALIDATION_MARKER in handler)) return undefined;
   const target = handler[VALIDATION_MARKER];
   return VALIDATED_TARGETS.find((candidate) => candidate === target);
 }

@@ -519,7 +519,7 @@ export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bin
 }
 
 /** Whether an {@link idempotent} handler declares `recovery: "record"`, for route inventories. */
-export function declaredIdempotencyRecovery(handler: object): "record" | undefined {
+export function declaredIdempotencyRecovery(handler: RouteHandler): "record" | undefined {
   if (!(IDEMPOTENCY_RECOVERY_MARKER in handler)) return undefined;
   return handler[IDEMPOTENCY_RECOVERY_MARKER] === "record" ? "record" : undefined;
 }

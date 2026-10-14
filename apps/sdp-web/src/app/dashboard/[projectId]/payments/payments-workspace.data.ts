@@ -530,6 +530,12 @@ export async function createTransfer(
       ? await dashboardRequest(path, init)
       : await dashboardRequestUnderOwnKey(path, init, idempotencyKey);
   if (!response.ok) {
+    const code = apiErrorCode(
+      await response
+        .clone()
+        .text()
+        .catch(() => "")
+    );
     const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
     throw new TransferRequestError(
       getApiError(
@@ -538,7 +544,7 @@ export async function createTransfer(
       ),
       response.status,
       isReplayed(response),
-      apiErrorCode(body)
+      code
     );
   }
 
@@ -664,6 +670,12 @@ export async function createTransferBatch(
     idempotencyKey
   );
   if (!response.ok) {
+    const code = apiErrorCode(
+      await response
+        .clone()
+        .text()
+        .catch(() => "")
+    );
     const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
     throw new TransferBatchRequestError(
       getApiError(
@@ -672,7 +684,7 @@ export async function createTransferBatch(
       ),
       response.status,
       isReplayed(response),
-      apiErrorCode(body)
+      code
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;

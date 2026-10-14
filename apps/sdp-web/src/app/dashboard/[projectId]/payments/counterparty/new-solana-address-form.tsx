@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { cn } from "@/lib/utils";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import { SOLANA_ADDRESS } from "./counterparty-create-schemas.redesign";
@@ -39,6 +41,7 @@ export function NewSolanaAddressForm({
   className,
 }: NewSolanaAddressFormProps) {
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice();
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +68,7 @@ export function NewSolanaAddressForm({
     if (!result.ok) {
       setPhase("idle");
       setFlag(null);
+      if (notice(fetchResultAnswer(result))) return;
       setError(result.error);
       return;
     }

@@ -51,6 +51,27 @@ describe("initializeCustodySetupAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
+  // The key's original request never recorded its outcome: the wallet may
+  // exist, so the user is told to check the list, not that the provider is set up.
+  it("tells the user to check the list after an unknown outcome", async () => {
+    client.fetch.mockRejectedValue(
+      new SdpApiResponseError(
+        409,
+        JSON.stringify({ error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "GET it" } })
+      )
+    );
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      message: "Shared.idempotency.outcomeUnknownCheckList",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
+    });
+  });
+
   it("reports an already set up provider and makes no other API call", async () => {
     client.fetch.mockRejectedValue(
       new Error('SDP API request failed (409): {"error":{"message":"Signing already initialized"}}')

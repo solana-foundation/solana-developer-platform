@@ -4,6 +4,7 @@ import type { Counterparty, PaymentsDashboardWallet } from "@sdp/types";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -177,14 +178,14 @@ describe("New request page", () => {
     expect(sends[1]?.key).toBe(sends[0]?.key);
   });
 
-  /** Records each create's body and key; the answers are given in order. */
   /** One create the page sent: its body and Idempotency-Key. */
   interface RecordedSend {
     body: { amount: string; expiresAt: string | null };
     key: string | null;
   }
 
-  function recordSends(...answers: ("lost" | number)[]) {
+  /** Records each create's body and key; the answers are given in order. */
+  function recordSends(...answers: ("lost" | "outcome_unknown" | number)[]) {
     const sends: RecordedSend[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       sends.push({
@@ -193,6 +194,12 @@ describe("New request page", () => {
       });
       const answer = answers.shift() ?? 201;
       if (answer === "lost") throw new TypeError("Failed to fetch");
+      if (answer === "outcome_unknown") {
+        return Response.json(
+          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "Read it first" } },
+          { status: 409 }
+        );
+      }
       return answer < 400
         ? Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }, { status: answer })
         : Response.json({ error: { message: "unavailable" } }, { status: answer });
@@ -283,6 +290,30 @@ describe("New request page", () => {
     expect(sends).toHaveLength(2);
     expect(sends[1]?.body).toEqual(sends[0]?.body);
     expect(sends[1]?.key).toBe(sends[0]?.key);
+  });
+
+  // The earlier request may have created it: the user checks the list, and
+  // pressing create again is a new request under a new key.
+  it("after an unknown outcome, says to check the list and opens it, sending nothing more", async () => {
+    const sends = recordSends("outcome_unknown", 201);
+    const error = vi.spyOn(toast, "error");
+    const user = userEvent.setup();
+    await fillRequest(user, "25");
+    await createLater(user, sends, 0);
+
+    expect(error).toHaveBeenCalledWith(
+      "We couldn’t confirm whether this was created — check the list before trying again."
+    );
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      expect.stringMatching(/\/payments\/requests$/)
+    );
+    expect(sends).toHaveLength(1);
+
+    cleanup();
+    dashboardRouter.push.mockClear();
+    await fillRequest(user, "25");
+    await createLater(user, sends, 1);
+    expect(sends[1]?.key).not.toBe(sends[0]?.key);
   });
 
   it("frees the form when creating the link throws", async () => {

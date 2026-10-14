@@ -2,8 +2,9 @@ import { type IdempotencyRequiredRoute, isBodylessHttpStatus } from "@sdp/types"
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
 import {
+  type ApiAnswer,
   answerRetiresKey,
-  apiErrorCodeOfText,
+  apiErrorCode,
   IDEMPOTENCY_KEY_HEADER,
   storageFingerprint,
 } from "./idempotency";
@@ -20,6 +21,8 @@ export type DashboardFetchResult<T> =
       body: unknown;
       /** sdp-api marked the answer `Idempotent-Replayed`: a stored answer to an earlier attempt. */
       replayed?: boolean;
+      /** sdp-api's error code, when the body names one. */
+      code?: string | null;
     };
 
 export interface DashboardFetchOptions {
@@ -109,19 +112,35 @@ function isApiAnswer(response: Response): boolean {
 }
 
 /**
+ * What the backend answered, or `null` when the response says nothing about
+ * the write: not the backend's answer ({@link isApiAnswer}), or a body that is
+ * not the JSON it claims to be. A create whose answer cannot be read keeps its
+ * key, so the retry is answered by the API's replay instead of running again
+ * under a new key.
+ */
+function answerOf(response: Response, body: ArrayBuffer): ApiAnswer | null {
+  if (!isApiAnswer(response)) return null;
+  const replayed = response.headers.get("Idempotent-Replayed") === "true";
+  if (isBodylessHttpStatus(response.status)) {
+    return { status: response.status, replayed, code: null };
+  }
+  const text = new TextDecoder().decode(body);
+  try {
+    JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return { status: response.status, replayed, code: response.ok ? null : apiErrorCode(text) };
+}
+
+/**
  * Whether an answer retires the key, so the next submit is a new action: only
- * a backend answer can ({@link isApiAnswer}), on the dashboard-wide rule
+ * a readable backend answer can ({@link answerOf}), on the dashboard-wide rule
  * (`answerRetiresKey`).
  */
 function retiresKey(response: Response, body: ArrayBuffer): boolean {
-  return (
-    isApiAnswer(response) &&
-    answerRetiresKey({
-      status: response.status,
-      replayed: response.headers.get("Idempotent-Replayed") === "true",
-      code: response.ok ? null : apiErrorCodeOfText(new TextDecoder().decode(body)),
-    })
-  );
+  const answer = answerOf(response, body);
+  return answer !== null && answerRetiresKey(answer);
 }
 
 function sendWithProject(
@@ -388,6 +407,7 @@ export async function dashboardFetch<T = unknown>(
       status: response.status,
       body: errorBody,
       replayed: response.headers.get("Idempotent-Replayed") === "true",
+      code: apiErrorCode(text),
     };
   }
 
