@@ -121,3 +121,34 @@ describe("API key grants schema", () => {
     ).toBe(false);
   });
 });
+
+describe("API key fields retired by grants", () => {
+  const retired = [
+    ["role", "api_developer"],
+    ["permissions", ["payments:read"]],
+    ["allowedOperations", ["payment"]],
+  ] as const;
+
+  function firstMessage(result: { success: boolean; error?: { issues: { message: string }[] } }) {
+    return result.error?.issues[0]?.message;
+  }
+
+  it.each(retired)("refuses %s on create, pointing at grants", (field, value) => {
+    const result = apiKeyCreateSchema.safeParse({ ...validCreateRequest, [field]: value });
+    expect(result.success).toBe(false);
+    expect(firstMessage(result)).toBe(
+      `${field} is no longer accepted: send grants, the explicit module.verb actions the key holds`
+    );
+  });
+
+  it.each(retired)(
+    "refuses %s on update beside a valid field, instead of stripping it",
+    (field, value) => {
+      const result = apiKeyUpdateSchema.safeParse({ name: "ci", [field]: value });
+      expect(result.success).toBe(false);
+      expect(firstMessage(result)).toMatch(
+        new RegExp(`^${field} is no longer accepted: send grants`)
+      );
+    }
+  );
+});

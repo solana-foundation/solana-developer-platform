@@ -226,7 +226,7 @@ export const revokeApiKeyResponseSchema = z
   .openapi({ description: "API key revocation response payload." });
 
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
-  .omit({ connectionId: true })
+  .omit({ connectionId: true, role: true, permissions: true, allowedOperations: true })
   .extend({
     name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
@@ -294,6 +294,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
   });
 
 export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
+  .omit({ role: true, permissions: true, allowedOperations: true })
   .extend({
     name: withOpenApi(apiKeyUpdateSchemaBase.shape.name, {
       description: "Updated key name.",

@@ -439,4 +439,26 @@ describe("API key lifecycle", () => {
       expect((await readKey(TARGET_KEY_ID))?.allowed_ips).toBeNull();
     });
   });
+
+  it.each([
+    ["role", "api_developer"],
+    ["permissions", ["payments:read"]],
+    ["allowedOperations", ["payment"]],
+  ])(
+    "refuses an update naming the retired %s field and leaves the key as it was",
+    async (field, value) => {
+      await insertKey({ id: TARGET_KEY_ID, grants: ["transfers.execute"] });
+
+      const response = await app.request(
+        `/v1/api-keys/${TARGET_KEY_ID}`,
+        { method: "PATCH", headers, body: JSON.stringify({ name: "ci", [field]: value }) },
+        env
+      );
+
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain(`${field} is no longer accepted: send grants`);
+      expect((await readKey(TARGET_KEY_ID))?.grants).toEqual(["transfers.execute"]);
+    }
+  );
 });

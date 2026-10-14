@@ -27,6 +27,25 @@ export const apiKeyGrantsSchema = z
     }
   });
 
+/**
+ * A field keys used before grants. Refused with a 400 that points at
+ * `grants`, never stripped: a request that narrows a key with
+ * `allowedOperations` must not succeed while leaving its grants broad.
+ */
+function retiredApiKeyField(field: string) {
+  return z
+    .never({
+      error: `${field} is no longer accepted: send grants, the explicit module.verb actions the key holds`,
+    })
+    .optional();
+}
+
+const retiredApiKeyFields = {
+  role: retiredApiKeyField("role"),
+  permissions: retiredApiKeyField("permissions"),
+  allowedOperations: retiredApiKeyField("allowedOperations"),
+};
+
 const apiKeyWalletBindingSchema = z.object({
   walletId: z.string().min(1),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
@@ -48,6 +67,7 @@ export const apiKeyCreateSchema = z.object({
   walletPurpose: z
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
     .optional(),
+  ...retiredApiKeyFields,
 });
 
 export const apiKeyUpdateSchema = z.object({
@@ -60,6 +80,7 @@ export const apiKeyUpdateSchema = z.object({
   signingWalletId: z.string().min(1).nullable().optional(),
   signingWalletIds: z.array(z.string().min(1)).nullable().optional(),
   walletBindings: z.array(apiKeyWalletBindingSchema).nullable().optional(),
+  ...retiredApiKeyFields,
 });
 
 export const apiKeyRotateSchema = z.object({
