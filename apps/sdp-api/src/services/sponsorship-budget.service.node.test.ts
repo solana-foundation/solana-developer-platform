@@ -192,16 +192,24 @@ describe("BudgetedFeePayment", () => {
         },
       });
 
-      const result =
-        operation === "sign"
-          ? feePayment.signAsFeePayer(buildTransaction())
-          : operation === "send"
-            ? feePayment.signAndSend(buildTransaction())
-            : feePayment.prepareOwnedSubmission(buildTransaction(), {
-                persistSigned: vi.fn(),
-                markStarted: vi.fn(),
-                hasStarted: vi.fn(),
-              });
+      const result = (() => {
+        switch (operation) {
+          case "sign":
+            return feePayment.signAsFeePayer(buildTransaction());
+          case "send":
+            return feePayment.signAndSend(buildTransaction());
+          case "owned":
+            return feePayment.prepareOwnedSubmission(buildTransaction(), {
+              persistSigned: vi.fn(),
+              markStarted: vi.fn(),
+              hasStarted: vi.fn(),
+            });
+          default: {
+            const exhaustive: never = operation;
+            throw new Error(`Unsupported operation: ${exhaustive}`);
+          }
+        }
+      })();
       await expect(result).rejects.toThrow("Claim CAS lost");
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
       expect(provider.signAndSend).not.toHaveBeenCalled();

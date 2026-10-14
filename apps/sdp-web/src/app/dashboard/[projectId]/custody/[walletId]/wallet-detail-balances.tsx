@@ -103,11 +103,26 @@ export function WalletBalanceRows({
   const { balances, error } = useWalletDetailBalances(walletId, initial);
   const href = useProjectHref();
 
-  return (
-    <>
-      {error ? <p className="text-sm text-tertiary">{error}</p> : null}
+  let view: "unavailable" | "empty" | "balances";
+  if (error) {
+    view = "unavailable";
+  } else if (balances.length === 0) {
+    view = "empty";
+  } else {
+    view = "balances";
+  }
 
-      {error ? null : balances.length > 0 ? (
+  switch (view) {
+    case "unavailable":
+      return <p className="text-sm text-tertiary">{error}</p>;
+    case "empty":
+      return (
+        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
+          {emptyLabel}
+        </div>
+      );
+    case "balances":
+      return (
         <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
           {balances.map((balance) => {
             const ownedToken = balance.token === "SOL" ? null : (tokenRoutes[balance.mint] ?? null);
@@ -127,13 +142,12 @@ export function WalletBalanceRows({
             );
           })}
         </div>
-      ) : (
-        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
-          {emptyLabel}
-        </div>
-      )}
-    </>
-  );
+      );
+    default: {
+      const exhaustive: never = view;
+      return exhaustive;
+    }
+  }
 }
 
 function WalletBalanceRow({

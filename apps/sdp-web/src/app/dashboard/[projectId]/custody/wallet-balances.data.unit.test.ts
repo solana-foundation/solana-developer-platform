@@ -1,10 +1,10 @@
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { setWindowPathname } from "@/test/window-location";
 import { fetchWalletBalance, fetchWalletBalances } from "./wallet-balances.data";
 
-vi.mock("@/lib/dashboard-fetch", () => ({
-  dashboardRequest: (...args: Parameters<typeof fetch>) => fetch(...args),
-}));
+beforeEach(() => setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`));
 afterEach(() => vi.unstubAllGlobals());
 
 const usdcBalance = {
@@ -16,6 +16,27 @@ const usdcBalance = {
 };
 
 describe("exact wallet balance reads", () => {
+  it("reads the exact wallet under the project named by the dashboard URL", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        data: {
+          walletBalances: {
+            custodyWalletId: "wallet-a",
+            address: "address",
+            balances: [],
+          },
+        },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchWalletBalance("wallet-a")).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("/api/dashboard/payments/wallets/wallet-a/balances", {
+      method: "GET",
+      cache: "no-store",
+      headers: new Headers({ "x-project-id": SANDBOX_PROJECT.id }),
+    });
+  });
   it("rejects a successful response that identifies another wallet", async () => {
     vi.stubGlobal(
       "fetch",

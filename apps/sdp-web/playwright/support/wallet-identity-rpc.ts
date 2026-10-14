@@ -1,8 +1,28 @@
 import { createServer } from "node:http";
+import { z } from "zod";
+
+const fixtureModeSchema = z.enum(["zero", "unavailable"]);
+const fixtureControlSchema = z.object({ mode: fixtureModeSchema });
+const fixtureStateSchema = z.object({
+  fixture: z.literal("wallet-identity"),
+  mode: fixtureModeSchema,
+  calls: z.record(z.string(), z.number().int().nonnegative()),
+});
+const rpcRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number()]),
+  method: z.string().min(1),
+  params: z.array(z.json()).optional(),
+});
+const rpcEnvelopeSchema = z.union([rpcRequestSchema, z.array(rpcRequestSchema).min(1)]);
+const multipleAccountsRequestSchema = rpcRequestSchema.extend({
+  method: z.literal("getMultipleAccounts"),
+  params: z.tuple([z.array(z.string())]).rest(z.json()),
+});
 
 /** Loopback-only balance provider fixture; no method can fund, sign or submit. */
 export async function startWalletIdentityRpc(port: number) {
-  let mode: "zero" | "unavailable" = "zero";
+  let mode: z.infer<typeof fixtureModeSchema> = "zero";
   const calls: Record<string, number> = {};
   const server = createServer(async (request, response) => {
     let body = "";
@@ -11,14 +31,12 @@ export async function startWalletIdentityRpc(port: number) {
     try {
       if (request.url === "/__wallet_identity/state") {
         if (request.method === "POST") {
-          const next = JSON.parse(body).mode;
-          if (next !== "zero" && next !== "unavailable") throw new Error("Invalid fixture mode");
-          mode = next;
+          mode = fixtureControlSchema.parse(JSON.parse(body)).mode;
         }
         response.end(JSON.stringify({ fixture: "wallet-identity", mode, calls }));
         return;
       }
-      const reply = (rpc: { method: string; id: string | number; params?: unknown[] }) => {
+      const reply = (rpc: z.infer<typeof rpcRequestSchema>) => {
         calls[rpc.method] = (calls[rpc.method] ?? 0) + 1;
         const envelope = { jsonrpc: "2.0", id: rpc.id };
         if (mode === "unavailable") {
@@ -30,8 +48,9 @@ export async function startWalletIdentityRpc(port: number) {
         const context = { slot: 4321 };
         switch (rpc.method) {
           case "getMultipleAccounts": {
-            const addresses = rpc.params?.[0];
-            if (!Array.isArray(addresses)) throw new Error("Expected account addresses");
+            const {
+              params: [addresses],
+            } = multipleAccountsRequestSchema.parse(rpc);
             return { ...envelope, result: { context, value: addresses.map(() => null) } };
           }
           case "getAccountInfo":
@@ -52,7 +71,7 @@ export async function startWalletIdentityRpc(port: number) {
             };
         }
       };
-      const rpc = JSON.parse(body);
+      const rpc = rpcEnvelopeSchema.parse(JSON.parse(body));
       response.end(JSON.stringify(Array.isArray(rpc) ? rpc.map(reply) : reply(rpc)));
     } catch {
       response.statusCode = 400;
@@ -66,7 +85,7 @@ export async function startWalletIdentityRpc(port: number) {
   return server;
 }
 
-export async function setWalletIdentityRpcMode(mode: "zero" | "unavailable") {
+export async function setWalletIdentityRpcMode(mode: z.infer<typeof fixtureModeSchema>) {
   const configuredUrl = process.env.SOLANA_RPC_URL;
   if (!configuredUrl) throw new Error("Wallet identity E2E requires its read-only RPC fixture");
   const url = new URL(configuredUrl);
@@ -80,9 +99,8 @@ export async function setWalletIdentityRpcMode(mode: "zero" | "unavailable") {
     body: JSON.stringify({ mode }),
   });
   if (!response.ok) throw new Error("Wallet identity RPC fixture did not accept its mode");
-  const state: { fixture: string; mode: string; calls: Record<string, number> } =
-    await response.json();
-  if (state.fixture !== "wallet-identity" || state.mode !== mode) {
+  const state = fixtureStateSchema.parse(await response.json());
+  if (state.mode !== mode) {
     throw new Error("RPC endpoint is not the wallet identity read-only fixture");
   }
   return state;

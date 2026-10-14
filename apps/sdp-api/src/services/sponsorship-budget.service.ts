@@ -732,8 +732,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async prepareAdmission(
     transaction: Uint8Array,
-    actor: SponsorshipScope["actor"] = this.scope.actor,
-    provider: FeePaymentPort = this.provider
+    actor: SponsorshipScope["actor"],
+    provider: FeePaymentPort
   ): Promise<AdmissionContext> {
     if (!provider.getSponsorshipConfiguration) {
       throw new FeePaymentError(
