@@ -14,6 +14,7 @@ import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   resolveCreateWalletScope,
@@ -25,7 +26,7 @@ import {
   type ExactApiKeyWalletBinding,
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
-import { AuditService } from "@/services/audit.service";
+import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
@@ -49,6 +50,29 @@ function resolveActor(c: AppContext): {
     permissions: clerk.permissions,
     userId: clerk.userId,
   };
+}
+
+/**
+ * Audit a reduction of authority that has already committed. The reduction
+ * must not depend on the ledger or Redis being healthy, so a failed write is
+ * logged as `sdp_audit_reduction_unaudited` for operators instead of failing
+ * the request.
+ */
+async function logReductionBestEffort(c: AppContext, entry: AuditLogEntry): Promise<void> {
+  try {
+    await new AuditService(getDb(c.env)).log(c, entry);
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "sdp_audit_reduction_unaudited",
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: entry.resourceId,
+        error,
+      },
+      "A committed reduction of authority could not be audited"
+    );
+  }
 }
 
 export const listApiKeys = async (c: AppContext) => {
@@ -427,26 +451,23 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     throw badRequest("Confirmation did not match the key name");
   }
 
-  // The revocation and the audit record commit together.
-  const revokedKey = await new AuditService(getDb(c.env)).logWithin(c, async (txDb) => {
-    const result = await new ApiKeyService(txDb, getRequestTenantScope(c)).revokeApiKey(
-      keyId,
-      actor.organizationId,
-      projectId
-    );
-    return {
-      result,
-      entry:
-        result === null || result.alreadyRevoked
-          ? null
-          : {
-              action: "delete",
-              resourceType: "api_key",
-              resourceId: keyId,
-              metadata: { action: "deactivate" },
-            },
-    };
-  });
+  // A reduction of authority commits first and never waits on the audit
+  // ledger or Redis: a key must stay revocable while either is down. Grants
+  // (create, rotate, update) keep their record in the same transaction and
+  // fail closed; this record is best-effort and a failure is logged loudly.
+  const revokedKey = await new ApiKeyService(getDb(c.env), getRequestTenantScope(c)).revokeApiKey(
+    keyId,
+    actor.organizationId,
+    projectId
+  );
+  if (revokedKey && !revokedKey.alreadyRevoked) {
+    await logReductionBestEffort(c, {
+      action: "delete",
+      resourceType: "api_key",
+      resourceId: keyId,
+      metadata: { action: "deactivate" },
+    });
+  }
 
   if (!revokedKey) {
     throw notFound("API key");

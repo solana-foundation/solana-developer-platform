@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asTransactionalClient, getDb } from "@/db";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import { ApiKeyService } from "@/services/api-key.service";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
@@ -158,6 +159,7 @@ describe("API key lifecycle", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await getDb(env).execute(
       `ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS ${AUDIT_FAILURE_CONSTRAINT}`
     );
@@ -412,12 +414,22 @@ describe("API key lifecycle", () => {
       expect((await readKey(TARGET_KEY_ID))?.rotation_deadline).toBeNull();
     });
 
-    it("leaves the key active when the revocation's audit write fails", async () => {
+    // A reduction of authority never waits on the ledger: the key is revoked
+    // and the missing record is reported to operators.
+    it("revokes the key even when the audit write fails, and reports it", async () => {
       await insertKey({ id: TARGET_KEY_ID });
       await failApiKeyAudits();
+      const error = vi.spyOn(getLogger(), "error");
 
-      expect((await revoke(TARGET_KEY_ID)).status).toBe(500);
-      expect((await readKey(TARGET_KEY_ID))?.status).toBe("active");
+      expect((await revoke(TARGET_KEY_ID)).status).toBe(200);
+      expect((await readKey(TARGET_KEY_ID))?.status).toBe("deactivated");
+      expect(error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_audit_reduction_unaudited",
+          resourceId: TARGET_KEY_ID,
+        }),
+        expect.any(String)
+      );
     });
 
     it("leaves the key unchanged when the update's audit write fails", async () => {

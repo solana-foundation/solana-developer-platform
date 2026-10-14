@@ -559,6 +559,11 @@ export class AuditService {
   }
 
   /**
+   * For grants of authority (create, rotate, update a key): a grant must not
+   * commit unaudited, so it fails closed with the ledger. A reduction of
+   * authority (revoke, organization deletion) commits first and logs its
+   * record best-effort instead, so it never waits on the ledger or Redis.
+   *
    * Run `work` and append its audit record in one database transaction: the
    * ledger's serialized writer opens the transaction, `work` runs in it under
    * the request's own database identity, and the record it returns is sealed
