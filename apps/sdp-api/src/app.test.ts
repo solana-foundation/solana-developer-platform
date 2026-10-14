@@ -284,7 +284,7 @@ describe("createApp onError capture", () => {
     const res = await app.request(IDEMPOTENCY_REUSED_PATH, {}, baseEnv);
 
     expect(res.status).toBe(422);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = z.object({ error: z.object({ code: z.string() }) }).parse(await res.json());
     expect(body.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
     expect(captureException).not.toHaveBeenCalled();
   });

@@ -1,5 +1,13 @@
 import { SigningError } from "@sdp/custody/signing";
-import type { TransactionSigner } from "@solana/kit";
+import {
+  address,
+  isTransactionPartialSigner,
+  isTransactionSendingSigner,
+  type SignatureBytes,
+  type SignatureDictionary,
+  type TransactionPartialSigner,
+  type TransactionSendingSigner,
+} from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import {
   boundSigningTime,
@@ -7,17 +15,21 @@ import {
   custodySigningTimeoutMs,
 } from "./signing-timeout";
 
+const SIGNER_ADDRESS = address("11111111111111111111111111111111");
+
 describe("boundSigningTime", () => {
   it("fails a signing call that outlives the bound, as a retryable network error", async () => {
     vi.useFakeTimers();
     try {
-      const signer = {
-        address: "Signer111111111111111111111111111111111111",
+      const signer: TransactionPartialSigner = {
+        address: SIGNER_ADDRESS,
         signTransactions: vi.fn(() => new Promise<never>(() => undefined)),
-      } as unknown as TransactionSigner;
-      const signing = (
-        boundSigningTime(signer, 1_000) as unknown as { signTransactions(): Promise<unknown> }
-      ).signTransactions();
+      };
+      const bounded = boundSigningTime(signer, 1_000);
+      if (!isTransactionPartialSigner(bounded)) {
+        throw new Error("the bounded signer lost signTransactions");
+      }
+      const signing = bounded.signTransactions([]);
       const settled = expect(signing).rejects.toMatchObject({ code: "NETWORK_ERROR" });
       await vi.advanceTimersByTimeAsync(1_000);
       await settled;
@@ -28,22 +40,26 @@ describe("boundSigningTime", () => {
   });
 
   it("keeps everything it does not bound, including a sending method on the prototype", async () => {
-    class SendingSigner {
-      readonly address = "Signer111111111111111111111111111111111111";
-      signTransactions = vi.fn(async () => ["signed"]);
-      signAndSendTransactions(): Promise<string[]> {
-        return Promise.resolve(["sent"]);
+    const signed: readonly SignatureDictionary[] = [];
+    const sent: readonly SignatureBytes[] = [];
+    class SendingSigner implements TransactionPartialSigner, TransactionSendingSigner {
+      readonly address = SIGNER_ADDRESS;
+      signTransactions = vi.fn(async () => signed);
+      signAndSendTransactions(): Promise<readonly SignatureBytes[]> {
+        return Promise.resolve(sent);
       }
     }
     const original = new SendingSigner();
-    const bounded = boundSigningTime(
-      original as unknown as TransactionSigner
-    ) as unknown as SendingSigner;
+    const bounded = boundSigningTime(original);
+    if (!isTransactionPartialSigner(bounded) || !isTransactionSendingSigner(bounded)) {
+      throw new Error("the bounded signer lost a signing method");
+    }
 
     expect(bounded.address).toBe(original.address);
-    expect(await bounded.signTransactions()).toEqual(["signed"]);
+    expect(await bounded.signTransactions([])).toBe(signed);
+    expect(original.signTransactions).toHaveBeenCalledOnce();
     expect(bounded.signAndSendTransactions).toBe(original.signAndSendTransactions);
-    expect(await bounded.signAndSendTransactions()).toEqual(["sent"]);
+    expect(await bounded.signAndSendTransactions([])).toBe(sent);
   });
 });
 
