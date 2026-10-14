@@ -24,8 +24,8 @@ function settled(input: string, key: string, result: ActionKeyResult): void {
     input,
     key,
     result.status === "success"
-      ? { status: 200, replayed: false }
-      : (result.answer ?? { status: null, replayed: false })
+      ? { status: 200, replayed: false, code: null }
+      : (result.answer ?? { status: null, replayed: false, code: null })
   );
 }
 

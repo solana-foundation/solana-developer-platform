@@ -1,7 +1,12 @@
-import type { IdempotencyRequiredRoute } from "@sdp/types";
+import { type IdempotencyRequiredRoute, isBodylessHttpStatus } from "@sdp/types";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
-import { answerRetiresKey, IDEMPOTENCY_KEY_HEADER, storageFingerprint } from "./idempotency";
+import {
+  answerRetiresKey,
+  apiErrorCodeOfText,
+  IDEMPOTENCY_KEY_HEADER,
+  storageFingerprint,
+} from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
@@ -76,7 +81,6 @@ function requiresPersistedKey(method: string, path: string): boolean {
 }
 
 const KEYED_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const BODYLESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 
 let mutationKeyStore: IdempotencyKeyStore | null = null;
 
@@ -98,7 +102,7 @@ const inFlightMutations = new Map<string, Promise<Response>>();
  */
 function isApiAnswer(response: Response): boolean {
   if (response.redirected) return false;
-  if (BODYLESS_STATUSES.has(response.status)) return true;
+  if (isBodylessHttpStatus(response.status)) return true;
   return response.headers.get("content-type")?.toLowerCase().includes("application/json") ?? false;
 }
 
@@ -107,12 +111,13 @@ function isApiAnswer(response: Response): boolean {
  * a backend answer can ({@link isApiAnswer}), on the dashboard-wide rule
  * (`answerRetiresKey`).
  */
-function retiresKey(response: Response): boolean {
+function retiresKey(response: Response, body: ArrayBuffer): boolean {
   return (
     isApiAnswer(response) &&
     answerRetiresKey({
       status: response.status,
       replayed: response.headers.get("Idempotent-Replayed") === "true",
+      code: response.ok ? null : apiErrorCodeOfText(new TextDecoder().decode(body)),
     })
   );
 }
@@ -203,10 +208,10 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response)) {
+      if (retiresKey(response, body)) {
         keys.release(fingerprint, key);
       }
-      return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {
+      return new Response(isBodylessHttpStatus(response.status) ? null : body, {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,

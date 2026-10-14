@@ -62,7 +62,7 @@ describe("initializeCustodySetupAction", () => {
 
     expect(result).toEqual({
       status: "provider_already_set_up",
-      answer: { status: 409, replayed: false },
+      answer: { status: 409, replayed: false, code: null },
     });
     expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
       "/v1/wallets/initialize",

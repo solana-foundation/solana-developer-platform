@@ -41,12 +41,12 @@ export type MovementActionResult =
  * A validation refusal never reached the API, so it is no answer.
  */
 export function movementAnswer(result: MovementActionResult): ApiAnswer {
-  if (result.ok) return { status: 200, replayed: false };
+  if (result.ok) return { status: 200, replayed: false, code: null };
   switch (result.kind) {
     case "server":
       return result.answer;
     case "validation":
-      return { status: null, replayed: false };
+      return { status: null, replayed: false, code: null };
     default: {
       const unreachable: never = result;
       throw new Error(`Unknown movement result: ${JSON.stringify(unreachable)}`);

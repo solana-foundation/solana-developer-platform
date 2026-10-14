@@ -22,7 +22,7 @@ describe("useActionIdempotencyKey", () => {
     expect(result.current.keyFor("label=a")).toBe(first);
     result.current.settled("label=a", first, {
       status: "error",
-      answer: { status: 503, replayed: false },
+      answer: { status: 503, replayed: false, code: null },
     });
     expect(result.current.keyFor("label=a")).toBe(first);
 
@@ -38,13 +38,13 @@ describe("useActionIdempotencyKey", () => {
     const a = result.current.keyFor("label=a");
     result.current.settled("label=a", a, {
       status: "error",
-      answer: { status: 503, replayed: false },
+      answer: { status: 503, replayed: false, code: null },
     });
 
     const b = result.current.keyFor("label=b");
     result.current.settled("label=b", b, {
       status: "error",
-      answer: { status: 503, replayed: false },
+      answer: { status: 503, replayed: false, code: null },
     });
 
     expect(result.current.keyFor("label=a")).toBe(a);
@@ -58,18 +58,18 @@ describe("useActionIdempotencyKey", () => {
     const replayed = result.current.keyFor("label=a");
     result.current.settled("label=a", replayed, {
       status: "error",
-      answer: { status: 503, replayed: false },
+      answer: { status: 503, replayed: false, code: null },
     });
     result.current.settled("label=a", replayed, {
       status: "error",
-      answer: { status: 400, replayed: true },
+      answer: { status: 400, replayed: true, code: null },
     });
     expect(result.current.keyFor("label=a")).not.toBe(replayed);
 
     const reused = result.current.keyFor("label=b");
     result.current.settled("label=b", reused, {
       status: "error",
-      answer: { status: 422, replayed: false },
+      answer: { status: 422, replayed: false, code: null },
     });
     expect(result.current.keyFor("label=b")).not.toBe(reused);
 
@@ -77,9 +77,27 @@ describe("useActionIdempotencyKey", () => {
     const refused = result.current.keyFor("label=c");
     result.current.settled("label=c", refused, {
       status: "error",
-      answer: { status: 400, replayed: false },
+      answer: { status: 400, replayed: false, code: null },
     });
     expect(result.current.keyFor("label=c")).toBe(refused);
+  });
+
+  // The original never recorded its outcome: every retry under the key gets
+  // the same 409, so the next press is a new action. One in flight runs again.
+  it("retires the key on a 409 whose outcome is unknown, and keeps it on one in flight", () => {
+    const { result } = renderHook(() => useActionIdempotencyKey());
+    const key = result.current.keyFor("wallet=treasury");
+    result.current.settled("wallet=treasury", key, {
+      status: "error",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_IN_FLIGHT" },
+    });
+    expect(result.current.keyFor("wallet=treasury")).toBe(key);
+
+    result.current.settled("wallet=treasury", key, {
+      status: "error",
+      answer: { status: 409, replayed: false, code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN" },
+    });
+    expect(result.current.keyFor("wallet=treasury")).not.toBe(key);
   });
 
   it("keeps the key when a refusal follows an unanswered attempt, or the action threw", () => {
@@ -88,7 +106,7 @@ describe("useActionIdempotencyKey", () => {
     result.current.settled("label=a", key, { status: "error" });
     result.current.settled("label=a", key, {
       status: "error",
-      answer: { status: 400, replayed: false },
+      answer: { status: 400, replayed: false, code: null },
     });
     expect(result.current.keyFor("label=a")).toBe(key);
   });
@@ -100,7 +118,7 @@ describe("useActionIdempotencyKey", () => {
     const key = result.current.keyFor("wallet=treasury");
     result.current.settled("wallet=treasury", key, {
       status: "error",
-      answer: { status: 503, replayed: false },
+      answer: { status: 503, replayed: false, code: null },
     });
 
     reload();
@@ -118,7 +136,7 @@ describe("useActionIdempotencyKey", () => {
     expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
     reloaded.current.settled("wallet=treasury", key, {
       status: "error",
-      answer: { status: 400, replayed: false },
+      answer: { status: 400, replayed: false, code: null },
     });
 
     expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
@@ -133,7 +151,7 @@ describe("useActionIdempotencyKey", () => {
       const key = result.current.keyFor("label=a");
       result.current.settled("label=a", key, {
         status: "error",
-        answer: { status: 503, replayed: false },
+        answer: { status: 503, replayed: false, code: null },
       });
 
       expect(result.current.keyFor("label=a")).toBe(key);

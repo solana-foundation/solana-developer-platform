@@ -122,6 +122,7 @@ export async function sendTransferBatchUnderKey(
       settleIdempotencyKey(store, fingerprint, key, {
         status: error.status,
         replayed: error.replayed,
+        code: error.code,
       });
     }
     throw error;

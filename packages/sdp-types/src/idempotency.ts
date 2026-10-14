@@ -29,3 +29,26 @@ export type BodylessHttpStatus = (typeof BODYLESS_HTTP_STATUSES)[number];
 export function isBodylessHttpStatus(status: number): status is BodylessHttpStatus {
   return BODYLESS_HTTP_STATUSES.some((bodyless) => bodyless === status);
 }
+
+/**
+ * The error codes sdp-api answers an Idempotency-Key refusal with (HOO-1918),
+ * so clients read them from one list.
+ */
+export const IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_REUSED",
+  "IDEMPOTENCY_KEY_IN_FLIGHT",
+  "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+] as const;
+
+export type IdempotencyErrorCode = (typeof IDEMPOTENCY_ERROR_CODES)[number];
+
+/**
+ * Whether a refusal ends its key: a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`
+ * means the original request never recorded its outcome, and every retry under
+ * that key would get the same answer. The client checks with GET, then sends
+ * under a new key. It carries no Retry-After.
+ */
+export function isIdempotencyKeyOutcomeUnknown(status: number, code: string | null): boolean {
+  return status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
+}

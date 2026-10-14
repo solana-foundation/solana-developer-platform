@@ -221,7 +221,7 @@ describe("WalletSetupFlow", () => {
   it("tells the user to add a wallet when the provider is already set up", async () => {
     vi.mocked(initializeCustodySetupAction).mockResolvedValue({
       status: "provider_already_set_up",
-      answer: { status: 409, replayed: false },
+      answer: { status: 409, replayed: false, code: null },
     });
     const user = userEvent.setup();
     renderInteractiveFlow({

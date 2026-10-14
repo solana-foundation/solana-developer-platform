@@ -207,7 +207,7 @@ describe("createActionMemo", () => {
 
   it("never evicts an unanswered value, however many inputs follow", () => {
     const first = memo.valueFor("input=0", () => "first");
-    memo.settle("input=0", first, { status: 503, replayed: false });
+    memo.settle("input=0", first, { status: 503, replayed: false, code: null });
     for (let index = 1; index <= 40; index++) memo.valueFor(`input=${index}`, () => `v${index}`);
 
     expect(memo.valueFor("input=0", () => "fresh")).toBe(first);
@@ -215,13 +215,13 @@ describe("createActionMemo", () => {
 
   it("forgets a value on a success, a replay or a 422, and keeps it on a plain refusal", () => {
     memo.valueFor("a", () => "a1");
-    memo.settle("a", "a1", { status: 201, replayed: false });
+    memo.settle("a", "a1", { status: 201, replayed: false, code: null });
     memo.valueFor("b", () => "b1");
-    memo.settle("b", "b1", { status: 400, replayed: true });
+    memo.settle("b", "b1", { status: 400, replayed: true, code: null });
     memo.valueFor("c", () => "c1");
-    memo.settle("c", "c1", { status: 422, replayed: false });
+    memo.settle("c", "c1", { status: 422, replayed: false, code: null });
     memo.valueFor("d", () => "d1");
-    memo.settle("d", "d1", { status: 400, replayed: false });
+    memo.settle("d", "d1", { status: 400, replayed: false, code: null });
 
     expect(memo.valueFor("a", () => "a2")).toBe("a2");
     expect(memo.valueFor("b", () => "b2")).toBe("b2");

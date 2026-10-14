@@ -87,6 +87,7 @@ async function performTransferUnderKey(
       settleIdempotencyKey(store, fingerprint, key, {
         status: error.status,
         replayed: error.replayed,
+        code: error.code,
       });
     }
     throw error;
