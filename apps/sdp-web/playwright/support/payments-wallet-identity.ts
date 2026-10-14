@@ -7,31 +7,22 @@ import { createLocalApiClient } from "./local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
+  getPlaywrightDatabaseUrl,
   resolvePlaywrightProjects,
 } from "./local-dashboard-bootstrap";
 
-/** Only the job-isolated CI database or an explicit local acceptance database may be mutated. */
-function isolatedDatabaseUrl(): string {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl)
-    throw new Error("Wallet identity E2E requires an explicit isolated DATABASE_URL");
+function getLocalDatabaseUrl(): string {
+  const databaseUrl = getPlaywrightDatabaseUrl();
   const database = new URL(databaseUrl);
   const apiUrl = new URL(getBootstrapApiBaseUrl());
-  const isCiDatabase = process.env.CI === "true" && database.pathname === "/sdp";
-  const isAcceptanceDatabase =
-    database.pathname === "/sdp_wallet_foundation_e2e" && database.port !== "5432";
   if (
     getE2EEnv().useExternalApi ||
     !["http:", "https:"].includes(apiUrl.protocol) ||
     !["postgres:", "postgresql:"].includes(database.protocol) ||
     !["127.0.0.1", "localhost"].includes(apiUrl.hostname) ||
-    !["127.0.0.1", "localhost"].includes(database.hostname) ||
-    !database.port ||
-    (!isCiDatabase && !isAcceptanceDatabase)
+    !["127.0.0.1", "localhost"].includes(database.hostname)
   ) {
-    throw new Error(
-      "Wallet identity E2E requires loopback API/Postgres and either the CI sdp database or a dedicated sdp_wallet_foundation_e2e database"
-    );
+    throw new Error("Wallet identity E2E requires loopback API and Postgres");
   }
 
   return databaseUrl;
@@ -77,7 +68,7 @@ async function cleanupWalletIdentityFixtures(
 }
 
 export async function bootstrapWalletIdentityFixtures(browser: Browser) {
-  const databaseUrl = isolatedDatabaseUrl();
+  const databaseUrl = getLocalDatabaseUrl();
   const admin = await getPlaywrightAdminSession(browser);
   const fixture = await bootstrapLocalWalletFixtures({
     identity: admin.identity,

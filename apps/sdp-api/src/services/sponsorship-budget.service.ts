@@ -7,6 +7,13 @@ import {
 import { resolveDefaultCluster } from "@sdp/rpc";
 import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
 import {
+  SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
+  SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES,
+  SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES,
+  SPONSORSHIP_RESERVATION_SUBMITTED_RESPONSE_STATUSES,
+  type SponsorshipReservationStatus,
+} from "@sdp/types";
+import {
   type Address,
   assertIsFullySignedTransaction,
   assertIsSignature,
@@ -28,7 +35,6 @@ import {
   type SponsorshipNetwork,
   type SponsorshipReservation,
   type SponsorshipReservationEvidence,
-  type SponsorshipReservationStatus,
   sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -385,12 +391,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       result !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, [
-        "signed",
-        "submitted",
-        "committed",
-        "charged_unknown",
-      ]))
+      !(await this.durablyAdvanced(reservation, SPONSORSHIP_RESERVATION_SIGNING_ACCOUNTED_STATUSES))
     ) {
       return this.accountingUnavailable(
         this.network,
@@ -485,7 +486,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       submittedResult !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+      !(await this.durablyAdvanced(
+        reservation,
+        SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES
+      ))
     ) {
       return this.accountingUnavailable(
         this.network,
@@ -532,7 +536,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (
       result !== "persisted" &&
-      !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
+      !(await this.durablyAdvanced(
+        reservation,
+        SPONSORSHIP_RESERVATION_SUBMISSION_ACCOUNTED_STATUSES
+      ))
     ) {
       return this.accountingUnavailable(
         this.network,
@@ -807,7 +814,9 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       : false;
     if (
       durableReplay &&
-      ["signed", "submitted", "committed"].includes(durableReplay.status) &&
+      SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
+        (status) => status === durableReplay.status
+      ) &&
       hasOperationResponse
     ) {
       return {
@@ -1019,7 +1028,9 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       }
       if (
         existing &&
-        ["signed", "submitted", "committed"].includes(existing.status) &&
+        SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
+          (status) => status === existing.status
+        ) &&
         reservationHasResponse(existing, operation)
       ) {
         return {
@@ -1118,7 +1129,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private async durablyAdvanced(
     reservation: AdmissionResult,
-    forwardStatuses: SponsorshipReservationStatus[]
+    forwardStatuses: readonly SponsorshipReservationStatus[]
   ): Promise<boolean> {
     let current: SponsorshipReservation | null;
     try {
@@ -1280,9 +1291,14 @@ function reservationHasResponse(
 ): boolean {
   if (operation === "sign") {
     return (
-      ["signed", "submitted", "committed"].includes(reservation.status) &&
-      Boolean(reservation.signedTransaction)
+      SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES.some(
+        (status) => status === reservation.status
+      ) && Boolean(reservation.signedTransaction)
     );
   }
-  return ["submitted", "committed"].includes(reservation.status) && Boolean(reservation.signature);
+  return (
+    SPONSORSHIP_RESERVATION_SUBMITTED_RESPONSE_STATUSES.some(
+      (status) => status === reservation.status
+    ) && Boolean(reservation.signature)
+  );
 }
