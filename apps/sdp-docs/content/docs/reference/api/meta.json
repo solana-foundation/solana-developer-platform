@@ -3,7 +3,6 @@
   "pages": [
     "index",
     "health",
-    "api-keys",
     "wallets",
     "projects",
     "issuance",

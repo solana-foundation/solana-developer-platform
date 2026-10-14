@@ -2,18 +2,15 @@ import { SigningError } from "@sdp/custody/signing";
 import type { ApiKeyRole, CreateApiKeyResponse } from "@sdp/types";
 import type { Context } from "hono";
 import { asTransactionalClient, getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { requireHumanActor } from "@/middleware/human-session";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { buildApiKeyAccessSummaries } from "@/routes/api-keys/access-response";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
-  assertBindingsWithinActorWalletScope,
-  assertGrantableAllowedOperations,
-  isWalletScopedActor,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
 } from "@/services/api-key-scope.service";
@@ -24,25 +21,15 @@ import {
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
-import { assertApiKeyProjectAccess } from "../project-access";
 
 type AppContext = Context<{ Bindings: Env }>;
 
+/** The signed-in person must be a member of the active project. */
 async function assertProjectAccess(
   c: AppContext,
-  auth: ReturnType<typeof getAuth>,
+  actor: { userId: string; organizationId: string },
   projectId: string
 ): Promise<void> {
-  assertApiKeyProjectAccess(auth, projectId);
-
-  if (auth.authType === "api_key") {
-    return;
-  }
-
-  if (!auth.userId) {
-    throw notFound("Project");
-  }
-
   const row = await getDb(c.env)
     .prepare(
       `SELECT 1 FROM project_members pm
@@ -50,7 +37,7 @@ async function assertProjectAccess(
        WHERE pm.project_id = ? AND pm.user_id = ? AND p.organization_id = ? AND p.status = 'active'
        LIMIT 1`
     )
-    .bind(projectId, auth.userId, auth.organizationId)
+    .bind(projectId, actor.userId, actor.organizationId)
     .first();
 
   if (!row) {
@@ -60,15 +47,15 @@ async function assertProjectAccess(
 
 export const listProjectApiKeys = async (c: AppContext) => {
   const { projectId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = requireHumanActor(c);
 
-  await assertProjectAccess(c, auth, projectId);
+  await assertProjectAccess(c, actor, projectId);
 
   const db = getDb(c.env);
   const apiKeyService = new ApiKeyService(
     db,
     createTenantScope({
-      organizationId: auth.organizationId,
+      organizationId: actor.organizationId,
       projectId,
     })
   );
@@ -106,11 +93,11 @@ export const listProjectApiKeys = async (c: AppContext) => {
 
 export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSchema>) => {
   const { projectId } = c.req.param();
-  const auth = getAuth(c);
+  const actor = requireHumanActor(c);
 
   const body = c.req.valid("json");
 
-  await assertProjectAccess(c, auth, projectId);
+  await assertProjectAccess(c, actor, projectId);
 
   const {
     name,
@@ -139,39 +126,19 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     provisionWallet: provisionWalletRequested,
   });
 
-  const actorApiKey = c.get("apiKey");
-  if (actorApiKey) {
-    assertBindingsWithinActorWalletScope(
-      actorApiKey,
-      [{ walletId: walletSelection.defaultSigningWalletId }, ...walletSelection.bindings],
-      walletScope
-    );
-  }
-
-  // Judge the requested Allowed Operations before any wallet is provisioned,
-  // so a refused request leaves nothing behind. The service judges again
-  // inside the key transaction.
-  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
-
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
   if (provisionWalletRequested) {
-    if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
+    if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
-    }
-    if (actorApiKey && isWalletScopedActor(actorApiKey)) {
-      throw new AppError(
-        "INSUFFICIENT_PERMISSIONS",
-        "Cannot provision a wallet from an API key with a selected wallet scope"
-      );
     }
 
     try {
       const wallet = await provisionApiKeyWallet(getDb(c.env), c.env, {
         auditContext: c,
         creationReason: "api_key",
-        organizationId: auth.organizationId,
+        organizationId: actor.organizationId,
         projectId,
         owner: provisionWallet,
         label: walletLabel,
@@ -193,26 +160,23 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   } else {
     resolvedWalletBindings = await resolveWalletBindingsInScope(
       getDb(c.env),
-      auth.organizationId,
+      actor.organizationId,
       projectId,
       walletSelection.bindings
     );
   }
 
   const tenantScope = createTenantScope({
-    organizationId: auth.organizationId,
+    organizationId: actor.organizationId,
     projectId,
   });
   const createdKey = await getDb(c.env).transaction(async (tx) => {
     const txDb = asTransactionalClient(tx);
     const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
-      organizationId: auth.organizationId,
+      organizationId: actor.organizationId,
       projectId,
-      createdByKeyId: auth.apiKeyId ?? undefined,
-      createdByUserId: auth.userId ?? undefined,
-      actorPermissions: auth.permissions,
-      actorApiKeyRole: c.get("apiKey")?.role ?? null,
-      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
+      createdByUserId: actor.userId,
+      actorPermissions: actor.permissions,
       name,
       description,
       role,

@@ -79,13 +79,21 @@ function get(headers: Record<string, string>) {
   return app.request(`/v1/organizations/${ORGANIZATION_ID}`, { headers }, env);
 }
 
+/** Settings are written by a signed-in organization admin, never a key (HOO-2099). */
+let adminToken: string;
+
+async function signInAdmin(): Promise<void> {
+  await seedMemberWithProject();
+  adminToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, ORGANIZATION_ID);
+}
+
 function patch(body: unknown, from: string) {
   return app.request(
     `/v1/organizations/${ORGANIZATION_ID}`,
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        Authorization: `Bearer ${adminToken}`,
         "Content-Type": "application/json",
         "x-forwarded-for": from,
       },
@@ -108,6 +116,7 @@ describe("Organization access settings", () => {
   describe("writing settings.allowedIpAddresses", () => {
     beforeEach(async () => {
       await seedOrganization(null);
+      await signInAdmin();
     });
     it("rejects an entry that is not an address or CIDR range", async () => {
       const res = await patch(
@@ -115,7 +124,7 @@ describe("Organization access settings", () => {
         "203.0.113.42"
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("rejects a prefix wider than the address family allows", async () => {
       const res = await patch(
@@ -123,7 +132,7 @@ describe("Organization access settings", () => {
         "203.0.113.42"
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("stores the range each entry actually selects", async () => {
       const res = await patch(
@@ -177,7 +186,7 @@ describe("Organization access settings", () => {
         };
       };
       expect(body.error.message).toContain("198.51.100.42");
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("refuses an allowlist when the caller's origin cannot be determined", async () => {
       const res = await app.request(
@@ -185,7 +194,7 @@ describe("Organization access settings", () => {
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            Authorization: `Bearer ${adminToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }),
@@ -193,7 +202,7 @@ describe("Organization access settings", () => {
         env
       );
       expect(res.status).toBe(400);
-      expect(await readSettings()).toBeNull();
+      expect((await readSettings())?.allowedIpAddresses).toBeUndefined();
     });
     it("clears the restriction when given an empty list", async () => {
       expect(
@@ -208,6 +217,7 @@ describe("Organization access settings", () => {
   describe("concurrent settings updates", () => {
     beforeEach(async () => {
       await seedOrganization({ defaultEnvironment: "sandbox" });
+      await signInAdmin();
     });
     it("keeps a security change that lands alongside an unrelated one", async () => {
       const [restriction, unrelated] = await Promise.all([

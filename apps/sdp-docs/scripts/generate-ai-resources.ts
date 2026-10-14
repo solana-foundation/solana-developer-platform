@@ -81,7 +81,6 @@ const KEY_PAGE_SLUGS = [
   "reference/postman-collection",
   "reference/api/index",
   "reference/api/health",
-  "reference/api/api-keys",
   "reference/api/wallets",
   "reference/api/projects",
   "reference/api/issuance",

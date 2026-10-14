@@ -26,8 +26,6 @@ const INPUT: CreateApiKeyInput = {
   projectId: TEST_PROJECT.id,
   createdByUserId: TEST_USER.id,
   actorPermissions: ["*"],
-  actorApiKeyRole: null,
-  actorAllowedOperations: null,
   name: "Racing key",
   role: "api_readonly",
 };
@@ -183,7 +181,7 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
         new ApiKeyService(
           getDb(env),
           createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-        ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"], null, null)
+        ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"])
       ).then(
         (result) => result,
         (error: unknown) => error

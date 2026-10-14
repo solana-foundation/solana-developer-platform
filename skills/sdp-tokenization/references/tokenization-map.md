@@ -93,9 +93,8 @@ Use this file as the quick reference for answering tokenization questions on top
 - Wallets and custody:
   - `GET /v1/wallets`
   - `POST /v1/wallets`
-- API keys:
-  - `GET /v1/api-keys`
-  - `POST /v1/api-keys`
+- API keys: created, rotated and revoked in the dashboard by a signed-in member; an API key
+  cannot manage keys, so there is no key-management endpoint to cite.
 - Issuance:
   - `GET /v1/issuance/templates`
   - `POST /v1/issuance/tokens`

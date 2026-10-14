@@ -79,31 +79,17 @@ With the Admin key, call `GET /v1/projects` and pick the project with slug `defa
 
 <Step>
 
-Call `POST /v1/projects/{projectId}/api-keys` twice to mint two project-scoped keys: one with `role: "api_developer"` for routine create, mint, and burn calls, and one with `role: "api_admin"` for compliance operations (screening, freeze, seize, force-burn). Each response includes the full key value exactly once:
-
-```json title="response.json"
-{
-  "data": {
-    "apiKey": {
-      "id": "key_375fe1e1-...",
-      "keyPrefix": "sk_test__b3",
-      "key": "sk_test_<full key, shown once>",
-      "role": "api_developer",
-      "environment": "sandbox"
-    }
-  }
-}
-```
+In the dashboard, create two keys in the project: one with the Developer role for routine create, mint, and burn calls, and one with the Admin role for compliance operations (screening, freeze, seize, force-burn). API keys cannot create keys, so this step is done by a signed-in member.
 
 <Callout type="warn">
-The `key` field appears only on this response. Capture it into your secrets manager immediately; SDP does not surface it again.
+The full key is shown only once. Capture it into your secrets manager immediately; SDP does not surface it again.
 </Callout>
 
 </Step>
 
 </Steps>
 
-Store the two project-scoped keys with your other production secrets. Keep the org-scoped Admin key cold; you only touch it when you provision additional keys or rotate.
+Store the two project-scoped keys with your other production secrets. Rotate or revoke them from the dashboard.
 
 ### 4. Sandbox readers: fund your custody wallet
 

@@ -1,16 +1,14 @@
 import {
-  type AllowedOperation,
   type ApiKeyRole,
   type ApiKeyWalletBinding,
   type ApiKeyWalletScope,
   getPermissionsForApiKeyRole,
   hasAllPermissions,
   hasAnyPermission,
-  isAllowedOperationsWithin,
   type Permission,
 } from "@sdp/types";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, conflict, insufficientPermissions } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import {
   type ExactApiKeyWalletBinding,
   normalizeApiKeyWalletPermissions,
@@ -351,23 +349,16 @@ export async function resolveWalletBindingsInScope(
   }));
 }
 
+/**
+ * A signed-in person may grant a key at most the permissions they hold; an
+ * organization administrator may grant any. Only people manage keys
+ * (`requireHumanSession`), so the actor is never itself a key.
+ */
 export function assertGrantableApiKeyPermissions(
   actorPermissions: Permission[],
   resolvedRole: ApiKeyRole,
-  requestedPermissions: Permission[] | null | undefined,
-  actorApiKeyRole: string | null
+  requestedPermissions: Permission[] | null | undefined
 ): void {
-  // The api_admin role grants every permission, and an org:admin holder passes
-  // the subset check below, so without this a lesser key carrying a custom
-  // org:admin grant could mint or rotate itself up to api_admin. Dashboard
-  // actors carry no API-key role and keep the exemptions below.
-  if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
-    throw new AppError(
-      "FORBIDDEN",
-      "Only an api_admin API key can create or rotate api_admin keys"
-    );
-  }
-
   if (hasAnyPermission(actorPermissions, ["org:admin"])) {
     return;
   }
@@ -409,22 +400,6 @@ export function isApiKeyWalletAccessDenied(error: unknown): boolean {
     error.code === "FORBIDDEN" &&
     error.details?.reason === API_KEY_WALLET_ACCESS_DENIED_REASON
   );
-}
-
-/**
- * A key may not mint or rotate a key with wider Allowed Operations than its
- * own (ADR 0006). A dashboard actor and an unrestricted key pass `null`.
- */
-export function assertGrantableAllowedOperations(
-  actorAllowedOperations: AllowedOperation[] | null | undefined,
-  requestedAllowedOperations: AllowedOperation[] | null | undefined
-): void {
-  if (!isAllowedOperationsWithin(actorAllowedOperations, requestedAllowedOperations)) {
-    throw new AppError(
-      "INSUFFICIENT_PERMISSIONS",
-      "Cannot grant an API key operations outside your own allowed operations"
-    );
-  }
 }
 
 /**
@@ -509,107 +484,6 @@ export function resolveApiKeySigningWalletId(
   }
 
   return null;
-}
-
-/**
- * The wallet-scope slice of the auth middleware's API key context —
- * `walletBindings` is genuinely optional there (legacy cached entries carry
- * only `signingWalletId`), everything else is always present.
- */
-export type WalletScopeActor = {
-  walletScope?: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  walletBindings?: ApiKeyWalletBinding[];
-};
-
-export type RequestedWalletBinding = {
-  walletId: string | null | undefined;
-  permissions?: Permission[];
-};
-
-/**
- * A wallet-scoped key granting wallet access it does not itself hold is a
- * scope escape: the minted key outlives every restriction placed on its
- * author. Non-key actors and all-wallet keys are unconstrained here.
- */
-export function isWalletScopedActor(actor: WalletScopeActor): boolean {
-  return (
-    actor.walletScope === "selected" ||
-    (actor.walletScope === undefined &&
-      ((actor.walletBindings?.length ?? 0) > 0 || actor.signingWalletId != null))
-  );
-}
-
-function actorPermissionsForWallet(actor: WalletScopeActor, walletId: string): Permission[] | null {
-  const binding = (actor.walletBindings ?? []).find((entry) => entry.walletId === walletId);
-  if (binding) {
-    return binding.permissions;
-  }
-  // A legacy signing-wallet key carries no binding rows; before per-wallet
-  // permissions existed it held full access to its signing wallet.
-  if (actor.signingWalletId === walletId) {
-    return ["*"];
-  }
-  return null;
-}
-
-function coversRequestedPermissions(actorHeld: Permission[], requested: Permission[]): boolean {
-  if (actorHeld.includes("*")) {
-    return true;
-  }
-  if (requested.includes("*")) {
-    return false;
-  }
-  return requested.every((permission) => actorHeld.includes(permission));
-}
-
-/**
- * A target key whose signing wallet has no binding row predates per-wallet
- * permissions and holds full access to that wallet — an actor must hold "*"
- * on it, not merely have the wallet in scope. A signing wallet that does
- * have a row is judged by that row instead.
- */
-export function legacySigningWalletBinding(
-  signingWalletId: string | null,
-  bindings: Array<{ walletId: string }>
-): RequestedWalletBinding[] {
-  if (!signingWalletId || bindings.some((binding) => binding.walletId === signingWalletId)) {
-    return [];
-  }
-  return [{ walletId: signingWalletId, permissions: ["*"] }];
-}
-
-export function assertBindingsWithinActorWalletScope(
-  actor: WalletScopeActor,
-  bindings: RequestedWalletBinding[],
-  requestedWalletScope?: ApiKeyWalletScope
-): void {
-  if (!isWalletScopedActor(actor)) {
-    return;
-  }
-  if (requestedWalletScope === "all") {
-    throw insufficientPermissions(
-      "Cannot grant an API key access to a wallet outside your own wallet scope"
-    );
-  }
-  for (const binding of bindings) {
-    if (!binding.walletId) {
-      continue;
-    }
-    const held = actorPermissionsForWallet(actor, binding.walletId);
-    if (held === null) {
-      throw insufficientPermissions(
-        "Cannot grant an API key access to a wallet outside your own wallet scope"
-      );
-    }
-    // The wallet alone is not the scope: an actor holding [read] on a wallet
-    // must not mint a key holding [*] on it.
-    if (binding.permissions && !coversRequestedPermissions(held, binding.permissions)) {
-      throw insufficientPermissions(
-        "Cannot grant an API key wallet permissions beyond your own on that wallet"
-      );
-    }
-  }
 }
 
 export function getAllowedApiKeyWalletIds(auth: ApiKeyContext): string[] | null {

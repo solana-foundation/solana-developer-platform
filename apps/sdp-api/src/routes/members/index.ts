@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { runWithSystemDatabaseIdentity } from "@/db";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { requireHumanSession } from "@/middleware/human-session";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -19,8 +20,10 @@ import { acceptSchema, inviteSchema } from "./schemas";
 
 const members = new Hono<{ Bindings: Env }>();
 
-// All routes require authentication (API key or Clerk)
+// All routes require authentication by a signed-in person: an API key cannot
+// list, invite, accept for, or remove members (HOO-2099).
 members.use("*", unifiedAuthMiddleware());
+members.use("*", requireHumanSession());
 members.use("*", projectContextMiddleware());
 
 members.get("/", requirePermissions("org:read"), listMembers);

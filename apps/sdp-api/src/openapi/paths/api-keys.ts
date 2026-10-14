@@ -18,6 +18,12 @@ import {
   listApiKeysResponse,
 } from "./responses";
 
+/**
+ * Registers API-key management. Keys are managed by a signed-in person only,
+ * never by an API key (HOO-2099), so these belong to the internal document.
+ *
+ * @param registry - The OpenAPI registry being built.
+ */
 export function registerApiKeyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
@@ -26,7 +32,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "List API keys",
     operationId: "listApiKeys",
     description: "Lists API keys for the authenticated organization.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
     },
@@ -46,7 +52,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Create API key",
     operationId: "createApiKey",
     description: "Creates a new API key. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
@@ -70,7 +76,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Get API key",
     operationId: "getApiKey",
     description: "Gets API key details by id.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -93,7 +99,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Update API key",
     operationId: "updateApiKey",
     description: "Updates API key attributes. Use null to clear optional fields.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -120,7 +126,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Rotate API key",
     operationId: "rotateApiKey",
     description: "Rotates an API key and returns the new key plus the old key grace period.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -147,7 +153,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     summary: "Deactivate API key",
     operationId: "revokeApiKey",
     description: "Deactivates (soft deletes) an API key and invalidates it immediately.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({

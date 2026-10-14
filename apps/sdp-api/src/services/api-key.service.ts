@@ -19,11 +19,7 @@ import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-util
 import { AppError, badRequest, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import {
-  assertGrantableAllowedOperations,
-  assertGrantableApiKeyPermissions,
-} from "./api-key-scope.service";
-import { parseApiKeyWalletPermissionsColumn } from "./api-key-wallets.service";
+import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
 
 export interface ApiKeyListItem {
   id: string;
@@ -54,18 +50,15 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 export interface CreateApiKeyInput {
   organizationId: string;
   projectId: string;
-  createdByKeyId?: string;
-  createdByUserId?: string;
+  /** The signed-in person creating the key; API keys never manage keys. */
+  createdByUserId: string;
   actorPermissions: Permission[];
-  actorApiKeyRole: string | null;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
   permissions?: Permission[] | null;
   allowedIps?: string[] | null;
   allowedOperations?: AllowedOperation[] | null;
-  /** The creating key's own list; null for a dashboard actor or an unrestricted key. */
-  actorAllowedOperations: AllowedOperation[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
@@ -76,9 +69,7 @@ export interface UpdateApiKeyInput {
   organizationId: string;
   projectId: string;
   actorPermissions: Permission[];
-  actorApiKeyRole: string | null;
   currentRole: ApiKeyRole;
-  actorAllowedOperations: AllowedOperation[] | null;
   name?: string;
   description?: string | null;
   allowedIps?: string[] | null;
@@ -339,13 +330,7 @@ export class ApiKeyService {
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
-    assertGrantableApiKeyPermissions(
-      input.actorPermissions,
-      input.role,
-      input.permissions,
-      input.actorApiKeyRole
-    );
-    assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
+    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions);
 
     // The organization must still be active, and the share lock holds that
     // until this transaction commits: a concurrent deletion's
@@ -373,20 +358,7 @@ export class ApiKeyService {
     const { key, prefix } = createApiKeyMaterial(project.environment);
     const keyHash = await hashString(key, input.pepper);
 
-    let createdBy = input.createdByUserId?.trim() || "";
-
-    if (!createdBy && input.createdByKeyId) {
-      const creatorKey = await this.db
-        .prepare(
-          `SELECT created_by
-           FROM api_keys
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(input.createdByKeyId, this.scope.organizationId, this.scope.projectId)
-        .first<{ created_by: string }>();
-      createdBy = creatorKey?.created_by || "";
-    }
-
+    const createdBy = input.createdByUserId;
     const actor = await this.db
       .prepare("SELECT id FROM users WHERE id = ?")
       .bind(createdBy)
@@ -458,12 +430,8 @@ export class ApiKeyService {
       assertGrantableApiKeyPermissions(
         input.actorPermissions,
         input.currentRole,
-        input.permissions,
-        input.actorApiKeyRole
+        input.permissions
       );
-    }
-    if (input.allowedOperations !== undefined) {
-      assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
     }
 
     const updates: string[] = [];
@@ -517,13 +485,7 @@ export class ApiKeyService {
     projectId: string,
     gracePeriodHours: number,
     actorPermissions: Permission[],
-    actorApiKeyRole: string | null,
-    actorAllowedOperations: AllowedOperation[] | null,
-    pepper?: string,
-    guardTargetWalletScope?: (target: {
-      signingWalletId: string | null;
-      bindings: Array<{ walletId: string; permissions: Permission[] }>;
-    }) => void
+    pepper?: string
   ): Promise<RotateApiKeyResult | ApiKeyAlreadyRotatedResult | null> {
     assertTenantClaim(this.scope, { organizationId, projectId }, "ApiKeyService.rotateApiKey");
     const existing = await this.db
@@ -546,12 +508,7 @@ export class ApiKeyService {
     assertGrantableApiKeyPermissions(
       actorPermissions,
       existing.role,
-      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions),
-      actorApiKeyRole
-    );
-    assertGrantableAllowedOperations(
-      actorAllowedOperations,
-      parseAllowedOperationsColumn(existing.allowed_operations)
+      existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions)
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
@@ -618,12 +575,7 @@ export class ApiKeyService {
         assertGrantableApiKeyPermissions(
           actorPermissions,
           target.role,
-          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions),
-          actorApiKeyRole
-        );
-        assertGrantableAllowedOperations(
-          actorAllowedOperations,
-          parseAllowedOperationsColumn(target.allowed_operations)
+          target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions)
         );
 
         const signingWalletId = target.signing_wallet_id;
@@ -631,14 +583,6 @@ export class ApiKeyService {
           `SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1`,
           [keyId]
         );
-        guardTargetWalletScope?.({
-          signingWalletId,
-          bindings: bindingRows.map((row) => ({
-            walletId: row.wallet_id,
-            permissions: parseApiKeyWalletPermissionsColumn(row.permissions),
-          })),
-        });
-
         await tx
           .prepare(
             `INSERT INTO api_keys (

@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -79,10 +80,19 @@ async function seedAuthAndWallets(): Promise<void> {
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
   ]);
+  ({ token: clerkToken } = await authenticateTestClerkUser(env, getDb(env), {
+    userId: TEST_USER.id,
+    email: TEST_USER.email,
+    clerkUserId: `clerk_${TEST_USER.id}`,
+    organizationId: TEST_ORG.id,
+    clerkOrgId: `clerk_${TEST_ORG.id}`,
+    orgSlug: TEST_ORG.slug,
+    role: "admin",
+  }));
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
-    members: [],
+    members: [TEST_USER.id],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
   await getDb(env).batch([
@@ -165,11 +175,11 @@ async function seedDuplicateScopeAWallet(): Promise<void> {
   });
 }
 
+/** Keys are managed by a signed-in organization admin, never by a key (HOO-2099). */
+let clerkToken: string;
+
 function authenticatedJsonHeaders() {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${TEST_API_KEY.raw}`,
-  };
+  return clerkHeaders(clerkToken, TEST_PROJECT.id);
 }
 
 async function createManagedApiKey(input: {
@@ -219,7 +229,7 @@ describe("API key wallet scope routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           name: "Missing wallet scope",
@@ -239,7 +249,7 @@ describe("API key wallet scope routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           name: "Conflicting all-wallet key",
@@ -263,7 +273,7 @@ describe("API key wallet scope routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           name: "Scoped key",
@@ -365,7 +375,7 @@ describe("API key wallet scope routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           name: "Scoped key",
@@ -392,7 +402,7 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
       },
       env
@@ -426,7 +436,7 @@ describe("API key wallet scope routes", () => {
       `/v1/api-keys/${createdKeyId}`,
       {
         headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
       },
       env
@@ -452,7 +462,7 @@ describe("API key wallet scope routes", () => {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           signingWalletId: "wal_scope_a",
@@ -480,7 +490,7 @@ describe("API key wallet scope routes", () => {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
         },
         body: JSON.stringify({
           walletScope: "all",

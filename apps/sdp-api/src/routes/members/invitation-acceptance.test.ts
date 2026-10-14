@@ -284,14 +284,25 @@ describe("POST /v1/members/accept", () => {
       .bind(INVITING_ORG_ID, CALLER_USER_ID)
       .run();
     await seedInvitation({ ...invitationFixture(), role: "admin" });
-    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
-      ...TEST_CACHED_API_KEY,
+    // Members are removed by a signed-in admin of the inviting organization.
+    await seedDefaultProjects(getDb(env), {
       organizationId: INVITING_ORG_ID,
-      permissions: ["*"],
+      createdBy: INVITER_USER_ID,
+      members: [INVITER_USER_ID],
+      ids: { sandbox: "prj_acceptance_inviting", production: "prj_acceptance_inviting_production" },
+    });
+    const { headers: inviterHeaders } = await authenticateTestClerkUser(env, getDb(env), {
+      userId: INVITER_USER_ID,
+      email: "inviter@example.com",
+      clerkUserId: "clerk_user_acceptance_inviter",
+      organizationId: INVITING_ORG_ID,
+      clerkOrgId: "clerk_org_acceptance_inviting",
+      orgSlug: "acceptance-inviting-org",
+      role: "admin",
     });
     const removal = await app.request(
       "/v1/members/mem_acceptance_stale",
-      { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      { method: "DELETE", headers: inviterHeaders("prj_acceptance_inviting") },
       env
     );
     expect(removal.status).toBe(204);

@@ -316,6 +316,7 @@ describe("Projects Routes", () => {
     });
   });
 
+  // Project members are managed by a signed-in person only (HOO-2099).
   describe("Project Members", () => {
     const projectId = TEST_PROJECT.id;
     const projectMemberId = `pm_${TEST_PROJECT.id}_${TEST_USER.id}`;
@@ -324,7 +325,7 @@ describe("Projects Routes", () => {
       const res = await app.request(
         `/v1/projects/${projectId}/members`,
         {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: clerkHeaders(clerkToken, projectId),
         },
         env
       );
@@ -356,8 +357,7 @@ describe("Projects Routes", () => {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({
             userId: "usr_test_member123",
@@ -387,8 +387,7 @@ describe("Projects Routes", () => {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({ userId: "usr_test_outside123" }),
         },
@@ -400,7 +399,7 @@ describe("Projects Routes", () => {
       expect(body.error.message).toContain("not a member of this organization");
     });
 
-    it("updates and removes a member in the API key's project", async () => {
+    it("updates and removes a project member", async () => {
       const db = getDb(env);
 
       const updateRes = await app.request(
@@ -408,8 +407,7 @@ describe("Projects Routes", () => {
         {
           method: "PATCH",
           headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            ...clerkHeaders(clerkToken, projectId),
           },
           body: JSON.stringify({ role: "viewer" }),
         },
@@ -427,7 +425,7 @@ describe("Projects Routes", () => {
         `/v1/projects/${projectId}/members/${projectMemberId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+          headers: clerkHeaders(clerkToken, projectId),
         },
         env
       );
@@ -438,91 +436,6 @@ describe("Projects Routes", () => {
         .bind(`pm_${TEST_PROJECT.id}_${TEST_USER.id}`)
         .first();
       expect(removed).toBeNull();
-    });
-
-    it("returns 404 for cross-project member reads", async () => {
-      const res = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
-        {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 404 without adding an admin to another project", async () => {
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_test_cross_add', 'cross-add@example.com', 1, 'active')"
-        )
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_cross_add', ?, 'usr_test_cross_add', 'member', 'active')`
-        )
-        .bind(TEST_ORG.id)
-        .run();
-
-      const res = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ userId: "usr_test_cross_add", role: "admin" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(404);
-      const membership = await db
-        .prepare(
-          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_test_cross_add'"
-        )
-        .bind(TEST_PRODUCTION_PROJECT.id)
-        .first();
-      expect(membership).toBeNull();
-    });
-
-    it("returns 404 without changing or removing another project's member", async () => {
-      const db = getDb(env);
-      const memberId = `pm_${TEST_PRODUCTION_PROJECT.id}_${TEST_USER.id}`;
-
-      const updateRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members/${memberId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ role: "viewer" }),
-        },
-        env
-      );
-      expect(updateRes.status).toBe(404);
-
-      const deleteRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members/${memberId}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(deleteRes.status).toBe(404);
-
-      const membership = await db
-        .prepare("SELECT role FROM project_members WHERE id = ?")
-        .bind(memberId)
-        .first<{ role: string }>();
-      expect(membership?.role).toBe("admin");
     });
   });
 

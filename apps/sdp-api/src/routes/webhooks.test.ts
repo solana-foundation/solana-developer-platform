@@ -188,7 +188,7 @@ describe("Clerk webhooks", () => {
       required(updatedOrg).settings ? JSON.parse(required(required(updatedOrg).settings)) : null
     ).toBeNull();
   });
-  it("invalidates cached API keys when Clerk deletes an organization", async () => {
+  it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";
     const projectId = "prj_webhook_cache_invalidation";
@@ -243,7 +243,11 @@ describe("Clerk webhooks", () => {
       rotationDeadline: null,
     });
     const authedRequest = () =>
-      app.request("/v1/api-keys", { headers: { Authorization: `Bearer ${rawKey}` } }, env);
+      app.request(
+        `/v1/organizations/${orgId}`,
+        { headers: { Authorization: `Bearer ${rawKey}` } },
+        env
+      );
     expect((await authedRequest()).status).toBe(200);
     const res = await simulateClerkWebhook({
       type: "organization.deleted",
