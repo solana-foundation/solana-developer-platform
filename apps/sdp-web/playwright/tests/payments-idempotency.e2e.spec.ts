@@ -82,7 +82,14 @@ async function scriptAnswers(
     const step = steps[attempt++] ?? "pass";
     if (step === "pass") return route.fallback();
     if (step === "lost") {
-      await route.fetch().catch(() => undefined);
+      // The server answers; only the answer is dropped. A request that fails
+      // or is refused is a broken test, not the lost answer it scripts.
+      const answer = await route.fetch();
+      if (!answer.ok()) {
+        throw new Error(
+          `${method} ${path} answered ${answer.status()} before its answer was dropped`
+        );
+      }
       return route.abort("failed");
     }
     return route.fulfill({

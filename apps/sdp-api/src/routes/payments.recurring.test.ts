@@ -1534,6 +1534,72 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("recovers a stale update whose amount the retry spells differently (30.0 and 30 are one amount)", async () => {
+    recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const before = {
+      sourceCustodyWalletId: activated.sourceCustodyWalletId,
+      counterpartyId: activated.counterpartyId,
+      counterpartyAccountId: activated.counterpartyAccountId,
+      token: activated.token,
+      amount: activated.amount,
+      periodHours: activated.periodHours,
+      firstCollectionAt: activated.firstCollectionAt,
+      nextCollectionDueAt: activated.nextCollectionDueAt,
+      metadataUri: activated.metadataUri,
+    };
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    // The crashed edit asked for "30.0".
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+           old_plan_id, old_subscription_id, changed_fields, before_values, after_values,
+           created_at, updated_at
+         ) VALUES (
+           'prpu_stale_respelled_amount', ?, ?, ?, 'replacement', 'processing', 'claim', ?, ?,
+           ARRAY['amount']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        JSON.stringify(before),
+        JSON.stringify({ ...before, amount: "30.0" }),
+        staleAt,
+        staleAt
+      )
+      .run();
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30" }) },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    expect((await parseRecurringResponse(updateRes)).data.recurringPayment).toMatchObject({
+      status: "active",
+    });
+    const attempt = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payment_update_attempts WHERE id = ?")
+      .bind("prpu_stale_respelled_amount")
+      .first<{ status: string }>();
+    expect(attempt).toEqual({ status: "confirmed" });
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"

@@ -791,6 +791,15 @@ export type PaymentSubscriptionCollectionAttemptInitialStatus =
 export const IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+/**
+ * The activation, lifecycle and update attempts that answer a keyed request
+ * (HOO-1918): every one but a failed attempt, as migration 0134's unique
+ * indexes cover. A failed attempt answers nothing, so the same key runs again.
+ */
+export const RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY = [
+  "processing",
+  "confirmed",
+] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
 export function isInFlightRecurringPaymentAttemptStatus(
   status: PaymentRecurringPaymentAttemptStatus
 ): boolean {

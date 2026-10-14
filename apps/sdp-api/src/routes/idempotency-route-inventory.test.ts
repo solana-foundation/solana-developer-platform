@@ -33,7 +33,7 @@ const PREPARE =
 const CONNECTION =
   "dashboard-internal custody connection lifecycle; not part of the public API contract yet";
 
-const EXEMPT: Record<string, string> = {
+const EXEMPT = {
   "POST /internal/dashboard/custody/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/connections/:connectionId/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/rotate": CREDENTIALS,
@@ -52,19 +52,19 @@ const EXEMPT: Record<string, string> = {
   "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": PREPARE,
   "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": PREPARE,
   "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": PREPARE,
-};
+} as const satisfies Record<string, string>;
 
 /**
  * Routes whose access check is `authorizeNone`: they name no resource beyond
  * the caller's own scope. Adding one is a reviewed decision; check the handler
  * first.
  */
-const NAMES_NOTHING: Record<string, string> = {
+const NAMES_NOTHING = {
   "POST /v1/compliance/address-screenings":
     "screens an on-chain address the caller supplies; it names no resource of any project",
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
-};
+} as const satisfies Record<string, string>;
 
 interface RouteSteps {
   idempotency: ReturnType<typeof declaredIdempotency>;
