@@ -879,10 +879,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
-  it("denies revoked API keys even when their stored permissions would allow replay", async () => {
+  it("denies revoked API keys even when their stored grants would allow replay", async () => {
     await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
-      .prepare("UPDATE api_keys SET status = 'revoked', permissions = NULL WHERE id = ?")
+      .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
       .bind(API_KEY.id)
       .run();
     // Authentication reads the key's row fresh, so it refuses before the route's own check.
