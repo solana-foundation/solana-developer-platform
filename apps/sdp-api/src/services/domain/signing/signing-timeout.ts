@@ -1,5 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import type { TransactionSigner } from "@solana/kit";
+import { getLogger } from "@/runtime/logger";
 
 /**
  * How long one custody signing call may take (HOO-1918). Past it the request
@@ -16,15 +17,23 @@ const DEFAULT_SIGNING_POLL_BUDGET_MS = 60 * 1_000;
 const SIGNING_POLL_MARGIN_MS = 15_000;
 
 /**
- * The signing bound for this deployment: {@link CUSTODY_SIGNING_TIMEOUT_MS},
- * raised to the configured custody poll budget plus a margin, so the bound
- * never cuts off a signer that is still polling within its budget. Utila's is
- * the only budget set by configuration; Fireblocks uses the default.
+ * The longest any signing call may take, whatever the configured budget. A
+ * recovery job treats a row still unsigned past its own window as dead and
+ * fails it, after which a late signature can no longer be recorded. The
+ * shortest such window is the Rings sweep's 2-minute grace for
+ * `ready_to_sign` (`RINGS_UNSIGNED_GRACE_MS`); transfers wait 5 minutes. The
+ * cap leaves 30 seconds of that window for the work before and after signing.
+ * `signing-timeout.test.ts` pins it below both.
  */
-export function custodySigningTimeoutMs(env: {
+export const MAX_CUSTODY_SIGNING_TIMEOUT_MS = 90_000;
+
+type SigningBudgetEnv = {
   UTILA_POLL_INTERVAL_MS?: string;
   UTILA_MAX_POLL_ATTEMPTS?: string;
-}): number {
+};
+
+/** The configured custody poll budget plus its margin, before the cap. */
+function requestedSigningTimeoutMs(env: SigningBudgetEnv): number {
   const interval = Number(env.UTILA_POLL_INTERVAL_MS ?? 1_000);
   const attempts = Number(env.UTILA_MAX_POLL_ATTEMPTS ?? 60);
   const utilaBudget = interval * attempts;
@@ -33,6 +42,35 @@ export function custodySigningTimeoutMs(env: {
     Number.isFinite(utilaBudget) ? utilaBudget : 0
   );
   return Math.max(CUSTODY_SIGNING_TIMEOUT_MS, budget + SIGNING_POLL_MARGIN_MS);
+}
+
+/**
+ * The signing bound for this deployment: {@link CUSTODY_SIGNING_TIMEOUT_MS},
+ * raised to the configured custody poll budget plus a margin, so the bound
+ * never cuts off a signer that is still polling within its budget, and capped
+ * at {@link MAX_CUSTODY_SIGNING_TIMEOUT_MS} so it never outlives recovery.
+ * Utila's is the only budget set by configuration; Fireblocks uses the default.
+ */
+export function custodySigningTimeoutMs(env: SigningBudgetEnv): number {
+  return Math.min(requestedSigningTimeoutMs(env), MAX_CUSTODY_SIGNING_TIMEOUT_MS);
+}
+
+/**
+ * Logs at startup when the configured Utila poll budget is longer than the
+ * signing cap allows, since signing calls are then cut off at the cap.
+ */
+export function warnIfCustodySigningBudgetCapped(env: SigningBudgetEnv): void {
+  const requestedMs = requestedSigningTimeoutMs(env);
+  if (requestedMs > MAX_CUSTODY_SIGNING_TIMEOUT_MS) {
+    getLogger().warn(
+      {
+        event: "sdp_custody_signing_budget_capped",
+        requested_ms: requestedMs,
+        cap_ms: MAX_CUSTODY_SIGNING_TIMEOUT_MS,
+      },
+      "UTILA_POLL_INTERVAL_MS × UTILA_MAX_POLL_ATTEMPTS exceeds the custody signing cap; signing calls stop at the cap"
+    );
+  }
 }
 
 function withSigningTimeout<T>(signing: Promise<T>, timeoutMs: number): Promise<T> {

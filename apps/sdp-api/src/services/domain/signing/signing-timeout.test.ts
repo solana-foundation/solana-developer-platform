@@ -9,10 +9,15 @@ import {
   type TransactionSendingSigner,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import * as loggerModule from "@/runtime/logger";
+import { RINGS_UNSIGNED_GRACE_MS } from "@/services/jobs/poll-rings-indexing";
+import { STUCK_PROCESSING_AFTER_MS } from "@/services/jobs/track-pending-transfers";
 import {
   boundSigningTime,
   CUSTODY_SIGNING_TIMEOUT_MS,
   custodySigningTimeoutMs,
+  MAX_CUSTODY_SIGNING_TIMEOUT_MS,
+  warnIfCustodySigningBudgetCapped,
 } from "./signing-timeout";
 
 const SIGNER_ADDRESS = address("11111111111111111111111111111111");
@@ -69,16 +74,56 @@ describe("custodySigningTimeoutMs", () => {
     expect(defaultBound).toBeGreaterThan(60 * 1_000);
     expect(defaultBound).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
 
-    const longBudget = custodySigningTimeoutMs({
-      UTILA_POLL_INTERVAL_MS: "2000",
-      UTILA_MAX_POLL_ATTEMPTS: "90",
+    const longerBudget = custodySigningTimeoutMs({
+      UTILA_POLL_INTERVAL_MS: "1000",
+      UTILA_MAX_POLL_ATTEMPTS: "70",
     });
-    expect(longBudget).toBeGreaterThan(180_000);
+    expect(longerBudget).toBe(85_000);
   });
 
   it("never drops below the base bound for a short budget", () => {
     expect(
       custodySigningTimeoutMs({ UTILA_POLL_INTERVAL_MS: "100", UTILA_MAX_POLL_ATTEMPTS: "5" })
     ).toBeGreaterThanOrEqual(CUSTODY_SIGNING_TIMEOUT_MS);
+  });
+
+  // A signer still running past a recovery window is failed under it, and its
+  // late signature can no longer be recorded.
+  it("caps a long configured budget below every recovery window that fails unsigned rows", () => {
+    const capped = custodySigningTimeoutMs({
+      UTILA_POLL_INTERVAL_MS: "6000",
+      UTILA_MAX_POLL_ATTEMPTS: "50",
+    });
+    expect(capped).toBe(MAX_CUSTODY_SIGNING_TIMEOUT_MS);
+    expect(MAX_CUSTODY_SIGNING_TIMEOUT_MS).toBeLessThan(RINGS_UNSIGNED_GRACE_MS);
+    expect(MAX_CUSTODY_SIGNING_TIMEOUT_MS).toBeLessThan(STUCK_PROCESSING_AFTER_MS);
+  });
+});
+
+describe("warnIfCustodySigningBudgetCapped", () => {
+  it("warns only when the configured budget exceeds the cap", () => {
+    const warn = vi.fn();
+    const logger = vi.spyOn(loggerModule, "getLogger").mockReturnValue({
+      ...loggerModule.getLogger(),
+      warn,
+    });
+    try {
+      warnIfCustodySigningBudgetCapped({});
+      expect(warn).not.toHaveBeenCalled();
+      warnIfCustodySigningBudgetCapped({
+        UTILA_POLL_INTERVAL_MS: "6000",
+        UTILA_MAX_POLL_ATTEMPTS: "50",
+      });
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          event: "sdp_custody_signing_budget_capped",
+          requested_ms: 315_000,
+          cap_ms: MAX_CUSTODY_SIGNING_TIMEOUT_MS,
+        }),
+        expect.any(String)
+      );
+    } finally {
+      logger.mockRestore();
+    }
   });
 });
