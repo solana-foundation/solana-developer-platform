@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -97,14 +98,10 @@ export async function resolveIdentityBoundIdempotencyReplay<
   throw conflict("Idempotency key already used with different request payload");
 }
 
-/** A JSON value as `JSON.parse` returns it. */
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+/** A JSON value as `JSON.parse` returns it; parse untrusted values through it. */
+export const jsonValueSchema = z.json();
+
+export type JsonValue = z.infer<typeof jsonValueSchema>;
 
 /**
  * Serializes a JSON value with object keys sorted by UTF-16 code unit, so equal

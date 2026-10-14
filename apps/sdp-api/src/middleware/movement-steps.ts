@@ -25,9 +25,10 @@ function stepInput<TAuthorized>(c: StepContext): MovementStepInput<TAuthorized> 
 
 /**
  * Answers a request whose Idempotency-Key already has a domain row, from that
- * row: after a takeover of a crashed attempt, or past the key's 24 hours. A
- * returned response is sent as-is and nothing runs again; null means the key
- * has no row yet.
+ * row: after a takeover of a crashed attempt (the route declares
+ * `idempotent({ ..., recovery: "record" })` so that takeover is allowed), or
+ * past the key's 24 hours. A returned response is sent as-is and nothing runs
+ * again; null means the key has no row yet.
  *
  * It works from the validated request and what `authorize` loaded only: no
  * RPC, nothing that can change after the original ran (a token account closed,

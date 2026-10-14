@@ -1,4 +1,4 @@
-import type { FeePaymentPort } from "@sdp/payments/fee-payment";
+import type { FeePaymentPort } from "@sdp/fee-payment";
 import type { MovementOf, SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";

@@ -9,9 +9,9 @@
  * tests, so this is the only place the fee-payer resolution is asserted.
  */
 
+import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
-import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
 import * as RpcModule from "@sdp/rpc/solana";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";

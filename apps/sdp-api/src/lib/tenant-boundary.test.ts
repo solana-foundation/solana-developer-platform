@@ -34,7 +34,7 @@ describe("tenant data-access boundary", () => {
 
   it("keeps system repository factories in explicit public, webhook, and job paths", () => {
     const allowedPrefixes = [
-      "routes/pay.ts",
+      "routes/pay/context.ts",
       "routes/issuance/handlers/metadata.ts",
       "routes/webhooks/",
       "services/jobs/",
@@ -42,6 +42,9 @@ describe("tenant data-access boundary", () => {
       // reconciliation job: transfers are looked up by provider reference,
       // so no tenant scope exists yet.
       "services/payments/ramp-settlements.ts",
+      // NOTE: the public `/pay` sponsored-transaction path: the payment request
+      // is found by its public token, so no tenant scope exists.
+      "services/payments/payment-request-sponsorship.ts",
       "db/repositories/index.ts",
       "db/repositories/repository-factory.ts",
     ];

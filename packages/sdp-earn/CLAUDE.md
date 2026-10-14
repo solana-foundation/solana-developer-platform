@@ -79,8 +79,8 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   builds inherit the named strategy's environment. Authenticated calls continue
   to derive environment from the selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
-  only) additionally need a Kora to sign against: `pnpm kora:up`, then point
-  `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
+  only) additionally need a Kora to sign against: `pnpm kora:local:up`, which
+  hands the API `KORA_RPC_URL_DEVNET` via `.secrets/kora-local/api.env`. `infra/kora/kora.toml` already carries the Kamino program
   ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
   `allow_create_account = true`, so the harness needs no edit (deployed devnet
   Kora carries the same allowlist and token set since sdp-infra#64 and

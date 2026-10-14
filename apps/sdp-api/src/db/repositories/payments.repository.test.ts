@@ -86,7 +86,7 @@ function transferInput(overrides: {
   return {
     id: `xfr_${suffix}`,
     organizationId: TEST_ORG.id,
-    projectId: null,
+    projectId: TEST_PROJECT_ID,
     custodyWalletId,
     walletId,
     counterpartyId: null,
@@ -161,11 +161,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     ).toBe(true);
   });
 
-  async function seedTransfer(input: {
-    id: string;
-    status: string;
-    projectId?: string | null;
-  }): Promise<void> {
+  async function seedTransfer(input: { id: string; status: string }): Promise<void> {
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
@@ -176,7 +172,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       .bind(
         input.id,
         TEST_ORG.id,
-        input.projectId === undefined ? TEST_PROJECT_ID : input.projectId,
+        TEST_PROJECT_ID,
         TEST_WALLET_ID,
         "USDC",
         "offramp",
@@ -230,7 +226,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.updateOnchainTransferForRamp({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         custodyWalletId: "cwlt_other",
         walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-onchain",
@@ -245,7 +241,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const updated = await repo.updateOnchainTransferForRamp({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       sourceAddress: "Sourceramp-onchain",
@@ -283,7 +279,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.updateOnchainTransferForRamp({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
         walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-occupied",
@@ -311,7 +307,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
       const providerData = { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } };
       const updatedAt = "2026-08-31T12:00:00.000Z";
@@ -348,7 +344,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
@@ -374,7 +370,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
@@ -400,7 +396,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
@@ -690,7 +686,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const created = await repo.createTransfer({
       id: "xfr_idempotency_metadata",
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
@@ -720,7 +716,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     const found = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       idempotencyKey: "key-abc",
     });
     expect(found?.id).toBe(created?.id);
@@ -734,7 +730,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const signed = await repo.persistSignedTransfer({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "signed-outbox-signature",
       signedTransaction: "AQID",
       lastValidBlockHeight: "18446744073709551615",
@@ -762,7 +758,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.persistSignedTransfer({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         signature: `height-${suffix}-signature`,
         signedTransaction: "AQID",
         lastValidBlockHeight: height,
@@ -777,7 +773,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.getTransferById({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       })
     ).resolves.toMatchObject({
       signature: null,
@@ -795,7 +791,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.markTransferSubmissionStarted({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         startedAt: "2026-08-21T10:01:00.000Z",
       })
     ).resolves.toBeNull();
@@ -803,7 +799,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await repo.persistSignedTransfer({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "submission-start-signature",
       signedTransaction: "BAUG",
       lastValidBlockHeight: "1000",
@@ -812,7 +808,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const started = await repo.markTransferSubmissionStarted({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       startedAt: "2026-08-21T10:01:00.000Z",
     });
 
@@ -831,7 +827,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const scope = {
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
     };
 
     await repo.persistSignedTransfer({
@@ -873,7 +869,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.persistSignedTransfer({
         transferId: unsigned.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         signature: "too-late-signature",
         signedTransaction: "DQ4P",
         lastValidBlockHeight: "4000",
@@ -884,7 +880,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await repo.persistSignedTransfer({
       transferId: signed.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "signed-before-terminal",
       signedTransaction: "EBES",
       lastValidBlockHeight: "5000",
@@ -899,7 +895,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.markTransferSubmissionStarted({
         transferId: signed.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         startedAt: "2026-08-21T10:08:00.000Z",
       })
     ).resolves.toBeNull();
@@ -957,33 +953,37 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
       idempotencyKey: "shared-key",
     };
-    const orgLevel = await repo.createTransfer({ ...base, id: "xfr_org_level", projectId: null });
-    const projectScoped = await repo.createTransfer({
+    const productionScoped = await repo.createTransfer({
       ...base,
-      id: "xfr_project_scoped",
-      projectId: TEST_PROJECT_ID,
+      id: "xfr_production_scoped",
+      projectId: projects.production.id,
     });
-    expect(orgLevel?.id).not.toBe(projectScoped?.id);
+    const sandboxScoped = await repo.createTransfer({
+      ...base,
+      id: "xfr_sandbox_scoped",
+      projectId: projects.sandbox.id,
+    });
+    expect(productionScoped?.id).not.toBe(sandboxScoped?.id);
 
-    const foundOrg = await repo.findTransferByIdempotency({
+    const foundProduction = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: projects.production.id,
       idempotencyKey: "shared-key",
     });
-    const foundProject = await repo.findTransferByIdempotency({
+    const foundSandbox = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+      projectId: projects.sandbox.id,
       idempotencyKey: "shared-key",
     });
-    expect(foundOrg?.id).toBe(orgLevel?.id);
-    expect(foundProject?.id).toBe(projectScoped?.id);
+    expect(foundProduction?.id).toBe(productionScoped?.id);
+    expect(foundSandbox?.id).toBe(sandboxScoped?.id);
   });
 
   it("rejects a second transfer with the same (org, idempotency_key)", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const base = {
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,

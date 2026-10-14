@@ -309,14 +309,6 @@ describe("reconcilePaymentRequest", () => {
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
-  it("best-effort still rethrows invariant violations", async () => {
-    const request: PaymentRequestRow = { ...(await createRequest()), project_id: null };
-
-    await expect(reconcilePaymentRequest(env, request, { bestEffort: true })).rejects.toThrow(
-      "missing project_id"
-    );
-  });
-
   it("returns an unresolved legacy request on best-effort reads without touching the chain", async () => {
     const request: PaymentRequestRow = {
       ...(await createRequest()),

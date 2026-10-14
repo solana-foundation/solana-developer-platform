@@ -38,31 +38,53 @@ const QUOTES_EXCHANGE: RecordedExchange = {
   body: QUOTES,
 };
 
-/** A Stripe onramp session, as `POST /v1/crypto/onramp_sessions` answers. */
-const SESSION = {
-  id: "cos_contract",
-  object: "crypto.onramp_session",
-  client_secret: "cos_contract_secret_abc",
-  status: "initialized",
-  redirect_url: null,
+/** The terms a Stripe session echoes for the kit's quote, as Stripe formats them. */
+export const STRIPE_SESSION_TERMS = {
+  destination_amount: null,
+  destination_currencies: ["usdc"],
+  destination_currency: "usdc",
+  destination_network: "solana",
+  destination_networks: ["solana"],
+  fees: null,
+  lock_wallet_address: true,
+  source_amount: "100.00",
+  source_currency: "usd",
+  transaction_id: null,
+  wallet_address: null,
+  wallet_addresses: { ethereum: null, solana: CONTRACT_WALLET, destination_tags: null },
 };
 
-const SESSION_EXCHANGE: RecordedExchange = {
-  method: "POST",
-  url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp_sessions$/,
-  form: {
-    "wallet_addresses[solana]": CONTRACT_WALLET,
-    lock_wallet_address: "true",
-    source_amount: FIAT_AMOUNT,
-    source_currency: "usd",
-    destination_currency: "usdc",
-    destination_network: "solana",
-    customer_ip_address: CUSTOMER_IP,
-    "metadata[externalCustomerId]": CUSTOMER_ID,
-  },
-  status: 200,
-  body: SESSION,
-};
+/**
+ * The kit's quote exchange, answered with a session that echoes `terms`, as
+ * `POST /v1/crypto/onramp_sessions` does.
+ */
+export function stripeSessionExchange(terms: typeof STRIPE_SESSION_TERMS): RecordedExchange {
+  return {
+    method: "POST",
+    url: /^https:\/\/api\.stripe\.com\/v1\/crypto\/onramp_sessions$/,
+    form: {
+      "wallet_addresses[solana]": CONTRACT_WALLET,
+      lock_wallet_address: "true",
+      source_amount: FIAT_AMOUNT,
+      source_currency: "usd",
+      destination_currency: "usdc",
+      destination_network: "solana",
+      "destination_currencies[]": "usdc",
+      "destination_networks[]": "solana",
+      customer_ip_address: CUSTOMER_IP,
+      "metadata[externalCustomerId]": CUSTOMER_ID,
+    },
+    status: 200,
+    body: {
+      id: "cos_contract",
+      object: "crypto.onramp_session",
+      client_secret: "cos_contract_secret_abc",
+      status: "initialized",
+      redirect_url: null,
+      transaction_details: terms,
+    },
+  };
+}
 
 /**
  * Stripe's contract kit. Stripe runs onramp only, and one secret key serves
@@ -84,7 +106,7 @@ export const STRIPE_TEST_KIT: RampProviderTestKit = {
         externalCustomerId: CUSTOMER_ID,
         customerIpAddress: CUSTOMER_IP,
       },
-      exchanges: [SESSION_EXCHANGE],
+      exchanges: [stripeSessionExchange(STRIPE_SESSION_TERMS)],
     },
   },
   usesModeCredential: (request) =>

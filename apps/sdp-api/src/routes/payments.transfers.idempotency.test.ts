@@ -1,5 +1,5 @@
-import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
-import { FeePaymentError } from "@sdp/payments/fee-payment";
+import type * as feePaymentAdapters from "@sdp/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
