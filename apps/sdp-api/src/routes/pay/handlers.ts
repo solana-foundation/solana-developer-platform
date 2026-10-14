@@ -95,8 +95,7 @@ export async function createSponsoredTransaction(
   );
 
   const sponsored = await issuePaymentRequestTransaction(c, {
-    request,
-    projectId: request.project_id,
+    request: { ...request, project_id: request.project_id },
     payer: assertValidAddress(c.req.valid("json").account, "account"),
     recipient: assertValidAddress(request.destination_address, "destinationAddress"),
     reference: assertValidAddress(request.reference, "reference"),

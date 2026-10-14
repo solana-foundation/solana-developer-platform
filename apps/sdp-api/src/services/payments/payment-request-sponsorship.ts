@@ -24,6 +24,7 @@ import {
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
@@ -33,13 +34,19 @@ import { AuditService } from "@/services/audit.service";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
+/** A payment request whose Project is known: the only kind `/pay` sponsors. */
+export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
+
 /**
  * What a payer scanning a payment request gets: the sponsored transaction to sign, or how long
  * another payer's live claim on the request still holds.
  */
-export type SponsoredPaymentTransaction =
-  | { kind: "signed"; transaction: string }
-  | { kind: "held"; retryAfterSeconds: number };
+const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("signed"), transaction: z.string() }),
+  z.object({ kind: z.literal("held"), retryAfterSeconds: z.number().int().positive() }),
+]);
+
+export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
 
 /**
  * Issue the fee-sponsored transaction a payer signs to settle a payment request. One sponsored
@@ -50,8 +57,7 @@ export type SponsoredPaymentTransaction =
  *
  * @param c - The request context, for the bindings and the sponsor-signature audit entry.
  * @param params - The payable request and the parties to the transfer.
- * @param params.request - The reconciled, payable payment request.
- * @param params.projectId - The request's Project.
+ * @param params.request - The reconciled, payable payment request; its Project sponsors.
  * @param params.payer - The account that pays and signs client-side.
  * @param params.recipient - The request's destination address.
  * @param params.reference - The request's Solana Pay reference account.
@@ -63,14 +69,13 @@ export type SponsoredPaymentTransaction =
 export async function issuePaymentRequestTransaction(
   c: Context<{ Bindings: Env }>,
   params: {
-    request: PaymentRequestRow;
-    projectId: string;
+    request: PayablePaymentRequest;
     payer: Address;
     recipient: Address;
     reference: Address;
   }
 ): Promise<SponsoredPaymentTransaction> {
-  const { request, projectId, payer } = params;
+  const { request, payer } = params;
   const repository = createSystemPaymentRequestsRepository(c.env);
   const rpc = solanaRpc.createRpc(c.env);
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
@@ -98,7 +103,7 @@ export async function issuePaymentRequestTransaction(
     feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
       movement: "payments.pay_request",
       organizationId: request.organization_id,
-      projectId,
+      projectId: request.project_id,
       actor: { type: "wallet", id: request.wallet_id },
     });
     return feePaymentInstance;
