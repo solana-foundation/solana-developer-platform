@@ -7,12 +7,19 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
 import { deriveTokenOptions } from "./payment-requests-page.data";
+
+/** The fields these tests read from a sent create body; the rest is kept for equality checks. */
+const sentCreateBodySchema = z.looseObject({
+  amount: z.string(),
+  expiresAt: z.string().nullable(),
+});
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -134,10 +141,10 @@ describe("New request page", () => {
   // The expiry comes from the clock. Read again on the retry, it would be a new
   // body under a new key, and a first attempt that did create could be repeated.
   it("resends the first attempt's expiry and key when the user retries", async () => {
-    const sends: { body: { expiresAt: string | null }; key: string | null }[] = [];
+    const sends: { body: z.infer<typeof sentCreateBodySchema>; key: string | null }[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       sends.push({
-        body: JSON.parse(String(init?.body)),
+        body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
         key: new Headers(init?.headers).get("Idempotency-Key"),
       });
       if (sends.length === 1) throw new TypeError("network down");
@@ -180,7 +187,7 @@ describe("New request page", () => {
 
   /** One create the page sent: its body and Idempotency-Key. */
   interface RecordedSend {
-    body: { amount: string; expiresAt: string | null };
+    body: z.infer<typeof sentCreateBodySchema>;
     key: string | null;
   }
 
@@ -189,7 +196,7 @@ describe("New request page", () => {
     const sends: RecordedSend[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       sends.push({
-        body: JSON.parse(String(init?.body)),
+        body: sentCreateBodySchema.parse(JSON.parse(String(init?.body))),
         key: new Headers(init?.headers).get("Idempotency-Key"),
       });
       const answer = answers.shift() ?? 201;
