@@ -84,7 +84,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Create wallet",
     operationId: "createWallet",
     description:
-      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400. With an Idempotency-Key, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, including after the 24-hour key window. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe at the provider. A provider failure is stored as a 503, so try again with a new key.",
+      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400. With an Idempotency-Key, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, including after the 24-hour key window. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe at the provider. A provider failure is stored as a 503, and a new key is a new provider request: a 503 can mean the provider created the wallet before the error, so check GET /v1/wallets and, if the wallet is not there, the provider account before trying again with a new key.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: walletCreateKeyHeaders,

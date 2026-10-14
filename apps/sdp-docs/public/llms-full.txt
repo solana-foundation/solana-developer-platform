@@ -286,7 +286,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
 | A recurring-payment action failed | A failed attempt leaves the schedule as it was. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
-| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted activate, cancel, resume or collect finishes on its own; an interrupted `PATCH` finishes when that `PATCH` is retried with its key. A `PATCH` may finish that attempt and then applies its own change. |
+| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted activate, cancel, resume or collect finishes on its own; an interrupted `PATCH` resumes when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
 | A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
 | Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. |
 
@@ -300,7 +300,7 @@ An organization that has been deleted or has lost production access is refused b
 
 A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
 
-When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key to finish it.
+When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key, which resumes from the last step SDP recorded. If the interruption came after a step was sent but before SDP recorded it, the retry can fail instead of finishing; read the schedule with `GET` before editing it again.
 
 ## Retention
 
@@ -308,7 +308,7 @@ Keys are kept for 24 hours after the original request. After that, a same-key re
 
 ## Creating wallets
 
-With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a retry returns the wallet an earlier attempt recorded, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, so try again with a new key.
+With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a retry returns the wallet an earlier attempt recorded, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error, so before trying again with a new key, check `GET /v1/wallets` and, if the wallet is not there, the provider account itself.
 
 ## The dashboard and the Postman collection
 
