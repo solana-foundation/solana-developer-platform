@@ -9,6 +9,7 @@ import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { unifiedTransactionSchema } from "@/routes/transactions/schemas";
 import type {
+  ListUnifiedTransactionsInput,
   UnifiedTransactionsRepository,
   UnifiedTransactionsRepositoryDb,
 } from "./unified-transactions.repository";
@@ -45,6 +46,29 @@ function readJsonOrNull(value: string): unknown {
   }
 }
 
+/**
+ * The rows the caller may see: its permitted modules, the Payments kinds it
+ * may read, and no ramp transfer of a provider the release channel leaves out.
+ */
+function permittedRowClauses(input: ListUnifiedTransactionsInput): {
+  clauses: string[];
+  values: unknown[];
+} {
+  const clauses = [`module IN (${buildInClause(input.modules.length)})`];
+  const values: unknown[] = [...input.modules];
+  if (input.modules.includes("payments")) {
+    clauses.push(`(module <> 'payments' OR kind IN (${buildInClause(input.paymentKinds.length)}))`);
+    values.push(...input.paymentKinds);
+  }
+  if (input.excludedRampProviders.length > 0) {
+    clauses.push(
+      `NOT (module = 'payments' AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = unified_transactions.module_id AND pt.provider IN (${buildInClause(input.excludedRampProviders.length)})))`
+    );
+    values.push(...input.excludedRampProviders);
+  }
+  return { clauses, values };
+}
+
 export function createPostgresUnifiedTransactionsRepository(
   db: UnifiedTransactionsRepositoryDb
 ): UnifiedTransactionsRepository {
@@ -52,14 +76,9 @@ export function createPostgresUnifiedTransactionsRepository(
     async list(input) {
       const clauses = ["organization_id = ?"];
       const values: unknown[] = [input.organizationId];
-      clauses.push(`module IN (${buildInClause(input.modules.length)})`);
-      values.push(...input.modules);
-      if (input.excludedRampProviders.length > 0) {
-        clauses.push(
-          `NOT (module = 'payments' AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = unified_transactions.module_id AND pt.provider IN (${buildInClause(input.excludedRampProviders.length)})))`
-        );
-        values.push(...input.excludedRampProviders);
-      }
+      const permitted = permittedRowClauses(input);
+      clauses.push(...permitted.clauses);
+      values.push(...permitted.values);
       if (input.projectId !== null) {
         clauses.push("project_id IS NOT DISTINCT FROM ?");
         values.push(input.projectId);

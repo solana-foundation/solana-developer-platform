@@ -120,7 +120,7 @@ export const DOCS_ACTION_MODULES: Readonly<Record<ActionModule, string>> = {
   transfer_batches: "Batches of transfers, and their estimates",
   payment_requests: "Payment requests and their payment links",
   counterparties: "Counterparties, their accounts, and provider requirements",
-  transactions: "The unified transaction list",
+  transactions: "The unified transaction list; each row also needs the read of its own module",
   recurring: "Recurring payments, subscription plans and subscriptions",
   wallets: "Custody wallets and their balances",
   compliance: "Address screening",

@@ -1,4 +1,8 @@
-import { type UnifiedTransactionModule, wellKnownMint } from "@sdp/types";
+import {
+  PAYMENT_TRANSACTION_KINDS,
+  type UnifiedTransactionModule,
+  wellKnownMint,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
@@ -130,6 +134,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       module: "payments",
       kind: "batch_pay",
       status: "succeeded",
@@ -152,6 +157,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"] as UnifiedTransactionModule[],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     };
 
@@ -186,6 +192,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       counterpartyId: "cpty_match",
       limit: 25,
     });
@@ -223,6 +230,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     });
 
@@ -260,6 +268,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments", "issuance"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 1,
     });
     if (first.nextCursor === null) throw new Error("first page did not produce a cursor");
@@ -268,6 +277,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments", "issuance"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       cursor: first.nextCursor,
       limit: 1,
     });
@@ -304,6 +314,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [CUSTODY_WALLET] }],
       limit: 25,
     });
@@ -330,6 +341,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments", "earn"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       moduleWalletScopes: [
         { module: "payments", custodyWalletIds: [CUSTODY_WALLET] },
         { module: "earn", custodyWalletIds: [OTHER_CUSTODY_WALLET] },
@@ -352,6 +364,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [] }],
       limit: 25,
     });
@@ -390,6 +403,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       projectId: PROJECT,
       modules: ["payments"],
       excludedRampProviders: [],
+      paymentKinds: PAYMENT_TRANSACTION_KINDS,
       limit: 25,
     });
 
@@ -410,6 +424,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
         projectId: PROJECT,
         modules: ["payments"],
         excludedRampProviders: [],
+        paymentKinds: PAYMENT_TRANSACTION_KINDS,
         cursor: encodeKeysetCursor(JSON.stringify({ createdAt: CREATED_AT }), "missing-fields"),
         limit: 25,
       })
