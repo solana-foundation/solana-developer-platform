@@ -307,3 +307,123 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     expect(transferStatusCalls()).toBe(callsBefore);
   });
 });
+
+describe("useOnrampWizard: a quote in flight when the selection changes (APE-466)", () => {
+  const WALLET_B: PaymentsDashboardWallet = {
+    ...WALLET,
+    id: "wallet-b",
+    walletId: "provider-b",
+    publicKey: "wallet-b-pubkey",
+    label: "Wallet B",
+  };
+  const STALE_TRANSFER_ID = "xfr_previous_selection";
+  // Primary presses from the deposit step to the transaction stage.
+  const STEPS_TO_TRANSACTION_STAGE = 2;
+
+  interface QuoteCall {
+    body: unknown;
+    signal: AbortSignal | null | undefined;
+    respond: (response: Response) => void;
+  }
+  let quoteCalls: QuoteCall[] = [];
+  let honorAbort = true;
+
+  beforeEach(() => {
+    quoteCalls = [];
+    honorAbort = true;
+    const base = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET, WALLET_B] } }));
+      }
+      if (url === "/api/dashboard/payments/ramps/onramp/quote" && init?.method === "POST") {
+        return new Promise<Response>((resolve, reject) => {
+          if (honorAbort) {
+            init.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError"))
+            );
+          }
+          quoteCalls.push({
+            body: JSON.parse(String(init.body)),
+            signal: init.signal,
+            respond: resolve,
+          });
+        });
+      }
+      return base === undefined ? Promise.resolve(Response.json({ data: {} })) : base(input, init);
+    });
+  });
+
+  async function enterTransactionStage(rendered: WizardRender, walletId: string, amount: string) {
+    act(() => rendered.result.current.setField("walletId", walletId));
+    act(() => rendered.result.current.setField("amount", amount));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE; press += 1) {
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+  }
+
+  async function renderWithQuoteInFlight(): Promise<WizardRender> {
+    const rendered = renderHook(() => useOnrampWizard({ ...PROPS, wallets: [WALLET, WALLET_B] }), {
+      wrapper,
+    });
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("bvnk"));
+    await enterTransactionStage(rendered, WALLET.id, "100");
+    await waitFor(() => expect(quoteCalls).toHaveLength(1));
+    expect(quoteCalls[0]?.body).toMatchObject({
+      destinationCustodyWalletId: WALLET.id,
+      fiatAmount: "100",
+    });
+    return rendered;
+  }
+
+  it("quotes the edited selection and drops the late quote for the previous one", async () => {
+    honorAbort = false;
+    const rendered = await renderWithQuoteInFlight();
+
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE; press += 1) {
+      act(() => rendered.result.current.handleSecondary());
+    }
+    expect(rendered.result.current.stepIndex).toBe(0);
+    expect(quoteCalls[0]?.signal?.aborted).toBe(true);
+    await enterTransactionStage(rendered, WALLET_B.id, "200");
+    await waitFor(() => expect(quoteCalls).toHaveLength(2));
+    expect(quoteCalls[1]?.body).toMatchObject({
+      destinationCustodyWalletId: WALLET_B.id,
+      fiatAmount: "200",
+    });
+
+    // Wallet A's quote lands after the edit, so it must never become the quote.
+    await act(async () => {
+      quoteCalls[0]?.respond(
+        Response.json({ data: { quote: BVNK_QUOTE, transferId: STALE_TRANSFER_ID } })
+      );
+    });
+    expect(rendered.result.current.quote).toBeNull();
+    expect(rendered.result.current.quoteCreationError).toBeNull();
+
+    await act(async () => {
+      quoteCalls[1]?.respond(
+        Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+      );
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);
+  });
+
+  it("reports nothing for the request Previous aborted", async () => {
+    const rendered = await renderWithQuoteInFlight();
+
+    act(() => rendered.result.current.handleSecondary());
+    await act(async () => {});
+
+    expect(quoteCalls[0]?.signal?.aborted).toBe(true);
+    expect(rendered.result.current.quote).toBeNull();
+    expect(rendered.result.current.quoteCreationError).toBeNull();
+    expect(rendered.result.current.quoteCreationRetrying).toBe(false);
+  });
+});
