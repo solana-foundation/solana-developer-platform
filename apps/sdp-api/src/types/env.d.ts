@@ -275,13 +275,11 @@ export interface Env extends ManagedRpcEnv {
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
   // MoonPay ramps configuration
-  MOONPAY_API_KEY?: string;
-  MOONPAY_SECRET_KEY?: string;
+  // MoonPay sandbox only: production projects bring their own MoonPay account.
   MOONPAY_ONRAMP_URL?: string;
   MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
-  MOONPAY_WEBHOOK_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
   // BVNK ramps configuration

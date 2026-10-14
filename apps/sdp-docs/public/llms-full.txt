@@ -3467,12 +3467,7 @@ SDP integrates the ramp providers in the matrix below. They are configured at th
 
 ## Sandbox vs production selection
 
-The sandbox/production mode is chosen **per request**, not at deployment time:
-
-- Non-production SDP deployments (`ENVIRONMENT !== "production"`) always use sandbox credentials.
-- In production deployments, the calling API key's environment picks the mode — `sk_test_` keys use sandbox, `sk_live_` use production.
-
-Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment, when the provider reads separate sandbox and production credentials; each provider's page says which.
+The project's environment picks the mode for every request: a Sandbox project uses a provider's sandbox credentials, a Production project its production ones. When SDP holds only a provider's sandbox credentials, that provider answers `PROVIDER_NOT_CONFIGURED` for Production projects. Each provider's page lists the credentials it reads.
 
 ## Capability matrix
 
@@ -3517,17 +3512,16 @@ Source: https://platform.solana.com/docs/payments/ramps-moonpay
 
 MoonPay is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "moonpay"`.
 
-MoonPay reads separate sandbox and production credentials, chosen per request.
+SDP holds MoonPay test-mode keys only, so MoonPay runs for sandbox projects. Production projects will bring their own MoonPay account; until then, MoonPay answers `PROVIDER_NOT_CONFIGURED` for them.
 
 ## Configuration
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `MOONPAY_API_KEY` | conditional | Production API key. Required when the request resolves to production. |
-| `MOONPAY_SECRET_KEY` | conditional | Production secret used to sign onramp / offramp URLs. Paired with `MOONPAY_API_KEY`. |
-| `MOONPAY_SANDBOX_API_KEY` | conditional | Sandbox API key. Required when the request resolves to sandbox. |
-| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Sandbox secret. Paired with `MOONPAY_SANDBOX_API_KEY`. |
-| `MOONPAY_ONRAMP_URL` | no | Override the onramp host. Defaults to MoonPay's standard URLs; the sandbox/production choice follows the [per-request rule](/docs/payments/ramps-providers#sandbox-vs-production-selection). |
+| `MOONPAY_SANDBOX_API_KEY` | conditional | Test-mode publishable key (`pk_test_…`). A live key is refused before any request. |
+| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Test-mode secret (`sk_test_…`) used to sign onramp and offramp URLs. Paired with `MOONPAY_SANDBOX_API_KEY`. |
+| `MOONPAY_SANDBOX_WEBHOOK_KEY` | conditional | Signing key of the endpoint MoonPay calls at `/webhooks/payments/ramps/sandbox/moonpay`. |
+| `MOONPAY_ONRAMP_URL` | no | Override the onramp host. Defaults to MoonPay's sandbox widget. |
 | `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
 
 MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.

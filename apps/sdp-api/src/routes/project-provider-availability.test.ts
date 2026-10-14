@@ -102,10 +102,8 @@ const DEPLOYMENT_CREDENTIALS = {
   PRIVY_APP_ID: "privy_project_provider_availability_app",
   PRIVY_APP_SECRET: "privy_project_provider_availability_secret",
   RANGE_API_KEY: "range_project_provider_availability_key",
-  MOONPAY_API_KEY: "moonpay_project_provider_availability_key",
-  MOONPAY_SECRET_KEY: "moonpay_project_provider_availability_secret",
-  MOONPAY_SANDBOX_API_KEY: "moonpay_sandbox_project_provider_availability_key",
-  MOONPAY_SANDBOX_SECRET_KEY: "moonpay_sandbox_project_provider_availability_secret",
+  MOONPAY_SANDBOX_API_KEY: "pk_test_project_provider_availability",
+  MOONPAY_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
   STRIPE_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
   STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_project_provider_availability",
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_project_provider_availability",
@@ -275,7 +273,7 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
       unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
     },
     ...COMPLIANCE_AVAILABILITY,
-    { family: "ramps", provider: "moonpay", available: true },
+    { family: "ramps", provider: "moonpay", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: false, reason: "provider_not_configured" },
@@ -612,14 +610,11 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it("reports a provider with only sandbox credentials as unavailable in a Production project", async () => {
-    const sandboxKeysOnly = deploymentEnv({
-      MOONPAY_API_KEY: undefined,
-      MOONPAY_SECRET_KEY: undefined,
-    });
+  it("reports MoonPay unavailable in a Production project, since SDP holds sandbox keys only", async () => {
+    const deployment = deploymentEnv({});
 
-    const production = await readAvailability("production", sandboxKeysOnly);
-    const sandbox = await readAvailability("sandbox", sandboxKeysOnly);
+    const production = await readAvailability("production", deployment);
+    const sandbox = await readAvailability("sandbox", deployment);
 
     expect(production.providers).toContainEqual({
       family: "ramps",
@@ -631,6 +626,19 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "ramps",
       provider: "moonpay",
       available: true,
+    });
+  });
+
+  it("reports MoonPay unavailable when a live key sits under the sandbox names", async () => {
+    const liveKey = deploymentEnv({ MOONPAY_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" });
+
+    const sandbox = await readAvailability("sandbox", liveKey);
+
+    expect(sandbox.providers).toContainEqual({
+      family: "ramps",
+      provider: "moonpay",
+      available: false,
+      reason: "provider_not_configured",
     });
   });
 
