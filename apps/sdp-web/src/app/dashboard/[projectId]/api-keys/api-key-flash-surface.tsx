@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { Card, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { useEffect, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
@@ -11,10 +12,18 @@ interface ApiKeyFlashResponse {
   flash: ApiKeyFlash | null;
 }
 
+/**
+ * In-flight flash reads, keyed by the auth scope that started them (Clerk session,
+ * user, organization) and the Project's flash path. Reading consumes the one-time
+ * cookie, so two surfaces of ONE scope (Strict Mode's double mount, a duplicated
+ * surface) must share the read; a surface of any other scope never may, or the
+ * next account in this tab would be handed the previous account's new key
+ * (APE-547). An entry lives only while its request is in flight.
+ */
 const pendingFlashRequests = new Map<string, Promise<ApiKeyFlash | null>>();
 
-async function loadApiKeyFlash(flashPath: string): Promise<ApiKeyFlash | null> {
-  const pending = pendingFlashRequests.get(flashPath);
+function loadApiKeyFlash(scopeKey: string, flashPath: string): Promise<ApiKeyFlash | null> {
+  const pending = pendingFlashRequests.get(scopeKey);
   if (pending !== undefined) {
     return pending;
   }
@@ -36,47 +45,59 @@ async function loadApiKeyFlash(flashPath: string): Promise<ApiKeyFlash | null> {
     })
     .catch(() => null)
     .finally(() => {
-      pendingFlashRequests.delete(flashPath);
+      pendingFlashRequests.delete(scopeKey);
     });
-  pendingFlashRequests.set(flashPath, request);
+  pendingFlashRequests.set(scopeKey, request);
   return request;
+}
+
+/** The auth scope a flash belongs to, or null until Clerk has a signed-in session. */
+function useFlashScopeKey(flashPath: string): string | null {
+  const { isLoaded, sessionId, userId, orgId } = useAuth();
+  if (!isLoaded || !sessionId || !userId) {
+    return null;
+  }
+  return JSON.stringify([sessionId, userId, orgId ?? null, flashPath]);
 }
 
 export function ApiKeyFlashSurface() {
   const t = useTranslations();
   const flashPath = useProjectHref()(API_KEYS_FLASH_PATH);
-  const [flash, setFlash] = useState<ApiKeyFlash | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const scopeKey = useFlashScopeKey(flashPath);
+  // The flash is held with the scope that read it, and shown only while that scope is
+  // current: a sign-out, account or organization switch, or Project change drops it at once.
+  const [loaded, setLoaded] = useState<{ scopeKey: string; flash: ApiKeyFlash | null } | null>(
+    null
+  );
 
   useEffect(() => {
+    if (scopeKey === null) {
+      return;
+    }
     let isActive = true;
 
-    const loadFlash = async () => {
-      const nextFlash = await loadApiKeyFlash(flashPath);
-
+    void loadApiKeyFlash(scopeKey, flashPath).then((flash) => {
       if (isActive) {
-        setFlash(nextFlash);
-        setIsLoaded(true);
+        setLoaded({ scopeKey, flash });
       }
-    };
-
-    void loadFlash();
+    });
 
     return () => {
       isActive = false;
     };
-  }, [flashPath]);
+  }, [flashPath, scopeKey]);
 
-  if (!isLoaded || !flash) {
+  const flash = loaded !== null && loaded.scopeKey === scopeKey ? loaded.flash : null;
+  if (!flash) {
     return null;
   }
 
   if (flash.key) {
     return (
       <GeneratedApiKeyModal
+        key={scopeKey}
         keyValue={flash.key}
         message={flash.message}
-        apiKeyId={flash.apiKeyId}
         keyPrefix={flash.keyPrefix}
       />
     );
