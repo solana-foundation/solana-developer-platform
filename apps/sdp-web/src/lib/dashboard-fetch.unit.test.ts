@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { dashboardFetch, dashboardRequest, setTabShowsDemo } from "./dashboard-fetch";
-import { resetIdempotencyKeyStoresForTests } from "./idempotency-key-store";
+import { resetIdempotencyKeyStoresForTests, setIdempotencyKeyScope } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 
 function noContentFetchMock() {
@@ -313,6 +313,25 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
   });
 
+  it("marks a refusal whose body is not JSON unreadable, and keeps its key", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const responses = [
+      new Response("<html>", { status: 422, headers: { "content-type": "application/json" } }),
+      jsonResponse(201),
+    ];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        responses.shift() ?? jsonResponse(201)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await dashboardFetch(PATH, { method: "POST", body: { amount: "1" } });
+    await submit();
+
+    expect(first).toMatchObject({ ok: false, status: 422, unreadable: true });
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+  });
+
   it("reports an unknown outcome's code and sends nothing more on its own", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const body = { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "check" } };
@@ -478,6 +497,22 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await first.text()).toBe("{}");
     expect(await second.text()).toBe("{}");
+  });
+
+  // Greptile (#2333): after a user switch in the tab, the same submit joined the
+  // first user's pending request and got its answer.
+  it("never joins a pending request of another signed-in user", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(201, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    setIdempotencyKeyScope("user_a:org_1");
+    const first = submit();
+    setIdempotencyKeyScope("user_b:org_1");
+    const second = submit();
+    await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   // Greptile (#2252): a live submit must never join a demo request of the same

@@ -16,7 +16,7 @@ export interface IdempotencyKeyClaimInput {
   id: string;
   claimToken: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   operation: string;
   idempotencyKey: string;
   /** The credential (API key id or user id) making the request. */
@@ -116,20 +116,11 @@ const existingRowSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
-/**
- * The scope predicate. A null project is matched with IS NULL rather than
- * IS NOT DISTINCT FROM, so Postgres can use the scope index.
- */
+/** The scope predicate, matching the scope unique constraint. */
 function scopeMatch(input: IdempotencyKeyClaimInput): { sql: string; params: unknown[] } {
-  const project = input.projectId === null ? "project_id IS NULL" : "project_id = ?";
   return {
-    sql: `organization_id = ? AND ${project} AND operation = ? AND idempotency_key = ?`,
-    params: [
-      input.organizationId,
-      ...(input.projectId === null ? [] : [input.projectId]),
-      input.operation,
-      input.idempotencyKey,
-    ],
+    sql: "organization_id = ? AND project_id = ? AND operation = ? AND idempotency_key = ?",
+    params: [input.organizationId, input.projectId, input.operation, input.idempotencyKey],
   };
 }
 

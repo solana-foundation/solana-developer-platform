@@ -91,16 +91,18 @@ export function isOutcomeUnknownAnswer(answer: ApiAnswer): boolean {
 
 /**
  * The answer a `dashboardFetch`-shaped result carries. A failure below 400 (a
- * followed redirect, a body nobody could read) is no answer from sdp-api, so it
- * reads as a lost one.
+ * followed redirect, a body nobody could read) or one marked `unreadable` is
+ * no answer from sdp-api, so it reads as a lost one.
  */
 export function fetchResultAnswer(result: {
   ok: boolean;
   status: number | null;
   replayed?: boolean;
   code?: string | null;
+  unreadable?: boolean;
 }): ApiAnswer {
-  const answered = result.ok || (result.status !== null && result.status >= 400);
+  const answered =
+    result.ok || (result.unreadable !== true && result.status !== null && result.status >= 400);
   return {
     status: answered ? result.status : null,
     replayed: result.replayed === true,

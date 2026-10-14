@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import { isIdempotencyErrorCode } from "@sdp/types";
 import {
   commitmentComparator,
   decimalFixedPointToNumber,
@@ -215,8 +216,9 @@ export async function initializeCustodySetupAction(
     return { status: "success" };
   } catch (error) {
     const answer = sdpApiAnswer(error);
-    // A 409 that is not the key's unknown outcome is the provider already set up.
-    if (answer.status === 409 && !isOutcomeUnknownAnswer(answer)) {
+    // Only the provider's own conflict means it is set up. The key's refusals (a
+    // request still in flight, an unknown outcome) are errors the user can act on.
+    if (answer.status === 409 && !isIdempotencyErrorCode(answer.code)) {
       return { status: "provider_already_set_up", answer };
     }
     return {

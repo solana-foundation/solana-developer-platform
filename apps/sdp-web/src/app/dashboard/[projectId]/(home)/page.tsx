@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { custody, issuance } from "@/flags";
+import { issuance } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -17,7 +18,7 @@ export default async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
-    custody(),
+    isModuleInDeploymentReleaseChannel("custody"),
     issuance(),
   ]);
   if (!userId) {

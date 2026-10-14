@@ -8,7 +8,11 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   storageFingerprint,
 } from "./idempotency";
-import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
+import {
+  createIdempotencyKeyStore,
+  type IdempotencyKeyStore,
+  idempotencyKeyScope,
+} from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
@@ -23,6 +27,12 @@ export type DashboardFetchResult<T> =
       replayed?: boolean;
       /** sdp-api's error code, when the body names one. */
       code?: string | null;
+      /**
+       * The response is not the backend's readable answer (a body that would not
+       * download or parse), so it says nothing about the write: the key is kept,
+       * and so is anything frozen with it (`fetchResultAnswer`).
+       */
+      unreadable?: boolean;
     };
 
 export interface DashboardFetchOptions {
@@ -118,13 +128,12 @@ function isApiAnswer(response: Response): boolean {
  * key, so the retry is answered by the API's replay instead of running again
  * under a new key.
  */
-function answerOf(response: Response, body: ArrayBuffer): ApiAnswer | null {
+function answerOf(response: Response, text: string): ApiAnswer | null {
   if (!isApiAnswer(response)) return null;
   const replayed = response.headers.get("Idempotent-Replayed") === "true";
   if (isBodylessHttpStatus(response.status)) {
     return { status: response.status, replayed, code: null };
   }
-  const text = new TextDecoder().decode(body);
   try {
     JSON.parse(text);
   } catch {
@@ -139,7 +148,7 @@ function answerOf(response: Response, body: ArrayBuffer): ApiAnswer | null {
  * (`answerRetiresKey`).
  */
 function retiresKey(response: Response, body: ArrayBuffer): boolean {
-  const answer = answerOf(response, body);
+  const answer = answerOf(response, new TextDecoder().decode(body));
   return answer !== null && answerRetiresKey(answer);
 }
 
@@ -203,7 +212,10 @@ async function sendUnderActionKey(
   // The mode is fixed at submit, and the request is sent in that mode.
   const demo = tabShowsDemo;
   const material = actionMaterial(path, init, demo);
-  let sent = inFlightMutations.get(material);
+  // Joined only within the signed-in user and org: after a switch in this tab,
+  // the same submit is the new user's own request, never the first one's answer.
+  const joinKey = JSON.stringify([idempotencyKeyScope(), material]);
+  let sent = inFlightMutations.get(joinKey);
   if (!sent) {
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
@@ -238,8 +250,8 @@ async function sendUnderActionKey(
         headers: response.headers,
       });
     });
-    inFlightMutations.set(material, sent);
-    void sent.finally(() => inFlightMutations.delete(material)).catch(() => undefined);
+    inFlightMutations.set(joinKey, sent);
+    void sent.finally(() => inFlightMutations.delete(joinKey)).catch(() => undefined);
   }
   // Every caller gets its own copy, so each can read the body.
   return (await abortable(sent, init.signal)).clone();
@@ -390,6 +402,7 @@ export async function dashboardFetch<T = unknown>(
       error: err instanceof Error ? err.message : "Network error",
       status: response.status,
       body: null,
+      unreadable: true,
     };
   }
 
@@ -408,6 +421,8 @@ export async function dashboardFetch<T = unknown>(
       body: errorBody,
       replayed: response.headers.get("Idempotent-Replayed") === "true",
       code: apiErrorCode(text),
+      // The same decision the key's store made ({@link answerOf}).
+      unreadable: answerOf(response, text) === null,
     };
   }
 

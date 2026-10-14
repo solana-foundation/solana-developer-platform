@@ -1,11 +1,10 @@
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
-  type ClerkJwtPayload,
   extractBearerToken,
   resolveClerkEmail,
   resolveClerkOrganizationClaims,
-  verifyClerkJwtForRequest,
+  verifyClerkSessionToken,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import type { Env } from "@/types/env";
@@ -18,14 +17,7 @@ export function clerkOnboardingMiddleware() {
       throw unauthorized("Clerk session required");
     }
 
-    let payload: ClerkJwtPayload;
-    try {
-      payload = await verifyClerkJwtForRequest(c, token);
-    } catch (error) {
-      throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
-        cause: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const payload = await verifyClerkSessionToken(c, token);
 
     if (!payload.sub) {
       throw new AppError("UNAUTHORIZED", "Clerk token missing subject");

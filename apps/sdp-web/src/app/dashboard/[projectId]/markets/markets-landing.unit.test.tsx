@@ -7,6 +7,11 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
+const flagMocks = vi.hoisted(() => ({
+  earn: vi.fn(async () => true),
+  dvp: vi.fn(async () => true),
+}));
+vi.mock("@/flags", () => flagMocks);
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
@@ -48,5 +53,21 @@ describe("MarketsLanding", () => {
   it("titles the cards with the shared subnav labels so they cannot drift", () => {
     expect(markup).toContain("Shared.dashboardShell.treasurySolutions");
     expect(markup).toContain("Shared.dashboardShell.earnProgram");
+  });
+
+  it("leaves out DvP where the release channel runs Earn without it", async () => {
+    // Stage: Earn is `beta`, DvP `experimental`, so the DvP card linked to a 404.
+    flagMocks.dvp.mockResolvedValueOnce(false);
+    const html = renderToStaticMarkup(await MarketsLanding());
+    expect(html).toContain("markets-earn-heading");
+    expect(html).not.toContain("markets-settlement-heading");
+    expect(html).not.toContain('href="/dashboard/prj_test_sandbox/markets/dvp"');
+  });
+
+  it("leaves out the Earn paths where only DvP runs", async () => {
+    flagMocks.earn.mockResolvedValueOnce(false);
+    const html = renderToStaticMarkup(await MarketsLanding());
+    expect(html).not.toContain("markets-earn-heading");
+    expect(html).toContain("markets-settlement-heading");
   });
 });

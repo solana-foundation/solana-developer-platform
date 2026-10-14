@@ -19,7 +19,7 @@ import {
   isPlausibleEmail,
   resolveClerkEmail,
   resolveClerkOrganizationClaims,
-  verifyClerkJwtForRequest,
+  verifyClerkSessionToken,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
@@ -581,14 +581,7 @@ export function clerkAuthMiddleware() {
         throw unauthorized("Clerk session required");
       }
 
-      let payload: ClerkJwtPayload;
-      try {
-        payload = await verifyClerkJwtForRequest(c, token);
-      } catch (error) {
-        throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
-          cause: error instanceof Error ? error.message : String(error),
-        });
-      }
+      const payload = await verifyClerkSessionToken(c, token);
 
       assertClerkTenantClaims(payload);
 
@@ -623,14 +616,7 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
 
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
-        let payload: ClerkJwtPayload;
-        try {
-          payload = await verifyClerkJwtForRequest(c, token);
-        } catch (error) {
-          throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
-            cause: error instanceof Error ? error.message : String(error),
-          });
-        }
+        const payload = await verifyClerkSessionToken(c, token);
         assertClerkTenantClaims(payload);
         const clerkContext = await buildClerkContext(c, payload);
         await enforceRateLimit(
@@ -642,9 +628,14 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
       });
     } catch (error) {
       // Invalid Clerk auth is rejected by default (a presented credential
-      // must never silently downgrade to anonymous), but never rate
-      // limiting — a limited user must not proceed as anonymous either.
-      if (rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
+      // must never silently downgrade to anonymous). Rate limiting and
+      // unreachable signing keys are always rejected: a limited user, or one
+      // whose token was never checked, must not proceed as anonymous either.
+      if (
+        rejectInvalid ||
+        (error instanceof AppError &&
+          (error.code === "RATE_LIMITED" || error.code === "SERVICE_UNAVAILABLE"))
+      ) {
         throw error;
       }
     }
