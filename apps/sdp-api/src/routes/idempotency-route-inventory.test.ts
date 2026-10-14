@@ -1,7 +1,9 @@
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { declaredAuthorization } from "@/middleware/authorize";
-import { declaredIdempotency } from "@/middleware/idempotency";
+import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
+import { declaresRecordReplay } from "@/middleware/movement-steps";
+import { declaredValidation } from "@/middleware/validate";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 
 /**
@@ -11,7 +13,11 @@ import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
  * - declares `idempotent()`, or is exempt below with a reason;
  * - runs `authorize(fn)` or `authorizeNone(reason)` before it, so a replay
  *   passes exactly the access checks a new request does; every
- *   `authorizeNone` is pinned below with its reason.
+ *   `authorizeNone` is pinned below with its reason;
+ * - validates its params, query and body before `authorize`, which reads them
+ *   as validated, so an invalid request claims nothing;
+ * - declares `recovery: "record"` exactly when it mounts `replayFromRecord`,
+ *   so a lapsed claim is taken over only where the domain row answers it.
  *
  * The module comes from the route-ownership table and the stage from the
  * `stable` release channel, so promoting a module to `stable` fails this test
@@ -64,6 +70,10 @@ interface RouteSteps {
   idempotentAt: number;
   authorizeAt: number;
   authorization: ReturnType<typeof declaredAuthorization>;
+  /** Positions of the route-level validators. */
+  validateAt: number[];
+  recovery: ReturnType<typeof declaredIdempotencyRecovery>;
+  replaysFromRecord: boolean;
 }
 
 function stableMutatingRoutes(): Map<string, RouteSteps> {
@@ -74,16 +84,26 @@ function stableMutatingRoutes(): Map<string, RouteSteps> {
       idempotentAt: -1,
       authorizeAt: -1,
       authorization: undefined,
+      validateAt: [],
+      recovery: undefined,
+      replaysFromRecord: false,
     };
     const idempotency = declaredIdempotency(handler);
     if (idempotency !== undefined) {
       steps.idempotency = idempotency;
       steps.idempotentAt = position;
+      steps.recovery = declaredIdempotencyRecovery(handler);
+    }
+    if (declaresRecordReplay(handler)) {
+      steps.replaysFromRecord = true;
     }
     const authorization = declaredAuthorization(handler);
     if (authorization !== undefined) {
       steps.authorization = authorization;
       steps.authorizeAt = position;
+    }
+    if (declaredValidation(handler) !== undefined) {
+      steps.validateAt.push(position);
     }
     routes.set(route, steps);
   }
@@ -116,6 +136,23 @@ describe("idempotency route inventory", () => {
       .map(([route]) => route)
       .sort();
     expect(unchecked).toEqual([]);
+  });
+
+  it("validates the request before the access check on every idempotent route", () => {
+    const lateValidation = idempotent
+      .filter(([, steps]) => steps.validateAt.some((at) => at > steps.authorizeAt))
+      .map(([route]) => route)
+      .sort();
+    expect(lateValidation).toEqual([]);
+  });
+
+  it("declares recovery from the record exactly on the routes that replay from it", () => {
+    const mismatched = [...routes]
+      .filter(([, steps]) => steps.replaysFromRecord !== (steps.recovery === "record"))
+      .map(([route]) => route)
+      .sort();
+    expect(mismatched).toEqual([]);
+    expect(idempotent.filter(([, steps]) => steps.replaysFromRecord).length).toBeGreaterThan(0);
   });
 
   it("pins every route that names no resource, with its reason", () => {

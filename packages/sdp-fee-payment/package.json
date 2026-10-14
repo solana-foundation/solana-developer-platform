@@ -1,0 +1,45 @@
+{
+  "name": "@sdp/fee-payment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./port": {
+      "types": "./src/port.ts",
+      "import": "./src/port.ts",
+      "default": "./src/port.ts"
+    },
+    "./kora": {
+      "types": "./src/kora.adapter.ts",
+      "import": "./src/kora.adapter.ts",
+      "default": "./src/kora.adapter.ts"
+    },
+    "./native": {
+      "types": "./src/native.adapter.ts",
+      "import": "./src/native.adapter.ts",
+      "default": "./src/native.adapter.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@sdp/rpc": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana/codecs": "catalog:",
+    "@solana/kit": "catalog:",
+    "@solana/kora": "0.3.0-beta.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

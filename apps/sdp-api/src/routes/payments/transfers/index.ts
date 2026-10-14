@@ -30,6 +30,7 @@ transfers.post(
   idempotent({
     key: "required",
     serverErrors: "rerun",
+    recovery: "record",
     // "1.0" and "1" move the same amount, so they are one request.
     canonicalize: (body) => canonicalizeDecimalFields(body, ["amount"]),
   }),

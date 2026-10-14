@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-10-12
 - **Deciders:** SDP engineering
-- **Related:** HOO-1873, HOO-1874 (PR #2196); `packages/sdp-rpc`; `packages/sdp-payments/src/fee-payment`; `apps/sdp-api/src/middleware/project-context.ts`; `apps/sdp-api/src/db/identity.ts` (ALS precedent)
+- **Related:** HOO-1873, HOO-1874 (PR #2196); `packages/sdp-rpc`; `packages/sdp-fee-payment`; `apps/sdp-api/src/middleware/project-context.ts`; `apps/sdp-api/src/db/identity.ts` (ALS precedent)
 
 ## Context
 
@@ -24,7 +24,7 @@ One deployment serves Sandbox (devnet) and Production (mainnet) projects. RPC an
 
 ## Considered Options
 
-- **Clients on Hono `c.var`, threaded into services and packages**: rejected. Jobs have no `c`, and package-internal defaults (`native.adapter.ts`, `fee-payment/index.ts`) stay silent.
+- **Clients on Hono `c.var`, threaded into services and packages**: rejected. Jobs have no `c`, and package-internal defaults (`native.adapter.ts`, `sdp-fee-payment/src/index.ts`) stay silent.
 - **Every package reads the scope (no `rpc` params)**: rejected. Veda snapshot fills have no store, so ambient reads there throw.
 - **Optional cluster argument on the door for jobs**: rejected. It can't be restricted to jobs and reintroduces a threaded choice.
 - **One job pass per cluster inside a single job**: rejected for separate per-cluster registrations, which isolate claims, leases and provider outages per cluster.

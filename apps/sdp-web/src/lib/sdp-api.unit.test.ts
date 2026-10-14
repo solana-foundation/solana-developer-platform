@@ -232,10 +232,30 @@ describe("server-side Idempotency-Key (HOO-1918)", () => {
       .catch((error: unknown) => error);
 
     expect(failure).toMatchObject({ status: 422, replayed: true });
-    expect(sdpApiAnswer(failure)).toEqual({ status: 422, replayed: true });
+    expect(sdpApiAnswer(failure)).toEqual({ status: 422, replayed: true, code: null });
     expect(sdpApiAnswer(new SdpApiResponseError(400, "{}"))).toEqual({
       status: 400,
       replayed: false,
+      code: null,
+    });
+  });
+
+  it("reports sdp-api's error code, also once the error crossed a server-action boundary", () => {
+    const body = JSON.stringify({
+      error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "Check with GET" },
+    });
+    const failure = new SdpApiResponseError(409, body);
+    const crossed = new Error(failure.message);
+
+    expect(sdpApiAnswer(failure)).toEqual({
+      status: 409,
+      replayed: false,
+      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+    });
+    expect(sdpApiAnswer(crossed)).toEqual({
+      status: 409,
+      replayed: false,
+      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
     });
   });
 });

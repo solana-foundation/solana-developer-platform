@@ -414,9 +414,8 @@ async function updateTransferRecord(
     blockTime: patch.blockTime,
     fee: patch.fee,
     error: patch.error,
-    ...(patch.failureCode === undefined
-      ? {}
-      : { providerData: executionFailureData(patch.failureCode) }),
+    providerData:
+      patch.failureCode === undefined ? undefined : executionFailureData(patch.failureCode),
     updatedAt: now,
   });
 
@@ -659,8 +658,14 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   if (row.status !== "failed") {
     return success(c, buildTransferReplayPayload(row));
   }
-  const recorded = row.provider_data[EXECUTION_FAILURE_KEY] as { code?: unknown } | undefined;
-  const code = isErrorCode(recorded?.code) ? recorded.code : "TRANSACTION_FAILED";
+  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
+  const recordedCode =
+    typeof recorded === "object" && recorded !== null && "code" in recorded
+      ? recorded.code
+      : undefined;
+  // A row the reconciler failed from the chain records no code: it is a
+  // transaction failure.
+  const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
   throw new AppError(
     code,
     `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,

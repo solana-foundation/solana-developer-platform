@@ -7,6 +7,7 @@
 
 # Payments and ramps
 /packages/sdp-payments/                                 @solana-foundation/foundation-product-team
+/packages/sdp-fee-payment/                              @solana-foundation/foundation-product-team
 /apps/sdp-api/src/routes/payments/                      @solana-foundation/foundation-product-team
 
 # Issuance

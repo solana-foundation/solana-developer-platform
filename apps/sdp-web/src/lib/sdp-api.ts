@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
-import { type ApiAnswer, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { type ApiAnswer, apiErrorCodeOfText, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
@@ -231,9 +231,22 @@ export function extractSdpApiError(error: unknown): { status: number | null; mes
  */
 export function sdpApiAnswer(error: unknown): ApiAnswer {
   if (error instanceof SdpApiResponseError) {
-    return { status: error.status, replayed: error.replayed };
+    return {
+      status: error.status,
+      replayed: error.replayed,
+      code: apiErrorCodeOfText(error.responseBody),
+    };
   }
-  return { status: extractSdpApiError(error).status, replayed: false };
+  // Crossed a server-action boundary: the body survives only in the message.
+  const body =
+    error instanceof Error
+      ? /^SDP API request failed \(\d+\): ([\s\S]*)$/.exec(error.message)
+      : null;
+  return {
+    status: extractSdpApiError(error).status,
+    replayed: false,
+    code: body?.[1] === undefined ? null : apiErrorCodeOfText(body[1]),
+  };
 }
 
 export interface SdpApiClient {

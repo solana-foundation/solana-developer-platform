@@ -1339,6 +1339,7 @@ export function EarnVaultDepositModal({
     const retired = settleIdempotencyKey(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
+      key,
       fetchResultAnswer(result)
     );
     // A slippage refusal comes from simulation, which Earn runs only after it
@@ -1346,7 +1347,7 @@ export function EarnVaultDepositModal({
     // anything: the retry is a new request with a fresh quote's floor and a
     // fresh key, not a replay of the floor that was refused.
     const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
-    if (slippageRefused) vaultDepositIdempotencyKeyStore.release(fingerprint);
+    if (slippageRefused) vaultDepositIdempotencyKeyStore.release(fingerprint, key);
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
     if (retired || slippageRefused) forgetVaultDepositFloor(fingerprint);

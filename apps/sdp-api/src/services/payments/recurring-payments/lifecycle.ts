@@ -141,6 +141,18 @@ async function getOrCreateLifecycleAttempt(input: {
   if (existing) {
     // A stale claim resumes the in-flight attempt under its original key, or
     // records this request's key on it when it has none (same transaction).
+    // An attempt another key answers for is that request's: finishing it here
+    // would leave this key with no attempt, so a retry once its record expires
+    // would run again. It is refused as in flight, unstored, and the
+    // transaction rolls the claim back; the cron finishes the attempt (as
+    // collect does).
+    if (
+      input.idempotencyKey !== null &&
+      existing.idempotency_key !== null &&
+      existing.idempotency_key !== input.idempotencyKey
+    ) {
+      throw conflict(`Recurring payment ${input.operation} is already processing`);
+    }
     if (input.idempotencyKey === null || existing.idempotency_key !== null) {
       return existing;
     }
@@ -199,6 +211,46 @@ async function getOrCreateLifecycleAttempt(input: {
   }
 
   return attempt;
+}
+
+/**
+ * A keyed request for a schedule already in the operation's final state runs
+ * nothing, but its key is still answered: a confirmed attempt records it, so a
+ * retry once the key's shared record has expired is answered from the attempt
+ * instead of running the operation on a schedule that has moved on since (a
+ * cancel after a later resume). The cron (no key) records nothing.
+ */
+async function answerFinalLifecycle(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  operation: RecurringPaymentLifecycleOperation;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  idempotencyKey: string | null;
+}): Promise<PaymentRecurringPaymentRow> {
+  if (input.idempotencyKey === null) {
+    return input.recurringPayment;
+  }
+  const answeredAt = new Date().toISOString();
+  const attempt = await input.recurringRepo.createLifecycleAttempt({
+    id: `prpl_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    operation: input.operation,
+    status: "confirmed",
+    stage: "finalize",
+    signature: null,
+    error: null,
+    metadata: {},
+    createdAt: answeredAt,
+    updatedAt: answeredAt,
+    idempotencyKey: input.idempotencyKey,
+  });
+  if (!attempt) {
+    throw internalError(`Failed to journal recurring payment ${input.operation}`);
+  }
+  return input.recurringPayment;
 }
 
 async function recordLifecycleFailure(input: {
@@ -393,7 +445,11 @@ async function runRecurringPaymentLifecycle(
     input.recurringPayment.status ===
     getRecurringPaymentLifecycleStatuses(input.operation).finalStatus
   ) {
-    return input.recurringPayment;
+    return answerFinalLifecycle({
+      ...input,
+      recurringRepo,
+      recurringPayment: input.recurringPayment,
+    });
   }
 
   const collectionState =
@@ -419,7 +475,11 @@ async function runRecurringPaymentLifecycle(
     collectionState.recurringPayment.status ===
     getRecurringPaymentLifecycleStatuses(input.operation).finalStatus
   ) {
-    return collectionState.recurringPayment;
+    return answerFinalLifecycle({
+      ...input,
+      recurringRepo,
+      recurringPayment: collectionState.recurringPayment,
+    });
   }
 
   await createSigningService(input.env).admitRuntimeExecution(

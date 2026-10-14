@@ -17,12 +17,26 @@ import type { Env } from "@/types/env";
 
 type AuthorizeContext = Context<{ Bindings: Env }>;
 
-/** The validated request, as the route's validators left it. */
+/**
+ * The validated request, as the route's validators left it. These steps are
+ * shared by every route, so each target is whatever that route's schema
+ * outputs: opaque here, and parsed by the route's own authorizer or replay.
+ */
 export interface AuthorizeInput {
   params: unknown;
   query: unknown;
   body: unknown;
 }
+
+/**
+ * A context whose validated targets are declared open, so Hono's typed
+ * `c.req.valid()` reads them without an assertion. Any route context is one.
+ */
+type ValidatedRequestContext = Context<
+  { Bindings: Env },
+  string,
+  { out: { param: unknown; query: unknown; json: unknown } }
+>;
 
 /**
  * Checks access and returns what it loaded (the wallet, the schedule) so the
@@ -38,18 +52,15 @@ export type AuthorizeDeclaration =
   /** The route names no resource beyond the caller's own scope. */
   | { kind: "none"; reason: string };
 
-function validated(c: AuthorizeContext, target: "param" | "query" | "json"): unknown {
-  // SAFETY: Hono's `valid` returns whatever the validator for `target` stored,
-  // or undefined; the route's own validator decides its shape.
-  return (c.req as unknown as { valid(target: string): unknown }).valid(target);
-}
-
-/** Reads the validated request a route's validators stored. */
-export function validatedInput(c: AuthorizeContext): AuthorizeInput {
+/**
+ * Reads the validated request a route's validators stored; a target with no
+ * validator is undefined, except params, which fall back to the raw path.
+ */
+export function validatedInput(c: ValidatedRequestContext): AuthorizeInput {
   return {
-    params: validated(c, "param") ?? c.req.param(),
-    query: validated(c, "query"),
-    body: validated(c, "json"),
+    params: c.req.valid("param") ?? c.req.param(),
+    query: c.req.valid("query"),
+    body: c.req.valid("json"),
   };
 }
 
@@ -97,6 +108,9 @@ export function getAuthorized<T>(c: AuthorizeContext): T {
 }
 
 /** Reads what an {@link authorize} or {@link authorizeNone} handler declares. */
-export function declaredAuthorization(handler: unknown): AuthorizeDeclaration | undefined {
-  return (handler as { [AUTHORIZE_MARKER]?: AuthorizeDeclaration } | null)?.[AUTHORIZE_MARKER];
+export function declaredAuthorization(handler: object): AuthorizeDeclaration | undefined {
+  // SAFETY: the marker is a registered symbol only authorize() and
+  // authorizeNone() set, always to an AuthorizeDeclaration; any other handler
+  // lacks it and reads undefined.
+  return (handler as { [AUTHORIZE_MARKER]?: AuthorizeDeclaration })[AUTHORIZE_MARKER];
 }

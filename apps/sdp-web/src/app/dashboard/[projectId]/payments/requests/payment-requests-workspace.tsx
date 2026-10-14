@@ -287,7 +287,7 @@ function CreateRequestModal({
         expiresAt,
       },
     });
-    settleExpiresAt(input, res);
+    settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
     if (!res.ok) {
       toast.error(res.error);

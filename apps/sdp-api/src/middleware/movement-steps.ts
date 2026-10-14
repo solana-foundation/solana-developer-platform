@@ -29,6 +29,9 @@ function stepInput<TAuthorized>(c: StepContext): MovementStepInput<TAuthorized> 
   return { ...validatedInput(c), authorized: getAuthorized<TAuthorized>(c) };
 }
 
+/** Marks a {@link replayFromRecord} step, for route inventory tests. */
+const RECORD_REPLAY_MARKER = Symbol.for("sdp.replayFromRecord");
+
 /** A domain row's answer to a keyed request, from {@link replayFromRecord}'s finder. */
 export interface RecordAnswer {
   /**
@@ -43,12 +46,14 @@ export interface RecordAnswer {
 
 /**
  * Answers a request whose Idempotency-Key already has a domain row, from that
- * row: after a takeover of a crashed attempt, or past the key's 24 hours. The
- * finder looks the row up by the credential-bound record key and returns it
- * with its stored fingerprint; a matching fingerprint is answered from the row
- * and nothing runs again, another is 422 `IDEMPOTENCY_KEY_REUSED`, and null
- * means the key has no row yet. A row's answer, success or failure, is marked
- * `Idempotent-Replayed` and stored under the key.
+ * row: after a takeover of a crashed attempt (the route declares
+ * `idempotent({ ..., recovery: "record" })` so that takeover is allowed), or
+ * past the key's 24 hours. The finder looks the row up by the credential-bound
+ * record key and returns it with its stored fingerprint; a matching fingerprint
+ * is answered from the row and nothing runs again, another is 422
+ * `IDEMPOTENCY_KEY_REUSED`, and null means the key has no row yet. A row's
+ * answer, success or failure, is marked `Idempotent-Replayed` and stored under
+ * the key.
  *
  * It works from the validated request and what `authorize` loaded only: no
  * RPC, nothing that can change after the original ran (a token account closed,
@@ -63,7 +68,7 @@ export function replayFromRecord<TAuthorized>(
     recordKey: string
   ) => Promise<RecordAnswer | null>
 ): MiddlewareHandler<{ Bindings: Env }> {
-  return async (c, next: Next) => {
+  const middleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next: Next) => {
     // The credential-bound record key (`getIdempotencyRecordKey`), never the raw header.
     const recordKey = getIdempotencyRecordKey(c);
     if (recordKey !== undefined) {
@@ -82,6 +87,12 @@ export function replayFromRecord<TAuthorized>(
     }
     await next();
   };
+  return Object.assign(middleware, { [RECORD_REPLAY_MARKER]: true });
+}
+
+/** Whether a route step is {@link replayFromRecord}, for route inventory tests. */
+export function declaresRecordReplay(handler: object): boolean {
+  return RECORD_REPLAY_MARKER in handler;
 }
 
 /**

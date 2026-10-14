@@ -46,17 +46,14 @@ export function WalletLabelInlineEditor({
 
     const input = JSON.stringify([walletId, draft.trim()]);
     startTransition(async () => {
-      const result = await updateWalletLabelAction(walletId, draft, actionKey.keyFor(input)).catch(
-        (error) => ({
-          status: "error" as const,
-          message:
-            error instanceof Error
-              ? error.message
-              : t("DashboardCustody.unableToUpdateWalletLabel"),
-        })
-      );
+      const key = actionKey.keyFor(input);
+      const result = await updateWalletLabelAction(walletId, draft, key).catch((error) => ({
+        status: "error" as const,
+        message:
+          error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),
+      }));
 
-      actionKey.settled(input, result);
+      actionKey.settled(input, key, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

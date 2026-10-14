@@ -177,10 +177,10 @@ export PRIVY_APP_SECRET=your_secret
 ### "Kora is not responding"
 ```bash
 # Ensure Kora is running
-pnpm kora:up
+pnpm kora:local:up
 
-# Check connectivity
-curl http://127.0.0.1:8080/health
+# Check connectivity (local devnet Kora)
+curl http://127.0.0.1:18081/health
 ```
 
 ### Run regular Kora wiring against Surfpool

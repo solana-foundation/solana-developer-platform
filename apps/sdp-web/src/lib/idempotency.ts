@@ -1,39 +1,85 @@
+import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types";
+import { z } from "zod";
+
 /** Canonical HTTP header used for retry-safe value-moving requests. */
 export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 
 /** The key sdp-api accepts: 1-255 printable ASCII characters (`idempotency-key.ts` in sdp-api). */
 export const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7e]{1,255}$/;
 
+/** A browser-minted key as a server action receives it, parsed at that boundary. */
+const actionIdempotencyKeySchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN);
+
 /**
  * The headers a server action sends upstream for the Idempotency-Key the
  * browser minted for this user action (HOO-1918), or `undefined` for none or
  * a malformed one. The server never mints a key: a retried action reuses the
  * browser's, and a server-side key would be new on every retry.
+ *
+ * @param key - The browser's value: a form field or an action argument.
  */
-export function actionIdempotencyHeaders(key: unknown): Record<string, string> | undefined {
-  return typeof key === "string" && IDEMPOTENCY_KEY_PATTERN.test(key)
-    ? { [IDEMPOTENCY_KEY_HEADER]: key }
-    : undefined;
+export function actionIdempotencyHeaders(
+  key: FormDataEntryValue | null | undefined
+): Record<string, string> | undefined {
+  const parsed = actionIdempotencyKeySchema.safeParse(key);
+  if (!parsed.success) return undefined;
+  return { [IDEMPOTENCY_KEY_HEADER]: parsed.data };
 }
 
-/** What sdp-api answered a keyed request: its status (`null` for no answer) and replay mark. */
+/**
+ * What sdp-api answered a keyed request: its status (`null` for no answer),
+ * replay mark, and error code (`null` for none, or for a body that names none).
+ */
 export interface ApiAnswer {
   status: number | null;
   replayed: boolean;
+  code: string | null;
+}
+
+/** sdp-api's error envelope, as far as the code goes. */
+const apiErrorCodeSchema = z.object({ error: z.object({ code: z.string() }) });
+
+/**
+ * The error code an sdp-api error body names, or `null` for a body that names
+ * none (a success, a proxy's own refusal, text).
+ *
+ * @param body - The parsed JSON body.
+ */
+export function apiErrorCode(body: unknown): string | null {
+  const parsed = apiErrorCodeSchema.safeParse(body);
+  return parsed.success ? parsed.data.error.code : null;
+}
+
+/** {@link apiErrorCode} of a body still in its raw text, which may not be JSON. */
+export function apiErrorCodeOfText(text: string): string | null {
+  try {
+    return apiErrorCode(JSON.parse(text));
+  } catch {
+    return null;
+  }
 }
 
 /**
  * The one rule every dashboard key holder applies (HOO-1918): an answer retires
  * its key, so the next submit of the same input is a new action, when it is a
- * success, a replay (`Idempotent-Replayed`), or a 422 (the key is another
- * request's). Anything else keeps it, a lost answer included, so the retry is
- * the same request: an unstored refusal simply runs again under it, and a
- * failure recorded after the request's row comes back as a replay, which
- * retires it.
+ * success, a replay (`Idempotent-Replayed`), a 422 (the key is another
+ * request's), or a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` (the original never
+ * recorded its outcome, so every retry under the key gets that same answer; the
+ * user checks the list and sends again under a new key). Anything else keeps
+ * it, a lost answer included, so the retry is the same request: an unstored
+ * refusal (a 409 `IDEMPOTENCY_KEY_IN_FLIGHT` among them) simply runs again
+ * under it, and a failure recorded after the request's row comes back as a
+ * replay, which retires it.
  */
 export function answerRetiresKey(answer: ApiAnswer): boolean {
-  const { status, replayed } = answer;
-  return replayed || (status !== null && ((status >= 200 && status < 300) || status === 422));
+  const { status, replayed, code } = answer;
+  if (replayed) return true;
+  if (status === null) return false;
+  return (
+    (status >= 200 && status < 300) ||
+    status === 422 ||
+    isIdempotencyKeyOutcomeUnknown(status, code)
+  );
 }
 
 /**
@@ -45,9 +91,14 @@ export function fetchResultAnswer(result: {
   ok: boolean;
   status: number | null;
   replayed?: boolean;
+  body?: unknown;
 }): ApiAnswer {
   const answered = result.ok || (result.status !== null && result.status >= 400);
-  return { status: answered ? result.status : null, replayed: result.replayed === true };
+  return {
+    status: answered ? result.status : null,
+    replayed: result.replayed === true,
+    code: answered && !result.ok ? apiErrorCode(result.body) : null,
+  };
 }
 
 /**

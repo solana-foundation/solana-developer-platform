@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
+import * as idempotencyKeysRepository from "@/db/repositories/idempotency-keys.repository";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -12,6 +13,7 @@ import {
   declaredIdempotency,
   getIdempotencyClaim,
   getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
   IDEMPOTENT_REPLAYED_HEADER,
   type IdempotencyOptions,
   idempotent,
@@ -19,6 +21,7 @@ import {
   requestFingerprint,
   runIdempotency,
 } from "./idempotency";
+import { replayFromRecord } from "./movement-steps";
 import { validateBody } from "./validate";
 
 const ORG = "org_idempotency";
@@ -295,7 +298,7 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a hung request's key go once it outlives the renewal cap", async () => {
+  function hungApp(serverErrors: IdempotencyOptions["serverErrors"]) {
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
@@ -304,16 +307,21 @@ describe("idempotent()", () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const { app, create } = buildApp(
-      { key: "required", leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
+    const built = buildApp(
+      { key: "required", serverErrors, leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
       async (c) => {
-        if (create.mock.calls.length === 1) {
+        if (built.create.mock.calls.length === 1) {
           markStarted();
           await released;
         }
         return c.json({ ok: true }, 201);
       }
     );
+    return { ...built, started, release };
+  }
+
+  it("lets a hung request's key go once it outlives the renewal cap on a rerun route", async () => {
+    const { app, create, started, release } = hungApp("rerun");
 
     const first = post(app, "/v1/other", { a: 1 }, KEY);
     await started;
@@ -325,6 +333,127 @@ describe("idempotent()", () => {
 
     expect(takeover.status).toBe(201);
     expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("answers a hung request's retry on a store route with the terminal 409, then replays its outcome", async () => {
+    const { app, create, started, release } = hungApp("store");
+
+    const first = post(app, "/v1/other", { a: 1 }, KEY);
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+    release();
+
+    expect(retry.status).toBe(409);
+    expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
+    expect((await first).status).toBe(201);
+    const replayed = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(replayed.status).toBe(201);
+    expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  /** Runs `body` while every outcome write fails, as if the database dropped after the handler. */
+  async function withFailingCompletes(body: () => Promise<void>): Promise<void> {
+    const actual = idempotencyKeysRepository.createPostgresIdempotencyKeyRepository;
+    const factory = vi
+      .spyOn(idempotencyKeysRepository, "createPostgresIdempotencyKeyRepository")
+      .mockImplementation((db) => ({
+        ...actual(db),
+        complete: async () => {
+          throw new Error("database unavailable");
+        },
+      }));
+    try {
+      await body();
+    } finally {
+      factory.mockRestore();
+    }
+  }
+
+  it("answers a store route's unrecorded outcome with a terminal 409 and never runs it twice", async () => {
+    await withFailingCompletes(async () => {
+      const { app, create } = buildApp({ key: "required", leaseSeconds: 1 }, created);
+
+      expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
+      // Past the 1s lease, which nothing renews once the request answered.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+        expect(retry.status).toBe(409);
+        expect(retry.headers.get("Retry-After")).toBeNull();
+        expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
+      }
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(await storedRows()).toMatchObject([{ status: "in_progress", response_status: null }]);
+    });
+  });
+
+  it("answers a crashed store route's retry with the terminal 409", async () => {
+    const { app, create } = buildApp({ key: "required" }, created);
+    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(201);
+    // A crash before the outcome was written: in progress, lease lapsed, never released.
+    await getDb(env).execute(
+      `UPDATE idempotency_keys
+          SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second',
+              response_status = NULL, response_headers = NULL, response_body = NULL`
+    );
+
+    const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(retry.status).toBe(409);
+    expect(retry.headers.get("Retry-After")).toBeNull();
+    expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  describe("on a store route that recovers from its domain row", () => {
+    function recoveringApp(recovery: IdempotencyOptions["recovery"]) {
+      const rows = new Map<string, { thing: { id: string } }>();
+      const create = vi.fn((c: Context<{ Bindings: Env }>) => {
+        const row = { thing: { id: `thing_${rows.size + 1}` } };
+        const recordKey = getIdempotencyRecordKey(c);
+        if (recordKey === undefined) throw new Error("expected a claimed key");
+        rows.set(recordKey, row);
+        return c.json(row, 201);
+      });
+      const app = testApp();
+      app.post(
+        "/v1/other",
+        idempotent({ key: "required", serverErrors: "store", recovery, leaseSeconds: 1 }),
+        replayFromRecord(async (c, _input, recordKey) => {
+          const row = rows.get(recordKey);
+          return row === undefined ? null : { fingerprint: null, respond: () => c.json(row, 201) };
+        }),
+        (c) => create(c)
+      );
+      return { app, create };
+    }
+
+    it("takes over an unrecorded outcome and answers it from the row", async () => {
+      await withFailingCompletes(async () => {
+        const { app, create } = recoveringApp("record");
+        const first = await post(app, "/v1/other", { a: 1 }, KEY);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+
+        expect(retry.status).toBe(201);
+        expect(await retry.json()).toEqual(await first.json());
+        expect(create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("refuses the takeover without the option", async () => {
+      await withFailingCompletes(async () => {
+        const { app, create } = recoveringApp(undefined);
+        await post(app, "/v1/other", { a: 1 }, KEY);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const retry = await post(app, "/v1/other", { a: 1 }, KEY);
+
+        expect(retry.status).toBe(409);
+        expect(await errorCode(retry)).toBe("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
+        expect(create).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 
   it("does not store a refusal, so the same key runs again", async () => {

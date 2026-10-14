@@ -197,8 +197,9 @@ describe("createProviderWallet", () => {
       });
 
       const cdpOptions = provisionCoinbaseCdpAccountMock.mock.calls[0]?.[1];
-      expect(cdpOptions).not.toHaveProperty("idempotencyKey");
-      expect(cdpOptions).not.toHaveProperty("reuseExisting");
+      // No request id: CDP gets a fresh idempotency key, and a name collision fails.
+      expect(cdpOptions?.idempotencyKey).toBeUndefined();
+      expect(cdpOptions?.reuseExisting).toBe(false);
       expect(provisionPrivyWalletMock).toHaveBeenCalledWith({}, {});
     });
   });

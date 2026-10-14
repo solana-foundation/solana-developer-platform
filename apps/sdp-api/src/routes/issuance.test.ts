@@ -2,9 +2,9 @@
  * Issuance Routes E2E Tests
  */
 
+import * as FeePaymentAdapters from "@sdp/fee-payment";
 import * as Mosaic from "@sdp/issuance/mosaic";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";

@@ -13,6 +13,8 @@ interface RequestableApp {
  * explicitly against the bare app.
  */
 export function withIdempotencyKeys<App extends RequestableApp>(app: App): Pick<App, "request"> {
+  // SAFETY: the wrapper passes its arguments to app.request, adding only a
+  // header, and returns app.request's result.
   return {
     request: (input: string, init: RequestInit = {}, ...rest: never[]) => {
       const method = (init.method ?? "GET").toUpperCase();

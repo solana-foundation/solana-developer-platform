@@ -15,6 +15,28 @@ const STRIPE_SESSION_STATUS = {
   rejected: "failed",
 } as const satisfies Record<string, RampSettlementEvent["kind"]>;
 
+type DeliveredAssetRail = NonNullable<
+  Extract<RampSettlementEvent, { kind: "settled" }>["deliveredAssetRail"]
+>;
+
+/** The rail each Stripe destination currency settles on, on Solana. */
+const STRIPE_SOLANA_RAILS = {
+  usdc: "usdc.solana",
+  sol: "sol.solana",
+} as const satisfies Record<string, DeliveredAssetRail>;
+
+function isStripeSolanaCurrency(currency: string): currency is keyof typeof STRIPE_SOLANA_RAILS {
+  return Object.hasOwn(STRIPE_SOLANA_RAILS, currency);
+}
+
+/** The rail a completed Stripe session delivered, or null for an asset SDP does not sell on Solana. */
+function stripeDeliveredAssetRail(currency: string, network: string): DeliveredAssetRail | null {
+  if (network !== "solana" || !isStripeSolanaCurrency(currency)) {
+    return null;
+  }
+  return STRIPE_SOLANA_RAILS[currency];
+}
+
 interface StripeSignatureHeader {
   timestamp: string;
   signatures: string[];
@@ -163,6 +185,18 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     }
     if (kind === "settled") {
       const transactionDetails = readRecord(session.transaction_details);
+      const currency = transactionDetails
+        ? readString(transactionDetails.destination_currency)
+        : undefined;
+      const network = transactionDetails
+        ? readString(transactionDetails.destination_network)
+        : undefined;
+      if (currency === undefined || network === undefined) {
+        throw badRequest(
+          `Stripe "${type}" webhook is missing the completed session's destination currency or network`,
+          { provider: this.provider }
+        );
+      }
       const receivedAmount = transactionDetails
         ? readString(transactionDetails.destination_amount)
         : undefined;
@@ -170,6 +204,7 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
         provider: this.provider,
         kind,
         reference,
+        deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
         ...(receivedAmount ? { receivedAmount } : {}),
       };
     }

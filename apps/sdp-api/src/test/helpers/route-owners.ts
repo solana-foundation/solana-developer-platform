@@ -12,13 +12,14 @@ export interface StableMutatingRouteStep {
   route: string;
   /** The step's position across the whole app, so steps of one route compare by order. */
   position: number;
-  handler: unknown;
+  handler: object;
 }
 
 /**
  * Every step of every POST, PATCH, PUT and DELETE route owned by a module at
  * `stable`, in mount order. The Idempotency-Key inventories (HOO-1918) read
- * the markers `idempotent()` and `authorize()` leave on these handlers.
+ * the markers `idempotent()`, `authorize()`, `replayFromRecord()` and the
+ * validators leave on these handlers.
  */
 export function stableMutatingRouteSteps(): StableMutatingRouteStep[] {
   const app = createApp({

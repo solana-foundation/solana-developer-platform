@@ -54,8 +54,10 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
+import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types", async (importOriginal) => {
@@ -2468,38 +2470,32 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("ramp session and destination binding", () => {
-    const STRIPE_TEST_ENV = {
-      STRIPE_SECRET_KEY: "sk_test_session_binding",
-      STRIPE_PUBLISHABLE_KEY: "pk_test_session_binding",
-      STRIPE_WEBHOOK_SECRET: "whsec_session_binding",
-    } as const;
-    let originalStripeEnv: Pick<
-      typeof env,
-      "STRIPE_SECRET_KEY" | "STRIPE_PUBLISHABLE_KEY" | "STRIPE_WEBHOOK_SECRET"
-    >;
+    installStripeTestEnv();
 
-    beforeEach(() => {
-      originalStripeEnv = {
-        STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
-        STRIPE_PUBLISHABLE_KEY: env.STRIPE_PUBLISHABLE_KEY,
-        STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
+    /** Answers a session create the way Stripe does, echoing the request's locked terms. */
+    function stripeSessionResponse(sessionId: string) {
+      return async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        if (!(init?.body instanceof URLSearchParams)) {
+          throw new Error("Expected the Stripe session request to send a form body");
+        }
+        const form = init.body;
+        return new Response(
+          JSON.stringify({
+            id: sessionId,
+            client_secret: `${sessionId}_secret`,
+            status: "initialized",
+            transaction_details: {
+              destination_currencies: form.getAll("destination_currencies[]"),
+              destination_networks: form.getAll("destination_networks[]"),
+              lock_wallet_address: form.get("lock_wallet_address") === "true",
+              source_amount: form.get("source_amount"),
+              source_currency: form.get("source_currency"),
+              wallet_addresses: { solana: form.get("wallet_addresses[solana]") },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
       };
-      Object.assign(env, STRIPE_TEST_ENV);
-    });
-
-    afterEach(() => {
-      Object.assign(env, originalStripeEnv);
-    });
-
-    function stripeSessionResponse(sessionId: string): Response {
-      return new Response(
-        JSON.stringify({
-          id: sessionId,
-          client_secret: `${sessionId}_secret`,
-          status: "initialized",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
     }
 
     async function createStripeOnrampQuote(
@@ -2531,9 +2527,9 @@ describe("Payments routes — ramps", () => {
       const counterpartyId = await seedCounterparty({ externalId: "stripe_bind_reuse" });
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"))
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"))
-        .mockResolvedValueOnce(stripeSessionResponse("cos_bind_reuse_1"));
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"))
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"))
+        .mockImplementationOnce(stripeSessionResponse("cos_bind_reuse_1"));
 
       const created = await createStripeOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
@@ -2555,18 +2551,24 @@ describe("Payments routes — ramps", () => {
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
         .run();
+      const otherTenantProjects = await seedDefaultProjects(getDb(env), {
+        organizationId: "org_test_other_tenant",
+        createdBy: TEST_USER.id,
+        members: [],
+      });
       await getDb(env)
         .prepare(
           `INSERT INTO payment_transfers (
              id, organization_id, project_id, wallet_id, source_address, destination_address,
              token, amount, memo, type, direction, status, provider, provider_reference,
              delivery_mode, provider_data, created_at, updated_at
-           ) VALUES (?, ?, NULL, ?, NULL, ?, 'USDC', NULL, NULL, 'onramp', 'inbound', 'pending',
+           ) VALUES (?, ?, ?, ?, NULL, ?, 'USDC', NULL, NULL, 'onramp', 'inbound', 'pending',
                      'stripe', ?, 'session_widget', ?::jsonb, ?, ?)`
         )
         .bind(
           "xfr_stripe_foreign_tenant",
           "org_test_other_tenant",
+          otherTenantProjects.sandbox.id,
           "wallet_other_tenant",
           TEST_SOLANA_ADDRESSES.wallet2,
           "cos_foreign_1",
@@ -2577,7 +2579,7 @@ describe("Payments routes — ramps", () => {
         .run();
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(stripeSessionResponse("cos_foreign_1"));
+        .mockImplementationOnce(stripeSessionResponse("cos_foreign_1"));
 
       const res = await createStripeOnrampQuote(counterpartyId, "25");
 

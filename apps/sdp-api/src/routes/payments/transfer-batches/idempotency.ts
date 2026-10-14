@@ -22,15 +22,19 @@ export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
     typeof options === "object" &&
     !Array.isArray(options) &&
     Object.keys(options).length === 0;
-  return {
+  const canonical: { [key: string]: JsonValue } = {
     ...rest,
-    ...(options === undefined || emptyOptions ? {} : { options }),
     recipients: recipients
       .map((recipient) => canonicalizeDecimalFields(recipient, ["amount"]))
-      .sort((a, b) => {
-        const left = canonicalJson(a);
-        const right = canonicalJson(b);
-        return left < right ? -1 : left > right ? 1 : 0;
-      }),
+      .sort((a, b) => compareCodeUnits(canonicalJson(a), canonicalJson(b))),
   };
+  if (options !== undefined && !emptyOptions) {
+    canonical.options = options;
+  }
+  return canonical;
+}
+
+/** Orders strings by UTF-16 code unit, independent of the runtime's locale: -1, 0 or 1. */
+function compareCodeUnits(left: string, right: string): number {
+  return Number(left > right) - Number(left < right);
 }

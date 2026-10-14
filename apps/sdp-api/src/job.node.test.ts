@@ -12,7 +12,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
-import { pruneIdempotencyKeys } from "@/services/jobs/prune-idempotency-keys";
+import * as pruneIdempotencyKeysModule from "@/services/jobs/prune-idempotency-keys";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
@@ -96,10 +96,6 @@ vi.mock("@/cron/secret-retirements", () => ({
   SECRET_RETIREMENTS_MONITOR: "sdp-api-retire-secrets",
 }));
 
-vi.mock("@/cron/idempotency-keys", () => ({
-  IDEMPOTENCY_KEY_PRUNE_MONITOR: "sdp-api-prune-idempotency-keys",
-}));
-
 vi.mock("@/db/client", () => ({
   closeDatabasePools: vi.fn(async () => {}),
 }));
@@ -122,10 +118,6 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 vi.mock("@/services/jobs/retire-orphaned-secrets", () => ({
   retireOrphanedSecrets: vi.fn(async () => ({ retired: 0, failed: 0 })),
-}));
-
-vi.mock("@/services/jobs/prune-idempotency-keys", () => ({
-  pruneIdempotencyKeys: vi.fn(async () => ({ deleted: 0, capped: false })),
 }));
 
 vi.mock("@/services/jobs/cleanup-provider-credential-secrets", () => ({
@@ -235,9 +227,12 @@ describe("runCronJob", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(retireOrphanedSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
-    vi.mocked(pruneIdempotencyKeys)
-      .mockReset()
-      .mockResolvedValue({ deleted: 0, unfinished: 0, capped: false });
+    // A work function, so it is swapped on the shared module rather than mocked.
+    vi.spyOn(pruneIdempotencyKeysModule, "pruneIdempotencyKeys").mockResolvedValue({
+      deleted: 0,
+      unfinished: 0,
+      capped: false,
+    });
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset().mockResolvedValue({
       cleaned: 0,
       skipped: 0,
@@ -688,11 +683,13 @@ describe("runCronJob", () => {
   it("prunes expired idempotency keys without failing the job when the prune throws", async () => {
     const env = makeEnv();
     vi.mocked(getProcessEnv).mockReturnValue(env);
-    vi.mocked(pruneIdempotencyKeys).mockRejectedValueOnce(new Error("database busy"));
+    vi.mocked(pruneIdempotencyKeysModule.pruneIdempotencyKeys).mockRejectedValueOnce(
+      new Error("database busy")
+    );
 
     await expect(runCronJob()).resolves.toBeUndefined();
 
-    expect(pruneIdempotencyKeys).toHaveBeenCalledExactlyOnceWith(env);
+    expect(pruneIdempotencyKeysModule.pruneIdempotencyKeys).toHaveBeenCalledExactlyOnceWith(env);
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
   });
 

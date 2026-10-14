@@ -11,6 +11,7 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 
 const mocks = vi.hoisted(() => ({
+  projectId: "prj_test_sandbox",
   createWallet: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
   initialize: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
 }));
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-    selectedProjectId: "prj_test_sandbox",
+    selectedProjectId: mocks.projectId,
     projects: [{ id: "prj_test_sandbox", name: "Default Sandbox Project" }],
     sdpEnvironment: "sandbox",
   }),
@@ -88,6 +89,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mocks.projectId = "prj_test_sandbox";
 });
 
 describe("provider step", () => {
@@ -241,6 +243,28 @@ describe("details step", () => {
     expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
     expect(mocks.createWallet).not.toHaveBeenCalled();
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
+  it("gives the same setup in another project its own key, so it never settles this one's", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const submit = async () => {
+      renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+      fireEvent.change(screen.getByLabelText("Wallet label"), {
+        target: { value: "Per-project treasury" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      });
+      cleanup();
+    };
+
+    await submit();
+    mocks.projectId = "prj_test_other";
+    await submit();
+
+    const [inSandbox, inOther] = mocks.initialize.mock.calls.map(([form]) => form);
+    expect(inSandbox?.get("idempotencyKey")).toEqual(expect.any(String));
+    expect(inOther?.get("idempotencyKey")).not.toBe(inSandbox?.get("idempotencyKey"));
   });
 
   it("points to adding a wallet when the provider was set up in the meantime", async () => {

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.85.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.84.0...v0.85.0) (2026-10-13)
+
+### Features
+
+* **payments:** validate ramp provider responses and add a contract suite ([#2327](https://github.com/solana-foundation/solana-developer-platform/pull/2327)) ([ef89788](https://github.com/solana-foundation/solana-developer-platform/commit/ef89788f58cda624431b4596e12c67b239d9329c))
+* **payments:** keep provider error text out of API responses ([#2326](https://github.com/solana-foundation/solana-developer-platform/pull/2326)) ([b987b37](https://github.com/solana-foundation/solana-developer-platform/commit/b987b3738277a41a6bb9c54737f4ad25b6a57f83))
+* **api:** the custody signer and fee sponsor refuse money starts an organization may not make ([#2263](https://github.com/solana-foundation/solana-developer-platform/pull/2263)) ([90423e5](https://github.com/solana-foundation/solana-developer-platform/commit/90423e5dcf0d8ed5bc46a57fbc7b63a006f23b99))
+
+### Bug Fixes
+
+* **api:** authentication reads organization and key status fresh on every request ([#2262](https://github.com/solana-foundation/solana-developer-platform/pull/2262)) ([affe109](https://github.com/solana-foundation/solana-developer-platform/commit/affe1097b7c5a812481e818cdf1d623fc9db3f28))
+
+### Refactors
+
+* **payments:** ramp settlements write through one transition table ([#2330](https://github.com/solana-foundation/solana-developer-platform/pull/2330)) ([ae031f9](https://github.com/solana-foundation/solana-developer-platform/commit/ae031f91ab131ba78c1175fbf014068f9b30bfa5))
+* **payments:** remove Lightspark and retire its provider id ([#2322](https://github.com/solana-foundation/solana-developer-platform/pull/2322)) ([139da90](https://github.com/solana-foundation/solana-developer-platform/commit/139da90171b5ea5e2541ce285bec43a37fe1fab4))
+
+### Maintenance
+
+* **api:** pin the constructors that could bypass the signing waists, and record ADR 0007 ([#2264](https://github.com/solana-foundation/solana-developer-platform/pull/2264)) ([eeafb7f](https://github.com/solana-foundation/solana-developer-platform/commit/eeafb7f43b83078b863172ceb6487272730c8135))
+* **web:** match the redesigned wallet card link in the stage smoke ([#2323](https://github.com/solana-foundation/solana-developer-platform/pull/2323)) ([b57d1b4](https://github.com/solana-foundation/solana-developer-platform/commit/b57d1b43dc2cb17985a34bff3a147a5ddbef7a38))
+
 ## [0.84.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.83.1...v0.84.0) (2026-10-13)
 
 ### ⚠ BREAKING CHANGES

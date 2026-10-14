@@ -258,7 +258,7 @@ export async function updateWalletLabelAction(
     return {
       status: "error",
       message: t("DashboardCustody.walletIdRequired"),
-      answer: { status: null, replayed: false },
+      answer: { status: null, replayed: false, code: null },
     };
   }
 

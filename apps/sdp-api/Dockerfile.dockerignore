@@ -27,6 +27,7 @@ packages/*
 !packages/sdp-redaction
 !packages/sdp-solana
 !packages/sdp-payments
+!packages/sdp-fee-payment
 !packages/sdp-issuance
 !packages/sdp-private-channels
 !packages/sdp-spc-escrow

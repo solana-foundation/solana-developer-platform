@@ -37,6 +37,7 @@ transferBatches.post(
   idempotent({
     key: "required",
     serverErrors: "rerun",
+    recovery: "record",
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
   }),

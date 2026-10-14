@@ -203,7 +203,7 @@ export async function resolveRampQuoteRequest(
 ): Promise<RampQuoteResolved> {
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
-  await admitRamp(c, { need: "quote", provider: input.provider });
+  await admitRamp(c, { need: "quote", provider: input.provider, direction, custodyWalletId });
 
   const projectId = requireProjectId(c);
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({

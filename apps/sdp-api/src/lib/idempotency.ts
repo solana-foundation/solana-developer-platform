@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { conflict } from "@/lib/errors";
 
 /**
@@ -80,14 +81,10 @@ export function isAbandonedReservation(row: { status: string; updated_at: string
   );
 }
 
-/** A JSON value as `JSON.parse` returns it. */
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+/** A JSON value as `JSON.parse` returns it; parse untrusted values through it. */
+export const jsonValueSchema = z.json();
+
+export type JsonValue = z.infer<typeof jsonValueSchema>;
 
 /**
  * For an Idempotency-Key fingerprint (HOO-1918): the body with each named

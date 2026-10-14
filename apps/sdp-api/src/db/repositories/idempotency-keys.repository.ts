@@ -22,6 +22,14 @@ export interface IdempotencyKeyClaimInput {
   /** The credential (API key id or user id) making the request. */
   principal: string;
   fingerprint: string;
+  /**
+   * Whether a claim whose lease lapsed without being released (a crash, a
+   * failed outcome write, a request past its renewal cap) may be taken over:
+   * only where the route answers the retry from its own domain row. Otherwise
+   * the earlier attempt may have run and nothing records it, so the claim
+   * answers `outcome_unknown` until it expires.
+   */
+  takeOverLapsed: boolean;
   leaseSeconds: number;
   retentionSeconds: number;
 }
@@ -55,7 +63,12 @@ export type IdempotencyKeyClaim =
   /** The key was first used for a different request or by another credential. */
   | { kind: "mismatch" }
   /** Another request holds a live lease on the key. */
-  | { kind: "in_flight"; retryAfterSeconds: number };
+  | { kind: "in_flight"; retryAfterSeconds: number }
+  /**
+   * The key's request lapsed without recording an outcome or being released,
+   * and this route may not take it over: whether it ran is unknown.
+   */
+  | { kind: "outcome_unknown" };
 
 export interface IdempotencyKeyRepository {
   claim(input: IdempotencyKeyClaimInput): Promise<IdempotencyKeyClaim>;
@@ -84,6 +97,7 @@ const existingRowSchema = z.discriminatedUnion("status", [
     principal: z.string(),
     fingerprint: z.string(),
     retry_after_seconds: z.number().int(),
+    lapsed_unreleased: z.boolean(),
   }),
   z.object({
     status: z.literal("completed"),
@@ -173,8 +187,9 @@ export function createPostgresIdempotencyKeyRepository(
       };
     }
 
-    // An earlier attempt with this request crashed or failed and its lease is
-    // over: this request takes the row over and runs again.
+    // An earlier attempt with this request failed (released) or, on a route
+    // that allows it, crashed, and its lease is over: this request takes the
+    // row over and runs again.
     const takenOver = await db
       .prepare(
         `UPDATE idempotency_keys
@@ -183,6 +198,7 @@ export function createPostgresIdempotencyKeyRepository(
           WHERE ${scope.sql}
             AND status = 'in_progress' AND principal = ? AND fingerprint = ?
             AND locked_until <= now() AND expires_at > now()
+            AND (released OR ?::boolean)
           RETURNING id`
       )
       .bind(
@@ -191,7 +207,8 @@ export function createPostgresIdempotencyKeyRepository(
         input.leaseSeconds,
         ...scope.params,
         input.principal,
-        input.fingerprint
+        input.fingerprint,
+        input.takeOverLapsed
       )
       .first<{ id: string }>();
     if (takenOver !== null) {
@@ -202,7 +219,8 @@ export function createPostgresIdempotencyKeyRepository(
       .prepare(
         `SELECT principal, fingerprint, status, response_status, response_headers, response_body,
                 GREATEST(1, CEIL(EXTRACT(EPOCH FROM (locked_until - now()))))::int
-                  AS retry_after_seconds
+                  AS retry_after_seconds,
+                (locked_until <= now() AND NOT released) AS lapsed_unreleased
            FROM idempotency_keys
           WHERE ${scope.sql} AND expires_at > now()`
       )
@@ -225,6 +243,10 @@ export function createPostgresIdempotencyKeyRepository(
           body: row.response_body,
         },
       };
+    }
+    if (row.lapsed_unreleased) {
+      // Reached only when the takeover above was not allowed.
+      return { kind: "outcome_unknown" };
     }
     return { kind: "in_flight", retryAfterSeconds: row.retry_after_seconds };
   }
@@ -308,7 +330,11 @@ export function createPostgresIdempotencyKeyRepository(
         )
         .bind(limit)
         .first<{ deleted: number; unfinished: number }>();
-      return { deleted: row?.deleted ?? 0, unfinished: row?.unfinished ?? 0 };
+      if (row === null) {
+        // The aggregate returns one row even when nothing was deleted.
+        throw new Error("idempotency key prune returned no row");
+      }
+      return { deleted: row.deleted, unfinished: row.unfinished };
     },
   };
 }

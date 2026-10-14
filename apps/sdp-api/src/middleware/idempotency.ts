@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { IdempotencyKeyMode } from "@sdp/types";
+import {
+  assertNever,
+  type IdempotencyKeyMode,
+  isBodylessHttpStatus,
+  isIdempotencyUnstoredStatus,
+} from "@sdp/types";
 import type { Context, MiddlewareHandler, Next } from "hono";
 import { routePath } from "hono/route";
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status";
@@ -11,7 +16,12 @@ import {
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
 import { AppError, internalError } from "@/lib/errors";
-import { canonicalJson, deriveProviderRequestId, type JsonValue } from "@/lib/idempotency";
+import {
+  canonicalJson,
+  deriveProviderRequestId,
+  type JsonValue,
+  jsonValueSchema,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -26,6 +36,8 @@ export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
  * tests.
  */
 export const IDEMPOTENCY_MARKER = Symbol.for("sdp.idempotency");
+/** Marks an {@link idempotent} handler with its `recovery` option, for route inventory tests. */
+const IDEMPOTENCY_RECOVERY_MARKER = Symbol.for("sdp.idempotency.recovery");
 
 export interface IdempotencyOptions {
   key: IdempotencyKeyMode;
@@ -51,8 +63,20 @@ export interface IdempotencyOptions {
    *   Only for a route whose handler writes its own row under a unique key
    *   before it moves anything, and replays that row on a retry, because that
    *   row is what recovers the earlier attempt.
+   *
+   * A `rerun` route also lets a retry take over a claim whose lease lapsed
+   * without an outcome (a crash, a failed write of the outcome); see
+   * {@link IdempotencyOptions.recovery} for a `store` route.
    */
   serverErrors: "store" | "rerun";
+  /**
+   * `record`: the route mounts `replayFromRecord` after this step, so a retry
+   * that takes over a claim whose lease lapsed without an outcome is answered
+   * from the domain row instead of running again. Set it on every route that
+   * mounts `replayFromRecord`. Without it (and without `rerun`) such a retry
+   * gets the terminal 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`.
+   */
+  recovery?: "record";
   /**
    * Rewrites the parsed JSON body before it is fingerprinted, for a route where
    * two spellings mean the same request (for example, recipients whose order
@@ -64,10 +88,12 @@ export interface IdempotencyOptions {
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
 /**
  * The longest a request keeps renewing its lease. Past it, renewal stops and a
- * retry can take the key over once the lease runs out: a request still running
- * after this long is hung, and holding its key would block every retry for the
- * 24 hours the key lives. Statement and signing timeouts end requests well
- * before it.
+ * retry on a route that recovers from its row (`rerun`, or `recovery:
+ * "record"`) can take the key over once the lease runs out: a request still
+ * running after this long is hung, and holding its key would block every
+ * retry for the 24 hours the key lives. Any other route answers that retry
+ * with the terminal `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`. Statement and signing
+ * timeouts end requests well before it.
  */
 export const MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS = 15 * 60;
 export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
@@ -75,17 +101,6 @@ export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
 export const MAX_STORED_RESPONSE_BYTES = 1024 * 1024;
 const COMPLETE_ATTEMPTS = 3;
 
-/**
- * Statuses that are not stored while the request has changed nothing: it was
- * refused, so a retry with the same key runs again. Stripe saves no result for
- * validation failures or concurrent conflicts; refusals of the caller (401,
- * 403, 429) are re-evaluated on every attempt too. Once the handler has
- * written its domain row ({@link markIdempotencyCommitted}), any status is
- * stored: the request did change something, and its retry gets the same answer.
- */
-const UNSTORED_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 409, 429]);
-/** Statuses whose responses carry no body. */
-const BODYLESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 /** Response headers a replay carries back. Everything else is per-request. */
 const STORED_RESPONSE_HEADERS = ["content-type", "location"] as const;
 
@@ -129,8 +144,7 @@ async function readFingerprintBody(
     const raw = await c.req.text();
     try {
       // An empty body reaches validateBody as `{}`, so it is the same request.
-      // SAFETY: JSON.parse returns a JSON value by definition.
-      parsed = raw.trim().length === 0 ? {} : (JSON.parse(raw) as JsonValue);
+      parsed = raw.trim().length === 0 ? {} : jsonValueSchema.parse(JSON.parse(raw));
     } catch {
       // Tagged so it can never equal a parsed body.
       return ["unparsed", raw];
@@ -139,14 +153,20 @@ async function readFingerprintBody(
   return canonicalize ? canonicalize(parsed) : parsed;
 }
 
-/** A validator's output as JSON: dates as ISO strings, bigints as strings, undefined dropped. */
+/**
+ * A validator's output as JSON: dates as ISO strings, bigints as strings,
+ * undefined dropped. It parses whatever the route's validator stored, so like
+ * any parser it takes `unknown`.
+ */
 function toJsonValue(value: unknown): JsonValue {
-  // SAFETY: JSON.parse of JSON.stringify output is a JSON value by definition.
-  return JSON.parse(
-    JSON.stringify(value, (_key, entry: unknown) =>
-      typeof entry === "bigint" ? entry.toString() : entry
-    ) ?? "null"
-  ) as JsonValue;
+  return jsonValueSchema.parse(
+    JSON.parse(
+      // A target with no validator stringifies to undefined; it fingerprints as null.
+      JSON.stringify(value, (_key, entry: unknown) =>
+        typeof entry === "bigint" ? entry.toString() : entry
+      ) ?? "null"
+    )
+  );
 }
 
 function replay(c: Context<{ Bindings: Env }>, stored: StoredIdempotentResponse): Response {
@@ -192,7 +212,7 @@ async function snapshot(response: Response, operation: string): Promise<StoredId
     const value = response.headers.get(name);
     if (value !== null) headers[name] = value;
   }
-  if (BODYLESS_STATUSES.has(response.status)) {
+  if (isBodylessHttpStatus(response.status)) {
     return { status: response.status, headers, body: null };
   }
   let body: string | null;
@@ -264,8 +284,9 @@ function startLeaseRenewal(
       pending = pending.then(async () => {
         if (stopped) return;
         if (Date.now() - startedAt >= maxRenewalSeconds * 1000) {
-          // Hung: let the lease run out so a retry can take the key over. The
-          // handler's own row keeps that retry from moving anything twice.
+          // Hung: let the lease run out so a retry on a route that recovers
+          // from its row can take the key over. That row keeps the retry from
+          // moving anything twice.
           stopped = true;
           clearInterval(timer);
           getLogger().error(
@@ -348,6 +369,7 @@ export async function runIdempotency(
     // response produced for a narrower or wider credential.
     principal: auth.id,
     fingerprint,
+    takeOverLapsed: options.serverErrors === "rerun" || options.recovery === "record",
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   });
@@ -363,6 +385,11 @@ export async function runIdempotency(
       logOutcome(operation, idempotencyKey, "in_flight");
       c.header("Retry-After", String(claim.retryAfterSeconds));
       throw new AppError("IDEMPOTENCY_KEY_IN_FLIGHT");
+    case "outcome_unknown":
+      // Terminal and never stored: the claim stays as it is, so every retry
+      // with this key gets the same answer until it expires.
+      logOutcome(operation, idempotencyKey, "outcome_unknown");
+      throw new AppError("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN");
     case "claimed":
       // The handler records it on its domain row, so a retry past the key's
       // 24 hours is matched by the same request identity.
@@ -377,6 +404,8 @@ export async function runIdempotency(
         );
       }
       break;
+    default:
+      return assertNever(claim);
   }
 
   const freshClaim = claim.fresh;
@@ -421,7 +450,10 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    if (UNSTORED_STATUSES.has(response.status) && c.get("idempotencyCommitted") !== true) {
+    // Once the handler has written its domain row (markIdempotencyCommitted),
+    // any status is stored: the request changed something, so its retry gets
+    // the same answer.
+    if (isIdempotencyUnstoredStatus(response.status) && c.get("idempotencyCommitted") !== true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
@@ -452,8 +484,9 @@ async function record(
       return;
     } catch (error) {
       if (attempt === COMPLETE_ATTEMPTS) {
-        // The lease runs out and a retry runs again; only the handler's own
-        // row stands between that retry and a second execution.
+        // The lease runs out. A route that recovers from its row answers the
+        // retry from it; any other route refuses it with the terminal
+        // IDEMPOTENCY_KEY_OUTCOME_UNKNOWN rather than run it again.
         getLogger().error(
           { operation, status: stored.status, ...describeError(error) },
           "idempotency: failed to record the outcome"
@@ -479,12 +512,23 @@ async function settle(write: () => Promise<unknown>, operation: string): Promise
 export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bindings: Env }> {
   const middleware: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
     runIdempotency(c, next, options);
-  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: options.key });
+  return Object.assign(middleware, {
+    [IDEMPOTENCY_MARKER]: options.key,
+    [IDEMPOTENCY_RECOVERY_MARKER]: options.recovery,
+  });
+}
+
+/** Whether an {@link idempotent} handler declares `recovery: "record"`, for route inventories. */
+export function declaredIdempotencyRecovery(handler: object): "record" | undefined {
+  if (!(IDEMPOTENCY_RECOVERY_MARKER in handler)) return undefined;
+  return handler[IDEMPOTENCY_RECOVERY_MARKER] === "record" ? "record" : undefined;
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
-export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
-  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+export function declaredIdempotency(handler: object): IdempotencyKeyMode | undefined {
+  // SAFETY: the marker is a registered symbol only idempotent() sets, always to
+  // an IdempotencyKeyMode; any other handler lacks it and reads undefined.
+  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode })[IDEMPOTENCY_MARKER];
 }
 
 /**

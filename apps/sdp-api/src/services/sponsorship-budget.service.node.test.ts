@@ -1,4 +1,4 @@
-import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
 import {
   type Blockhash,
   compileTransaction,

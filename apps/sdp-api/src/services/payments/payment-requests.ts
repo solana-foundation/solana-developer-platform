@@ -96,6 +96,7 @@ async function settlePaymentRequestIfPaid(
   custodyWalletId: string
 ): Promise<PaymentRequestRow> {
   const projectId = row.project_id;
+  // TODO: once migration 0129 makes payment_requests.project_id NOT NULL (HOO-1966), narrow PaymentRequestRow.project_id to string and delete this guard.
   if (projectId === null) {
     throw internalError("payment_requests row is missing project_id");
   }

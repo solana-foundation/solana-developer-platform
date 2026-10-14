@@ -146,7 +146,8 @@ const providerWalletLifecycleRegistry = {
           walletSeed: params.requestId ?? crypto.randomUUID(),
           network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
-          ...(params.requestId ? { idempotencyKey: params.requestId, reuseExisting: true } : {}),
+          idempotencyKey: params.requestId,
+          reuseExisting: params.requestId !== undefined,
         })
       );
 
