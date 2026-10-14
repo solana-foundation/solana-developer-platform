@@ -218,7 +218,7 @@ function collectAdditions(statements) {
     const constraint = action.match(ADD_CONSTRAINT);
     const column = !constraint && action.match(ADD_COLUMN);
     if (constraint) {
-      if (constraint[1]) remember(normalize(constraint[1]), { index, certain: true });
+      if (constraint[1]) remember(normalize(constraint[1]), { index, certain: true, table });
     } else if (column) {
       if (!newColumns.has(table)) newColumns.set(table, new Map());
       newColumns.get(table).set(normalize(column[2]), {
@@ -464,7 +464,7 @@ function trackNotNullChecks(checks, statement, { countAdds }) {
   }
 }
 
-function blockingActionFinding(action, table, newTable, index, context, checks) {
+function blockingActionFinding(action, { table, newTable, index, context, proven }) {
   if (newTable) return null;
   const constraint = action.match(ADD_CONSTRAINT);
   if (constraint) {
@@ -479,8 +479,9 @@ function blockingActionFinding(action, table, newTable, index, context, checks) 
   }
   const validate = action.match(VALIDATE_CONSTRAINT);
   if (validate) {
+    // This statement counts too: PostgreSQL validates after it adds, in any order.
     const addedHere = (context.created.get(normalize(validate[1])) ?? []).some(
-      (entry) => entry.index < index
+      (entry) => entry.table === table && entry.index <= index
     );
     return addedHere
       ? "validates a constraint in the migration that adds it, so the scan runs under the add's lock"
@@ -489,10 +490,7 @@ function blockingActionFinding(action, table, newTable, index, context, checks) 
   const alterColumn = action.match(ALTER_COLUMN);
   if (alterColumn && /^SET\s+NOT\s+NULL\b/i.test(alterColumn[2])) {
     const column = normalize(alterColumn[1]);
-    const validatedCheck = [...(checks.get(table)?.values() ?? [])].some(
-      (check) => check.column === column && check.validated
-    );
-    return context.newColumns.get(table)?.get(column)?.certain || validatedCheck
+    return context.newColumns.get(table)?.get(column)?.certain || proven.has(column)
       ? null
       : "sets NOT NULL without a validated CHECK (column IS NOT NULL), blocking reads and writes while every row is checked";
   }
@@ -510,8 +508,21 @@ function statementBlockingFindings(statement, index, context, checks, scope) {
   if (!alter) return [];
   const table = normalize(alter[1]);
   const newTable = tableIsNew(context, table, index, scope);
-  return splitTopLevel(statement.slice(alter[0].length))
-    .map((action) => blockingActionFinding(action, table, newTable, index, context, checks))
+  const actions = splitTopLevel(statement.slice(alter[0].length));
+  // PostgreSQL drops constraints before it sets NOT NULL, in any order.
+  const dropped = new Set(
+    actions.flatMap((action) => {
+      const drop = action.match(DROP_CONSTRAINT);
+      return drop ? [normalize(drop[1])] : [];
+    })
+  );
+  const proven = new Set(
+    [...(checks.get(table) ?? new Map())]
+      .filter(([name, check]) => check.validated && !dropped.has(name))
+      .map(([, check]) => check.column)
+  );
+  return actions
+    .map((action) => blockingActionFinding(action, { table, newTable, index, context, proven }))
     .filter(Boolean);
 }
 

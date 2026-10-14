@@ -432,7 +432,20 @@ test("a NOT VALID constraint is validated by a later migration, not the one that
     ),
     ["validates a constraint in the migration that adds it"]
   );
+  assert.deepEqual(
+    blockers(
+      "ALTER TABLE a ADD CONSTRAINT a_b_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID, VALIDATE CONSTRAINT a_b_fk;"
+    ),
+    ["validates a constraint in the migration that adds it"]
+  );
   assert.deepEqual(findBlockingStatements("ALTER TABLE a VALIDATE CONSTRAINT a_b_fk;"), []);
+  assert.deepEqual(
+    findBlockingStatements(
+      "ALTER TABLE a ADD CONSTRAINT shared_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID;\n" +
+        "ALTER TABLE c VALIDATE CONSTRAINT shared_fk;"
+    ),
+    []
+  );
   assert.deepEqual(findBlockingStatements(readMigration("0100_transaction_status_checks.sql")), []);
   assert.deepEqual(
     findBlockingStatements(readMigration("0109_transaction_status_checks_validate.sql")),
@@ -460,6 +473,12 @@ test("SET NOT NULL needs a CHECK an earlier migration added and validated before
     blockers(`ALTER TABLE a DROP CONSTRAINT a_x_not_null;\n${setNotNull}`, validated),
     flagged
   );
+  for (const sameStatement of [
+    "ALTER TABLE a DROP CONSTRAINT a_x_not_null, ALTER COLUMN x SET NOT NULL;",
+    "ALTER TABLE a ALTER COLUMN x SET NOT NULL, DROP CONSTRAINT a_x_not_null;",
+  ]) {
+    assert.deepEqual(blockers(sameStatement, validated), flagged);
+  }
   assert.deepEqual(blockers(setNotNull, [...validated, "ALTER TABLE a DROP COLUMN x;"]), flagged);
   assert.deepEqual(blockers("ALTER TABLE a ALTER COLUMN y SET NOT NULL;", validated), flagged);
 

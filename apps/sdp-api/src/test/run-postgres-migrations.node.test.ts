@@ -15,10 +15,10 @@ const SET_LOCK_TIMEOUT = "SELECT set_config('lock_timeout', $1, true)";
 const RECORD_MIGRATION = "INSERT INTO schema_migrations (version) VALUES ($1)";
 
 function migrationClient(
-  options: { invalidIndex?: boolean; fail?: (query: string) => unknown } = {}
+  options: { invalidIndex?: boolean; fail?: (query: string) => Error | undefined } = {}
 ) {
   return {
-    query: vi.fn(async (query: string, _values?: unknown[]) => {
+    query: vi.fn(async (query: string, _values?: string[]) => {
       const failure = options.fail?.(query);
       if (failure) throw failure;
       return {
@@ -286,7 +286,9 @@ describe("Postgres migration runner under live lock contention", () => {
         "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1",
         [migratorPid]
       );
-      if (rows[0]?.wait_event_type === "Lock") return;
+      const [backend] = rows;
+      if (!backend) throw new Error(`backend ${migratorPid} is gone`);
+      if (backend.wait_event_type === "Lock") return;
       await sleep(10);
     }
     throw new Error("the migration never waited on a lock");
@@ -306,7 +308,9 @@ describe("Postgres migration runner under live lock contention", () => {
     traffic = new Client({ connectionString: adminDatabaseUrl });
     await Promise.all([migrator.connect(), blocker.connect(), traffic.connect()]);
     const { rows } = await migrator.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-    migratorPid = rows[0]?.pid ?? 0;
+    const [backend] = rows;
+    if (!backend) throw new Error("pg_backend_pid() returned no row");
+    migratorPid = backend.pid;
   });
 
   afterAll(async () => {
@@ -337,7 +341,7 @@ describe("Postgres migration runner under live lock contention", () => {
       lockTimeout: "300ms",
       lockRetryDelaysMs: [10, 10],
     });
-    const outcome = migration.catch((error: unknown) => error);
+    const rejected = expect(migration).rejects.toMatchObject({ code: "55P03" });
     await untilMigratorWaitsOnLock();
 
     // Queued behind the migration's ACCESS EXCLUSIVE request, this read would
@@ -345,7 +349,7 @@ describe("Postgres migration runner under live lock contention", () => {
     const { rows } = await traffic.query(`SELECT count(*)::int AS total FROM ${table}`);
     expect(rows).toEqual([{ total: 1 }]);
 
-    expect(await outcome).toMatchObject({ code: "55P03" });
+    await rejected;
     expect(await recorded()).toEqual([]);
     const columns = await traffic.query(
       "SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = 'note'",
@@ -355,9 +359,9 @@ describe("Postgres migration runner under live lock contention", () => {
   });
 
   it("applies the migration on a retry once the lock frees", async () => {
-    let release: Promise<unknown> | undefined;
+    let release: Promise<void> | undefined;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {
-      release ??= blocker.query("COMMIT");
+      release ??= blocker.query("COMMIT").then(() => undefined);
     });
     await blocker.query("BEGIN");
     await blocker.query(`SELECT id FROM ${table}`);

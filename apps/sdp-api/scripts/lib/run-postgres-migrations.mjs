@@ -130,7 +130,7 @@ async function runInTransaction(
     } catch (error) {
       await client.query("ROLLBACK");
       const delay = lockRetryDelaysMs[attempt];
-      if (error?.code !== LOCK_NOT_AVAILABLE || delay === undefined) throw error;
+      if (error.code !== LOCK_NOT_AVAILABLE || delay === undefined) throw error;
       console.warn(
         `${label}: ${error.message}; retrying in ${delay} ms (attempt ${attempt + 2} of ${lockRetryDelaysMs.length + 1})`
       );
