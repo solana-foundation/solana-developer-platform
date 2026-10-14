@@ -190,7 +190,7 @@ describe("ramp provider contract", () => {
         for (const mode of SDP_ENVIRONMENTS) {
           if (!kit.managedModes.includes(mode)) {
             it(`refuses an ${direction} in ${mode} before any request`, async () => {
-              const runs: ReadonlyArray<() => Promise<unknown>> = [
+              const runs: ReadonlyArray<() => Promise<PaymentRampEstimate | PaymentRampQuote>> = [
                 () => runEstimate(client, kit, direction, mode),
                 () => runQuote(client, kit, direction, mode),
               ];

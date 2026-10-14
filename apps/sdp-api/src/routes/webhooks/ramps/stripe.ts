@@ -1,6 +1,7 @@
 import { readRecord, readString } from "@sdp/payments/json";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
@@ -36,6 +37,9 @@ function stripeDeliveredAssetRail(currency: string, network: string): DeliveredA
   }
   return STRIPE_SOLANA_RAILS[currency];
 }
+
+/** The one field every Stripe event carries that says which mode it ran in. */
+const stripeEventModeSchema = z.object({ livemode: z.boolean() });
 
 interface StripeSignatureHeader {
   timestamp: string;
@@ -155,13 +159,13 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     } catch {
       throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
     }
-    const livemode = readRecord(payload)?.livemode;
-    if (typeof livemode !== "boolean") {
+    const mode = stripeEventModeSchema.safeParse(payload);
+    if (!mode.success) {
       throw badRequest("Stripe webhook is missing livemode", { provider: this.provider });
     }
-    if (livemode !== (environment === "production")) {
+    if (mode.data.livemode !== (environment === "production")) {
       throw badRequest(
-        `Stripe ${livemode ? "live" : "test"} event sent to the ${environment} webhook`,
+        `Stripe ${mode.data.livemode ? "live" : "test"} event sent to the ${environment} webhook`,
         { provider: this.provider }
       );
     }

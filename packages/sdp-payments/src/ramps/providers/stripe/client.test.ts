@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
+import { RAMP_PROVIDER_CLIENTS } from "../../index";
 import { replayExchanges } from "../../test-kit";
 import { StripeRampClient } from "./client";
 import { STRIPE_SESSION_TERMS, STRIPE_TEST_KIT, stripeSessionExchange } from "./test-kit";
@@ -77,7 +78,7 @@ describe("StripeRampClient credentials", () => {
   async function estimateWith(env: Record<string, string>, mode: "sandbox" | "production") {
     assert.ok(STRIPE_TEST_KIT.onramp, "the Stripe kit records an onramp");
     const replay = replayExchanges(STRIPE_TEST_KIT.onramp.estimate.exchanges);
-    const settled = await new StripeRampClient()
+    const settled = await RAMP_PROVIDER_CLIENTS.stripe
       .estimateOnramp({ env, mode }, STRIPE_TEST_KIT.onramp.estimate.input)
       .then(
         () => ({ ok: true as const }),

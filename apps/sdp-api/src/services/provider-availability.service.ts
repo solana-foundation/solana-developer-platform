@@ -1,3 +1,4 @@
+import { hasStripeManagedKeys } from "@sdp/payments/ramps";
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
@@ -270,15 +271,11 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
     stripe: {
       label: "Stripe",
-      // Sandbox keys only: production projects bring their own Stripe account
-      // (HOO-1943), so production reports unconfigured until they can.
+      // The client's own key check, so a live key under the sandbox names
+      // reads as unconfigured here too. Production is never managed.
       isConfigured: (env, testMode) =>
-        testMode !== false &&
-        hasAllEnv(env, [
-          "STRIPE_SANDBOX_SECRET_KEY",
-          "STRIPE_SANDBOX_PUBLISHABLE_KEY",
-          "STRIPE_SANDBOX_WEBHOOK_SECRET",
-        ]),
+        hasStripeManagedKeys(env, testMode === false ? "production" : "sandbox") &&
+        hasEnv(env, "STRIPE_SANDBOX_WEBHOOK_SECRET"),
     },
   },
   earn: {

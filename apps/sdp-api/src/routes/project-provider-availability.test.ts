@@ -634,6 +634,19 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
+  it("reports Stripe unavailable when a live key sits under the sandbox names", async () => {
+    const liveKey = deploymentEnv({ STRIPE_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" });
+
+    const sandbox = await readAvailability("sandbox", liveKey);
+
+    expect(sandbox.providers).toContainEqual({
+      family: "ramps",
+      provider: "stripe",
+      available: false,
+      reason: "provider_not_configured",
+    });
+  });
+
   it.for(Object.values(ROLE_API_KEYS))("serves an $role key bound to the project", async (key) => {
     await seedApiKey(key, key.role, "sandbox");
 
