@@ -19,6 +19,9 @@ import type { Env } from "@/types/env";
  * a private-channel movement signs, not a cache workaround. Wallet bindings
  * need no re-read: authentication read them fresh for this request.
  */
+// TODO(HOO-2099 PR 3): this second read of the key row in one request goes
+// when PR 3 replaces the private-channel re-check; it does not re-check the
+// organization or project status that authentication does.
 export async function refreshPrivateChannelAuth(
   env: Env,
   auth: ApiKeyContext,

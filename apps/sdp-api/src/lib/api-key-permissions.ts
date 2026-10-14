@@ -16,6 +16,8 @@ const explicitPermissionsSchema = z.array(z.enum(PERMISSIONS));
  * column itself, so anything else that does not parse is a bug and fails
  * loudly instead of granting or silently denying.
  */
+// TODO(HOO-2099 PR 2): a stored permission outside PERMISSIONS answers 500 on
+// every request for that key; PR 2's permission model replaces this parse.
 export function parseStoredApiKeyPermissions(
   role: ApiKeyRole,
   stored: string | null
