@@ -67,8 +67,8 @@ const SERVER_ERROR_RETRY = {
 
 const UNRECORDED_OUTCOME = {
   record:
-    "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until about 16 minutes after the original was sent, then takes over and is answered from the record it wrote.",
-  none: "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until about 16 minutes after the original was sent, then 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, as does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key.",
+    "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), then takes over and is answered from the record it wrote.",
+  none: "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), then 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, as does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key.",
 } as const satisfies Record<"record" | "none", string>;
 
 const ANSWER_AFTER_RECORD =
