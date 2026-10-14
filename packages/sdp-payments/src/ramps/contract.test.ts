@@ -174,8 +174,15 @@ describe("ramp provider contract", () => {
   for (const provider of RAMP_PROVIDERS) {
     const kit = KITS[provider];
     if ("removedBy" in kit) {
+      // No kit means no recorded fixtures to run the contract against, so the
+      // removal ticket only dropped the fixtures — the client stays registered
+      // until the ticket lands. Pin that: when the client goes too, this
+      // placeholder must go with it.
       it(`${provider} has no kit because ${kit.removedBy} removes it`, () => {
-        assert.match(kit.removedBy, /^HOO-\d+$/);
+        assert.ok(
+          provider in RAMP_PROVIDER_CLIENTS,
+          `${provider} is still registered; delete this placeholder when it is removed`
+        );
       });
       continue;
     }
