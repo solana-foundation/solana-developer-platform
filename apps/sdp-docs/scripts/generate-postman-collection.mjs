@@ -180,7 +180,7 @@ function getRequestHeaders(operation, routePath, method) {
     });
   }
 
-  // A route that requires Idempotency-Key returns 400 without one (ADR 0008).
+  // A route that requires Idempotency-Key returns 400 without one (ADR 0009).
   // The key is a saved collection variable per operation, not {{$guid}}: a
   // retry after a timeout must resend the same key or it moves money twice,
   // and one operation's response must never retire another's key.

@@ -29,7 +29,7 @@ import {
 } from "./responses";
 
 // Matches each route's `idempotent({ key: "accepted", serverErrors: "store" })`
-// step (ADR 0008); spec.test.ts checks.
+// step (ADR 0009); spec.test.ts checks.
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",

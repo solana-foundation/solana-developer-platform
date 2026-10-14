@@ -30,7 +30,7 @@ export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.ex
 
 /**
  * How a route's `idempotent({ key, serverErrors, recovery })` step behaves
- * (ADR 0008), restated for its OpenAPI header. `spec.test.ts` checks that every
+ * (ADR 0009), restated for its OpenAPI header. `spec.test.ts` checks that every
  * route's documented header matches the mode and recovery its chain declares.
  */
 export interface IdempotencyDocumentation {
@@ -67,8 +67,8 @@ const SERVER_ERROR_RETRY = {
 
 const UNRECORDED_OUTCOME = {
   record:
-    "If the original request crashed before recording its outcome, a same-key retry takes over and is answered from the record it wrote.",
-  none: "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, and so does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key.",
+    "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until about 16 minutes after the original was sent, then takes over and is answered from the record it wrote.",
+  none: "If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until about 16 minutes after the original was sent, then 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, as does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key.",
 } as const satisfies Record<"record" | "none", string>;
 
 const ANSWER_AFTER_RECORD =
@@ -92,7 +92,7 @@ export function idempotencyKeyDescription({
 
 /**
  * Request headers for a `stable` route whose chain mounts `idempotent()`
- * (ADR 0008): required when the route moves money, optional otherwise. Routes
+ * (ADR 0009): required when the route moves money, optional otherwise. Routes
  * outside `stable` that keep their own key handling use
  * `projectScopeWithIdempotencyHeaders` or
  * `projectScopeWithRequiredIdempotencyHeaders`.

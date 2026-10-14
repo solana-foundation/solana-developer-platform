@@ -918,7 +918,7 @@ describe("OpenAPI spec", () => {
 
 /**
  * The documented `Idempotency-Key` header follows each route's declared
- * `idempotent()` mode (ADR 0008), so the reference cannot drift from the code:
+ * `idempotent()` mode (ADR 0009), so the reference cannot drift from the code:
  * required where the chain requires it, optional where it accepts it, and
  * absent on every other mutating route of a `stable` module.
  */

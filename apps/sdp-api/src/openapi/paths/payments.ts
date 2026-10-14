@@ -63,7 +63,7 @@ import {
   walletBalancesResponse,
 } from "./responses";
 
-// Each matches the route's `idempotent()` step (ADR 0008); spec.test.ts checks.
+// Each matches the route's `idempotent()` step (ADR 0009); spec.test.ts checks.
 // Transfers and batches store any answer once their row is written.
 const movementKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "required",
