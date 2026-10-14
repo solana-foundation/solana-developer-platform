@@ -85,6 +85,15 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
 export const API_KEY_PRE_READ_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS));
 
 /**
+ * The flood guard's counter: one key hash from one client address. An
+ * address the proxy did not verify shares the `unknown` bucket, as the per-IP
+ * backstop does.
+ */
+export function apiKeyFloodGuardIdentifier(keyHash: string, clientIp: string | null): string {
+  return `api-key:${keyHash}:ip:${clientIp ?? "unknown"}`;
+}
+
+/**
  * Per-user ceiling for verified Clerk dashboard traffic. Set well above what a person
  * driving the UI produces — a dashboard page can fan out to a dozen endpoints and
  * several panels poll on timers — so this is a runaway-loop backstop, not a throttle

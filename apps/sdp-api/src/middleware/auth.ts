@@ -22,12 +22,18 @@ import type {
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import { API_KEY_PRE_READ_MAX_REQUESTS, enforceRateLimit, RATE_LIMIT_TIERS } from "./rate-limit";
+import {
+  API_KEY_PRE_READ_MAX_REQUESTS,
+  apiKeyFloodGuardIdentifier,
+  enforceRateLimit,
+  RATE_LIMIT_TIERS,
+} from "./rate-limit";
 
 const NODE_LAST_USED_WRITE_INTERVAL_MS = 5 * 60_000;
 
@@ -201,13 +207,20 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   const pepper = c.env.API_KEY_PEPPER;
   const keyHash = await hashString(apiKey, pepper);
 
-  // A flood guard per key hash before the row is read, at the highest tier
-  // since the key's own is not known yet: a flooding credential, valid or
-  // not, is bounded before it costs a DB read. Random-key spray (a fresh hash
-  // each time) is bounded by the per-IP backstop in front of auth.
-  await enforceRateLimit(c, `api-key:${keyHash}`, API_KEY_PRE_READ_MAX_REQUESTS, {
-    metricTier: "api_key_flood_guard",
-  });
+  // A flood guard per key hash and client IP before the row is read, at the
+  // highest tier since the key's own is not known yet: a flooding credential,
+  // valid or not, is bounded before it costs a DB read. It is keyed by the
+  // client IP too, so a leaked key used from outside its IP allowlist only
+  // ever exhausts its own bucket, never the owner's. Random-key spray (a
+  // fresh hash each time) is bounded by the per-IP backstop in front of auth.
+  await enforceRateLimit(
+    c,
+    apiKeyFloodGuardIdentifier(keyHash, getClientIp(c)),
+    API_KEY_PRE_READ_MAX_REQUESTS,
+    {
+      metricTier: "api_key_flood_guard",
+    }
+  );
 
   // The authoritative read: every authorization field from the key's live
   // rows, in one statement, so a change to any of them applies on this

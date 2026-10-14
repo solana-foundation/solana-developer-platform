@@ -3,7 +3,7 @@ import type { OrganizationSettings } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { API_KEY_PRE_READ_MAX_REQUESTS } from "@/middleware/rate-limit";
+import { API_KEY_PRE_READ_MAX_REQUESTS, apiKeyFloodGuardIdentifier } from "@/middleware/rate-limit";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
@@ -413,7 +413,10 @@ describe("Organization access settings", () => {
       try {
         await seedRateLimit(
           env,
-          `api-key:${await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER)}`,
+          apiKeyFloodGuardIdentifier(
+            await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
+            "198.51.100.42"
+          ),
           API_KEY_PRE_READ_MAX_REQUESTS
         );
         expect((await get(headers)).status).toBe(429);

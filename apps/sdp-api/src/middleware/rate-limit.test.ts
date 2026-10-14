@@ -12,6 +12,7 @@ import {
   ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
   ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
   API_KEY_PRE_READ_MAX_REQUESTS,
+  apiKeyFloodGuardIdentifier,
   enforceRateLimit,
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
 } from "@/middleware/rate-limit";
@@ -61,7 +62,8 @@ describe("Rate limiting", () => {
   });
 
   /** The flood guard counts per key hash, before the key's row is read. */
-  const floodCounter = () => `api-key:${validKeyHash}`;
+  const floodCounter = (clientIp: string = CLIENT_IP) =>
+    apiKeyFloodGuardIdentifier(validKeyHash, clientIp);
   /** The key's own tier counts per key id. */
   const tierCounter = TEST_CACHED_API_KEY.id;
 
@@ -161,6 +163,17 @@ describe("Rate limiting", () => {
       expect(res.headers.get("Retry-After")).not.toBeNull();
       expect(readSpy).not.toHaveBeenCalled();
       expect(await readRateLimitCount(env, floodCounter())).toBe(API_KEY_PRE_READ_MAX_REQUESTS);
+    });
+
+    // A leaked key flooded from outside its allowlist exhausts only the
+    // attacker's own bucket.
+    it("does not let a flood from another address throttle the key's owner", async () => {
+      await seedApiKeyRow(env, validKeyHash, TEST_CACHED_API_KEY);
+      await seedRateLimit(env, floodCounter("198.51.100.66"), API_KEY_PRE_READ_MAX_REQUESTS);
+
+      const res = await keyedRequest();
+
+      expect(res.status).not.toBe(429);
     });
 
     it("caps the unlimited tier at the same ceiling", async () => {
