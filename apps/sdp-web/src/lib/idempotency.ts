@@ -80,6 +80,17 @@ export function answerRetiresKey(answer: ApiAnswer): boolean {
 }
 
 /**
+ * {@link answerRetiresKey} for a money movement (`IDEMPOTENCY_REQUIRED_ROUTES`):
+ * a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` keeps the key, so the next press
+ * reuses it and sdp-api answers, instead of a fresh key sending the payment a
+ * second time. sdp-api's money routes recover from their own row and never
+ * send that code; this holds if one ever does.
+ */
+export function moneyAnswerRetiresKey(answer: ApiAnswer): boolean {
+  return answerRetiresKey(answer) && !isOutcomeUnknownAnswer(answer);
+}
+
+/**
  * Whether the answer is a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: the original
  * request never recorded its outcome, so it may have run. Its key retires
  * ({@link answerRetiresKey}), but the form must not offer a plain retry: the

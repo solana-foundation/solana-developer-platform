@@ -1,7 +1,12 @@
 "use client";
 
 import { z } from "zod";
-import { type ApiAnswer, answerRetiresKey, storageFingerprint } from "./idempotency";
+import {
+  type ApiAnswer,
+  answerRetiresKey,
+  moneyAnswerRetiresKey,
+  storageFingerprint,
+} from "./idempotency";
 
 /**
  * Browser-side durability for an IDEMPOTENCY KEY, per request fingerprint: the
@@ -272,6 +277,18 @@ export function settleIdempotencyKey(
   answer: ApiAnswer
 ): boolean {
   if (!answerRetiresKey(answer)) return false;
+  store.release(fingerprint, key);
+  return true;
+}
+
+/** {@link settleIdempotencyKey} on the money rule (`moneyAnswerRetiresKey`). */
+export function settleMoneyIdempotencyKey(
+  store: IdempotencyKeyStore,
+  fingerprint: string,
+  key: string,
+  answer: ApiAnswer
+): boolean {
+  if (!moneyAnswerRetiresKey(answer)) return false;
   store.release(fingerprint, key);
   return true;
 }

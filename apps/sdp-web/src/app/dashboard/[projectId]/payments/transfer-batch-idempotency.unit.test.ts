@@ -151,6 +151,28 @@ describe("sendTransferBatchUnderKey", () => {
     expect(next).not.toBe(refused);
   });
 
+  // A money movement never mints a fresh key while the original may have run:
+  // the next press is answered under the same key.
+  it("keeps the key on an unknown outcome and resends under it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
+          { status: 409 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "Shared.idempotency.outcomeUnknownCheckList"
+    );
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [unknown, next] = sentKeys(fetchMock);
+    expect(next).toBe(unknown);
+  });
+
   // Browser test (HOO-1918): the API recorded the batch but the answer was lost;
   // a refusal after that settles nothing about the recorded batch, so the third
   // press must replay it under the first key, not pay every recipient again.

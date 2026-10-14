@@ -267,13 +267,15 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 2)).not.toBe(keyOfCall(fetchMock, 1));
   });
 
-  it("retires the key on a 409 whose outcome is unknown, and keeps it on one in flight", async () => {
+  const conflict = (code: string) =>
+    new Response(JSON.stringify({ error: { code, message: "conflict" } }), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    });
+
+  // A money movement never mints a fresh key while the original may have run.
+  it("keeps a money route's key through a 409 in flight or with an unknown outcome", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
-    const conflict = (code: string) =>
-      new Response(JSON.stringify({ error: { code, message: "conflict" } }), {
-        status: 409,
-        headers: { "content-type": "application/json" },
-      });
     const responses = [
       conflict("IDEMPOTENCY_KEY_IN_FLIGHT"),
       conflict("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"),
@@ -290,7 +292,27 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     await submit();
 
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
-    expect(keyOfCall(fetchMock, 2)).not.toBe(keyOfCall(fetchMock, 1));
+    expect(keyOfCall(fetchMock, 2)).toBe(keyOfCall(fetchMock, 1));
+  });
+
+  it("retires another route's key on a 409 whose outcome is unknown", async () => {
+    openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const responses = [conflict("IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"), jsonResponse(201)];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        responses.shift() ?? jsonResponse(201)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const send = () =>
+      dashboardRequest("/api/dashboard/payments/counterparties", {
+        method: "POST",
+        body: '{"name":"a"}',
+      });
+
+    await send();
+    await send();
+
+    expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
   });
 
   // Greptile (#2333): a create whose 2xx body was not the JSON it claimed lost
