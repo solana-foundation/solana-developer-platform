@@ -21,7 +21,7 @@ import {
   DvpTradesSkeleton,
   EarnIntegrationGuideSkeleton,
   EmbeddedYieldPortfolioSkeleton,
-  MarketsLandingSkeleton,
+  MarketsLandingFlagsSkeleton,
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
 import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
@@ -139,7 +139,7 @@ function resolveCurrentPageLoadingComponent(
     case "payments-overview":
       return PaymentsPageSkeleton;
     case "markets-landing":
-      return MarketsLandingSkeleton;
+      return MarketsLandingFlagsSkeleton;
     case "treasury-solutions":
       return TreasurySolutionsSkeleton;
     case "embedded-yield-portfolio":

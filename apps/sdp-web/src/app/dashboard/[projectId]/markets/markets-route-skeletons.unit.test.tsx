@@ -110,4 +110,13 @@ describe("DvP route skeletons", () => {
     expect(occurrences(html, "max-w-3xl")).toBe(3);
     expect(html).not.toContain("max-w-6xl");
   });
+
+  it.each([
+    [{ earn: true, dvp: true }, 3],
+    [{ earn: true, dvp: false }, 2],
+    [{ earn: false, dvp: true }, 1],
+  ])("draws a landing path block per card the page renders for %o", (modules, cards) => {
+    const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
+    expect(html.match(/h-40 w-full rounded-2xl/g)).toHaveLength(cards);
+  });
 });
