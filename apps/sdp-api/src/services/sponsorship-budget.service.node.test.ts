@@ -52,6 +52,12 @@ const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
   rawSettings: null,
 };
 
+const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = {
+  organizationStatus: "active",
+  projectEnvironment: "production",
+  rawSettings: JSON.stringify({ enableProductionProject: true }),
+};
+
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
   const message = pipe(
     createTransactionMessage({ version }),
@@ -160,11 +166,9 @@ describe("BudgetedFeePayment", () => {
     expect(created).toBeLessThan(reserved);
   });
 
-  it("charges the scope's cluster network, not the process default", async () => {
-    // A mainnet Earn movement on a devnet-default process must reserve against
-    // the mainnet policies and record a mainnet reservation, or the devnet
-    // budget silently pays for mainnet and the mainnet breaker never sees it.
-    const { feePayment, repository } = harness({ ...SCOPE, cluster: "mainnet-beta" });
+  it("charges a production project's mainnet network, not the process default", async () => {
+    const { feePayment, repository } = harness({ ...SCOPE, environment: "production" });
+    readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
     repository.resolvePolicies.mockResolvedValue([
       { ...policy("global"), network: "mainnet" },
       { ...policy("organization"), network: "mainnet" },

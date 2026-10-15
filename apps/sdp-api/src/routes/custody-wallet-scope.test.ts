@@ -46,7 +46,7 @@ vi.mock("@/services/solana", async (importOriginal) => ({
 
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
+  resolveRequestSponsoredFeePayer: signerCheckMocks.createSponsorship,
 }));
 
 const SEEDED_PUBLIC_KEYS = {

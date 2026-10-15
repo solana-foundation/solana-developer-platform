@@ -21,7 +21,6 @@ import {
   buildKoraUserId,
   createProjectSponsorshipFeePayment,
   createSponsorshipFeePayment,
-  resolveAuthenticatedSponsorshipScope,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -123,10 +122,10 @@ describe("sponsorship identity boundary", () => {
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:sandbox:org_test_sponsorship:project:project_1:user:usr_test_sponsorship",
-      undefined
+      "devnet"
     );
   });
-  it("selects the paymaster by the scope's cluster when a flow names one", () => {
+  it("selects the mainnet paymaster for a production project's sponsorship", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
       movement: "payments.transfer",
@@ -134,7 +133,6 @@ describe("sponsorship identity boundary", () => {
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
       actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "mainnet-beta",
     });
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
@@ -269,13 +267,13 @@ describe("sponsorship identity boundary", () => {
       c.set("projectEnvironment", "sandbox");
       await runInClusterScope({ projectId: "project_trusted", environment: "sandbox" }, next);
     });
-    app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
+    app.get("/probe", (c) => c.text(buildKoraUserId(resolveRequestSponsorshipScope(c))));
     const response = await app.request("/probe");
     expect(await response.text()).toBe(
       `sdp:v1:sandbox:${TEST_ORG.id}:project:project_trusted:user:${TEST_USER.id}`
     );
   });
-  it("takes a production request's sponsorship cluster from the open cluster scope", async () => {
+  it("takes a production request's sponsorship project and environment from the open cluster scope", async () => {
     const app = new Hono<{
       Bindings: Env;
     }>();
@@ -289,15 +287,12 @@ describe("sponsorship identity boundary", () => {
         environment: "production",
         signingWalletId: null,
       });
-      c.set("projectId", "project_trusted");
-      c.set("projectEnvironment", "production");
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });
     app.get("/probe", (c) => c.json(resolveRequestSponsorshipScope(c)));
     const response = await app.request("/probe", {}, testEnv);
     expect(await response.json()).toEqual({
       environment: "production",
-      cluster: "mainnet-beta",
       organizationId: "org_trusted",
       projectId: "project_trusted",
       actor: { type: "api_key", id: "key_trusted" },
@@ -338,7 +333,7 @@ describe("sponsorship identity boundary", () => {
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
-      undefined
+      "mainnet-beta"
     );
   });
   it("rejects a persisted project that does not belong to the claimed organization", async () => {

@@ -97,12 +97,6 @@ describe("resolveVaultSponsorship", () => {
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
-    // The cluster rides the scope so the mainnet Kora signs and the mainnet
-    // budget is charged, not the process default's.
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ cluster: "mainnet-beta" })
-    );
   });
 
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
@@ -117,7 +111,6 @@ describe("resolveVaultSponsorship", () => {
       organizationId: "org_1",
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "devnet",
       movement: "earn.deposit",
     });
   });
