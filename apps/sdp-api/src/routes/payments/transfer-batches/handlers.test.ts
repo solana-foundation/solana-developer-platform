@@ -30,6 +30,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -456,6 +457,8 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
