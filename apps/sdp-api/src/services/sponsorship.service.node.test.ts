@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
   compileTransaction,
@@ -245,7 +246,7 @@ describe("sponsorship identity boundary", () => {
       });
       c.set("projectId", "project_trusted");
       c.set("projectEnvironment", "production");
-      await next();
+      await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });
     app.get("/probe", (c) => c.text(buildKoraUserId(resolveRequestSponsorshipScope(c))));
     const response = await app.request(
@@ -265,13 +266,41 @@ describe("sponsorship identity boundary", () => {
       c.set("clerk", await testClerkContext(testEnv));
       c.set("projectId", "project_trusted");
       c.set("projectEnvironment", "sandbox");
-      await next();
+      await runInClusterScope({ projectId: "project_trusted", environment: "sandbox" }, next);
     });
     app.get("/probe", (c) => c.text(buildKoraUserId(resolveAuthenticatedSponsorshipScope(c))));
     const response = await app.request("/probe");
     expect(await response.text()).toBe(
       `sdp:v1:sandbox:${TEST_ORG.id}:project:project_trusted:user:${TEST_USER.id}`
     );
+  });
+  it("takes a production request's sponsorship cluster from the open cluster scope", async () => {
+    const app = new Hono<{
+      Bindings: Env;
+    }>();
+    app.use("*", async (c, next) => {
+      c.set("apiKey", {
+        id: "key_trusted",
+        organizationId: "org_trusted",
+        projectId: "project_trusted",
+        role: "api_admin",
+        permissions: ["*"],
+        environment: "production",
+        signingWalletId: null,
+      });
+      c.set("projectId", "project_trusted");
+      c.set("projectEnvironment", "production");
+      await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
+    });
+    app.get("/probe", (c) => c.json(resolveRequestSponsorshipScope(c)));
+    const response = await app.request("/probe", {}, testEnv);
+    expect(await response.json()).toEqual({
+      environment: "production",
+      cluster: "mainnet-beta",
+      organizationId: "org_trusted",
+      projectId: "project_trusted",
+      actor: { type: "api_key", id: "key_trusted" },
+    });
   });
   it("rejects Clerk sponsorship without a project environment", async () => {
     const app = new Hono<{
