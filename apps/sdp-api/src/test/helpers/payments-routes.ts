@@ -154,7 +154,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 export const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
 
-export const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
+export const TEST_MOONPAY_SECRET_KEY = "sk_test_moonpay";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
@@ -167,10 +167,6 @@ export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
-
-let originalMoonPayApiKey: string | undefined;
-
-let originalMoonPaySecretKey: string | undefined;
 
 let originalMoonPayOnrampUrl: string | undefined;
 
@@ -572,8 +568,6 @@ export function installPaymentsRouteTestHooks(): void {
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
-    originalMoonPayApiKey = env.MOONPAY_API_KEY;
-    originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
     originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
     savedBvnkSandboxEnv = stubBvnkSandboxEnv(env);
@@ -583,8 +577,6 @@ export function installPaymentsRouteTestHooks(): void {
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
-    env.MOONPAY_API_KEY = undefined;
-    env.MOONPAY_SECRET_KEY = undefined;
     env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
     env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
     env.BVNK_HAWK_AUTH_ID = undefined;
@@ -598,8 +590,6 @@ export function installPaymentsRouteTestHooks(): void {
   afterEach(async () => {
     env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
-    env.MOONPAY_API_KEY = originalMoonPayApiKey;
-    env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
     env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
     env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
     if (savedBvnkSandboxEnv !== undefined) {

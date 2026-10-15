@@ -61,13 +61,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ -n "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then
-  export KORA_RPC_URL="${KORA_SURFPOOL_KORA_RPC_URL}"
-elif [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
-  export KORA_RPC_URL="http://127.0.0.1:18080"
-else
-  export KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
-fi
+# shellcheck source=scripts/kora-surfpool/kora-url.sh
+. "${ROOT_DIR}/scripts/kora-surfpool/kora-url.sh"
 
 export FEE_PAYMENT_PROVIDER="${FEE_PAYMENT_PROVIDER:-kora}"
 export RUN_INTEGRATION_TESTS="${RUN_INTEGRATION_TESTS:-true}"

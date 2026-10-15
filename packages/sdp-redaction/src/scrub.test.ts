@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { redactCredentialString } from "./credentials";
 import {
   maskEmail,
   scrubAuditMetadata,
@@ -197,6 +198,83 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.ok(scrubbed.includes("USD Coin"));
     assert.ok(scrubbed.includes(SOLANA_ADDRESS));
+  });
+});
+
+describe("redactCredentialString: escaped quotes", () => {
+  // A quoted value ends at its first unescaped quote. Stopping at an escaped one
+  // left the rest of the secret in the message (APE-827).
+  it("redacts past an escaped quote inside the value", () => {
+    assert.equal(
+      redactCredentialString('{"secret":"prefix\\"provider-secret"}'),
+      '{"secret":"[REDACTED]"}'
+    );
+  });
+
+  it("ends the value at a quote that follows an escaped backslash", () => {
+    assert.equal(
+      redactCredentialString(`{"secret":"a\\\\","mint":"${SOLANA_ADDRESS}"}`),
+      `{"secret":"[REDACTED]","mint":"${SOLANA_ADDRESS}"}`
+    );
+  });
+
+  it("redacts a field serialized twice", () => {
+    const redacted = redactCredentialString('{\\"secret\\":\\"provider-secret\\",\\"a\\":1}');
+
+    assert.ok(!redacted.includes("provider-secret"), redacted);
+    assert.ok(redacted.includes('\\"a\\":1'), redacted);
+  });
+
+  it("keeps the telemetry scrub closed on the same input", () => {
+    assert.ok(
+      !scrubTelemetryString('{"secret":"prefix\\"provider-secret"}').includes("provider-secret")
+    );
+  });
+
+  it("redacts an escaped quote inside a field serialized twice", () => {
+    const redacted = redactCredentialString(
+      JSON.stringify(JSON.stringify({ secret: 'prefix"provider-secret' }))
+    );
+
+    assert.ok(!redacted.includes("provider-secret"), redacted);
+  });
+
+  for (const depth of [1, 2, 3]) {
+    it(`redacts at serialization depth ${depth} and keeps the next field`, () => {
+      let body: string = JSON.stringify({ secret: 'pre"fix\\provider-secret', note: "kept" });
+      for (let level = 1; level < depth; level += 1) {
+        body = JSON.stringify(body);
+      }
+
+      const redacted = redactCredentialString(body);
+
+      assert.ok(!redacted.includes("provider-secret"), redacted);
+      assert.ok(redacted.includes("kept"), redacted);
+    });
+  }
+
+  it("redacts a value that never closes", () => {
+    assert.equal(redactCredentialString('{"secret":"provider-sec'), '{"secret":"[REDACTED]');
+  });
+
+  it("scans a long backslash run in linear time", () => {
+    const payload = `${"\\".repeat(200_000)}x`;
+
+    const startedAt = process.hrtime.bigint();
+    redactCredentialString(payload);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    assert.ok(elapsedMs < 1_000, `expected a linear scan, took ${elapsedMs.toFixed(0)}ms`);
+  });
+
+  it("scans an unterminated escaped value in linear time", () => {
+    const payload = `{"secret":"${'\\"'.repeat(100_000)}`;
+
+    const startedAt = process.hrtime.bigint();
+    redactCredentialString(payload);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    assert.ok(elapsedMs < 1_000, `expected a linear scan, took ${elapsedMs.toFixed(0)}ms`);
   });
 });
 

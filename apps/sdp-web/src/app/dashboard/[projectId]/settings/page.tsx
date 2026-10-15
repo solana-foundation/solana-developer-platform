@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { MembersSection } from "./members-section";

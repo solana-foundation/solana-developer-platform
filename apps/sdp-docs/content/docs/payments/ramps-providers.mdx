@@ -8,12 +8,7 @@ SDP integrates the ramp providers in the matrix below. They are configured at th
 
 ## Sandbox vs production selection
 
-The sandbox/production mode is chosen **per request**, not at deployment time:
-
-- Non-production SDP deployments (`ENVIRONMENT !== "production"`) always use sandbox credentials.
-- In production deployments, the calling API key's environment picks the mode — `sk_test_` keys use sandbox, `sk_live_` use production.
-
-Configure both credential pairs for any provider you want to expose to test and live traffic on the same deployment, when the provider reads separate sandbox and production credentials; each provider's page says which.
+The project's environment picks the mode for every request: a Sandbox project uses a provider's sandbox credentials, a Production project its production ones. When SDP holds only a provider's sandbox credentials, that provider answers `PROVIDER_NOT_CONFIGURED` for Production projects. Each provider's page lists the credentials it reads.
 
 ## Capability matrix
 

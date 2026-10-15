@@ -21,7 +21,7 @@ This package contains integration tests that:
 - **Node dependencies installed** (`pnpm install`)
 - **Local Postgres available** for API integration and browser E2E state
 - **Privy account** with devnet credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`) for live-provider smoke and browser auth
-- **Hosted Kora instance** (`KORA_RPC_URL`) only for the `Kora / Live Smoke` lane
+- **Hosted Kora instance** (`KORA_DEVNET_URL`) only for the `Kora / Live Smoke` lane
 - **SDP API running** (local or remote)
 
 ### Running Tests
@@ -67,7 +67,7 @@ Use Doppler (team members) or export manually:
 **Required for live Kora/devnet smoke:**
 
 - `SOLANA_RPC_URL` — Example: `https://api.devnet.solana.com`
-- `KORA_RPC_URL` — Example: `https://your-kora-devnet-instance.us-central1.run.app`
+- `KORA_DEVNET_URL` — Example: `https://your-kora-devnet-instance.us-central1.run.app`
 - `PRIVY_APP_ID`
 - `PRIVY_APP_SECRET`
 
@@ -78,7 +78,7 @@ Use Doppler (team members) or export manually:
 
 **Optional:**
 
-- `KORA_API_KEY` — Only required if your Kora endpoint requires API key auth.
+- `KORA_DEVNET_API_KEY` — Only required if your Kora endpoint requires API key auth.
 - `KORA_MIN_BALANCE_LAMPORTS` — Preflight threshold for the Kora fee payer balance check.
 - `SURFPOOL_REMOTE_RPC_URL` — Explicit upstream RPC for embedded Surfpool lazy account fetching.
 - `SOLANA_RPC_CI_PREFERRED_PROVIDER` — Selects the managed RPC provider used as Surfpool's upstream.
@@ -88,8 +88,8 @@ Use Doppler (team members) or export manually:
 SOLANA_RPC_URL=https://api.devnet.solana.com
 
 # Fee-payer service (devnet)
-KORA_RPC_URL=https://your-kora-devnet-instance.us-central1.run.app
-# KORA_API_KEY=...
+KORA_DEVNET_URL=https://your-kora-devnet-instance.us-central1.run.app
+# KORA_DEVNET_API_KEY=...
 
 # Privy signer (default)
 PRIVY_APP_ID=<your-privy-app-id>
@@ -195,7 +195,7 @@ pnpm kora:surfpool:down
 ```
 
 The test command still runs SDP through `FEE_PAYMENT_PROVIDER=kora` and
-`KORA_RPC_URL=http://127.0.0.1:18080`; only the JSON-RPC server behind that URL
+`KORA_DEVNET_URL=http://127.0.0.1:18080`; only the JSON-RPC server behind that URL
 is local test infrastructure. It signs with a test-only fee payer and submits to
 the embedded Surfnet RPC URL written by `pnpm kora:surfpool:up`. Embedded
 Surfnet uses the same managed Solana RPC selection as the integration test
@@ -203,7 +203,7 @@ runner, including `SOLANA_RPC_CI_PREFERRED_PROVIDER`, as its
 `SURFPOOL_REMOTE_RPC_URL`; set `SURFPOOL_REMOTE_RPC_URL` directly to override it.
 At least one `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` must be set, and the
 selected endpoint must serve devnet: Surfpool always forks devnet. When this command is run
-under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
+under Doppler, the harness ignores Doppler's hosted `KORA_DEVNET_URL` / `KORA_MAINNET_URL` and uses
 `http://127.0.0.1:18080` for the local Kora-compatible endpoint; set
 `KORA_SURFPOOL_KORA_RPC_URL` to change that local endpoint. Use
 `KORA_SURFPOOL_RUNTIME=cli` to validate against the Surfpool CLI sidecar instead.
@@ -218,8 +218,8 @@ under Doppler, the harness ignores Doppler's hosted `KORA_RPC_URL` and uses
 
 ### Live Kora smoke failed
 
-- Confirm `KORA_RPC_URL` points at the hosted devnet Kora service and that `KORA_API_KEY` is present when the service requires it.
-- Check Kora health with `curl "$KORA_RPC_URL/health"` or `curl "$KORA_RPC_URL/liveness"`, depending on the deployed server.
+- Confirm `KORA_DEVNET_URL` points at the hosted devnet Kora service and that `KORA_DEVNET_API_KEY` is present when the service requires it.
+- Check Kora health with `curl "$KORA_DEVNET_URL/health"` or `curl "$KORA_DEVNET_URL/liveness"`, depending on the deployed server.
 - If preflight reports a low fee-payer balance, fund the hosted Kora payer before retrying. `KORA_MIN_BALANCE_LAMPORTS` controls the local preflight threshold.
 - Keep new failures in this lane focused on hosted Kora/client/provider behavior. If the failure is token lifecycle or dashboard rendering, prefer moving the assertion to Surfpool/local coverage.
 

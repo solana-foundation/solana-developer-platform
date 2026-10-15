@@ -2,9 +2,9 @@ import { afterEach, beforeEach } from "vitest";
 import { env } from "@/test/helpers/env";
 
 const STRIPE_TEST_ENV = {
-  STRIPE_SECRET_KEY: "sk_test_route_tests",
-  STRIPE_PUBLISHABLE_KEY: "pk_test_route_tests",
-  STRIPE_WEBHOOK_SECRET: "whsec_route_tests",
+  STRIPE_SANDBOX_SECRET_KEY: "sk_test_route_tests",
+  STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_route_tests",
+  STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_route_tests",
 } as const;
 
 /**
@@ -16,9 +16,9 @@ export function installStripeTestEnv(): void {
 
   beforeEach(() => {
     saved = {
-      STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
-      STRIPE_PUBLISHABLE_KEY: env.STRIPE_PUBLISHABLE_KEY,
-      STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
+      STRIPE_SANDBOX_SECRET_KEY: env.STRIPE_SANDBOX_SECRET_KEY,
+      STRIPE_SANDBOX_PUBLISHABLE_KEY: env.STRIPE_SANDBOX_PUBLISHABLE_KEY,
+      STRIPE_SANDBOX_WEBHOOK_SECRET: env.STRIPE_SANDBOX_WEBHOOK_SECRET,
     };
     Object.assign(env, STRIPE_TEST_ENV);
   });

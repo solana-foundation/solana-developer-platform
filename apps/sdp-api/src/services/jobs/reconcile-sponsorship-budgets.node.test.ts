@@ -190,7 +190,7 @@ describe("reconcileSponsorshipBudgets", () => {
     };
 
     await reconcileSponsorshipBudgets(
-      { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+      { SOLANA_NETWORK: "devnet", KORA_DEVNET_URL: "https://kora-devnet.mock.invalid" } as Env,
       deps
     );
 
@@ -216,7 +216,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     await expect(
       reconcileSponsorshipBudgets(
-        { SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet.example" } as Env,
+        { SOLANA_NETWORK: "devnet", KORA_DEVNET_URL: "https://kora-devnet.mock.invalid" } as Env,
         {
           repository,
           budgetRedis,

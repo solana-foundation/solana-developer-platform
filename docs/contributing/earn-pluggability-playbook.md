@@ -611,7 +611,7 @@ provider adds:
    `Kora / Live Smoke` shard asserts the running devnet service's
    `getConfig`, which catches an allowlist merged in sdp-infra but not yet
    rolled out as a new revision, but the step is skipped on fork PRs and the
-   suite skips without `KORA_RPC_URL` + `RUN_INTEGRATION_TESTS`, so after
+   suite skips without `KORA_DEVNET_URL` + `RUN_INTEGRATION_TESTS`, so after
    changing programs confirm it actually ran (or run
    `pnpm kora:devnet:test`). The mainnet toml has no live check, so keep it
    correct by hand. That is
