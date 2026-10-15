@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { splitSqlStatements } from "../apps/sdp-api/scripts/lib/run-postgres-migrations.mjs";
 
@@ -7,6 +7,7 @@ export const MIGRATIONS_DIR = "apps/sdp-api/src/db/migrations/";
 const SQL_DIR = `${MIGRATIONS_DIR}postgres/`;
 const REPEATABLE_DIR = `${SQL_DIR}repeatable/`;
 const BREAKING_DIRECTIVE = /^--\s*sdp:migration-compat:\s*breaking\s*$/m;
+const BLOCKING_DIRECTIVE = /^--\s*sdp:migration-locks:\s*blocking\s*$/m;
 // Test files and test-only helpers never run in the deployed image, so they cannot break a
 // traffic rollback. No production module imports either helper root.
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
@@ -25,11 +26,22 @@ const DROP = new RegExp(
   String.raw`^DROP\s+(?:MATERIALIZED\s+)?(\w+)\s+(?:CONCURRENTLY\s+)?${IF_EXISTS}([\s\S]*)$`,
   "i"
 );
+const TABLE_CONSTRAINT = String.raw`(?:FOREIGN\s+KEY|UNIQUE|CHECK|PRIMARY\s+KEY|EXCLUDE)\b`;
 const ADD_COLUMN = new RegExp(
-  String.raw`^ADD\s+(?:COLUMN\s+)?(IF\s+NOT\s+EXISTS\s+)?(${NAME})`,
+  String.raw`^ADD\s+(?!CONSTRAINT\b|${TABLE_CONSTRAINT})(?:COLUMN\s+)?(IF\s+NOT\s+EXISTS\s+)?(${NAME})`,
   "i"
 );
-const ADD_CONSTRAINT = new RegExp(String.raw`^ADD\s+CONSTRAINT\s+(${NAME})\s+([\s\S]*)$`, "i");
+const ADD_CONSTRAINT = new RegExp(
+  String.raw`^ADD\s+(?:CONSTRAINT\s+(${NAME})\s+|(?=${TABLE_CONSTRAINT}))([\s\S]*)$`,
+  "i"
+);
+const VALIDATE_CONSTRAINT = new RegExp(String.raw`^VALIDATE\s+CONSTRAINT\s+(${NAME})`, "i");
+const CREATE_INDEX = new RegExp(
+  String.raw`^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?:(?!ON\s)${NAME}\s+)?ON\s+(?:ONLY\s+)?(${NAME})`,
+  "i"
+);
+const NOT_NULL_CHECK = new RegExp(String.raw`^(${NAME})\s+IS\s+NOT\s+NULL$`, "i");
+const NOT_VALID = /\bNOT\s+VALID\b/i;
 const DROP_COLUMN = new RegExp(
   String.raw`^DROP\s+(?:COLUMN\s+)?${IF_EXISTS}(?!CONSTRAINT\b)(${NAME})`,
   "i"
@@ -206,7 +218,7 @@ function collectAdditions(statements) {
     const constraint = action.match(ADD_CONSTRAINT);
     const column = !constraint && action.match(ADD_COLUMN);
     if (constraint) {
-      remember(normalize(constraint[1]), { index, certain: true });
+      if (constraint[1]) remember(normalize(constraint[1]), { index, certain: true, table });
     } else if (column) {
       if (!newColumns.has(table)) newColumns.set(table, new Map());
       newColumns.get(table).set(normalize(column[2]), {
@@ -386,12 +398,166 @@ function rewritesRows(main, context, isNewTable) {
   return rewrites && !isNewTable(normalize(rowTarget[1]));
 }
 
+const excerpt = (statement) => statement.replace(/\s+/g, " ").slice(0, 100);
+const unquoted = (text) => text.replace(/'(?:[^']|'')*'/g, "''");
+
 export function findBreakingStatements(sql) {
   const statements = splitSqlStatements(sql);
   const context = collectAdditions(statements);
   return statements.flatMap((statement, index) =>
     statementFindings(statement, index, context).map(
-      (finding) => `${finding}: ${statement.replace(/\s+/g, " ").slice(0, 100)}`
+      (finding) => `${finding}: ${excerpt(statement)}`
+    )
+  );
+}
+
+function notNullColumn(definition) {
+  if (!/^CHECK\b/i.test(definition)) return null;
+  let body = topLevelGroups(definition)[0]?.trim() ?? "";
+  while (/^\(.*\)$/s.test(body) && topLevelGroups(body)[0]?.length === body.length - 2) {
+    body = body.slice(1, -1).trim();
+  }
+  const match = body.match(NOT_NULL_CHECK);
+  return match ? normalize(match[1]) : null;
+}
+
+// CHECK (column IS NOT NULL) constraints by table, the evidence that lets SET
+// NOT NULL skip its full scan. Only a validated one counts.
+function trackNotNullChecks(checks, statement, { countAdds }) {
+  const drop = statement.match(DROP);
+  if (drop?.[1].toLowerCase() === "table") {
+    for (const table of dropTargets(drop[2])) checks.delete(table);
+    return;
+  }
+  if (/^DO\b/i.test(statement)) {
+    for (const [inner] of innerStatements(statement, 0)) {
+      trackNotNullChecks(checks, inner, { countAdds });
+    }
+    return;
+  }
+  const alter = statement.match(ALTER_TABLE);
+  if (!alter) return;
+  const table = normalize(alter[1]);
+  const tableChecks = checks.get(table) ?? new Map();
+  checks.set(table, tableChecks);
+  for (const action of splitTopLevel(statement.slice(alter[0].length))) {
+    const added = action.match(ADD_CONSTRAINT);
+    const column = added?.[1] && notNullColumn(added[2]);
+    const validate = action.match(VALIDATE_CONSTRAINT);
+    const dropped = action.match(DROP_CONSTRAINT);
+    const droppedColumn = action.match(DROP_COLUMN);
+    if (column && countAdds) {
+      tableChecks.set(normalize(added[1]), {
+        column,
+        validated: !NOT_VALID.test(unquoted(added[2])),
+      });
+    } else if (validate) {
+      const check = tableChecks.get(normalize(validate[1]));
+      if (check) check.validated = true;
+    } else if (dropped) {
+      tableChecks.delete(normalize(dropped[1]));
+    } else if (droppedColumn) {
+      for (const [name, check] of tableChecks) {
+        if (check.column === normalize(droppedColumn[1])) tableChecks.delete(name);
+      }
+    }
+  }
+}
+
+function blockingActionFinding(action, { table, newTable, index, context, proven }) {
+  if (newTable) return null;
+  const constraint = action.match(ADD_CONSTRAINT);
+  if (constraint) {
+    return /^FOREIGN\s+KEY\b/i.test(constraint[2]) && !NOT_VALID.test(unquoted(constraint[2]))
+      ? "adds a foreign key without NOT VALID, blocking writes to both tables while every row is checked"
+      : null;
+  }
+  if (ADD_COLUMN.test(action)) {
+    return /\bREFERENCES\b/i.test(unquoted(action))
+      ? "adds a column with an inline REFERENCES, which cannot be NOT VALID"
+      : null;
+  }
+  const validate = action.match(VALIDATE_CONSTRAINT);
+  if (validate) {
+    // This statement counts too: PostgreSQL validates after it adds, in any order.
+    const addedHere = (context.created.get(normalize(validate[1])) ?? []).some(
+      (entry) => entry.table === table && entry.index <= index
+    );
+    return addedHere
+      ? "validates a constraint in the migration that adds it, so the scan runs under the add's lock"
+      : null;
+  }
+  const alterColumn = action.match(ALTER_COLUMN);
+  if (alterColumn && /^SET\s+NOT\s+NULL\b/i.test(alterColumn[2])) {
+    const column = normalize(alterColumn[1]);
+    return context.newColumns.get(table)?.get(column)?.certain || proven.has(column)
+      ? null
+      : "sets NOT NULL without a validated CHECK (column IS NOT NULL), blocking reads and writes while every row is checked";
+  }
+  return null;
+}
+
+function statementBlockingFindings(statement, index, context, checks, scope) {
+  const createIndex = statement.match(CREATE_INDEX);
+  if (createIndex) {
+    return createIndex[1] || tableIsNew(context, normalize(createIndex[2]), index, scope)
+      ? []
+      : ["builds an index without CONCURRENTLY, blocking writes for the whole build"];
+  }
+  const alter = statement.match(ALTER_TABLE);
+  if (!alter) return [];
+  const table = normalize(alter[1]);
+  const newTable = tableIsNew(context, table, index, scope);
+  const actions = splitTopLevel(statement.slice(alter[0].length));
+  // PostgreSQL drops constraints before it sets NOT NULL, in any order.
+  const dropped = new Set(
+    actions.flatMap((action) => {
+      const drop = action.match(DROP_CONSTRAINT);
+      return drop ? [normalize(drop[1])] : [];
+    })
+  );
+  const proven = new Set(
+    [...(checks.get(table) ?? new Map())]
+      .filter(([name, check]) => check.validated && !dropped.has(name))
+      .map(([, check]) => check.column)
+  );
+  return actions
+    .map((action) => blockingActionFinding(action, { table, newTable, index, context, proven }))
+    .filter(Boolean);
+}
+
+// A VALIDATE only helps a SET NOT NULL in a later statement: within one ALTER
+// TABLE, PostgreSQL checks the new NOT NULL before it validates the CHECK.
+function blockingFindings(statement, index, context, checks, scope = TOP) {
+  if (/^DO\b/i.test(statement)) {
+    return innerStatements(statement, index).flatMap(([inner, position, innerScope]) =>
+      blockingFindings(inner, position, context, checks, innerScope)
+    );
+  }
+  const findings = statementBlockingFindings(statement, index, context, checks, scope);
+  trackNotNullChecks(checks, statement, { countAdds: false });
+  return findings;
+}
+
+/**
+ * Statements that hold a lock blocking live traffic on an existing table for a
+ * whole build or scan. Tables and columns this file creates are exempt.
+ *
+ * @param sql - Full text of a migration file.
+ * @param history - Full text of every migration that runs before it, in order.
+ */
+export function findBlockingStatements(sql, history = []) {
+  const checks = new Map();
+  for (const earlier of history) {
+    for (const statement of splitSqlStatements(earlier)) {
+      trackNotNullChecks(checks, statement, { countAdds: true });
+    }
+  }
+  const statements = splitSqlStatements(sql);
+  const context = collectAdditions(statements);
+  return statements.flatMap((statement, index) =>
+    blockingFindings(statement, index, context, checks).map(
+      (finding) => `${finding}: ${excerpt(statement)}`
     )
   );
 }
@@ -442,7 +608,12 @@ export function findRemovedViewColumns(baseSql, headSql) {
   return findings;
 }
 
-export function checkMigrationChange(changedFiles, readFile, readBase = () => null) {
+export function checkMigrationChange(
+  changedFiles,
+  readFile,
+  readBase = () => null,
+  readHistory = () => []
+) {
   const outside = changedFiles.filter(
     (file) =>
       !file.startsWith(MIGRATIONS_DIR) &&
@@ -454,6 +625,20 @@ export function checkMigrationChange(changedFiles, readFile, readBase = () => nu
   for (const file of changedFiles) {
     if (!file.startsWith(SQL_DIR) || !file.endsWith(".sql")) continue;
     const sql = readFile(file);
+    const blocking =
+      sql === null || BLOCKING_DIRECTIVE.test(sql)
+        ? []
+        : findBlockingStatements(sql, readHistory(file));
+    if (blocking.length > 0) {
+      violations.push(
+        `${file}: these statements hold a lock that blocks live traffic on an existing table while they run:\n  ${blocking.join("\n  ")}\n` +
+          "Build an index with CREATE INDEX CONCURRENTLY IF NOT EXISTS, alone in a file marked `-- sdp:migration-mode: non-transactional`. " +
+          "Add a foreign key NOT VALID (an inline REFERENCES becomes ADD COLUMN, then ADD CONSTRAINT) and VALIDATE it in a later migration, as 0100 and 0109 do. " +
+          "For NOT NULL, add CHECK (column IS NOT NULL) NOT VALID; a later migration validates it, then sets NOT NULL in a separate statement. " +
+          "A table this file creates is exempt, but only without IF NOT EXISTS, which cannot prove the table is new. " +
+          "If the lock is harmless because the table is small, add `-- sdp:migration-locks: blocking` and say why in the file."
+      );
+    }
     const findings = sql === null ? [] : findBreakingStatements(sql);
     if (file.startsWith(REPEATABLE_DIR)) {
       const base = readBase(file);
@@ -485,6 +670,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     .split("\n")
     .filter(Boolean);
   const mergeBase = git(["merge-base", base, "HEAD"]).trim();
+  const versioned = readdirSync(SQL_DIR)
+    .filter((file) => file.endsWith(".sql"))
+    .sort((left, right) => left.localeCompare(right));
   const violations = checkMigrationChange(
     changedFiles,
     (file) => (existsSync(file) ? readFileSync(file, "utf8") : null),
@@ -494,12 +682,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       } catch {
         return null;
       }
-    }
+    },
+    // The runner's order: versioned files by name, then every repeatable file.
+    (file) =>
+      versioned
+        .filter(
+          (earlier) =>
+            file.startsWith(REPEATABLE_DIR) || earlier.localeCompare(file.slice(SQL_DIR.length)) < 0
+        )
+        .map((earlier) => readFileSync(`${SQL_DIR}${earlier}`, "utf8"))
   );
 
   if (violations.length > 0) {
     console.error(violations.join("\n\n"));
     process.exit(1);
   }
-  console.log(`Migration compatibility policy passed (${changedFiles.length} changed files).`);
+  console.log(
+    `Migration compatibility and lock policy passed (${changedFiles.length} changed files).`
+  );
 }

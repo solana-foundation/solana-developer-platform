@@ -45,7 +45,7 @@ const PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS = {
 const PLAYWRIGHT_LOCAL_ORG_AUTH_ID = "aoi_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_USER_AUTH_ID = "aui_e2e_dashboard";
 const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
-const DEFAULT_KORA_RPC_URL = "https://your-kora-devnet-instance.us-central1.run.app";
+const DEFAULT_KORA_DEVNET_URL = "https://your-kora-devnet-instance.us-central1.run.app";
 const DEFAULT_SOLANA_RPC_URL = "https://api.devnet.solana.com";
 const KORA_MAX_TRANSFER_LAMPORTS = BigInt(9_900_000);
 const ZERO_LAMPORTS = BigInt(0);
@@ -124,8 +124,8 @@ interface EnsureLinkedOrgOptions {
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
   return {
     localApiBaseUrl: process.env.PLAYWRIGHT_API_URL ?? DEFAULT_LOCAL_API_URL,
-    koraApiKey: getLocalDevVar("KORA_API_KEY"),
-    koraRpcUrl: getLocalDevVar("KORA_RPC_URL") ?? DEFAULT_KORA_RPC_URL,
+    koraApiKey: getLocalDevVar("KORA_DEVNET_API_KEY"),
+    koraRpcUrl: getLocalDevVar("KORA_DEVNET_URL") ?? DEFAULT_KORA_DEVNET_URL,
     solanaRpcUrl: getLocalDevVar("SOLANA_RPC_URL") ?? DEFAULT_SOLANA_RPC_URL,
   };
 }
@@ -530,7 +530,7 @@ async function fundAddressViaKoraFeePayer(
 ): Promise<boolean> {
   const runtimeEnv = getPlaywrightApiRuntimeEnv();
   const client = new KoraClient({
-    rpcUrl: runtimeEnv.koraRpcUrl ?? DEFAULT_KORA_RPC_URL,
+    rpcUrl: runtimeEnv.koraRpcUrl ?? DEFAULT_KORA_DEVNET_URL,
     ...(runtimeEnv.koraApiKey ? { apiKey: runtimeEnv.koraApiKey } : {}),
   });
   const payerSignerResponse = await client.getPayerSigner();

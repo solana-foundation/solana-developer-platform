@@ -78,13 +78,16 @@ else
 fi
 
 # --- hand-off to the API ----------------------------------------------------
-# Suffixed KORA_*_<CLUSTER> wins over Doppler's bare KORA_RPC_URL, and the
+# The per-cluster Kora URLs override Doppler's deployed Koras (empty audiences:
+# the local Koras are plain HTTP, and a Doppler audience would reject them), and the
 # mainnet RPC points at the fork so the API and its paymaster see one chain.
 {
   echo "FEE_PAYMENT_PROVIDER=kora"
-  echo "KORA_RPC_URL_DEVNET=http://127.0.0.1:${DEVNET_PORT}"
+  echo "KORA_DEVNET_URL=http://127.0.0.1:${DEVNET_PORT}"
+  echo "KORA_DEVNET_CLOUD_RUN_AUDIENCE="
   if [ -n "${surfpool_rpc_url}" ]; then
-    echo "KORA_RPC_URL_MAINNET=http://127.0.0.1:${MAINNET_PORT}"
+    echo "KORA_MAINNET_URL=http://127.0.0.1:${MAINNET_PORT}"
+    echo "KORA_MAINNET_CLOUD_RUN_AUDIENCE="
     echo "SOLANA_MAINNET_RPC_URL=${surfpool_rpc_url}"
   fi
 } >"${API_ENV_FILE}"

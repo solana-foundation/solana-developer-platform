@@ -43,6 +43,7 @@ import {
 } from "@solana/kit";
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { requireKoraEndpoint } from "../helpers/kora";
 
 const {
   KoraAdapter,
@@ -67,18 +68,18 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
   let client: InstanceType<typeof KoraClient>;
 
   beforeAll(() => {
-    const rpcUrl = env.KORA_RPC_URL ?? "http://localhost:8080";
+    const { rpcUrl, apiKey } = requireKoraEndpoint();
     const options = {
       rpcUrl,
-      apiKey: env.KORA_API_KEY,
+      apiKey,
       timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30_000,
     };
     adapter = new KoraAdapter(options);
-    client = new KoraClient({ rpcUrl, apiKey: env.KORA_API_KEY });
+    client = new KoraClient({ rpcUrl, apiKey });
   });
 
   // If this reds with the Kamino ids missing, suspect a STALE WARM INSTANCE
-  // before suspecting code. CI's KORA_RPC_URL is the dev-env Kora
+  // before suspecting code. CI's KORA_DEVNET_URL is the dev-env Kora
   // (api-kora-devnet.solana.com); its config mounts as a Secret Manager volume
   // at `version = "latest"`, which Cloud Run resolves per instance AT STARTUP,
   // so a `terraform apply` that bumps the config secret does not reach

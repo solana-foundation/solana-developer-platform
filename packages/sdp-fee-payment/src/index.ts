@@ -39,7 +39,7 @@ export function resolveFeePaymentProvider(env: FeePaymentEnv): FeePaymentProvide
   return (env.FEE_PAYMENT_PROVIDER ?? "kora") as FeePaymentProviderType;
 }
 
-/** The cluster the unsuffixed trio (`KORA_RPC_URL` and friends) serves: the process default. */
+/** The process default cluster (`SOLANA_NETWORK`): the one the native fee payer serves. */
 export function defaultFeePaymentCluster(env: FeePaymentEnv): SolanaCluster {
   return resolveDefaultCluster(env);
 }
@@ -57,51 +57,33 @@ export interface KoraEndpoint {
  * One API process serves both clusters (a sandbox project is devnet, a
  * production project is mainnet-beta) and each cluster has its OWN Kora with
  * its own signer, policy and credentials, so the endpoint is selected by the
- * transaction's cluster, never by the process default. `KORA_*_<CLUSTER>` is
- * explicit and wins; the unsuffixed trio (`KORA_RPC_URL` and friends) serves
- * only the cluster `SOLANA_NETWORK` names. A cluster with neither answers null
- * so callers fail closed to wallet-pays rather than signing through the wrong
+ * transaction's cluster, never by the process default: `KORA_DEVNET_*` or
+ * `KORA_MAINNET_*`, nothing else. A cluster without its URL answers null so
+ * callers fail closed to wallet-pays rather than signing through the wrong
  * paymaster. There is NO built-in default URL: a paymaster is money, and a
- * deployment reaches one only by naming it. A per-cluster trio never borrows
- * the default trio's key or audience: a devnet key presented to the mainnet
- * service is a misconfiguration to surface, not paper over.
- *
- * Flipping `SOLANA_NETWORK` re-points the bare trio at the new cluster: a
- * `KORA_RPC_URL` that named the devnet Kora becomes the mainnet paymaster.
- * Rewire it in the same change (prod: HOO-717).
+ * deployment reaches one only by naming it.
  */
 export function resolveKoraEndpoint(
   env: FeePaymentEnv,
   cluster: SolanaCluster = defaultFeePaymentCluster(env)
 ): KoraEndpoint | null {
-  const perCluster =
+  const endpoint =
     cluster === "mainnet-beta"
       ? {
-          rpcUrl: env.KORA_RPC_URL_MAINNET,
-          apiKey: env.KORA_API_KEY_MAINNET,
-          identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE_MAINNET,
+          rpcUrl: env.KORA_MAINNET_URL?.trim(),
+          apiKey: env.KORA_MAINNET_API_KEY,
+          identityTokenAudience: env.KORA_MAINNET_CLOUD_RUN_AUDIENCE,
         }
       : {
-          rpcUrl: env.KORA_RPC_URL_DEVNET,
-          apiKey: env.KORA_API_KEY_DEVNET,
-          identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE_DEVNET,
+          rpcUrl: env.KORA_DEVNET_URL?.trim(),
+          apiKey: env.KORA_DEVNET_API_KEY,
+          identityTokenAudience: env.KORA_DEVNET_CLOUD_RUN_AUDIENCE,
         };
-  const explicit = perCluster.rpcUrl?.trim();
-  if (explicit) {
-    return {
-      rpcUrl: explicit,
-      apiKey: perCluster.apiKey,
-      identityTokenAudience: perCluster.identityTokenAudience,
-    };
-  }
-
-  if (cluster !== defaultFeePaymentCluster(env)) return null;
-  const rpcUrl = env.KORA_RPC_URL?.trim();
-  if (!rpcUrl) return null;
+  if (!endpoint.rpcUrl) return null;
   return {
-    rpcUrl,
-    apiKey: env.KORA_API_KEY,
-    identityTokenAudience: env.KORA_CLOUD_RUN_AUDIENCE,
+    rpcUrl: endpoint.rpcUrl,
+    apiKey: endpoint.apiKey,
+    identityTokenAudience: endpoint.identityTokenAudience,
   };
 }
 
@@ -155,7 +137,7 @@ export function createKoraAdapter(
   const endpoint = resolveKoraEndpoint(env, cluster);
   if (!endpoint) {
     throw new FeePaymentError(
-      `Kora is not configured for ${cluster}: set KORA_RPC_URL for the process network or a KORA_RPC_URL_<CLUSTER> override`,
+      `Kora is not configured for ${cluster}: set KORA_${cluster === "mainnet-beta" ? "MAINNET" : "DEVNET"}_URL`,
       "PROVIDER_NOT_AVAILABLE"
     );
   }

@@ -239,17 +239,25 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     await gotoProjectPage(page, fixture.project.id, "/dashboard");
     expect((await activityResponse).status()).toBe(200);
-    await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
-    const activityCard = page
+    // The stage serves the Overview or the previous Home, whichever its flags say, and before its
+    // first wallet an organization sees the wallet prompt instead of the list.
+    const overviewActivity = page.locator('[data-overview-section="activity"]');
+    const legacyActivity = page
       .locator('[data-slot="card"]')
       .filter({ has: page.getByText("Recent transactions", { exact: true }) });
-    const firstActivityRow = activityCard.locator("tbody tr").first();
-    const emptyActivity = activityCard.getByText(
-      /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
-    );
-    await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
-    if (await firstActivityRow.isVisible()) {
-      expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
+    const firstWalletPrompt = page.getByRole("heading", { name: "Start with a wallet" });
+    await expect(overviewActivity.or(legacyActivity).or(firstWalletPrompt).first()).toBeVisible();
+    const activity = (await overviewActivity.isVisible()) ? overviewActivity : legacyActivity;
+    if (await activity.isVisible()) {
+      await expect(activity.getByText(/^Recent (activity|transactions)$/)).toBeVisible();
+      const firstActivityRow = activity.locator("tbody tr").first();
+      const emptyActivity = activity.getByText(
+        /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
+      );
+      await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
+      if (await firstActivityRow.isVisible()) {
+        expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
+      }
     }
     await assertExactIdentityAndProject(page, fixture);
     expect(activityRequests).toHaveLength(1);
