@@ -67,6 +67,28 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
   });
 
+  // Greptile (#2333): a refusal whose body failed to download read as an
+  // answered 422 with no code, which retired the key the payment ran under.
+  it("keeps the key when a refusal's body fails to download", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("network error"));
+            },
+          }),
+          { status: 422, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = transferRequestFingerprint(SUBMISSION);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+
+    expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
+  });
+
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
   it("keeps the key on an unknown outcome and resends under it", async () => {
