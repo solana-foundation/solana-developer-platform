@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
 import {
+  type CounterpartyResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentResponse,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
-import {
-  gotoProjectPage,
-  seedCounterpartyWithSolanaAccount,
-} from "../support/local-dashboard-bootstrap";
+import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
 import {
   bootstrapWalletIdentityFixtures,
   walletIdentityDatabaseUrl,
@@ -18,11 +16,10 @@ import {
 
 const expect = playwrightExpect.configure({ timeout: 120_000 });
 
-// Keep pending schedules and their exact wallet links as retained local evidence.
 test.describe
   .serial("Managed recurring exact source identity", () => {
     let fixture: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>;
-    let counterparty: Awaited<ReturnType<typeof seedCounterpartyWithSolanaAccount>>;
+    let counterparty: CounterpartyResponse["counterparty"];
 
     async function withDatabase(fn: (db: Client) => Promise<void>) {
       const db = new Client({ connectionString: walletIdentityDatabaseUrl() });
@@ -61,15 +58,43 @@ test.describe
       });
       expect(seeded.ok).toBe(true);
       expect(await seeded.json()).not.toHaveProperty("error");
-      counterparty = await seedCounterpartyWithSolanaAccount(fixture.api, {
+      const created = await fixture.api.post<CounterpartyResponse>("/v1/counterparties", {
+        entityType: "individual",
         displayName: `Recurring Identity ${randomUUID().slice(0, 8)}`,
-        accountLabel: "Unfunded recurring identity destination",
-        destinationAddress: fixture.walletA.publicKey,
+      });
+      counterparty = created.counterparty;
+      await fixture.api.post(`/v1/counterparties/${counterparty.id}/accounts`, {
+        accountKind: "crypto_wallet",
+        label: "Unfunded recurring identity destination",
+        details: { network: "solana", address: fixture.walletA.publicKey },
       });
     });
 
     test.afterAll(async () => {
-      await fixture?.admin.page.close();
+      try {
+        if (counterparty) {
+          await withDatabase(async (db) => {
+            await db.query("BEGIN");
+            try {
+              // Include this run's schedules whose source pin was intentionally cleared.
+              await db.query(
+                "DELETE FROM payment_recurring_payments WHERE counterparty_id = $1 AND project_id = $2",
+                [counterparty.id, fixture.projectId]
+              );
+              await db.query("DELETE FROM counterparties WHERE id = $1 AND project_id = $2", [
+                counterparty.id,
+                fixture.projectId,
+              ]);
+              await db.query("COMMIT");
+            } catch (error) {
+              await db.query("ROLLBACK");
+              throw error;
+            }
+          });
+        }
+      } finally {
+        await fixture?.cleanup();
+      }
     });
 
     async function createPendingSchedule(page: Page, wallet: { id: string; label: string | null }) {
