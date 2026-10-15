@@ -2,9 +2,10 @@ import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types";
 import { z } from "zod";
 
 /**
- * A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` raised as an error, so a page can
- * tell it from a refusal: the action may have run, so the page refreshes what
- * it shows instead of only showing the message.
+ * A money answer that leaves the outcome unknown, raised as an error so a page
+ * can tell it from a refusal: a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or a 422
+ * `IDEMPOTENCY_KEY_REUSED` (the earlier request under the key may have run).
+ * The page refreshes what it shows instead of only showing the message.
  */
 export class IdempotencyOutcomeUnknownError extends Error {
   override name = "IdempotencyOutcomeUnknownError";
@@ -93,13 +94,39 @@ export function answerRetiresKey(answer: ApiAnswer): boolean {
 
 /**
  * {@link answerRetiresKey} for a money movement (`IDEMPOTENCY_REQUIRED_ROUTES`):
- * a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` keeps the key, so the next press
- * reuses it and sdp-api answers, instead of a fresh key sending the payment a
- * second time. sdp-api's money routes recover from their own row and never
- * send that code; this holds if one ever does.
+ * a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` or a 422 `IDEMPOTENCY_KEY_REUSED`
+ * keeps the key, so a fresh key never sends the payment a second time while
+ * the first one may have landed. sdp-api's money routes recover from their own
+ * row and never send the first code; this holds if one ever does.
  */
 export function moneyAnswerRetiresKey(answer: ApiAnswer): boolean {
-  return answerRetiresKey(answer) && !isOutcomeUnknownAnswer(answer);
+  return answerRetiresKey(answer) && uncertainMoneyAnswerMessage(answer) === null;
+}
+
+/**
+ * Whether the answer is a 422 `IDEMPOTENCY_KEY_REUSED`: this request differs
+ * from the one first sent under the key. It says nothing about whether that
+ * one ran, so on a money route the key is kept ({@link moneyAnswerRetiresKey}).
+ */
+export function isKeyReusedAnswer(answer: ApiAnswer): boolean {
+  return answer.status === 422 && answer.code === "IDEMPOTENCY_KEY_REUSED";
+}
+
+/**
+ * What to tell the user when a money movement's answer leaves its outcome
+ * unknown, or `null` for any other answer. Neither case is resent: the key is
+ * kept, and the user checks the list (and, for a reused key, restores the
+ * original request) before a new action.
+ */
+export function uncertainMoneyAnswerMessage(
+  answer: ApiAnswer
+):
+  | "Shared.idempotency.outcomeUnknownCheckList"
+  | "Shared.idempotency.keyReusedRestoreOriginal"
+  | null {
+  if (isOutcomeUnknownAnswer(answer)) return "Shared.idempotency.outcomeUnknownCheckList";
+  if (isKeyReusedAnswer(answer)) return "Shared.idempotency.keyReusedRestoreOriginal";
+  return null;
 }
 
 /**

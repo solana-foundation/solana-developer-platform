@@ -1,9 +1,7 @@
 "use client";
 
-import {
-  isIdempotencyKeyOutcomeUnknown,
-  type PaymentTransferSummary as TransferRecord,
-} from "@sdp/types";
+import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -87,19 +85,12 @@ async function performTransferUnderKey(
     // and its session always names the same payment, so its key is never
     // released. Otherwise the money rule decides (`moneyAnswerRetiresKey`).
     if (!providerSession && error instanceof TransferRequestError) {
-      settleMoneyIdempotencyKey(store, fingerprint, key, {
-        status: error.status,
-        replayed: error.replayed,
-        code: error.code,
-      });
-      if (isIdempotencyKeyOutcomeUnknown(error.status, error.code)) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
         // The key is kept, so the next press is answered under it: send nothing new.
-        throw new TransferRequestError(
-          t("Shared.idempotency.outcomeUnknownCheckList"),
-          error.status,
-          error.replayed,
-          error.code
-        );
+        throw new TransferRequestError(t(uncertain), error.status, error.replayed, error.code);
       }
     }
     throw error;

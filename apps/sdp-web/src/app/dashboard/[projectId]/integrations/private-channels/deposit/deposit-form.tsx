@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
@@ -184,7 +184,7 @@ export function DepositForm({
       // Retire the key only on an answer that proves what happened
       // (`answerRetiresKey`). A transport failure or a 5xx keeps it, so the
       // retry replays rather than depositing twice.
-      settleIdempotencyKey(
+      settleMoneyIdempotencyKey(
         privateChannelDepositIdempotencyKeyStore,
         fingerprint,
         idempotencyKey,

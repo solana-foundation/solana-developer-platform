@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchResultAnswer, isOutcomeUnknownAnswer } from "@/lib/idempotency";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
@@ -277,15 +277,17 @@ function useParRedemptionSubmission(options: {
         return;
       }
       const result = await createEarnVaultWithdrawalRequest(input, key);
-      // A withdrawal request moves money: an unknown outcome keeps the key, so
-      // the next press is answered under it rather than requesting again.
+      // A withdrawal request moves money: an unknown outcome or a reused key
+      // keeps the key, so the next press is answered under it.
       const answer = fetchResultAnswer(result);
       settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
       if (result.ok) {
         setOutcome(result.data);
         options.onRequested?.(result.data.withdrawalRequest);
-      } else if (isOutcomeUnknownAnswer(answer)) {
-        options.setError(t("Shared.idempotency.outcomeUnknownCheckList"));
+      } else if (uncertainMoneyAnswerMessage(answer) !== null) {
+        options.setError(
+          t(uncertainMoneyAnswerMessage(answer) ?? "Shared.idempotency.outcomeUnknownCheckList")
+        );
         void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
       } else {
         options.setError(result.error);

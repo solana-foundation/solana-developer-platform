@@ -67,6 +67,25 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
   });
 
+  // Keegan (#2333): a 422 IDEMPOTENCY_KEY_REUSED retired the key, so the next
+  // press minted a new one and could pay again while the first may have landed.
+  it("keeps the key on IDEMPOTENCY_KEY_REUSED and says to restore the original or check", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json(
+        { error: { code: "IDEMPOTENCY_KEY_REUSED", message: "reused" } },
+        { status: 422 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = transferRequestFingerprint(SUBMISSION);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+      "Shared.idempotency.keyReusedRestoreOriginal"
+    );
+
+    expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
+  });
+
   // Greptile (#2333): a refusal whose body failed to download read as an
   // answered 422 with no code, which retired the key the payment ran under.
   it("keeps the key when a refusal's body fails to download", async () => {
