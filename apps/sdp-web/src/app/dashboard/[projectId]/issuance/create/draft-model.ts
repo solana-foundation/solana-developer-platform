@@ -22,6 +22,13 @@ export const draftSchema = z
     transferFee: z.boolean(),
     transferFeeBasisPoints: z.string(),
     transferFeeMax: z.string(),
+    // The new design's draft flow also asks for the issuer, the currency and, for a token that
+    // is not a stablecoin, whether it can freeze accounts and has a permanent delegate (a
+    // stablecoin always has both). The previous design's form sends none of them.
+    issuerName: z.string().trim().max(200).optional(),
+    pegCurrency: z.enum(["USD", "EUR", "GBP"]).optional(),
+    freezeAccounts: z.boolean().optional(),
+    permanentDelegate: z.boolean().optional(),
     authorities: z.object({
       "mint-authority": z.string().min(1),
       "metadata-authority": z.string().min(1),
@@ -41,6 +48,8 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
   const selectedSettings: Record<string, { params?: Record<string, string> }> = {};
 
   if (!isStablecoin && input.pauseTransfers) selectedSettings.pauseTransfers = {};
+  if (!isStablecoin && input.freezeAccounts) selectedSettings.freezeAccounts = {};
+  if (!isStablecoin && input.permanentDelegate) selectedSettings.permanentDelegate = {};
   if (!isStablecoin && input.interestBearing) {
     selectedSettings.interestBearing = { params: { rate: input.interestRate } };
   }
@@ -61,7 +70,7 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
     template: isStablecoin ? "stablecoin" : "custom",
     requiresAllowlist: input.allowlist,
     isMintable: true,
-    isFreezable: isStablecoin,
+    isFreezable: isStablecoin || input.freezeAccounts === true,
     assetCategory: isStablecoin ? "stablecoin" : "generic",
     assetType: "generic",
     issuanceMetadata: {
@@ -75,13 +84,15 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
         name: input.name.trim(),
         description: input.description.trim() || undefined,
         website: input.website.trim() || undefined,
+        issuerName: input.issuerName?.trim() || undefined,
+        pegCurrency: input.pegCurrency,
       },
       chain: { decimals: Number.parseInt(input.decimals, 10) },
       custom: {
         customer: {
           authorityWalletIds: Object.fromEntries(
-            Object.entries(input.authorities).filter(
-              ([key]) => isStablecoin || key === "mint-authority" || key === "metadata-authority"
+            Object.entries(input.authorities).filter(([key]) =>
+              isDraftAuthorityInUse(input, key as AuthorityKey)
             )
           ),
         },
@@ -96,4 +107,15 @@ export function buildDraftPayload(input: DraftState): Record<string, unknown> {
   payload.signingCustodyWalletId = input.authorities["mint-authority"];
 
   return payload;
+}
+
+/**
+ * Whether the draft's token has the authority at all: a stablecoin has all four; any other
+ * token has mint and metadata, and freeze or the permanent delegate only when it asks for them.
+ */
+export function isDraftAuthorityInUse(input: DraftState, key: AuthorityKey): boolean {
+  if (input.assetClass === "stablecoin") return true;
+  if (key === "mint-authority" || key === "metadata-authority") return true;
+  if (key === "freeze-authority") return input.freezeAccounts === true;
+  return input.permanentDelegate === true;
 }

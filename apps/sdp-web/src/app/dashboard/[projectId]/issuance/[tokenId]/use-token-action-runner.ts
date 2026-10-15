@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import type {
   ActionConfirmationState,
   ActionExecutionInput,
@@ -61,6 +62,7 @@ export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[
       options.successToast ?? t("DashboardIssuance.management.transactionFinalized");
     const toastId = toast.loading(submitToast, {
       position: "bottom-right",
+      description: options.submitToastDescription,
     });
 
     setIsPending(true);
@@ -69,24 +71,32 @@ export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[
 
       if (result.ok) {
         setActionConfirmation(null);
-        toast.success(successToast, { id: toastId, position: "bottom-right" });
+        toast.success(successToast, {
+          id: toastId,
+          position: "bottom-right",
+          description: undefined,
+        });
         try {
           await options.onSuccess?.(result);
-          router.refresh();
+          refreshKeepingDashboardUrl(router);
         } catch (refreshError) {
           console.error("Token action post-success refresh failed", refreshError);
         }
         return result;
       }
 
-      toast.error(result.message, { id: toastId, position: "bottom-right" });
+      toast.error(result.message, {
+        id: toastId,
+        position: "bottom-right",
+        description: undefined,
+      });
       return result;
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : t("DashboardIssuance.management.transactionFailed");
-      toast.error(message, { id: toastId, position: "bottom-right" });
+      toast.error(message, { id: toastId, position: "bottom-right", description: undefined });
       return {
         ok: false,
         message,
@@ -125,6 +135,7 @@ export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[
             t("DashboardIssuance.management.submittingAction", {
               action: input.label.toLowerCase(),
             }),
+          submitToastDescription: options.submitToastDescription,
           successToast:
             options.successToast ?? t("DashboardIssuance.management.transactionFinalized"),
           onSuccess: options.onSuccess,

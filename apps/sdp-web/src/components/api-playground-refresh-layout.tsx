@@ -14,6 +14,7 @@ import { SNIPPET_LANGUAGES, type SnippetLanguage } from "@/components/api-playgr
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { InfoHint } from "@/components/ui/info-hint";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusText } from "@/components/ui/status-text";
 import { useTranslations } from "@/i18n/provider";
 
@@ -42,6 +43,9 @@ const SNIPPET_LANGUAGE_NAMES: Record<SnippetLanguage, string> = {
 // from these variables.
 const TAB_LIST_CLASS =
   "gap-6.5 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
+
+// On a phone the design swaps each view's underline tabs for a 32px chip group with 14px labels.
+const PHONE_CHIP_CLASS = "refresh:px-2 refresh:py-1 refresh:text-body";
 
 // The design's playground fields: 36px underline controls with 14px values, tracked -0.01em
 // like the deck's other controls.
@@ -205,7 +209,7 @@ function RunShortcut() {
   const apple = useApplePlatform();
   const keys = apple ? ["⌘", "↵"] : ["Ctrl", "↵"];
   return (
-    <span aria-hidden="true" className="ml-2.5 flex items-center gap-1">
+    <span aria-hidden="true" className="ml-2.5 flex items-center gap-1 max-sm:hidden">
       {keys.map((key) => (
         <kbd
           key={key}
@@ -340,7 +344,7 @@ function SnippetControls({
 }) {
   const t = useTranslations();
   return (
-    <span className="flex items-center gap-1">
+    <span className="ml-auto flex items-center gap-1">
       <span className="relative inline-flex h-6 items-center gap-1 rounded-control px-2 text-body text-primary transition-colors hover:bg-fill-subtle has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-primary">
         {SNIPPET_LANGUAGE_NAMES[language]}
         <ChevronDown aria-hidden="true" className="size-3.5 text-tertiary" />
@@ -500,9 +504,10 @@ function EndpointLine({
           <ApiPlaygroundEndpointOptions endpoints={endpoints} />
         </select>
       </div>
-      {/* The design's Run sits a pixel inside the picker's rule, top and bottom. */}
+      {/* The design's Run sits a pixel inside the picker's rule, top and bottom; on a phone it is
+          a 36px full-width button under the picker, without the shortcut. */}
       {createApiKeyHref ? (
-        <Button asChild className="!h-[58px] self-center rounded-control !px-5">
+        <Button asChild className="!h-9 self-center rounded-control !px-5 sm:!h-[58px]">
           <Link href={createApiKeyHref} data-playground-create-key="">
             <Plus className="size-4" aria-hidden="true" />
             {t("Shared.SharedComponents.createAnApiKey")}
@@ -514,7 +519,7 @@ function EndpointLine({
           onClick={onRun}
           disabled={runDisabled}
           aria-keyshortcuts="Meta+Enter Control+Enter"
-          className="!h-[58px] !gap-0 self-center rounded-control !px-5"
+          className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[58px]"
         >
           <span className="flex items-center whitespace-nowrap">
             <span className="flex items-center gap-1.5">
@@ -692,11 +697,12 @@ export function ApiPlaygroundRefreshLayout({
       <PlaygroundMessages messages={messages} />
 
       {/* The design's rhythm: 28px to the rule, 40px under it to the two 36px section rows (the
-          divider between the halves starts there, not at the rule), 24px to the view tabs. */}
+          divider between the halves starts there, not at the rule), 24px to the view tabs. A
+          phone stacks the halves 32px apart, with chips 12px under each heading row. */}
       <div className="mt-7 grid border-t border-border-default pt-10 lg:grid-cols-2">
         <section
           aria-labelledby="api-playground-request"
-          className="min-w-0 pb-10 lg:border-r lg:border-border-default lg:pr-10 lg:pb-0"
+          className="min-w-0 pb-8 md:pb-10 lg:border-r lg:border-border-default lg:pr-10 lg:pb-0"
         >
           <div className="flex h-9 items-center justify-between gap-4">
             <h2 id="api-playground-request" className="text-body font-medium text-primary">
@@ -713,12 +719,25 @@ export function ApiPlaygroundRefreshLayout({
               {t("Shared.SharedComponents.reset")}
             </button>
           </div>
-          <div className="mt-6 flex items-center justify-between gap-3">
+          {/* On a phone the Code view's language and Copy controls drop under the chips, right
+              aligned, rather than overflow the row beside them. */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 md:mt-6 md:flex-nowrap">
+            <SegmentedControl
+              ariaLabel={t("Shared.SharedComponents.request")}
+              options={REQUEST_VIEWS.map((entry) => ({
+                value: entry.value,
+                label: t(entry.labelKey),
+              }))}
+              value={view}
+              onChange={(value) => setView(value as RequestView)}
+              className="shrink-0 md:hidden"
+              optionClassName={PHONE_CHIP_CLASS}
+            />
             <Tabs
               bordered={false}
               value={view}
               onValueChange={(value) => setView(value as RequestView)}
-              className="shrink-0"
+              className="shrink-0 max-md:hidden"
             >
               <TabList className={TAB_LIST_CLASS}>
                 {REQUEST_VIEWS.map((entry) => (
@@ -739,7 +758,7 @@ export function ApiPlaygroundRefreshLayout({
             ) : null}
           </div>
 
-          <div className="mt-10">
+          <div className="mt-4 md:mt-10">
             {view === "form" ? (
               <RequestForm
                 endpoint={activeEndpoint}
@@ -772,7 +791,7 @@ export function ApiPlaygroundRefreshLayout({
 
         <section
           aria-labelledby="api-playground-response"
-          className="min-w-0 border-t border-border-default pt-10 lg:border-t-0 lg:pt-0 lg:pl-10"
+          className="min-w-0 border-t border-border-default pt-8 md:pt-10 lg:border-t-0 lg:pt-0 lg:pl-10"
         >
           <div className="flex h-9 items-center justify-between gap-4">
             <h2 id="api-playground-response" className="text-body font-medium text-primary">
@@ -784,11 +803,22 @@ export function ApiPlaygroundRefreshLayout({
               <ExecutionStatus execution={execution} />
             </p>
           </div>
+          <SegmentedControl
+            ariaLabel={t("Shared.SharedComponents.response")}
+            options={RESPONSE_VIEWS.map((entry) => ({
+              value: entry.value,
+              label: t(entry.labelKey),
+            }))}
+            value={responseView}
+            onChange={(value) => setResponseView(value as ResponseView)}
+            className="mt-3 w-fit md:hidden"
+            optionClassName={PHONE_CHIP_CLASS}
+          />
           <Tabs
             bordered={false}
             value={responseView}
             onValueChange={(value) => setResponseView(value as ResponseView)}
-            className="mt-6"
+            className="mt-6 max-md:hidden"
           >
             <TabList className={TAB_LIST_CLASS}>
               {RESPONSE_VIEWS.map((entry) => (
