@@ -73,6 +73,11 @@ export async function admitTransferBatchExecution(
 /**
  * Answers a create-batch request from its row: after a takeover of a crashed
  * attempt, or once the shared record has expired. No RPC and no account state.
+ * It runs only once the request that created the batch is presumed dead (the
+ * key layer took the key over, or it expired), so recipients still pending
+ * with no chunk transfer will never be sent: a chunk's transfer row and links
+ * commit before its broadcast. They are failed, and the batch settles, before
+ * it answers, instead of replaying a batch stuck in `processing` forever.
  */
 export async function findTransferBatchRecordReplay(
   c: AppContext,
@@ -87,9 +92,22 @@ export async function findTransferBatchRecordReplay(
     idempotencyKey: recordKey,
   });
   if (row === null || row.idempotency_fingerprint === null) return null;
+  if (row.idempotency_fingerprint !== getIdempotencyFingerprint(c)) {
+    // Another request's row: the step refuses it (422) without touching it.
+    return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
+  }
+  const settled =
+    row.status === "processing"
+      ? await getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
+          batchId: row.id,
+          organizationId,
+          projectId: authorized.projectId,
+          error: "The batch request ended before this recipient's transfer was sent",
+        })
+      : row;
   return {
-    fingerprint: row.idempotency_fingerprint,
-    respond: () => respondToTransferBatchReplay(c, row, organizationId, authorized.projectId),
+    fingerprint: settled.idempotency_fingerprint,
+    respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
   };
 }
 

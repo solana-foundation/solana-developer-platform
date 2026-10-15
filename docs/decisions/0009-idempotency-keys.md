@@ -118,6 +118,13 @@ point finds its row and never signs or sends twice. Unlike Brandur's design the 
 on the domain row, not the key row, because domain rows outlive the key's 24 hours and the
 reconciler works from them.
 
+A transfer batch commits its row and its recipients before any chunk, and each chunk commits its
+transfer row and recipient links before it broadcasts. So a recipient still pending with no
+transfer row was never sent. When a takeover or a retry past the 24 hours finds its batch still
+`processing`, the record finder fails those unsent recipients and recomputes the batch before it
+answers; the pending-transfers job does the same for a batch over an hour old that no one retries.
+Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
+
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. A replay of activate, cancel, resume or collect

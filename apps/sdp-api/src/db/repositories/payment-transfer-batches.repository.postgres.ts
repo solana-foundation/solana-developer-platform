@@ -840,6 +840,56 @@ export function createPostgresPaymentTransferBatchesRepository(
     async recomputeTransferBatchStatus(input: RecomputeTransferBatchStatusInput) {
       return db.transaction((tx) => recomputeBatchStatusInTransaction(tx, input));
     },
+
+    async listStrandedTransferBatches(input) {
+      const result = await db
+        .prepare(
+          `SELECT b.id, b.organization_id, b.project_id
+             FROM payment_transfer_batches b
+            WHERE b.status = 'processing'
+              AND b.created_at < ?
+              AND EXISTS (
+                SELECT 1 FROM payment_transfer_recipients r
+                 WHERE r.batch_id = b.id AND r.status = 'pending' AND r.transfer_id IS NULL
+              )
+            ORDER BY b.created_at
+            LIMIT ?`
+        )
+        .bind(input.createdBefore, input.limit)
+        .all<{ id: string; organization_id: string; project_id: string }>();
+      return result.results.map((row) => ({
+        batchId: row.id,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+      }));
+    },
+
+    async failUnsentTransferRecipients(input) {
+      return db.transaction(async (tx) => {
+        // The batch lock first, as every batch status writer takes it.
+        await tx
+          .prepare(
+            `SELECT id FROM payment_transfer_batches
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+              FOR UPDATE`
+          )
+          .bind(input.batchId, input.organizationId, input.projectId)
+          .first<{ id: string }>();
+        await tx
+          .prepare(
+            `UPDATE payment_transfer_recipients
+                SET status = 'failed', error = ?, updated_at = sdp_iso_now()
+              WHERE batch_id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND status = 'pending'
+                AND transfer_id IS NULL`
+          )
+          .bind(input.error, input.batchId, input.organizationId, input.projectId)
+          .run();
+        return recomputeBatchStatusInTransaction(tx, input);
+      });
+    },
   };
 }
 
