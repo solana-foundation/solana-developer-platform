@@ -4,6 +4,7 @@ import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import {
   ApiPlaygroundEndpointOptions,
   ApiPlaygroundRefreshLayout,
@@ -22,7 +23,8 @@ import { useTranslations } from "@/i18n/provider";
 import { filterPlaygroundEndpointsToReleaseChannel } from "@/lib/api-playground-openapi-catalog";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { answerRetiresKey, apiErrorCode } from "@/lib/idempotency";
+import { answerRetiresKey, apiErrorCode, storageFingerprint } from "@/lib/idempotency";
+import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import {
   getStoredApiKeySecret,
   isValidSdpApiKey,
@@ -412,24 +414,51 @@ function getExecutionStatus(
 }
 
 /**
- * The key of the last Send whose answer settled nothing (a lost answer, a 5xx,
- * an unstored refusal), with the request it went out for. Sending that same
- * request again reuses it, so the API answers the retry from the first attempt
- * instead of running it twice; an answer that retires a key
- * (`answerRetiresKey`) clears it, and any other request gets a new key. Memory
- * only: the request can carry a pasted secret, so it never reaches storage.
+ * The key of the last Send of a write whose answer settled nothing (a lost
+ * answer, a 5xx, an unstored refusal), with a digest of the request it went
+ * out for. Sending that same request again reuses it, so the API answers the
+ * retry from the first attempt instead of running it twice, after a reload
+ * too; an answer that retires a key (`answerRetiresKey`) clears it, a Send of
+ * a different write replaces it, and a GET (keyless) leaves it. It is one
+ * entry of an idempotency key store, so it is scoped by user and org with the
+ * dashboard's other keys. The request can carry a pasted API key, so only its
+ * digest ({@link storageFingerprint}) is stored, never the request.
  */
-let unsettledSend: { request: string; key: string } | null = null;
+const playgroundRetryKeys = createIdempotencyKeyStore("sdp:playground:retry:idempotency:v1");
+const UNSETTLED_SEND = "unsettled-send";
+const unsettledSendSchema = z.object({ request: z.string(), key: z.string() });
 
-/** @internal Test-only. */
-export function resetPlaygroundRetryKeyForTests(): void {
-  unsettledSend = null;
+/** What the store's single entry holds: the request digest and its key. */
+interface UnsettledSend {
+  request: string;
+  key: string;
 }
 
-/** A new key per Send of a write, except the retry of a Send that settled nothing. */
-function keyForSend(request: string): string {
-  if (unsettledSend?.request === request) return unsettledSend.key;
-  return crypto.randomUUID();
+function parseUnsettledSend(raw: string): UnsettledSend | null {
+  try {
+    const parsed = unsettledSendSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The key for a Send of a write: the unsettled one when this is its retry,
+ * otherwise a new one that replaces it. Returns the stored entry too, so the
+ * answer settles only the entry this Send claimed.
+ */
+function keyForSend(request: string): { key: string; entry: string } {
+  const digest = storageFingerprint(request);
+  const mint = () => JSON.stringify({ request: digest, key: crypto.randomUUID() });
+  const kept = playgroundRetryKeys.claim(UNSETTLED_SEND, mint).key;
+  const unsettled = parseUnsettledSend(kept);
+  if (unsettled?.request === digest) return { key: unsettled.key, entry: kept };
+  playgroundRetryKeys.release(UNSETTLED_SEND, kept);
+  const entry = playgroundRetryKeys.claim(UNSETTLED_SEND, mint).key;
+  const minted = parseUnsettledSend(entry);
+  if (minted === null) throw new Error("playground retry key: minted an unreadable entry");
+  return { key: minted.key, entry };
 }
 
 interface ExecutePlaygroundRequestOptions {
@@ -490,15 +519,11 @@ async function executePlaygroundRequest({
   setIsExecuting(true);
 
   // Each Send is a new call with a new key, unless it retries one that settled
-  // nothing ({@link unsettledSend}). The proxy forwards it as Idempotency-Key,
-  // which the money routes require.
+  // nothing ({@link playgroundRetryKeys}). The proxy forwards it as
+  // Idempotency-Key, which the money routes require.
   const sendRequest = JSON.stringify([apiKeyId, activeEndpoint.method, resolvedPath, requestBody]);
-  const idempotencyKey = hasRequestBody(activeEndpoint.method)
-    ? keyForSend(sendRequest)
-    : undefined;
-  if (idempotencyKey !== undefined) {
-    unsettledSend = { request: sendRequest, key: idempotencyKey };
-  }
+  const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
+  const idempotencyKey = claimed?.key;
 
   try {
     const proxyResponse = await dashboardRequest("/api/playground/execute", {
@@ -530,14 +555,14 @@ async function executePlaygroundRequest({
     // Only an answer to the write itself settles its key; a keyless read (say,
     // a GET checking whether the lost write landed) leaves it for the retry.
     if (
-      idempotencyKey !== undefined &&
+      claimed !== undefined &&
       answerRetiresKey({
         status: envelope.status,
         replayed: envelope.headers?.["idempotent-replayed"] === "true",
         code: envelope.ok ? null : apiErrorCode(JSON.stringify(envelope.body ?? null)),
       })
     ) {
-      unsettledSend = null;
+      playgroundRetryKeys.release(UNSETTLED_SEND, claimed.entry);
     }
 
     onResult({

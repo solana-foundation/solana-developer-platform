@@ -6,14 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
-import {
-  type ApiPlaygroundEndpointConfig,
-  ApiPlaygroundShell,
-  resetPlaygroundRetryKeyForTests,
-} from "./api-playground-shell";
+import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const mocks = vi.hoisted(() => ({
@@ -45,7 +42,8 @@ const endpoint: ApiPlaygroundEndpointConfig = {
 describe("ApiPlaygroundShell", () => {
   beforeEach(() => {
     clearStoredApiKeySecrets();
-    resetPlaygroundRetryKeyForTests();
+    window.sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
     mocks.replaceSearchParams.mockReset();
     mocks.searchParamGet.mockReset();
     mocks.searchParamGet.mockReturnValue(null);
@@ -196,6 +194,74 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(1)).toBe(sentKey(0));
     expect(sentKey(2)).toBe(sentKey(0));
     expect(sentKey(3)).not.toBe(sentKey(2));
+  });
+
+  // Jina (#2333): the unsettled key lived only in module memory, so a reload
+  // between a lost write and its retry sent the retry under a new key.
+  it("keeps a lost POST's key across a reload, in session storage, so the retry still reuses it", async () => {
+    const secret = ["sk", "test", "idempotency", "fixture"].join("_");
+    storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const envelope = (status: number) =>
+      new Response(
+        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    const answers: (Response | "lost")[] = ["lost", envelope(201)];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
+      const answer = answers.shift() ?? envelope(201);
+      if (answer === "lost") throw new TypeError("Failed to fetch");
+      return answer;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const postEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-reload",
+      method: "POST",
+    };
+    const sendWith = async (
+      Shell: typeof ApiPlaygroundShell,
+      Provider: typeof I18nProvider,
+      messages: ReturnType<typeof getMessages>,
+      calls: number
+    ) => {
+      const view = render(
+        <Provider locale="en" messages={messages}>
+          <Shell apiKeyId="key-test" endpoints={[postEndpoint]} productName="Test product" />
+        </Provider>
+      );
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+      cleanup();
+    };
+    const sentKey = (call: number) =>
+      z
+        .object({ idempotencyKey: z.string().optional() })
+        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+
+    await sendWith(ApiPlaygroundShell, I18nProvider, getMessages("en"), 1);
+    // The reload: every module starts over; only session storage survives.
+    vi.resetModules();
+    const reloaded = await import("./api-playground-shell");
+    const reloadedI18n = await import("@/i18n/provider");
+    const reloadedMessages = await import("@/i18n/messages");
+    const reloadedKeys = await import("@/lib/playground-api-keys");
+    reloadedKeys.storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
+    await sendWith(
+      reloaded.ApiPlaygroundShell,
+      reloadedI18n.I18nProvider,
+      reloadedMessages.getMessages("en"),
+      2
+    );
+
+    expect(sentKey(0)).toEqual(expect.any(String));
+    expect(sentKey(1)).toBe(sentKey(0));
+    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain(secret);
   });
 
   // Greptile (#2333): a GET between a lost write and its retry cleared the
