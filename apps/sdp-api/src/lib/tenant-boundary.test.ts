@@ -38,6 +38,9 @@ describe("tenant data-access boundary", () => {
       "routes/issuance/handlers/metadata.ts",
       "routes/webhooks/",
       "services/jobs/",
+      // Provider webhook adapters run only after signed public ingress or a
+      // claimed inbox row; tenant resolution happens inside the adapter.
+      "services/ramps/webhooks/",
       // The provider-settlement path shared by webhooks and the ramp
       // reconciliation job: transfers are looked up by provider reference,
       // so no tenant scope exists yet.

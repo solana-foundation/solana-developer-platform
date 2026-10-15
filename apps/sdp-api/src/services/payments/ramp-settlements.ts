@@ -5,6 +5,7 @@ import {
   isTerminalRampTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferTransitionId,
+  type RampWebhookBusinessOutcome,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
@@ -122,7 +123,7 @@ function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId 
 export async function applyRampSettlementEvent(
   env: Env,
   event: RampSettlementEvent
-): Promise<{ applied: boolean; outcome: "applied" | "ignored" | "unmatched" | "refused" }> {
+): Promise<{ applied: boolean; outcome: RampWebhookBusinessOutcome }> {
   if (event.kind === "ignore") {
     return { applied: false, outcome: "ignored" };
   }

@@ -1,4 +1,10 @@
-import type { RampWebhookEventStatus, SdpEnvironment } from "@sdp/types";
+import {
+  RAMP_WEBHOOK_APPLY_OUTCOMES,
+  RAMP_WEBHOOK_EVENT_STATUSES,
+  type RampWebhookApplyOutcome,
+  type RampWebhookEventStatus,
+  type SdpEnvironment,
+} from "@sdp/types";
 import {
   PERSISTED_RAMP_PROVIDERS,
   type PersistedRampProviderId,
@@ -16,7 +22,7 @@ export interface RampWebhookEventRow {
   /** A retired provider's row still reads, and parks for want of a processor. */
   provider: PersistedRampProviderId;
   environment: SdpEnvironment;
-  /** Exact signed bytes for new rows; legacy JSONB rows are serialized on read. */
+  /** Verified replay body; BVNK bank details are removed before persistence. */
   rawBody: string;
   providerEventId: string | null;
   applyOutcome: RampWebhookApplyOutcome | null;
@@ -26,15 +32,6 @@ export interface RampWebhookEventRow {
   created_at: string;
   updated_at: string;
 }
-
-export type RampWebhookApplyOutcome =
-  | "applied"
-  | "ignored"
-  | "unmatched"
-  | "refused"
-  | "discarded"
-  | "invalid"
-  | "retryable_error";
 
 export interface InsertRampWebhookEventInput {
   provider: RampProviderId;
@@ -102,7 +99,11 @@ export interface RampWebhookEventsRepository {
     input: InsertVerifiedRampWebhookEventInput
   ): Promise<{ row: RampWebhookEventRow; inserted: boolean }>;
   /** Retains the outcome until the retention job prunes the discharged row. */
-  dischargeEvent(id: string, outcome: "applied" | "ignored" | "discarded"): Promise<void>;
+  dischargeEvent(
+    id: string,
+    outcome: "applied" | "ignored" | "discarded",
+    reason?: string
+  ): Promise<void>;
   pruneDischarged(before: string, limit: number): Promise<number>;
   /** Records a failed apply. Below `maxAttempts` the row stays `pending` for
    * the replay job; at the limit it parks as `failed`. */
@@ -132,6 +133,8 @@ export interface RampWebhookEventsRepository {
 }
 
 const storedEventProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS);
+const storedEventOutcomeSchema = z.enum(RAMP_WEBHOOK_APPLY_OUTCOMES).nullable();
+const storedEventStatusSchema = z.enum(RAMP_WEBHOOK_EVENT_STATUSES);
 
 /**
  * The claim, park and re-arm statements take only rows whose provider this
@@ -142,19 +145,18 @@ const storedEventProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS);
 const KNOWN_PROVIDERS: string[] = [...PERSISTED_RAMP_PROVIDERS];
 
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
+  const rawBody = z.string().nullable().parse(row.raw_body);
+  const legacyPayload = row.payload;
   return {
     id: row.id as string,
     provider: storedEventProviderSchema.parse(row.provider),
     environment: row.environment as SdpEnvironment,
     rawBody:
-      typeof row.raw_body === "string"
-        ? row.raw_body
-        : typeof row.payload === "string"
-          ? row.payload
-          : JSON.stringify(row.payload),
-    providerEventId: (row.provider_event_id as string | null) ?? null,
-    applyOutcome: (row.apply_outcome as RampWebhookApplyOutcome | null) ?? null,
-    status: row.status as RampWebhookEventStatus,
+      rawBody ??
+      (typeof legacyPayload === "string" ? legacyPayload : JSON.stringify(legacyPayload)),
+    providerEventId: z.string().nullable().parse(row.provider_event_id),
+    applyOutcome: storedEventOutcomeSchema.parse(row.apply_outcome),
+    status: storedEventStatusSchema.parse(row.status),
     attempts: Number(row.attempts),
     last_error: (row.last_error as string | null) ?? null,
     created_at: row.created_at as string,
@@ -217,15 +219,16 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
       return { row: mapRow(existing), inserted: false };
     },
 
-    async dischargeEvent(id, outcome) {
+    async dischargeEvent(id, outcome, reason) {
       await db
         .prepare(
           `UPDATE ramp_webhook_events
-           SET status = 'discharged', apply_outcome = ?, discharged_at = sdp_iso_now(),
+           SET status = 'discharged', apply_outcome = ?, last_error = ?,
+               raw_body = NULL, payload = NULL, discharged_at = sdp_iso_now(),
                updated_at = sdp_iso_now()
            WHERE id = ? AND status = 'pending'`
         )
-        .bind(outcome, id)
+        .bind(outcome, reason ?? null, id)
         .run();
     },
 

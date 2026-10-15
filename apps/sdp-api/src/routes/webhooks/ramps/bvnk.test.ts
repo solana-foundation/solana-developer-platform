@@ -64,6 +64,34 @@ describe("bvnkWebhook.parse", () => {
     });
   });
 
+  it("stores a replayable wallet event without bank details", () => {
+    const rawBody = JSON.stringify({
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: "wallet_1",
+        name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
+        status: "ACTIVE",
+        customer: { id: "customer_1", name: "Customer Name" },
+        paymentInstruments: [
+          {
+            type: "FIAT",
+            accountNumber: "900473221558",
+            bankDetails: { bic: "LEADUS49XXX", name: "LEAD BANK" },
+          },
+        ],
+      },
+    });
+    const stored = bvnkWebhook.bodyForInbox(rawBody);
+
+    expect(stored).not.toContain("900473221558");
+    expect(stored).not.toContain("LEADUS49XXX");
+    expect(stored).not.toContain("LEAD BANK");
+    expect(bvnkWebhook.parse(stored)).toMatchObject({
+      event: "ledger:v2:wallet:status-change",
+      data: { bankAccount: { accountNumber: "[REDACTED]" } },
+    });
+  });
+
   it("parses the v1 fiat pay-in status-change webhook and stringifies its amount", () => {
     const processor = bvnkWebhook;
 

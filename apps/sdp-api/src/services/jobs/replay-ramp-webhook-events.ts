@@ -97,7 +97,7 @@ export async function applyStoredRampWebhookEvent(
     } catch (error) {
       if (error instanceof AppError && error.code === "BAD_REQUEST") {
         if (row.environment === "sandbox") {
-          await events.dischargeEvent(row.id, "discarded");
+          await events.dischargeEvent(row.id, "discarded", error.message);
           logEvent("warn", {
             event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
             flow: "ramp-settlement",
@@ -145,6 +145,14 @@ export async function applyStoredRampWebhookEvent(
     const message = error instanceof Error ? error.message : String(error);
     const terminal = error instanceof TerminalRampWebhookError;
     const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
+    let failureOutcome: "invalid" | "refused" | "retryable_error";
+    if (error instanceof InvalidRampWebhookError) {
+      failureOutcome = "invalid";
+    } else if (terminal) {
+      failureOutcome = "refused";
+    } else {
+      failureOutcome = "retryable_error";
+    }
     await events.recordFailure({
       id: row.id,
       error: message,
@@ -152,12 +160,7 @@ export async function applyStoredRampWebhookEvent(
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
       terminal,
-      outcome:
-        error instanceof InvalidRampWebhookError
-          ? "invalid"
-          : terminal
-            ? "refused"
-            : "retryable_error",
+      outcome: failureOutcome,
     });
     if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {

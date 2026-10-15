@@ -1,5 +1,5 @@
--- Keep the signed body until apply so malformed but authentic deliveries are
--- durable. Existing JSONB rows continue to replay through the legacy payload.
+-- Keep a verified replay body until apply. Completed rows retain only their
+-- outcome; existing JSONB rows continue to replay through the legacy payload.
 ALTER TABLE ramp_webhook_events
   ADD COLUMN IF NOT EXISTS raw_body TEXT,
   ADD COLUMN IF NOT EXISTS provider_event_id TEXT,
@@ -10,7 +10,7 @@ ALTER TABLE ramp_webhook_events ALTER COLUMN payload DROP NOT NULL;
 
 ALTER TABLE ramp_webhook_events
   ADD CONSTRAINT ramp_webhook_events_body_check
-  CHECK (raw_body IS NOT NULL OR payload IS NOT NULL);
+  CHECK (status = 'discharged' OR raw_body IS NOT NULL OR payload IS NOT NULL);
 
 ALTER TABLE ramp_webhook_events
   DROP CONSTRAINT IF EXISTS ramp_webhook_events_status_check;

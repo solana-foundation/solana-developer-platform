@@ -445,7 +445,7 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
   ).insertVerifiedEvent({
     provider: processor.provider,
     environment,
-    rawBody,
+    rawBody: processor.bodyForInbox?.(rawBody) ?? rawBody,
     providerEventId: processor.eventId(rawBody),
   });
 

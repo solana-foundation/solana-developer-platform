@@ -237,16 +237,21 @@ describe("Ramp webhook event inbox", () => {
       {
         status: "discharged",
         apply_outcome: "applied",
-        raw_body: JSON.stringify(completedPayload),
+        raw_body: null,
       },
     ]);
   });
 
-  it("acks and retains a signed malformed sandbox event as discarded", async () => {
+  it("acks and records a signed malformed sandbox event as discarded", async () => {
     const { res } = await sendMoonpayWebhook(null, { rawBody: "{invalid-json" });
     expect(res.status).toBe(200);
     expect(await readInboxRows()).toMatchObject([
-      { status: "discharged", apply_outcome: "discarded", raw_body: "{invalid-json" },
+      {
+        status: "discharged",
+        apply_outcome: "discarded",
+        raw_body: null,
+        last_error: expect.any(String),
+      },
     ]);
     expect(await readTransferStatus()).toBe("awaiting_payment");
   });
@@ -254,7 +259,12 @@ describe("Ramp webhook event inbox", () => {
   it("stores a signed malformed Stripe event before discarding it in sandbox", async () => {
     expect((await sendStripeWebhook("{invalid-json")).status).toBe(200);
     expect(await readInboxRows()).toMatchObject([
-      { status: "discharged", apply_outcome: "discarded", raw_body: "{invalid-json" },
+      {
+        status: "discharged",
+        apply_outcome: "discarded",
+        raw_body: null,
+        last_error: expect.any(String),
+      },
     ]);
   });
 

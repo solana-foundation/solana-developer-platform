@@ -121,7 +121,12 @@ Also exercise the affected authenticated, webhook, or provider flow; `/health` o
 
 ### Ramp webhook inbox
 
-Signed ramp deliveries are stored as raw bodies before acknowledgement. The worker parses and applies them, retaining discharged outcomes for seven days. A row with `status = 'failed'` is parked for operator review; pending unmatched events retry for up to ten attempts. A terminal park stays parked across deployments, while a retryable park is rearmed once on a new build.
+Verified ramp deliveries are stored before acknowledgement. BVNK replay bodies
+have bank details removed before storage. The worker parses and applies them,
+then clears the body while retaining the discharged outcome for seven days. A
+row with `status = 'failed'` is parked for operator review; pending unmatched
+events retry for up to ten attempts. A terminal park stays parked across
+deployments, while a retryable park is rearmed once on a new build.
 
 Before enabling production ramp webhooks, confirm the Cloud Logging alert on `jsonPayload.event="sdp_api_ramp_webhook_event_exhausted"` covers both the API and cron services and routes to the money movement on-call. The event includes the inbox row id, provider, environment, attempt count, and failure reason; it does not include the signed body. An alert on `sdp_api_ramp_webhook_event_discarded` is optional for sandbox diagnostics.
 

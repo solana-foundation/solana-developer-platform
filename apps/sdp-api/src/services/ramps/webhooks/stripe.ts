@@ -135,9 +135,10 @@ export const stripeWebhook = {
 
   eventId(rawBody: string): string | null {
     try {
-      const root = readRecord(JSON.parse(rawBody));
-      const id = root ? readString(root.id) : undefined;
-      return id && /^evt_[A-Za-z0-9]+$/.test(id) ? id : null;
+      const parsed = z
+        .object({ id: z.string().regex(/^evt_[A-Za-z0-9]+$/) })
+        .safeParse(JSON.parse(rawBody));
+      return parsed.success ? parsed.data.id : null;
     } catch {
       return null;
     }

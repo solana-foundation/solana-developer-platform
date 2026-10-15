@@ -1362,6 +1362,13 @@ describe("BVNK ramp webhook", () => {
     const stored = await readLastWebhookEvent("sandbox");
     expect(required(stored).status).toBe("pending");
     expect(required(stored).last_error).toContain("reference is not assigned yet");
+    const inbox = await getDb(env)
+      .prepare(
+        "SELECT raw_body FROM ramp_webhook_events WHERE provider = 'bvnk' ORDER BY created_at DESC LIMIT 1"
+      )
+      .first<{ raw_body: string }>();
+    expect(required(inbox).raw_body).not.toContain("900473221558");
+    expect(required(inbox).raw_body).not.toContain("LEADUS49XXX");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
   it("acknowledges a legacy wallet create event for a funding name without writing rows", async () => {

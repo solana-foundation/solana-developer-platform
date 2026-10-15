@@ -24,6 +24,7 @@ import {
   readStoredBvnkSettlement,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
 import type { RampRuntimeContext, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
+import { scrubTelemetry } from "@sdp/redaction";
 import {
   BVNK_FUNDING_WALLET_STATUS,
   type BvnkOfframpChannelSettlement,
@@ -963,6 +964,42 @@ export const bvnkWebhook = {
     return null;
   },
 
+  bodyForInbox(rawBody: string): string {
+    const scrubbed: unknown = scrubTelemetry(JSON.parse(rawBody));
+    const wallet = z
+      .looseObject({ event: z.string(), data: z.record(z.string(), z.unknown()) })
+      .safeParse(scrubbed);
+    if (!wallet.success) {
+      return JSON.stringify(scrubbed);
+    }
+    const { event, data } = wallet.data;
+    if (event === "ledger:v2:wallet:status-change") {
+      const safeData = z
+        .object({
+          id: z.string(),
+          name: z.string(),
+          status: z.string(),
+          customer: z.object({ id: z.string() }).optional(),
+          paymentInstruments: z
+            .array(z.object({ type: z.string(), accountNumber: z.string().optional() }))
+            .optional(),
+        })
+        .safeParse(data);
+      return JSON.stringify({ ...wallet.data, data: safeData.success ? safeData.data : {} });
+    }
+    if (event === "bvnk:ledger:wallet:create") {
+      const safeData = z
+        .object({
+          walletName: z.string(),
+          status: z.string().optional(),
+          ledgers: z.array(z.object({ accountNumber: z.string().optional() })).optional(),
+        })
+        .safeParse(data);
+      return JSON.stringify({ ...wallet.data, data: safeData.success ? safeData.data : {} });
+    }
+    return JSON.stringify(wallet.data);
+  },
+
   /**
    * Verifies the HMAC signature of a BVNK webhook body.
    * @param context - Webhook headers, raw body, environment, and runtime configuration.
@@ -1062,7 +1099,7 @@ export const bvnkWebhook = {
         return "ignored";
       case "bvnk:payment:payin:status-change":
         await handleBvnkPayinStatusChange(env, environment, webhook.data);
-        return "applied";
+        return isBvnkPayinStatus(webhook.data.status) ? "applied" : "ignored";
       case "payment:v2:payin:status-change":
         getLogger().info(
           { payin_id: webhook.data.id, status: webhook.data.status },
@@ -1071,7 +1108,7 @@ export const bvnkWebhook = {
         return "ignored";
       case "bvnk:payment:crypto:status-change":
         await handleBvnkCryptoPayoutStatusChange(env, environment, webhook.data);
-        return "applied";
+        return isBvnkCryptoPayoutStatus(webhook.data.status) ? "applied" : "ignored";
       case "bvnk:payment:channel:transaction-detected":
         await handleBvnkPaymentChannelTransactionDetected(env, environment, webhook);
         return "applied";
@@ -1086,7 +1123,7 @@ export const bvnkWebhook = {
         return "applied";
       case "bvnk:platform:customer:agreement-session-status-change":
         await handleBvnkPlatformCustomerAgreementSessionStatusChange(env, environment, webhook);
-        return "applied";
+        return webhook.data.status === "SIGNED" ? "applied" : "ignored";
       case "ledger:v2:wallet:status-change":
       case "bvnk:ledger:wallet:create":
         await applyBvnkWalletEvent(
