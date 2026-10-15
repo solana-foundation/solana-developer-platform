@@ -18,7 +18,9 @@ try {
     "API",
     `http://127.0.0.1:${apiPort}`,
     Number(apiPort),
-    "under `pnpm dev`, the API task starts it; otherwise run `pnpm -F @sdp/api dev`"
+    "under `pnpm dev`, the API task starts it; otherwise run `pnpm -F @sdp/api dev`",
+    // Covers migrations and a cold tsx boot, like Playwright's 180s webServer timeout.
+    180
   );
   await watchServer({ port: workerPort, disableCron: "false" });
 } catch (error) {

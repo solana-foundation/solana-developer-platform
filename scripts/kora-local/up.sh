@@ -35,11 +35,11 @@ chmod 700 "${STATE_DIR}"
 
 # --- devnet -----------------------------------------------------------------
 # Signer: Doppler's funded key, else the one generated on an earlier run, else a new one.
-if [ -n "${KORA_SIGNER_PRIVATE_KEY:-}" ]; then
-  devnet_signer="${KORA_SIGNER_PRIVATE_KEY}"
-elif [ -f "${SIGNER_CACHE_FILE}" ]; then
+devnet_signer="${KORA_SIGNER_PRIVATE_KEY:-}"
+if [ -z "${devnet_signer}" ] && [ -f "${SIGNER_CACHE_FILE}" ]; then
   devnet_signer="$(env_value "${SIGNER_CACHE_FILE}" SIGNER_PRIVATE_KEY)"
-else
+fi
+if [ -z "${devnet_signer}" ]; then
   echo "Generating a local devnet Kora signer (no KORA_SIGNER_PRIVATE_KEY in env)."
   devnet_signer="$(pnpm --silent --filter @sdp/api keygen:local --quiet)"
   echo "SIGNER_PRIVATE_KEY=${devnet_signer}" >"${SIGNER_CACHE_FILE}"
@@ -51,6 +51,17 @@ echo "Starting devnet Kora on 127.0.0.1:${DEVNET_PORT}."
 COMPOSE_PROJECT_NAME=kora-devnet KORA_PORT="${DEVNET_PORT}" KORA_REDIS_PORT="${DEVNET_REDIS_PORT}" \
   RPC_URL="${KORA_DEVNET_RPC_URL:-https://api.devnet.solana.com}" SIGNER_PRIVATE_KEY="${devnet_signer}" \
   docker compose -f "${ROOT_DIR}/infra/kora/docker-compose.yml" up -d redis kora
+
+# `compose up -d` succeeds even when the container then crash-loops.
+devnet_ready=""
+for _ in $(seq 60); do
+  if curl -fsS "http://127.0.0.1:${DEVNET_PORT}/liveness" >/dev/null 2>&1; then
+    devnet_ready=1
+    break
+  fi
+  sleep 1
+done
+[ -n "${devnet_ready}" ] || { echo "Devnet Kora did not become healthy on 127.0.0.1:${DEVNET_PORT}; see \`docker compose -p kora-devnet logs kora\`." >&2; exit 1; }
 
 # --- mainnet (Surfpool fork) ------------------------------------------------
 mainnet_upstream_rpc="${SURFPOOL_REMOTE_RPC_URL:-${SOLANA_MAINNET_RPC_URL:-}}"

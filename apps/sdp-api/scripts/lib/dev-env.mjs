@@ -68,13 +68,14 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
  * @param {string} rawUrl URL whose host and port are probed.
  * @param {number} defaultPort Port used when the URL names none.
  * @param {string} startHint How to start the service, appended to waiting logs and the error.
- * @returns {Promise<void>} Resolves once connected; rejects after 60 seconds.
+ * @param {number} timeoutSeconds How long to wait before giving up.
+ * @returns {Promise<void>} Resolves once connected; rejects after `timeoutSeconds`.
  */
-export async function waitForService(label, rawUrl, defaultPort, startHint) {
+export async function waitForService(label, rawUrl, defaultPort, startHint, timeoutSeconds) {
   const parsed = new URL(rawUrl);
   const portNumber = parsed.port === "" ? defaultPort : Number(parsed.port);
   const startedAt = Date.now();
-  const deadline = startedAt + 60_000;
+  const deadline = startedAt + timeoutSeconds * 1000;
   let lastLogAt = 0;
 
   while (true) {
@@ -111,7 +112,7 @@ export async function waitForService(label, rawUrl, defaultPort, startHint) {
 
     if (now > deadline) {
       throw new Error(
-        `${label} did not become reachable at ${parsed.hostname}:${portNumber} within 60s. ${startHint}.`
+        `${label} did not become reachable at ${parsed.hostname}:${portNumber} within ${timeoutSeconds}s. ${startHint}.`
       );
     }
 
@@ -126,13 +127,15 @@ export function waitForDataStores() {
       "Postgres",
       databaseUrl,
       5432,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:postgres:up`"
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:postgres:up`",
+      60
     ),
     waitForService(
       "Redis",
       redisUrl,
       6379,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:redis:up`"
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:redis:up`",
+      60
     ),
   ]);
 }
