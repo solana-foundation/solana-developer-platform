@@ -5,8 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const appDir = path.resolve(scriptDir, "..");
+export const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
 
 function loadLocalEnvFile(filePath) {
@@ -40,15 +39,16 @@ const koraLocalEnvPath = path.resolve(
   process.env.KORA_LOCAL_STATE_DIR ?? path.resolve(appDir, "../../.secrets/kora-local"),
   "api.env"
 );
-const localEnv = { ...loadLocalEnvFile(koraLocalEnvPath), ...loadLocalEnvFile(localEnvPath) };
-const port = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
-const databaseUrl =
+export const localEnv = {
+  ...loadLocalEnvFile(koraLocalEnvPath),
+  ...loadLocalEnvFile(localEnvPath),
+};
+export const apiPort = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
+export const workerPort = localEnv.SDP_WORKER_PORT ?? process.env.SDP_WORKER_PORT ?? "8789";
+export const databaseUrl =
   // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback.
   localEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "postgresql://sdp:sdp@127.0.0.1:5432/sdp";
-const redisUrl = localEnv.REDIS_URL ?? process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
-const shouldResetLocalState =
-  (localEnv.SDP_API_RESET_LOCAL_STATE ?? process.env.SDP_API_RESET_LOCAL_STATE) === "1";
-const localRedisKeysPreservedAcrossRestarts = new Set(["cache:audit-ledger:checkpoint:v1"]);
+export const redisUrl = localEnv.REDIS_URL ?? process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 let activeChild = null;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -61,7 +61,16 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-async function waitForService(label, rawUrl, defaultPort, startHint) {
+/**
+ * Polls a TCP port until it accepts a connection, logging every 10 seconds.
+ *
+ * @param {string} label Service name used in log lines and the timeout error.
+ * @param {string} rawUrl URL whose host and port are probed.
+ * @param {number} defaultPort Port used when the URL names none.
+ * @param {string} startHint How to start the service, appended to waiting logs and the error.
+ * @returns {Promise<void>} Resolves once connected; rejects after 60 seconds.
+ */
+export async function waitForService(label, rawUrl, defaultPort, startHint) {
   const parsed = new URL(rawUrl);
   const portNumber = parsed.port === "" ? defaultPort : Number(parsed.port);
   const startedAt = Date.now();
@@ -110,7 +119,34 @@ async function waitForService(label, rawUrl, defaultPort, startHint) {
   }
 }
 
-function run(command, args, options = {}) {
+/** Waits for the local Postgres and Redis that `pnpm dev`'s infrastructure task starts. */
+export function waitForDataStores() {
+  return Promise.all([
+    waitForService(
+      "Postgres",
+      databaseUrl,
+      5432,
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:postgres:up`"
+    ),
+    waitForService(
+      "Redis",
+      redisUrl,
+      6379,
+      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:redis:up`"
+    ),
+  ]);
+}
+
+/**
+ * Runs a child process in the app directory with the local env layered over
+ * the parent's, forwarding SIGINT/SIGTERM to it.
+ *
+ * @param {string} command Executable to spawn.
+ * @param {string[]} args Arguments for the executable.
+ * @param {Record<string, string>} env Values that win over both the parent env and the local env files.
+ * @returns {Promise<void>} Resolves on exit code 0; rejects on any other exit or a signal.
+ */
+export function run(command, args, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: appDir,
@@ -118,7 +154,7 @@ function run(command, args, options = {}) {
       env: {
         ...process.env,
         ...localEnv,
-        ...options.env,
+        ...env,
       },
     });
     activeChild = child;
@@ -139,47 +175,35 @@ function run(command, args, options = {}) {
   });
 }
 
-async function resetLocalRedisState(url) {
-  const parsed = new URL(url);
-  const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-  if (!loopbackHosts.has(parsed.hostname)) {
-    throw new Error(
-      "SDP_API_RESET_LOCAL_STATE=1 is restricted to loopback Redis instances to protect shared data."
-    );
-  }
-
-  const { default: Redis } = await import("ioredis");
-  const client = new Redis(url, { maxRetriesPerRequest: 1 });
-  try {
-    for (const prefix of ["apiKeys", "rateLimits", "cache"]) {
-      let cursor = "0";
-      const keysToDelete = new Set();
-      do {
-        const [nextCursor, keys] = await client.scan(cursor, "MATCH", `${prefix}:*`, "COUNT", 100);
-        for (const key of keys) {
-          if (!localRedisKeysPreservedAcrossRestarts.has(key)) {
-            keysToDelete.add(key);
-          }
-        }
-        cursor = nextCursor;
-      } while (cursor !== "0");
-
-      // Redis SCAN does not guarantee a stable cursor while the keyspace is
-      // being mutated. Collect the complete local-only namespace first so a
-      // reset cannot skip keys while isolated test shards restart. The audit
-      // checkpoint is deliberately preserved because its Postgres ledger is
-      // append-only and survives the same restart.
-      const keys = [...keysToDelete];
-      for (let index = 0; index < keys.length; index += 500) {
-        await client.unlink(...keys.slice(index, index + 500));
-      }
-    }
-  } finally {
-    await client.quit();
-  }
+/**
+ * Starts `src/server.ts` under `tsx watch` with the local runtime defaults.
+ * The API and the worker are the same server, as in sdp-infra: only the port
+ * and whether the in-process cron runs differ.
+ *
+ * @param {object} params
+ * @param {string} params.port Port the server listens on.
+ * @param {"true" | "false"} params.disableCron Value for the server's DISABLE_CRON.
+ * @returns {Promise<void>} Settles when the watcher exits.
+ */
+export function watchServer({ port, disableCron }) {
+  return run(process.execPath, [tsxCli, "watch", "--clear-screen=false", "src/server.ts"], {
+    ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
+    API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
+    SDP_DEPLOYMENT_MODE:
+      localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
+    // Local tooling runs every module unless told otherwise, like the compose files;
+    // deployed services must set SDP_RELEASE_CHANNEL (the boot check refuses one without it).
+    SDP_RELEASE_CHANNEL:
+      localEnv.SDP_RELEASE_CHANNEL ?? process.env.SDP_RELEASE_CHANNEL ?? "experimental",
+    DATABASE_URL: databaseUrl,
+    REDIS_URL: redisUrl,
+    PORT: port,
+    DISABLE_CRON: disableCron,
+  });
 }
 
-function describeEnvSource() {
+/** Describes where the local env came from, for the first startup log line. */
+export function describeEnvSource() {
   const hasLocalEnv = fs.existsSync(localEnvPath);
   const isDopplerRun = Boolean(
     process.env.DOPPLER_CONFIG || process.env.DOPPLER_ENVIRONMENT || process.env.DOPPLER_TOKEN
@@ -194,46 +218,13 @@ function describeEnvSource() {
   return "local defaults — copy apps/sdp-api/.env.local.example to apps/sdp-api/.env.local for provider configuration";
 }
 
-try {
-  console.log(`Environment: ${describeEnvSource()}`);
-  await Promise.all([
-    waitForService(
-      "Postgres",
-      databaseUrl,
-      5432,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:postgres:up`"
-    ),
-    waitForService(
-      "Redis",
-      redisUrl,
-      6379,
-      "under `pnpm dev`, the local infrastructure task starts it; otherwise run `pnpm db:redis:up`"
-    ),
-  ]);
-
-  if (shouldResetLocalState) {
-    await resetLocalRedisState(redisUrl);
-  }
-
-  await run("node", ["scripts/migrate-postgres.mjs"], {
-    env: { DATABASE_URL: databaseUrl },
-  });
-  await run(process.execPath, [tsxCli, "watch", "--clear-screen=false", "src/server.ts"], {
-    env: {
-      ENVIRONMENT: localEnv.ENVIRONMENT ?? process.env.ENVIRONMENT ?? "development",
-      API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
-      SDP_DEPLOYMENT_MODE:
-        localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
-      // Local tooling runs every module unless told otherwise, like the compose files;
-      // deployed services must set SDP_RELEASE_CHANNEL (the boot check refuses one without it).
-      SDP_RELEASE_CHANNEL:
-        localEnv.SDP_RELEASE_CHANNEL ?? process.env.SDP_RELEASE_CHANNEL ?? "experimental",
-      DATABASE_URL: databaseUrl,
-      REDIS_URL: redisUrl,
-      PORT: port,
-    },
-  });
-} catch (error) {
+/**
+ * Logs a startup failure and exits non-zero.
+ *
+ * @param {unknown} error The rejection from the launcher's startup sequence.
+ * @returns {never}
+ */
+export function exitOnStartupError(error) {
   const message = error instanceof Error ? error.message : "Unknown local dev startup error";
   console.error(message);
   process.exit(1);

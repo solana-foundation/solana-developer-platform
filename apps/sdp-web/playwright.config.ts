@@ -8,6 +8,7 @@ const fixturesPath = path.join(__dirname, "playwright/.fixtures/issuance.json");
 const useExternalApi = env.useExternalApi;
 const localApiPort = process.env.PLAYWRIGHT_API_PORT ?? "8788";
 const localApiUrl = process.env.PLAYWRIGHT_API_URL ?? `http://127.0.0.1:${localApiPort}`;
+const localWorkerPort = process.env.PLAYWRIGHT_WORKER_PORT ?? "8790";
 const apiBaseUrl = useExternalApi ? env.sdpApiBaseUrl : localApiUrl;
 const webPort = new URL(env.baseURL).port || "3001";
 const nextDistDir = process.env.PLAYWRIGHT_NEXT_DIST_DIR ?? ".next-playwright";
@@ -42,7 +43,7 @@ export default defineConfig({
     ...(!useExternalApi
       ? [
           {
-            command: "node scripts/dev-local.mjs",
+            command: "node scripts/dev-api.mjs",
             cwd: path.join(__dirname, "../sdp-api"),
             url: `${localApiUrl}/health`,
             reuseExistingServer: false,
@@ -50,6 +51,20 @@ export default defineConfig({
               ...resolveProcessEnv(),
               SDP_API_PORT: localApiPort,
               SDP_API_RESET_LOCAL_STATE: "1",
+            },
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            timeout: 180_000,
+          },
+          {
+            command: "node scripts/dev-worker.mjs",
+            cwd: path.join(__dirname, "../sdp-api"),
+            url: `http://127.0.0.1:${localWorkerPort}/health`,
+            reuseExistingServer: false,
+            env: {
+              ...resolveProcessEnv(),
+              SDP_API_PORT: localApiPort,
+              SDP_WORKER_PORT: localWorkerPort,
             },
             stdout: "pipe" as const,
             stderr: "pipe" as const,

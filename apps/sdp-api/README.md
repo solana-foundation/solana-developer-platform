@@ -100,12 +100,18 @@ authenticated.
    # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
    pnpm kora:local:up
 
-   # API with team/Doppler configuration (keep this process running)
+   # API and cron worker with team/Doppler configuration (keep this process running)
    pnpm dev:api
    ```
 
+   The API (`scripts/dev-api.mjs`) migrates and serves with cron off; the cron
+   worker (`scripts/dev-worker.mjs`, port 8789) waits for it and runs the
+   reconcilers, like the deployed API and worker services. Turbo prefixes their
+   logs `@sdp/api:dev` and `@sdp/api:dev:worker`.
+
    External contributors using only `.env.local` can replace the final command
-   with `pnpm -C apps/sdp-api dev` so no Doppler session is required.
+   with `pnpm -C apps/sdp-api dev` and `pnpm -C apps/sdp-api dev:worker` so no
+   Doppler session is required.
 
    The API development process waits for Postgres and Redis and applies local
    migrations before starting the server.

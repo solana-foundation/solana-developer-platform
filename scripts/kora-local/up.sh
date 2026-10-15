@@ -2,7 +2,7 @@
 # Boots both local paymasters and hands their addresses to the API:
 #   devnet  — Kora in Docker against a real devnet RPC (Doppler KORA_DEVNET_RPC_URL)
 #   mainnet — Kora in Docker against a Surfpool mainnet fork (scripts/kora-surfpool)
-# Writes .secrets/kora-local/api.env, which apps/sdp-api/scripts/dev-local.mjs
+# Writes .secrets/kora-local/api.env, which apps/sdp-api/scripts/lib/dev-env.mjs
 # loads under the developer's own .env.local. Run under Doppler (pnpm dev:kora)
 # so the RPC URLs and the funded devnet signer come from the dev config.
 set -euo pipefail
