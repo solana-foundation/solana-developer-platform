@@ -5,15 +5,16 @@
  * Requires Kora to be running locally (pnpm kora:local:up) or CI environment.
  *
  * Run locally:
- *   pnpm kora:local:up && KORA_RPC_URL=http://127.0.0.1:18081 pnpm --filter @sdp/api-integration test
+ *   pnpm kora:local:up && KORA_DEVNET_URL=http://127.0.0.1:18081 pnpm --filter @sdp/api-integration test
  *
  * Override URL for CI:
- *   KORA_RPC_URL=http://kora:8080 pnpm --filter @sdp/api-integration test
+ *   KORA_DEVNET_URL=http://kora:8080 pnpm --filter @sdp/api-integration test
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
 import { beforeAll, describe, expect, it } from "vitest";
 import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { requireKoraEndpoint } from "../helpers/kora";
 
 const { KoraAdapter, KoraClient } = apiTestSupport;
 
@@ -22,18 +23,15 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
   let client: InstanceType<typeof KoraClient>;
 
   beforeAll(() => {
-    const koraUrl = env.KORA_RPC_URL ?? "http://localhost:8080";
+    const { rpcUrl, apiKey } = requireKoraEndpoint();
 
     adapter = new KoraAdapter({
-      rpcUrl: koraUrl,
-      apiKey: env.KORA_API_KEY,
+      rpcUrl,
+      apiKey,
       timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30000,
     });
 
-    client = new KoraClient({
-      rpcUrl: koraUrl,
-      apiKey: env.KORA_API_KEY,
-    });
+    client = new KoraClient({ rpcUrl, apiKey });
   });
 
   describe("Kora Client", () => {

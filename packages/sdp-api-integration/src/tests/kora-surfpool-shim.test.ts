@@ -12,6 +12,7 @@ import {
 } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { env, RUN_INTEGRATION_TESTS } from "../helpers/integration";
+import { requireKoraEndpoint } from "../helpers/kora";
 
 const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraAdapter, KoraClient } = apiTestSupport;
 
@@ -20,12 +21,9 @@ const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Ad
 
 describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Surfpool shim", () => {
   it("signs and sends a fee-payer transaction through the regular Kora adapter", async () => {
-    if (!env.KORA_RPC_URL) {
-      throw new Error("KORA_RPC_URL is required for the Kora Surfpool shim test.");
-    }
-
-    const adapter = new KoraAdapter({ rpcUrl: env.KORA_RPC_URL });
-    const config = await new KoraClient({ rpcUrl: env.KORA_RPC_URL }).getConfig();
+    const { rpcUrl } = requireKoraEndpoint();
+    const adapter = new KoraAdapter({ rpcUrl });
+    const config = await new KoraClient({ rpcUrl }).getConfig();
     expect(config.validation_config.allowed_programs).toContain(DVP_SWAP_PROGRAM_PROGRAM_ADDRESS);
     const rpc = createRpc(env);
     const feePayer = await adapter.getFeePayer();
@@ -52,11 +50,8 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
   });
 
   it("answers a duplicate submit with the original signature, as the cluster does", async () => {
-    if (!env.KORA_RPC_URL) {
-      throw new Error("KORA_RPC_URL is required for the Kora Surfpool shim test.");
-    }
-
-    const adapter = new KoraAdapter({ rpcUrl: env.KORA_RPC_URL });
+    const { rpcUrl } = requireKoraEndpoint();
+    const adapter = new KoraAdapter({ rpcUrl });
     const rpc = createRpc(env);
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");

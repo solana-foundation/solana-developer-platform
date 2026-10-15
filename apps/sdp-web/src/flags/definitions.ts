@@ -249,6 +249,11 @@ export function defineDashboardFlags({
     ],
   });
 
+  const newDesignOverview = newDesignModuleFlag(
+    "overview",
+    "the dashboard's Overview (the page, its name in the sidebar, the new quick start)"
+  );
+
   const newDesignWallets = newDesignModuleFlag(
     "wallets",
     "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"
@@ -281,6 +286,7 @@ export function defineDashboardFlags({
     earn,
     newDesign,
     paymentsDemoMode,
+    newDesignOverview,
     newDesignWallets,
     newDesignContacts,
     newDesignPayDeposit,

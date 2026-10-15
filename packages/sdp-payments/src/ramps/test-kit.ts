@@ -43,8 +43,10 @@ export interface RampKitCase<TInput> {
  * provider runs has an estimate case and a quote case.
  */
 export interface RampProviderTestKit {
-  /** Credentials for both modes. */
+  /** The managed credentials, for every mode in `managedModes`. */
   env: Record<string, string>;
+  /** The modes SDP holds credentials for. Every other mode must fail closed before any request. */
+  managedModes: readonly SdpEnvironment[];
   onramp?: {
     estimate: RampKitCase<RampEstimateOnrampInput>;
     quote: RampKitCase<RampOnrampQuoteInput>;

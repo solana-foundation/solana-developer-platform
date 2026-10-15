@@ -39,13 +39,13 @@ const PRIVY_CREDENTIALS = {
   PRIVY_APP_ID: "privy_project_provider_rule_app",
   PRIVY_APP_SECRET: "privy_project_provider_rule_secret",
 } as const satisfies Partial<Env>;
-const MOONPAY_PRODUCTION_CREDENTIALS = {
-  MOONPAY_API_KEY: "moonpay_project_provider_rule_key",
-  MOONPAY_SECRET_KEY: "moonpay_project_provider_rule_secret",
-} as const satisfies Partial<Env>;
 const MOONPAY_SANDBOX_CREDENTIALS = {
-  MOONPAY_SANDBOX_API_KEY: "moonpay_sandbox_project_provider_rule_key",
-  MOONPAY_SANDBOX_SECRET_KEY: "moonpay_sandbox_project_provider_rule_secret",
+  MOONPAY_SANDBOX_API_KEY: "pk_test_project_provider_rule",
+  MOONPAY_SANDBOX_SECRET_KEY: "sk_test_project_provider_rule",
+} as const satisfies Partial<Env>;
+const MOONPAY_LIVE_KEYS_UNDER_SANDBOX_NAMES = {
+  MOONPAY_SANDBOX_API_KEY: "pk_live_project_provider_rule",
+  MOONPAY_SANDBOX_SECRET_KEY: "sk_live_project_provider_rule",
 } as const satisfies Partial<Env>;
 const MOONPAY: ProjectProviderRequest = { family: "ramps", provider: "moonpay" };
 const RANGE: ProjectProviderRequest = { family: "compliance", provider: "range" };
@@ -140,19 +140,17 @@ describe("assertProjectProviderAdmitted", () => {
       refusal("MoonPay requires manual activation for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({});
+    // SDP holds MoonPay sandbox keys only, so a Production project stops at credentials.
     await expect(
       admit(projects.production, deploymentEnv(MOONPAY_SANDBOX_CREDENTIALS), MOONPAY)
     ).rejects.toMatchObject(
       notConfigured("MoonPay is not configured for production projects in this deployment.")
     );
-    await expect(
-      admit(projects.production, deploymentEnv(MOONPAY_PRODUCTION_CREDENTIALS), MOONPAY)
-    ).resolves.toBeUndefined();
   });
 
-  it("requires a ramp provider's sandbox credentials in a Sandbox project", async () => {
+  it("requires a ramp provider's test-mode sandbox credentials in a Sandbox project", async () => {
     await expect(
-      admit(projects.sandbox, deploymentEnv(MOONPAY_PRODUCTION_CREDENTIALS), MOONPAY)
+      admit(projects.sandbox, deploymentEnv(MOONPAY_LIVE_KEYS_UNDER_SANDBOX_NAMES), MOONPAY)
     ).rejects.toMatchObject(
       notConfigured("MoonPay is not configured for sandbox projects in this deployment.")
     );
