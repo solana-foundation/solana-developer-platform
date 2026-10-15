@@ -1,6 +1,6 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
-import { resolveDefaultCluster } from "@sdp/rpc";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
@@ -169,7 +169,7 @@ export async function authorizeBatchRequest(
 ): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
   const scope = await resolveScope(c, retainedCustodyWalletId);
-  assertPaymentProjectScope(input.projectId, scope.auth.projectId);
+  assertPaymentProjectScope(input.projectId, projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
   if (requiredWalletPermissions !== null) {
@@ -206,8 +206,8 @@ export async function resolveBatchMovement(
   input: CreateTransferBatchInput,
   authorized: AuthorizedBatchRequest
 ): Promise<ResolvedBatchRequest> {
-  const token = normalizePaymentToken(input.token, resolveDefaultCluster(c.env));
-  const rpc = solanaRpc.createRpc(c.env);
+  const token = normalizePaymentToken(input.token, currentClusterScope().cluster);
+  const rpc = createClusterRpc();
   const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
   const recipients = resolveRecipients({
     recipients: input.recipients,
