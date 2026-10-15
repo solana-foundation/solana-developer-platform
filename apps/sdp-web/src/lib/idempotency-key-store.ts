@@ -139,6 +139,28 @@ function readEntries(storeKey: string): StoredEntry[] {
   });
 }
 
+/**
+ * The value session storage itself holds for this fingerprint, read past the
+ * memory tier: a key found here survives a reload as it is.
+ *
+ * @param storeKey - The full `sessionStorage` name, scope included.
+ */
+function storedValue(storeKey: string, fingerprint: string): string | undefined {
+  const stored = readStoredText(storeKey);
+  if (!stored.usable || stored.raw === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(stored.raw);
+    if (!Array.isArray(parsed)) return undefined;
+    for (const entry of parsed) {
+      const candidate = storedEntrySchema.safeParse(entry);
+      if (candidate.success && candidate.data.id === fingerprint) return candidate.data.value;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 /** @param storeKey - The full `sessionStorage` name, scope included. */
 function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
   // Memory first and unconditionally: it has to hold the value if the store
@@ -204,8 +226,15 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
     claim(fingerprint, mint = () => crypto.randomUUID()) {
       const name = scopedKey(storeKey);
       const entries = readEntries(name);
-      const key = entries.find((entry) => entry.id === fingerprint)?.value ?? mint();
-      // Written again for a kept key too, so `persisted` describes this claim.
+      const kept = entries.find((entry) => entry.id === fingerprint)?.value;
+      if (kept !== undefined && storedValue(name, fingerprint) === kept) {
+        // Already persisted: the retry needs no rewrite, so a store that now
+        // refuses writes never blocks the retry of an earlier attempt.
+        claimedIn.set(JSON.stringify([fingerprint, kept]), name);
+        return { key: kept, persisted: true };
+      }
+      const key = kept ?? mint();
+      // A new key, or one kept only in memory, must reach storage to count.
       const persisted = writeEntries(name, [
         ...entries.filter((entry) => entry.id !== fingerprint),
         { id: fingerprint, value: key },

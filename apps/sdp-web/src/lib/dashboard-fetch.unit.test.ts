@@ -434,9 +434,8 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
     await expect(submit()).rejects.toThrow("network down");
     storage.refuseWrites = true;
-    expect((await submit()).status).toBe(428);
-    storage.refuseWrites = false;
-    await submit();
+    // The key is already in storage, so the retry is sent under it.
+    expect((await submit()).status).toBe(201);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
