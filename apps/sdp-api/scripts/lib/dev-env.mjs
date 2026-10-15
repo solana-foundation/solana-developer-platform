@@ -34,7 +34,7 @@ function loadLocalEnvFile(filePath) {
 }
 
 const localEnvPath = path.resolve(appDir, ".env.local");
-// Written by scripts/kora-local/up.sh (pnpm dev:kora); .env.local still wins.
+// Written by scripts/kora-local/up.sh (pnpm dev); .env.local still wins.
 const koraLocalEnvPath = path.resolve(
   process.env.KORA_LOCAL_STATE_DIR ?? path.resolve(appDir, "../../.secrets/kora-local"),
   "api.env"
