@@ -624,6 +624,8 @@
     "apiKeyGrantsModuleCount": "Modules: {count}",
     "apiKeyGrantsImplied": "Included",
     "apiKeyGrantsImpliedHelper": "Manage and Execute include Read.",
+    "apiKeyGrantsNotOffered": "This key also holds grants for modules this deployment doesn't run. They're kept as they are; remove one to take it away.",
+    "apiKeyGrantsRemove": "Remove {action}",
     "apiKeyGrantsNotGrantable": "Keys can never manage API keys, members, the organization or projects, or set up providers. Those stay with signed-in admins.",
     "apiKeyGrantsToggle": "{verb} on {module}",
     "apiKeyGrantsReviewTitle": "Permissions",

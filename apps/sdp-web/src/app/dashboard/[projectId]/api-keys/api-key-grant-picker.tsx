@@ -7,9 +7,11 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
   clearModuleGrants,
+  clearOfferedGrants,
   everythingGrants,
   grantModuleRows,
   grantToggleState,
+  heldGrantsNotOffered,
   toggleGrant,
 } from "./api-key-authoring";
 import {
@@ -25,7 +27,9 @@ import {
  * picker, so a module can hold `manage` and `execute` together (a recurring
  * payment's drafts and its activation are different decisions). Ticking
  * Manage or Execute shows Read as included. "None" is a row with nothing
- * ticked; "Everything" writes out every offered action.
+ * ticked; "Everything" writes out every offered action. Grants the deployment
+ * does not offer (a module outside its release channel) are listed read-only
+ * and kept by "Everything" and "Clear all" until removed one by one.
  */
 export function ApiKeyGrantPicker({
   offered,
@@ -41,6 +45,7 @@ export function ApiKeyGrantPicker({
 }) {
   const t = useTranslations();
   const rows = grantModuleRows(offered);
+  const notOffered = heldGrantsNotOffered(grants, offered);
 
   return (
     <div>
@@ -53,11 +58,16 @@ export function ApiKeyGrantPicker({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => onChange(everythingGrants(offered))}
+            onClick={() => onChange(everythingGrants(offered, grants))}
           >
             {t("DashboardCustody.apiKeyGrantsEverything")}
           </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => onChange([])}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => onChange(clearOfferedGrants(grants, offered))}
+          >
             {t("DashboardCustody.apiKeyGrantsClear")}
           </Button>
         </div>
@@ -126,6 +136,29 @@ export function ApiKeyGrantPicker({
           );
         })}
       </div>
+      {notOffered.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-border-default px-4 py-3">
+          <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyGrantsNotOffered")}</p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {notOffered.map((action) => (
+              <li
+                key={action}
+                className="flex items-center gap-2 rounded-md bg-fill-subtle px-2 py-1 font-mono text-xs text-primary"
+              >
+                {action}
+                <button
+                  type="button"
+                  className="text-secondary underline"
+                  onClick={() => onChange(grants.filter((grant) => grant !== action))}
+                  aria-label={t("DashboardCustody.apiKeyGrantsRemove", { action })}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {touched && grants.length === 0 ? (
         <p className="mt-2 text-xs text-destructive">
           {t("DashboardCustody.apiKeyGrantsRequired")}

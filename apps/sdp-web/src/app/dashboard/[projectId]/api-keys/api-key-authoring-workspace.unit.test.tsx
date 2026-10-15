@@ -11,7 +11,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { saveApiKeyAuthoringAction } from "./actions";
-import { type ApiKeyAuthoringExistingKey, grantableActionsInChannel } from "./api-key-authoring";
+import {
+  type ApiKeyAuthoringExistingKey,
+  everythingGrants,
+  grantableActionsInChannel,
+} from "./api-key-authoring";
 import { ApiKeyAuthoringWorkspace } from "./api-key-authoring-workspace";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -115,7 +119,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(continueButton.hasAttribute("disabled")).toBe(false);
   });
 
-  it("saves Everything as the explicit list of offered actions, less the RPC relay", async () => {
+  it("saves Everything as the explicit list of offered actions, less the RPC relay and included reads", async () => {
     vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "saved" });
     const user = await openPermissionsStep();
     await user.click(screen.getByRole("button", { name: "Everything" }));
@@ -124,8 +128,9 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     expect(vi.mocked(saveApiKeyAuthoringAction).mock.calls[0]?.[0].draft.grants).toEqual(
-      STABLE_ACTIONS.filter((action) => action !== "rpc.execute")
+      everythingGrants(STABLE_ACTIONS)
     );
+    expect(everythingGrants(STABLE_ACTIONS)).not.toContain("rpc.execute");
   });
 
   it("opens an existing key on its own grants", async () => {

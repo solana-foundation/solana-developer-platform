@@ -9,6 +9,7 @@ import {
   actionOwnerOf,
   actionVerbOf,
   grantsCoverAction,
+  isAction,
   isInEverythingGrant,
   normalizeGrants,
   type SdpModule,
@@ -92,24 +93,60 @@ export function grantToggleState(grants: readonly Action[], action: Action): Gra
 }
 
 /**
+ * Drops a module's `read` wherever the same module's `manage` or `execute` is
+ * held: it is included, so storing it too would only make the list noisier.
+ */
+function withoutIncludedReads(grants: readonly Action[]): Action[] {
+  return normalizeGrants(
+    grants.filter(
+      (grant) =>
+        actionVerbOf(grant) !== "read" ||
+        !grants.some(
+          (other) =>
+            actionModuleOf(other) === actionModuleOf(grant) && actionVerbOf(other) !== "read"
+        )
+    )
+  );
+}
+
+/**
  * Turns one action on or off. Each verb is its own toggle, so a module can
  * hold both `manage` and `execute`. `read` is never stored next to the
  * module's `manage` or `execute`, which include it; an included read cannot
- * be turned off on its own.
+ * be turned off on its own. Turning off a module's last `manage` or
+ * `execute` leaves its `read`: unticking a write narrows the key to reading
+ * that module rather than dropping it.
  */
 export function toggleGrant(grants: readonly Action[], action: Action): Action[] {
+  const module = actionModuleOf(action);
   if (grants.includes(action)) {
-    return grants.filter((grant) => grant !== action);
-  }
-  const next = [...grants, action];
-  const verb = actionVerbOf(action);
-  if (verb === "manage" || verb === "execute") {
-    const module = actionModuleOf(action);
-    return normalizeGrants(
-      next.filter((grant) => !(actionModuleOf(grant) === module && actionVerbOf(grant) === "read"))
+    const next = grants.filter((grant) => grant !== action);
+    const verb = actionVerbOf(action);
+    const stillWrites = next.some(
+      (grant) => actionModuleOf(grant) === module && actionVerbOf(grant) !== "read"
     );
+    if ((verb === "manage" || verb === "execute") && !stillWrites) {
+      const read = `${module}.read`;
+      if (isAction(read) && API_KEY_GRANTABLE_ACTIONS.includes(read)) {
+        return normalizeGrants([...next, read]);
+      }
+    }
+    return next;
   }
-  return normalizeGrants(next);
+  return withoutIncludedReads([...grants, action]);
+}
+
+/**
+ * The held grants this deployment does not offer (a module its release
+ * channel no longer runs). The picker cannot tick them, so it shows them
+ * read-only and keeps them through "Everything" and "Clear all"; the API
+ * accepts a grant the key already holds even when it is out of channel.
+ */
+export function heldGrantsNotOffered(
+  grants: readonly Action[],
+  offered: readonly Action[]
+): Action[] {
+  return normalizeGrants(grants.filter((grant) => !offered.includes(grant)));
 }
 
 /** Clears every grant on one module. */
@@ -117,14 +154,29 @@ export function clearModuleGrants(grants: readonly Action[], module: ActionModul
   return grants.filter((grant) => actionModuleOf(grant) !== module);
 }
 
+/** "Clear all": every offered grant off; ones the picker cannot show are kept. */
+export function clearOfferedGrants(
+  grants: readonly Action[],
+  offered: readonly Action[]
+): Action[] {
+  return heldGrantsNotOffered(grants, offered);
+}
+
 /**
  * "Everything": every offered action, written out, except the metered RPC
- * relay, which a key gets only when it is ticked on its own. What is stored
- * is this explicit list, so an action added to SDP later reaches no existing
- * key.
+ * relay, which a key gets only when it is ticked on its own. Reads a module's
+ * `manage` or `execute` includes are not stored, and grants the picker cannot
+ * show are kept. What is stored is this explicit list, so an action added to
+ * SDP later reaches no existing key.
  */
-export function everythingGrants(offered: readonly Action[]): Action[] {
-  return normalizeGrants(offered.filter(isInEverythingGrant));
+export function everythingGrants(
+  offered: readonly Action[],
+  current: readonly Action[] = []
+): Action[] {
+  return withoutIncludedReads([
+    ...offered.filter(isInEverythingGrant),
+    ...heldGrantsNotOffered(current, offered),
+  ]);
 }
 
 /** The verbs held on each module, an included read listed too, for summaries. */

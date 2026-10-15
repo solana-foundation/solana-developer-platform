@@ -1,5 +1,7 @@
 import {
+  type Action,
   API_KEY_GRANTABLE_ACTIONS,
+  grantsCoverAction,
   isModuleInReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
@@ -9,11 +11,13 @@ import {
   type ApiKeyAuthoringDraft,
   buildEndpointWalletPayload,
   clearModuleGrants,
+  clearOfferedGrants,
   createApiKeyAuthoringDraft,
   everythingGrants,
   grantableActionsInChannel,
   grantModuleRows,
   grantToggleState,
+  heldGrantsNotOffered,
   summarizeGrants,
   toggleGrant,
 } from "./api-key-authoring";
@@ -103,17 +107,48 @@ describe("API-key authoring: grant toggles", () => {
     expect(grants).toEqual(["recurring.manage", "recurring.execute"]);
   });
 
-  it("turns a verb off, and clears a module", () => {
-    expect(toggleGrant(["transfers.execute"], "transfers.execute")).toEqual([]);
+  it("narrows to read when a module's last write is turned off, and clears a module", () => {
+    expect(toggleGrant(["transfers.execute"], "transfers.execute")).toEqual(["transfers.read"]);
+    expect(toggleGrant(["recurring.manage", "recurring.execute"], "recurring.execute")).toEqual([
+      "recurring.manage",
+    ]);
+    expect(toggleGrant(["transfers.read"], "transfers.read")).toEqual([]);
     expect(
       clearModuleGrants(["transfers.execute", "wallets.read", "transfers.read"], "transfers")
     ).toEqual(["wallets.read"]);
   });
 
+  it("keeps a read set before a write was ticked and unticked", () => {
+    const ticked = toggleGrant(["transfers.read"], "transfers.execute");
+    expect(ticked).toEqual(["transfers.execute"]);
+    expect(toggleGrant(ticked, "transfers.execute")).toEqual(["transfers.read"]);
+  });
+
   it("writes Everything out as the explicit offered list, the RPC relay left to its own tick", () => {
     const offered = grantableActionsInChannel(inStable);
     expect(offered).toContain("rpc.execute");
-    expect(everythingGrants(offered)).toEqual(offered.filter((action) => action !== "rpc.execute"));
+    const everything = everythingGrants(offered);
+    expect(everything).not.toContain("rpc.execute");
+    for (const action of offered) {
+      if (action === "rpc.execute") continue;
+      expect(grantsCoverAction(everything, action), action).toBe(true);
+    }
+  });
+
+  it("stores no read that Everything's manage or execute already includes", () => {
+    const everything = everythingGrants(grantableActionsInChannel(inStable));
+    expect(everything).toContain("transfers.execute");
+    expect(everything).not.toContain("transfers.read");
+    expect(everything).toContain("transactions.read");
+  });
+
+  it("keeps held grants the channel does not offer through Everything and Clear all", () => {
+    const offered = grantableActionsInChannel(inStable);
+    expect(offered).not.toContain("issuance.execute");
+    const held: Action[] = ["issuance.execute", "transfers.read"];
+    expect(heldGrantsNotOffered(held, offered)).toEqual(["issuance.execute"]);
+    expect(everythingGrants(offered, held)).toContain("issuance.execute");
+    expect(clearOfferedGrants(held, offered)).toEqual(["issuance.execute"]);
   });
 
   it("summarizes held verbs by module, the included read listed", () => {
