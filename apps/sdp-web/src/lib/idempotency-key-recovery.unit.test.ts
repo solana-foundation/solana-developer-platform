@@ -72,14 +72,15 @@ describe("unresolved Treasury intent identity", () => {
     expect(reloaded.claim("intent").key).toBe(key);
   });
 
-  it("reports a key whose write cannot persist, so a money flow refuses to submit", () => {
+  it("reports a new key whose write cannot persist, and a stored key as persisted", () => {
     const store = createIdempotencyKeyStore("test:quota");
-    store.claim("intent");
+    const kept = store.claim("intent").key;
     const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
     try {
-      expect(store.claim("intent").persisted).toBe(false);
+      expect(store.claim("other-intent").persisted).toBe(false);
+      expect(store.claim("intent")).toEqual({ key: kept, persisted: true });
     } finally {
       write.mockRestore();
     }
