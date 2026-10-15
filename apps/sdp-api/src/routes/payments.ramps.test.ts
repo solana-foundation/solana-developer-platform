@@ -968,8 +968,8 @@ describe("Payments routes — ramps", () => {
   it("refuses to cancel a transfer at a provider outside the release channel", async () => {
     await seedRampTransfer({
       id: "xfr_cancel_excluded",
-      provider: "moonpay",
-      providerReference: "moonpay_ref_cancel_excluded",
+      provider: "stripe",
+      providerReference: "stripe_ref_cancel_excluded",
       status: "awaiting_payment",
     });
 
