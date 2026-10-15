@@ -120,19 +120,22 @@ reconciler works from them.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
-its attempt recorded; it does not fail the row. The cron does not recover an `updating` schedule:
-once its update is stale, a same-key retry of that PATCH is not answered from its in-flight
-attempt but runs the handler, which resumes the attempt under the same key. A replay of a
-lifecycle action (activate, cancel, resume, PATCH, collect) finds the attempt its key claimed and
-returns the schedule as it stands now, which may still be mid-transition; clients poll GET.
-Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key, so its
-retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
-schedule, a PATCH that changes nothing) writes a confirmed attempt that changes nothing. An
-activate needs none: a schedule never returns to `pending_activation`, so a retry cannot activate
-again. A request never
-finishes another key's in-flight attempt silently: cancel, resume and collect refuse it as in
-flight (409, unstored) and the cron finishes it; a PATCH, which the cron does not recover, may
-finish it and then writes its own confirmed attempt.
+its attempt recorded; it does not fail the row. A replay of activate, cancel, resume or collect
+finds the attempt its key claimed and returns the schedule as it stands now, which may still be
+mid-transition (the cron finishes it); clients poll GET. The cron does not recover an `updating`
+schedule, so an in-flight update attempt is never an answer: stored, it would hold the key on
+`updating` for 24 hours. A same-key PATCH retry that finds its attempt in flight gets 409
+`IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` (unstored) until the schedule goes stale, then runs
+the handler, which resumes the attempt under the same key; a settled update attempt replays its
+answer. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
+so its retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
+schedule, a resume of an active one, a PATCH that changes nothing) writes a confirmed attempt that
+changes nothing. An activate needs none: a schedule never returns to `pending_activation`, so a
+retry cannot activate again. A request never finishes another key's in-flight attempt silently:
+cancel, resume and collect refuse it as in flight (409, unstored) and the cron finishes it; a
+PATCH, which the cron does not recover, may finish it, and writes its own confirmed attempt in the
+same transaction as the finalize, so the update never lands without the record its retry is
+answered from.
 
 Custody wallet creation (`POST /v1/wallets`) moves no money but creates a provider wallet before its
 row, so it has no row to write first and stays `serverErrors: "store"`. A keyed create derives a
