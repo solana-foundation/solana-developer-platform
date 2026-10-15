@@ -365,6 +365,9 @@ function TransferFormState({
     const fingerprint = privateChannelTransferRequestFingerprint(requestPayload);
     const idempotencyKey = claimMovementKey(privateChannelTransferIdempotencyKeyStore, fingerprint);
     if (idempotencyKey === null) {
+      // Nothing was sent, so the form must take the next press once storage
+      // works again.
+      submitting.current = false;
       updateState({ error: t("Shared.idempotency.keyNotPersisted") });
       return;
     }
