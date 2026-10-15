@@ -332,8 +332,8 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
 // addressing style for one concept, and no literal segment (`summary`) can
-// ever be captured as a Solana address. No `wallets:read`: these are end-user
-// wallets SDP does not custody.
+// ever be captured as a Solana address. `earn.read` only: these are end-user
+// wallets SDP does not custody, so no wallet scope applies.
 earn.get(
   "/external-wallet/positions/summary",
   requireAction("earn.read"),
@@ -348,9 +348,9 @@ earn.get(
 );
 
 // B2B2C activity and earnings (PRO-1772): the reads that close the loop the
-// money routes below open. Same posture as the position reads — `earn:read`
-// only, no `wallets:read` (end-user wallets carry no custody bindings), and NO
-// provider gate: these report on money that already moved (ADR 0002). The
+// money routes below open. Same posture as the position reads — `earn.read`
+// only (end-user wallets are outside any wallet scope), and NO provider gate:
+// these report on money that already moved (ADR 0002). The
 // movements collection is declared before its `:movementId` detail so a
 // literal segment can never be captured as an id.
 earn.get("/external-wallet/movements", requireAction("earn.read"), listEarnExternalWalletMovements);
@@ -392,13 +392,11 @@ earn.get(
 // from a custody wallet, so unlike /programs there is no provider wallet to
 // provision and no address to fund afterwards.
 //
-// Both routes take the GLOBAL `wallets:read` alongside their earn scope, the
-// same pairing every money-moving payments route uses. That is not belt and
-// braces: for an API key with NO wallet bindings the per-wallet assertion in
-// the handler is a documented NO-OP, so the router permission is the only gate
-// such a key ever meets when it names a wallet.
+// Each route declares one action; whether the caller may sign with the named
+// custody wallet is the custody signer's decision, deposit and withdrawal
+// alike (HOO-2099, ADR 0007 addendum).
 //
-// `requestGate` resolves the strategy, wallet and binding and answers an
+// `requestGate` resolves the strategy and wallet and answers an
 // Idempotency-Key replay before the handler runs. The route reaches
 // `createOrgSignerForCustodyWallet` and broadcasts a value-moving transaction,
 // so the gate must sit AFTER `requireAction` and `validateBody`, and immediately before the handler, so a refusal is
@@ -450,17 +448,12 @@ earn.post(
   }),
   createEarnVaultWithdrawal
 );
-// The exit QUOTE: a read with EXIT gates only — position scoping and the
-// read-side wallet binding (both 404), capability (501), and deliberately
-// nothing money-in-shaped (ADR 0002 exit safety): no surfacing, no
-// entitlement, no admission, no environment capability.
+// The exit QUOTE: a read with EXIT gates only — position scoping (404),
+// capability (501), and deliberately nothing money-in-shaped (ADR 0002 exit
+// safety): no surfacing, no entitlement, no admission, no environment
+// capability. Project-scoped like the position reads (HOO-2099).
 earn.post(
   "/vault-withdrawal-previews",
-  // wallets:read is NOT a money-in gate, so ADR 0002 does not argue for
-  // dropping it — and dropping it is load-bearing the wrong way: for a key
-  // with no wallet bindings the binding check is a documented no-op, so
-  // earn:read alone would read any org position's live payout here while
-  // GET /vault-positions answers the same key 403.
   requireAction("earn.read"),
   validateBody(earnVaultWithdrawalPreviewSchema),
   createEarnVaultWithdrawalPreview
@@ -518,8 +511,8 @@ earn.get(
 // (PRO-1741): a REPORT of share balances the positions read cannot see (held
 // with no recorded claim) and claims the chain no longer backs (recorded, zero
 // shares). Report-only — it writes nothing — with no provider gate (it
-// describes money the org already holds) and the positions read's exact
-// wallet-binding scope, which is why it carries the same permission pair.
+// describes money the org already holds), project-scoped like the positions
+// read, which is why it carries the same action.
 earn.get(
   "/vault-share-reconciliation",
   requireAction("earn.read"),
@@ -531,12 +524,11 @@ earn.get(
 // and all previews live on the optional-auth router above. Queued request and
 // cancellation builds stay keyed with the durable lifecycle they create.
 //
-// Deliberately NO `requestGate` and NO `wallets:read`, and that is not the
-// deposit route's cautionary tale repeating: the custody wallet binding governs
-// the org's own custody and stands between a request and
-// `createOrgSignerForCustodyWallet`. These routes never resolve a signer and never touch custody — the owner's own
+// Deliberately NO `requestGate` and no wallet scope: a key's wallet scope
+// governs the org's own custody at `createOrgSignerForCustodyWallet`. These
+// routes never resolve a signer and never touch custody — the owner's own
 // signature is the authorization, and there is no signing sink here for the
-// value-moving conformance inventory to find. `earn:write` gates both submits
+// value-moving conformance inventory to find. `earn.execute` gates the submits
 // because they create and broadcast recorded movements.
 earn.post(
   "/external-wallet/deposits",
@@ -566,9 +558,7 @@ earn.post(
 // The cross-provider movement feed (source: earn_movements). One chronological
 // history spanning both execution models, which no per-family list can serve —
 // and like them it takes NO provider gate, because it reports on money that has
-// already moved. `wallets:read` is required for the same reason the vault reads
-// require it: the wallet-binding scope it enforces is what keeps a key bound to
-// particular wallets from seeing movements signed by others.
+// already moved. Project-scoped like every Earn read (HOO-2099).
 earn.get("/movements", requireAction("earn.read"), listEarnMovements);
 
 // Portfolio programs: N provider wallets per org+environment+provider

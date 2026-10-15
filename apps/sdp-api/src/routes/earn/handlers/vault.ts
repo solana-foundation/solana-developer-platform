@@ -287,8 +287,9 @@ interface EarnVaultDepositResolved {
  * Parse and resolve a vault deposit for the request gate.
  *
  * Everything the handler needs is resolved HERE, before the handler runs, so
- * the wallet binding, the strategy admission and the swap normalization are all
- * decided BEFORE `createOrgSignerForCustodyWallet` is reached.
+ * the wallet, the strategy admission and the swap normalization are all
+ * decided BEFORE `createOrgSignerForCustodyWallet` is reached; the signer then
+ * decides whether this caller may sign with the wallet (HOO-2099).
  */
 export async function extractEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
