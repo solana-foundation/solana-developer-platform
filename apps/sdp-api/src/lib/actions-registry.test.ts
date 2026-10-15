@@ -112,6 +112,12 @@ describe("action registry", () => {
     expect(expandStoredGrants(["*", "payments:write", "transfers.everything"])).toEqual([]);
   });
 
+  it("grants nothing for stored strings that name Object.prototype members", () => {
+    expect(
+      expandStoredGrants(["constructor", "__proto__", "toString", "hasOwnProperty"])
+    ).toEqual([]);
+  });
+
   it("names every action module.verb with a verb its module has", () => {
     for (const action of ACTIONS) {
       const [module, verb] = action.split(".") as [keyof typeof ACTION_MODULES, string];

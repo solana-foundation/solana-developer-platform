@@ -229,7 +229,10 @@ export function expandStoredGrants(stored: readonly string[]): Action[] {
       held.add(value);
       continue;
     }
-    for (const piece of ACTION_ALIASES[value] ?? []) {
+    // Own keys only: a stored "constructor" or "__proto__" must grant nothing,
+    // not reach Object.prototype.
+    const pieces = Object.hasOwn(ACTION_ALIASES, value) ? ACTION_ALIASES[value] : undefined;
+    for (const piece of pieces ?? []) {
       held.add(piece);
     }
   }
