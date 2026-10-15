@@ -72,27 +72,6 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
 }
 
 /**
- * The cluster and parsed body of a JSON-RPC fetch the stub intercepts.
- *
- * @param input - The fetch target kit passed.
- * @param init - The fetch options kit passed.
- * @returns The cluster whose endpoint was hit and the request's parsed JSON body.
- * @throws Error when kit did not fetch a string URL with a string body.
- */
-function readJsonRpcFetch(
-  input: Parameters<typeof fetch>[0],
-  init: Parameters<typeof fetch>[1]
-): { cluster: SolanaCluster; body: unknown } {
-  if (typeof input !== "string") {
-    throw new Error("The cluster RPC stub expects kit to fetch a string URL");
-  }
-  if (init === undefined || typeof init.body !== "string") {
-    throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
-  }
-  return { cluster: clusterForUrl(input), body: JSON.parse(init.body) };
-}
-
-/**
  * Whether `input` targets a server on this machine, such as the local Clerk issuer serving JWKS.
  *
  * @param input - The resource a `fetch` call was made with.
@@ -128,8 +107,14 @@ export function installClusterRpcStub(): ClusterRpcStub {
       if (isLoopbackRequest(input)) {
         return originalFetch(input, init);
       }
-      const { cluster, body } = readJsonRpcFetch(input, init);
-      const { id, method } = jsonRpcRequestSchema.parse(body);
+      if (typeof input !== "string") {
+        throw new Error("The cluster RPC stub expects kit to fetch a string URL");
+      }
+      if (init === undefined || typeof init.body !== "string") {
+        throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
+      }
+      const cluster = clusterForUrl(input);
+      const { id, method } = jsonRpcRequestSchema.parse(JSON.parse(init.body));
       calls.push({ cluster, method });
       if (method === "getGenesisHash") {
         return Response.json({ jsonrpc: "2.0", id, result: GENESIS_HASH_BY_CLUSTER[cluster] });
@@ -159,51 +144,6 @@ export function installClusterRpcStub(): ClusterRpcStub {
       results.set(method, result);
     },
   };
-}
-
-const jsonRpcParamsSchema = z.object({
-  method: z.string(),
-  params: z.array(z.unknown()),
-});
-
-/** One JSON-RPC request that reached a cluster's endpoint, with the params it carried. */
-export interface ClusterRpcRequest extends ClusterRpcCall {
-  params: readonly unknown[];
-}
-
-export interface ClusterRpcRequestLog extends ClusterRpcStub {
-  /** Every request of the current test with its params, in arrival order; emptied after each test. */
-  readonly requests: readonly ClusterRpcRequest[];
-}
-
-/**
- * {@link installClusterRpcStub}, also recording the params of every request, for tests that
- * assert what a read asked the cluster for. Register at `describe` level.
- *
- * @returns The stub plus the current test's requests with their params.
- */
-export function installClusterRpcRequestLog(): ClusterRpcRequestLog {
-  const stub = installClusterRpcStub();
-  const requests: ClusterRpcRequest[] = [];
-
-  beforeEach(() => {
-    const stubbedFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      if (isLoopbackRequest(input)) {
-        return stubbedFetch(input, init);
-      }
-      const { cluster, body } = readJsonRpcFetch(input, init);
-      const { method, params } = jsonRpcParamsSchema.parse(body);
-      requests.push({ cluster, method, params });
-      return stubbedFetch(input, init);
-    };
-  });
-
-  afterEach(() => {
-    requests.length = 0;
-  });
-
-  return { ...stub, requests };
 }
 
 /** A jsonParsed SPL token account a stubbed `getTokenAccountsByOwner` answers with. */
@@ -245,150 +185,5 @@ export function tokenAccountsByOwnerResult(
         },
       },
     })),
-  };
-}
-
-const jsonRpcRequestWithParamsSchema = jsonRpcRequestSchema.extend({
-  params: z.array(z.unknown()),
-});
-
-const signatureStatusesParamsSchema = z.union([
-  z.tuple([z.array(z.string())]),
-  z.tuple([z.array(z.string()), z.object({ searchTransactionHistory: z.literal(true) })]),
-]);
-
-/** What a responder answers one request with: a `result`, or a JSON-RPC `error` body. */
-export type ClusterRpcReply =
-  | { result: JsonRpcResult }
-  | { error: { code: number; message: string } };
-
-/** One signature's status as a stubbed `getSignatureStatuses` serves it. */
-export interface StubSignatureStatus {
-  slot: number;
-  confirmations: number | null;
-  confirmationStatus: "processed" | "confirmed" | "finalized";
-  err: JsonRpcResult;
-}
-
-/** The signatures one `getSignatureStatuses` request asked a cluster about. */
-export interface SignatureStatusesRead {
-  cluster: SolanaCluster;
-  signatures: readonly string[];
-  searchTransactionHistory: boolean;
-}
-
-export interface ClusterRpcResponder extends ClusterRpcRequestLog {
-  /**
-   * Answer every `method` request of the current test with `reply(request)`, ahead of any
-   * {@link ClusterRpcStub.answer} for it, so a test can answer per cluster, per params or per
-   * attempt, or fail the request.
-   *
-   * @param method - The JSON-RPC method name.
-   * @param reply - Builds the answer from the request.
-   */
-  respond(method: string, reply: (request: ClusterRpcRequest) => ClusterRpcReply): void;
-  /**
-   * Answer every `getSignatureStatuses` request of the current test signature by signature.
-   *
-   * @param verdict - The status of one signature in one request, or null when the cluster has none.
-   */
-  respondSignatureStatuses(
-    verdict: (signature: string, read: SignatureStatusesRead) => StubSignatureStatus | null
-  ): void;
-}
-
-/**
- * The signatures a `getSignatureStatuses` request carried and whether it searched history.
- *
- * @param request - A recorded `getSignatureStatuses` request.
- * @returns The cluster, signatures and history flag the request carried.
- * @throws ZodError when the params are not a `getSignatureStatuses` call.
- */
-export function signatureStatusesRead(request: ClusterRpcRequest): SignatureStatusesRead {
-  const params = signatureStatusesParamsSchema.parse(request.params);
-  return {
-    cluster: request.cluster,
-    signatures: params[0],
-    searchTransactionHistory: params.length === 2,
-  };
-}
-
-/**
- * A `getSignatureStatuses` answer listing `statuses` in request order.
- *
- * @param statuses - Each requested signature's status, or null when the cluster has none.
- * @returns The reply to return from a {@link ClusterRpcResponder.respond} responder.
- */
-export function signatureStatusesReply(
-  statuses: readonly (StubSignatureStatus | null)[]
-): ClusterRpcReply {
-  return {
-    result: {
-      context: { slot: 1 },
-      value: statuses.map((status) =>
-        status === null
-          ? null
-          : {
-              slot: status.slot,
-              confirmations: status.confirmations,
-              confirmationStatus: status.confirmationStatus,
-              err: status.err,
-            }
-      ),
-    },
-  };
-}
-
-/**
- * {@link installClusterRpcStub}, also recording every request with its params and answering the
- * methods a test registers with {@link ClusterRpcResponder.respond}; methods without a responder
- * fall through to the stub. Register at `describe` level.
- *
- * @returns The current test's calls and requests, and the answer and responder registries.
- */
-export function installClusterRpcResponder(): ClusterRpcResponder {
-  const stub = installClusterRpcStub();
-  const calls: ClusterRpcCall[] = [];
-  const requests: ClusterRpcRequest[] = [];
-  const replies = new Map<string, (request: ClusterRpcRequest) => ClusterRpcReply>();
-
-  beforeEach(() => {
-    const stubbedFetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      if (isLoopbackRequest(input)) {
-        return stubbedFetch(input, init);
-      }
-      const { cluster, body } = readJsonRpcFetch(input, init);
-      const { id, method, params } = jsonRpcRequestWithParamsSchema.parse(body);
-      const request: ClusterRpcRequest = { cluster, method, params };
-      calls.push({ cluster, method });
-      requests.push(request);
-      const reply = replies.get(method);
-      if (reply === undefined) {
-        return stubbedFetch(input, init);
-      }
-      return Response.json({ jsonrpc: "2.0", id, ...reply(request) });
-    };
-  });
-
-  afterEach(() => {
-    calls.length = 0;
-    requests.length = 0;
-    replies.clear();
-  });
-
-  return {
-    calls,
-    requests,
-    answer: stub.answer,
-    respond(method, reply) {
-      replies.set(method, reply);
-    },
-    respondSignatureStatuses(verdict) {
-      replies.set("getSignatureStatuses", (request) => {
-        const read = signatureStatusesRead(request);
-        return signatureStatusesReply(read.signatures.map((signature) => verdict(signature, read)));
-      });
-    },
   };
 }
