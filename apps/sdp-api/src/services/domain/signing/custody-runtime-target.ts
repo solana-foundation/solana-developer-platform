@@ -17,7 +17,7 @@ import type { DatabaseClient } from "@/db";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
-import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
+import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import { AuditService } from "@/services/audit.service";
@@ -664,15 +664,15 @@ export class CustodyRuntimeTargets {
       custodySigningTimeoutMs(this.env)
     );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    // A start reads the organization's and the ambient principal's live rows
-    // each time it signs, in one statement; an exit reads nothing.
+    // Each signature reads the organization's and the ambient principal's
+    // live rows in one statement; an exit with no principal reads nothing.
     const subject = { custodyWalletId };
     return admittedSigner(
       signer,
       async () =>
         decideMovement(
           movement,
-          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }, subject),
+          await readMovementFactsWith(this.db, { organizationId, projectId }, movement, subject),
           subject
         ),
       {

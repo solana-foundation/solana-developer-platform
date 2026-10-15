@@ -99,8 +99,9 @@ const asSystem = <T>(read: () => Promise<T>) =>
   runWithSystemDatabaseIdentity("test:money-admission", read);
 
 describe("MOVEMENTS exits", () => {
-  // SECURITY REVIEW GATE: an exit is never refused, so this list changes only
-  // with a named security reviewer (see packages/sdp-types/src/movements.ts).
+  // SECURITY REVIEW GATE: an exit is never refused for the organization, only
+  // for its credential, so this list changes only with a named security
+  // reviewer (see packages/sdp-types/src/movements.ts).
   it("exempts exactly the reviewed exits from admission", () => {
     const exits = (Object.keys(MOVEMENTS) as MovementId[])
       .filter((movement) => MOVEMENTS[movement].kind === "exit")
@@ -135,7 +136,8 @@ describe("decideMovement", () => {
       cases.map(([label, subject]) => [movement, label, subject] as const)
     )
   )("decides %s for %s", (movement, _label, subject) => {
-    // An exit always passes (ADR 0002); a start is exactly the start decision.
+    // An exit never depends on the organization (ADR 0002) and these facts
+    // carry a live principal; a start is exactly the start decision.
     expect(decideMovement(movement, subject, NO_WALLET)).toEqual(
       MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(subject)
     );
@@ -352,8 +354,50 @@ describe("decidePrincipal", () => {
     expect(decide({ kind: "none" })).toEqual({ admitted: false, reason: "principal_missing" });
   });
 
-  it("admits an exit whatever the principal", () => {
-    expect(decide({ kind: "none" }, WALLET, "recurring.cancel")).toEqual({ admitted: true });
+  // An exit is decided by its credential alone (HOO-2099): no action, and a
+  // reconciler with no principal still finishes a payout.
+  it("admits an exit with no principal", () => {
+    expect(decide({ kind: "none" }, WALLET, "private_channels.withdraw")).toEqual({
+      admitted: true,
+    });
+  });
+
+  it("admits an exit by a live key in scope that holds no start action", () => {
+    expect(decide(liveKey({ grants: [] }), WALLET, "private_channels.withdraw")).toEqual({
+      admitted: true,
+    });
+  });
+
+  it.each<[string, MoneyPrincipalFacts, string]>([
+    ["a revoked key", liveKey({ status: "deactivated" }), "principal_not_live"],
+    [
+      "a key whose scope leaves the wallet out",
+      liveKey({ walletScope: "selected", walletListed: false }),
+      "wallet_out_of_scope",
+    ],
+    [
+      "a mandate for another wallet",
+      { kind: "mandate", mandate: { status: "canceling", sourceCustodyWalletId: "cwlt_other" } },
+      "wallet_out_of_scope",
+    ],
+  ])("refuses an exit by %s", (_label, principal, reason) => {
+    expect(decide(principal, WALLET, "private_channels.withdraw")).toEqual({
+      admitted: false,
+      reason,
+    });
+  });
+
+  it("admits a mandate's own exit in any status", () => {
+    expect(
+      decide(
+        {
+          kind: "mandate",
+          mandate: { status: "canceling", sourceCustodyWalletId: "cwlt_signing" },
+        },
+        WALLET,
+        "recurring.cancel"
+      )
+    ).toEqual({ admitted: true });
   });
 
   it("admits a live key that holds the action", () => {

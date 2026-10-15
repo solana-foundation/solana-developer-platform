@@ -54,10 +54,9 @@ export async function resolvePrivateChannelCustodyWallet(
     publicKey: allowAddress ? selector : undefined,
   });
   if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
-  // A withdrawal is an exit to a destination the caller picks, and the custody
-  // signer admits exits without reading the principal, so the key's wallet
-  // scope is checked here for every movement (HOO-2099). Whether its key is
-  // still live is decided by the signer for each start.
+  // The custody signer refuses a wallet outside the key's scope for every
+  // movement, withdrawals included (HOO-2099); refusing here as well stops the
+  // flow before it records a movement or calls the gateway.
   assertCallerWalletInScope(auth.walletAccess, wallet.id);
   return wallet;
 }

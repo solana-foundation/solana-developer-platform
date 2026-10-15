@@ -156,10 +156,9 @@ export class MoneyMovementRefusedError extends AppError {
 
 /**
  * Refuses, before any work, a request that names a custody wallet outside
- * the caller's wallet scope as read at authentication (HOO-2099). For the
- * routes whose exits let the caller pick a destination (Private Channels and
- * Rings): the custody waist admits every exit without reading the principal,
- * so the request's own scope is the line there. Same 403 as the waist's.
+ * the caller's wallet scope as read at authentication (HOO-2099): the custody
+ * signer's own refusal, made early so a flow that records or calls a gateway
+ * before it signs (Private Channels, Rings) does neither. Same 403.
  */
 export function assertCallerWalletInScope(
   walletAccess: WalletAccess,
@@ -205,64 +204,46 @@ function statusAdmits(
 }
 
 /**
- * Pure. The principal half of a start's decision: is the principal live, does
- * it hold one of the movement's actions, and may it sign with this wallet.
+ * Pure. The principal's half of a decision: is the principal live, may it sign
+ * with this wallet, and, for a start, does it hold one of the movement's
+ * actions. An exit is decided by the credential alone (HOO-2099): no action
+ * (the route required one) and no mandate or request status, and with no
+ * principal at all (a reconciler finishing a payout) it signs.
  */
 export function decidePrincipal(
   movement: MovementId,
   facts: Pick<MoneyAdmissionFacts, "principal" | "readAt">,
   subject: MoneyAdmissionSubject
 ): MoneyAdmissionDecision {
+  // An exit's actions are null: the route already required one.
   const actions = movementActions(movement);
-  if (actions === null) {
-    return ADMITTED;
-  }
   const principal = facts.principal;
   switch (principal.kind) {
     case "none":
-      return refuse("principal_missing");
-    case "api_key": {
-      const key = principal.key;
-      if (!key || apiKeyRowRefusal(key, facts.readAt) !== null) {
-        return refuse("principal_not_live");
-      }
-      if (!actions.some((action) => apiKeyMayPerform(key.grants, action))) {
-        return refuse("action_not_held");
-      }
-      // A selected key signs only with a listed wallet; with none listed it
-      // signs nothing. A start with no custody wallet (a sponsor) has no
-      // wallet to scope.
-      if (subject.custodyWalletId !== null && key.walletScope === "selected" && !key.walletListed) {
-        return refuse("wallet_out_of_scope");
-      }
-      return ADMITTED;
-    }
-    case "member": {
-      const member = principal.member;
-      if (!member || !memberStatusMayMoveMoney(member.status)) {
-        return refuse("principal_not_live");
-      }
-      const role = normalizeOrganizationRole(member.role);
-      return actions.some((action) => organizationRoleMayPerform(role, action))
-        ? ADMITTED
-        : refuse("action_not_held");
-    }
+      return actions === null ? ADMITTED : refuse("principal_missing");
+    case "api_key":
+      return decideApiKey(principal.key, facts.readAt, actions, subject);
+    case "member":
+      return decideMember(principal.member, actions);
     case "mandate": {
       const mandate = principal.mandate;
-      if (!mandate || !statusAdmits(MANDATE_MOVEMENT_STATUSES, movement, mandate.status)) {
+      if (
+        !mandate ||
+        !mayActInStatus(MANDATE_MOVEMENT_STATUSES, movement, actions, mandate.status)
+      ) {
         return refuse("principal_not_live");
       }
-      if (
+      const otherWallet =
         subject.custodyWalletId !== null &&
-        subject.custodyWalletId !== mandate.sourceCustodyWalletId
-      ) {
-        return refuse("wallet_out_of_scope");
-      }
-      return ADMITTED;
+        subject.custodyWalletId !== mandate.sourceCustodyWalletId;
+      return otherWallet ? refuse("wallet_out_of_scope") : ADMITTED;
     }
     case "payment_request": {
       const request = principal.request;
-      if (!request || !statusAdmits(PAYMENT_REQUEST_MOVEMENT_STATUSES, movement, request.status)) {
+      if (
+        !request ||
+        !mayActInStatus(PAYMENT_REQUEST_MOVEMENT_STATUSES, movement, actions, request.status)
+      ) {
         return refuse("principal_not_live");
       }
       // A `/pay` link holds no custody signer; it only ever has SDP sponsor.
@@ -275,10 +256,61 @@ export function decidePrincipal(
   }
 }
 
+type ApiKeyPrincipalFacts = Extract<MoneyPrincipalFacts, { kind: "api_key" }>["key"];
+
+function decideApiKey(
+  key: ApiKeyPrincipalFacts,
+  readAt: number,
+  actions: readonly Action[] | null,
+  subject: MoneyAdmissionSubject
+): MoneyAdmissionDecision {
+  if (!key || apiKeyRowRefusal(key, readAt) !== null) {
+    return refuse("principal_not_live");
+  }
+  if (actions !== null && !actions.some((action) => apiKeyMayPerform(key.grants, action))) {
+    return refuse("action_not_held");
+  }
+  // A selected key signs only with a listed wallet; with none listed it signs
+  // nothing. A sponsor signs for no custody wallet, so has none to scope.
+  if (subject.custodyWalletId !== null && key.walletScope === "selected" && !key.walletListed) {
+    return refuse("wallet_out_of_scope");
+  }
+  return ADMITTED;
+}
+
+function decideMember(
+  member: { status: string; role: string } | null,
+  actions: readonly Action[] | null
+): MoneyAdmissionDecision {
+  if (!member || !memberStatusMayMoveMoney(member.status)) {
+    return refuse("principal_not_live");
+  }
+  if (actions === null) {
+    return ADMITTED;
+  }
+  const role = normalizeOrganizationRole(member.role);
+  return actions.some((action) => organizationRoleMayPerform(role, action))
+    ? ADMITTED
+    : refuse("action_not_held");
+}
+
+/** A start needs the row in a status that admits it; an exit only needs the row. */
+function mayActInStatus(
+  table: Parameters<typeof statusAdmits>[0],
+  movement: MovementId,
+  actions: readonly Action[] | null,
+  status: string
+): boolean {
+  return actions === null || statusAdmits(table, movement, status);
+}
+
 /**
- * Pure. What a signing waist decides for one movement: an exit always passes
- * (ADR 0002); a start needs the organization ({@link decideMoneyStart}) and
- * then the principal ({@link decidePrincipal}).
+ * Pure. What a signing waist decides for one movement. A start needs the
+ * organization ({@link decideMoneyStart}) and then the principal
+ * ({@link decidePrincipal}). An exit never needs the organization, so a
+ * suspended or unentitled one can always unwind (ADR 0002, ADR 0007); it
+ * needs only the credential asking for it, when there is one. `null` facts
+ * for an exit mean nothing was read because no principal was set.
  */
 export function decideMovement(
   movement: MovementId,
@@ -286,7 +318,7 @@ export function decideMovement(
   subject: MoneyAdmissionSubject
 ): MoneyAdmissionDecision {
   if (MOVEMENTS[movement].kind === "exit") {
-    return ADMITTED;
+    return facts ? decidePrincipal(movement, facts, subject) : ADMITTED;
   }
   const organization = decideMoneyStart(facts);
   if (!organization.admitted || !facts) {
@@ -432,6 +464,26 @@ function principalFacts(
   }
 }
 
+/**
+ * Whether deciding `movement` needs the admission read. An exit with no
+ * ambient principal needs nothing: {@link decideMovement} admits it on `null`.
+ */
+export function movementNeedsAdmissionFacts(movement: MovementId): boolean {
+  return MOVEMENTS[movement].kind === "start" || currentMoneyPrincipal() !== null;
+}
+
+/** {@link readMoneyAdmissionFactsWith}, or `null` when the movement needs no read. */
+export async function readMovementFactsWith(
+  db: DatabaseExecutor,
+  scope: MoneyAdmissionScope,
+  movement: MovementId,
+  subject: MoneyAdmissionSubject
+): Promise<MoneyAdmissionFacts | null> {
+  return movementNeedsAdmissionFacts(movement)
+    ? readMoneyAdmissionFactsWith(db, scope, subject)
+    : null;
+}
+
 /** {@link readMoneyAdmissionFactsWith} on the request's own client. */
 export async function readMoneyAdmissionFacts(
   env: Env,
@@ -513,7 +565,7 @@ export async function checkMoneyStart(
 ): Promise<MoneyAdmissionDecision> {
   const decision = decideMovement(
     context.movement,
-    await readMoneyAdmissionFacts(env, scope, subject),
+    await readMovementFactsWith(getDb(env), scope, context.movement, subject),
     subject
   );
   if (!decision.admitted) {

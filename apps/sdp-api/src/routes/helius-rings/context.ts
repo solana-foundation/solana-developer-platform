@@ -34,9 +34,9 @@ export function getHeliusRingsOperationRepository(c: AppContext) {
 
 /**
  * How a route uses the Rings wallet it names. A `read` is project-scoped. A
- * `write` also needs the wallet inside the key's wallet scope (HOO-2099):
- * Rings exits pay out to a destination the caller picks, and the custody
- * signer admits exits without reading the principal.
+ * `write` also needs the wallet inside the key's wallet scope (HOO-2099): the
+ * custody signer refuses one outside it, and refusing up front keeps the
+ * operation from being prepared or sent to the gateway first.
  */
 export type RingsWalletUse = "read" | "write";
 

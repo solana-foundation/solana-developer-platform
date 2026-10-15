@@ -1,8 +1,9 @@
-import { MOVEMENTS, type MovementId } from "@sdp/types";
+import type { MovementId } from "@sdp/types";
 import {
   assertMovementAdmitted,
   decideMovement,
   type MoneyAdmissionFacts,
+  movementNeedsAdmissionFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
 import type { Env } from "@/types/env";
@@ -24,15 +25,14 @@ export interface SponsorshipAdmissionScope {
 
 /**
  * The organization's and the ambient principal's live state for a sponsor
- * signature (HOO-1955, HOO-2099). A scope with no project has nothing to read,
- * and so cannot start money.
+ * signature (HOO-1955, HOO-2099).
  */
 export async function readSponsorshipAdmissionFacts(
   env: Env,
   scope: SponsorshipAdmissionScope
 ): Promise<MoneyAdmissionFacts | null> {
-  // An exit always passes, so it reads nothing.
-  if (MOVEMENTS[scope.movement].kind === "exit") {
+  // An exit with no principal reads nothing.
+  if (!movementNeedsAdmissionFacts(scope.movement)) {
     return null;
   }
   return readMoneyAdmissionFacts(
@@ -42,7 +42,7 @@ export async function readSponsorshipAdmissionFacts(
   );
 }
 
-/** Throws for a start the organization may not make; an exit always passes. */
+/** Throws for a start the organization may not make, or an exit its credential may not. */
 export function assertSponsorshipAdmitted(
   scope: SponsorshipAdmissionScope,
   facts: MoneyAdmissionFacts | null

@@ -11,12 +11,15 @@
  *   Refused for a suspended or deleted organization, and for a production
  *   project whose organization lacks the production entitlement.
  * - `exit`: only returns value or obligations the organization already
- *   committed, or finishes work it already started. Never refused (ADR 0002):
- *   money already in must be able to come out.
+ *   committed, or finishes work it already started. Never refused for the
+ *   organization (ADR 0002): money already in must be able to come out. The
+ *   credential asking still must be live and may sign only with wallets in its
+ *   scope (ADR 0007 addendum); with no credential (a reconciler) it signs.
  *
- * SECURITY REVIEW GATE: classifying a movement as `exit` exempts it from
- * admission, so adding one or changing a `start` to `exit` needs a named
- * security reviewer. Ids are stable: refusal events carry them.
+ * SECURITY REVIEW GATE: classifying a movement as `exit` exempts it from the
+ * organization's admission and from action checks, so adding one or changing
+ * a `start` to `exit` needs a named security reviewer. Ids are stable:
+ * refusal events carry them.
  */
 
 import type { Action } from "./actions";
@@ -31,7 +34,7 @@ export type MovementKind = "start" | "exit";
  * refuses a principal that holds none of them. Most starts have one; a
  * movement several routes sign (each declaring its own action) lists each of
  * them, so the waist never refuses what the route admitted. An exit names
- * none: it is never refused.
+ * none: the route's own action admits it.
  */
 export type MovementDefinition =
   | { module: SdpModule; kind: "start"; actions: readonly [Action, ...Action[]] }
