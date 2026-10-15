@@ -186,8 +186,21 @@ describe("OndoEarnClient.listStrategies", () => {
     assert.equal(snapshot.riskMetadata?.tvlUsd, 179668490.6);
     assert.equal(snapshot.riskMetadata?.curator, "ondo");
     // The eligibility constraints ride the row (PRO-1832): an integrator reads
-    // them from the catalogue, not from a doc they have to know exists.
-    assert.match(String(snapshot.riskMetadata?.eligibility), /Reg S/);
+    // them from the catalogue, not from a doc they have to know exists. Pin
+    // what "non-US persons only" left out: entities, Canada, the
+    // qualified-investor regimes and Ondo's own page for the full list.
+    const eligibility = String(snapshot.riskMetadata?.eligibility);
+    assert.match(eligibility, /individuals and entities in the US, Canada/);
+    assert.match(eligibility, /Reg S US persons/);
+    assert.match(
+      eligibility,
+      /Qualified\/professional investors only in Brazil, the EEA, Hong Kong, Malaysia, Singapore, Switzerland and the UK/
+    );
+    assert.match(eligibility, /Not enforced on-chain or by SDP/);
+    assert.match(
+      eligibility,
+      /https:\/\/docs\.ondo\.finance\/general-access-products\/usdy\/eligibility/
+    );
     assert.match(String(snapshot.riskMetadata?.issuerControls), /freeze authority/);
     // The row must sit inside the envelope the sync validates against.
     assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, snapshot), true);

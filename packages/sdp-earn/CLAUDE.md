@@ -231,8 +231,12 @@ Percent-to-fraction conversion preserves the API number's decimal digits,
 including exponent notation, and truncates to six places using integer
 arithmetic. Do not round with `toFixed` before truncating the rate.
 The row's `riskMetadata` carries the eligibility constraints an
-integrator asks about (Reg S non-US-person restriction, issuer freeze
-authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
+integrator asks about (Ondo's prohibited and qualified-investor-only
+jurisdictions, issuer freeze authority), with the longer record in
+`docs/earn/ondo-catalogue-inventory.md`. The `eligibility` string names the US
+and Canada and links Ondo's eligibility page for the rest; re-read that page
+before changing the string or the inventory doc, and never shrink it back to
+"non-US persons only".
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
 primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
 Jupiter trust boundary stays single-owner in the API.

@@ -25,12 +25,37 @@ the owner's USDY balance, and the exit is the reverse swap. Surfaced 2026-09-14
 
 Recorded here and on the row (`riskMetadata.eligibility`,
 `riskMetadata.issuerControls`) so an integrator's compliance review does not
-depend on finding this file.
+depend on finding this file. The jurisdiction rules are Ondo's, from its
+[USDY eligibility page](https://docs.ondo.finance/general-access-products/usdy/eligibility),
+fetched 2026-10-15. Ondo's page governs: re-check it before relying on these
+lists. The row names the US and Canada and links the page for the rest.
 
-- **Reg S, non-US persons only.** USDY is offered under Regulation S. The
-  restriction is NOT enforced on-chain: any wallet can hold the token, so the
-  party offering the strategy to end users screens them. SDP performs no
-  eligibility check of its own.
+- **Prohibited jurisdictions.** Individuals located or residing in, and
+  entities organized under the laws of or with a principal place of business
+  in, any of these are Ondo "Prohibited Persons", barred from "subscribing for,
+  acquiring or redeeming USDY tokens": Afghanistan; Belarus; Canada; Crimea,
+  the Donetsk and Luhansk People's Republics, the Kherson and Zaporizhzhia
+  regions and the city of Sevastopol (Ukraine); Cuba; North Korea (listed by
+  Ondo as "Democratic Republic of Korea"); Iran; Libya; Myanmar; Russia;
+  Somalia; South Sudan; Sudan; Syria; and the United States, including its
+  states, possessions, territories and federal districts. An entity 50% or more
+  owned or controlled, in aggregate, by Prohibited Persons may be barred too.
+- **US persons and US orders.** Also barred: buy orders placed from within the
+  US, and "US persons" under Rule 902 of Regulation S or anyone acting for
+  their account or benefit.
+- **Qualified or professional investors only.** Individuals residing in (in
+  some cases, citizens of) and entities organized or based in Brazil, the EEA,
+  Hong Kong, Malaysia, Singapore, Switzerland and the UK must meet that
+  jurisdiction's investor category (Ondo's page maps each) "in order to be
+  issued USDY tokens". The page's intro applies these restrictions to
+  "subscribing for, acquiring or redeeming"; the row takes that stricter
+  reading.
+- **Partner clause.** "By agreeing to a business relationship with Ondo, any
+  partners agree to not offer Ondo related products or services in connection
+  with any of the outlined prohibited jurisdictions."
+- **Not enforced on-chain or by SDP.** Any wallet can buy and hold USDY on the
+  secondary market, so the party offering the strategy to end users screens
+  them. SDP performs no eligibility check of its own.
 - **Issuer freeze authority.** Ondo holds both the mint and the freeze authority
   on the USDY mint, so any token account, including an SDP custody wallet's,
   can be frozen by the issuer. A frozen account cannot exit through the
