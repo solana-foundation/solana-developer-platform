@@ -337,7 +337,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Update recurring payment",
     operationId: "updatePaymentRecurringPayment",
     description:
-      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records. Requires an Idempotency-Key, because an edit can sign and broadcast a replacement subscription: a retry with the same key and request returns the recurring payment instead of broadcasting again.",
+      "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records. Requires an Idempotency-Key, because an edit can sign and broadcast a replacement subscription. A same-key retry of a completed edit replays its answer. A retry of an interrupted edit gets 409 IDEMPOTENCY_KEY_IN_FLIGHT with Retry-After until the attempt is stale, then resumes from the last step SDP recorded. If a step was sent but not yet recorded when the edit was interrupted, which is rare, the retry can fail or send that step again, so read the recurring payment with GET before editing it again.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
