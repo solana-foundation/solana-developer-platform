@@ -50,7 +50,7 @@ test.describe
       await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
       await expect(page.locator("#generated-key")).toHaveValue(/^(sk_test_|sk_live_)/);
 
-      await page.getByRole("button", { name: "Dismiss" }).click();
+      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
       await page.reload();
 
       await expect(page.locator("#generated-key")).toHaveCount(0);
@@ -95,7 +95,7 @@ test.describe
       await page.getByRole("button", { name: "Create key" }).click();
 
       await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss" }).click();
+      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
 
       let keyRow = page.getByRole("row", { name: new RegExp(keyName) });
       await expect(keyRow).toContainText("Issuance", { timeout: 120_000 });
@@ -103,7 +103,7 @@ test.describe
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Rotate key (24h grace)" }).click();
       await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await page.getByRole("button", { name: "Dismiss" }).click();
+      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
       const rotatedKeyRows = page.getByRole("row", { name: new RegExp(keyName) });
       await expect(rotatedKeyRows).toHaveCount(2);
       await expect(rotatedKeyRows.nth(0)).toContainText("Issuance");
