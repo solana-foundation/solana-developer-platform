@@ -253,13 +253,12 @@ function useQueuedWithdrawalSubmission(options: {
       // keeps the key, so the next press is answered under it.
       const answer = fetchResultAnswer(result);
       settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
       if (result.ok) {
         setOutcome(result.data);
         options.onRequested?.(result.data.withdrawalRequest);
-      } else if (uncertainMoneyAnswerMessage(answer) !== null) {
-        options.setError(
-          t(uncertainMoneyAnswerMessage(answer) ?? "Shared.idempotency.outcomeUnknownCheckList")
-        );
+      } else if (uncertain !== null) {
+        options.setError(t(uncertain));
         void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
       } else {
         options.setError(result.error);
