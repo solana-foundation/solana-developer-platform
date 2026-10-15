@@ -19,7 +19,7 @@ import {
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
-import type { SponsorshipScope } from "./sponsorship.service";
+import type { SponsorshipMovementScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 const logEvent = vi.hoisted(() => vi.fn());
@@ -38,7 +38,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
-const SCOPE: SponsorshipScope = {
+const SCOPE: SponsorshipMovementScope = {
   environment: "sandbox",
   organizationId: "org_1",
   projectId: "project_1",
@@ -91,7 +91,7 @@ function policy(
   };
 }
 
-function harness(scope: SponsorshipScope = SCOPE) {
+function harness(scope: SponsorshipMovementScope = SCOPE) {
   const repository = {
     resolvePolicies: vi
       .fn()

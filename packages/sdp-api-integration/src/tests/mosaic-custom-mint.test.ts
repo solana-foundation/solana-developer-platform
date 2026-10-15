@@ -41,11 +41,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       "issuance.authority"
     );
     const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
-      environment: TEST_PROJECT.environment,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
+      scope: {
+        environment: TEST_PROJECT.environment,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        actor: { type: "project", id: TEST_PROJECT.id },
+      },
       movement: "issuance.authority",
-      actor: { type: "project", id: TEST_PROJECT.id },
     });
 
     const result = await mosaic.createToken({

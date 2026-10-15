@@ -45,7 +45,8 @@ const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
 const rebindSignature = vi.hoisted(() => vi.fn());
 const hasClaim = vi.hoisted(() => vi.fn());
-const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const resolveProjectSponsorshipScope = vi.hoisted(() => vi.fn());
+const createSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
@@ -54,7 +55,8 @@ let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createProjectSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+  createSponsorshipFeePayment,
 }));
 vi.mock("./read-chain", () => ({ readEscrowState, readDvpAccounts }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
@@ -143,7 +145,13 @@ describe("fundDvpTradeLeg", () => {
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    resolveProjectSponsorshipScope.mockResolvedValue({
+      environment: "sandbox",
+      organizationId: "org_dvp_sponsor",
+      projectId: "prj_dvp_sponsor",
+      actor: { type: "wallet", id: "cwlt_dvp_sponsor" },
+    });
+    createSponsorshipFeePayment.mockReturnValue({
       getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });

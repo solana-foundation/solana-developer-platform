@@ -91,7 +91,13 @@ vi.mock("@/services/sponsorship.service", async () => {
   );
   return {
     ...actual,
-    createRequestSponsorshipFeePayment: () => ({
+    resolveRequestSponsorshipScope: () => ({
+      environment: "sandbox",
+      organizationId: "org_dvp_settle",
+      projectId: "prj_dvp_settle",
+      actor: { type: "api_key", id: "key_dvp_settle" },
+    }),
+    createSponsorshipFeePayment: () => ({
       getFeePayer,
       prepareOwnedSubmission,
       providerId: "test",

@@ -19,8 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectService } from "@/services/project.service";
 import {
   buildKoraUserId,
-  createProjectSponsorshipFeePayment,
   createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -112,13 +112,16 @@ describe("sponsorship identity boundary", () => {
   });
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(env, {
-      movement: "payments.transfer",
-      environment: "sandbox",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "user", id: "usr_test_sponsorship" },
-    });
+    createSponsorshipFeePayment(
+      env,
+      {
+        environment: "sandbox",
+        organizationId: "org_test_sponsorship",
+        projectId: "project_1",
+        actor: { type: "user", id: "usr_test_sponsorship" },
+      },
+      "payments.transfer"
+    );
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:sandbox:org_test_sponsorship:project:project_1:user:usr_test_sponsorship",
@@ -127,13 +130,16 @@ describe("sponsorship identity boundary", () => {
   });
   it("selects the mainnet paymaster for a production project's sponsorship", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    createSponsorshipFeePayment(env, {
-      movement: "payments.transfer",
-      environment: "production",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "wallet", id: "cwlt_1" },
-    });
+    createSponsorshipFeePayment(
+      env,
+      {
+        environment: "production",
+        organizationId: "org_test_sponsorship",
+        projectId: "project_1",
+        actor: { type: "wallet", id: "cwlt_1" },
+      },
+      "payments.transfer"
+    );
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:production:org_test_sponsorship:project:project_1:wallet:cwlt_1",
@@ -148,13 +154,16 @@ describe("sponsorship identity boundary", () => {
       signAndSend: vi.fn(),
     };
     vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
-    return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
-      movement: "payments.transfer",
-      environment: "sandbox",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "user", id: "usr_test_sponsorship" },
-    });
+    return createSponsorshipFeePayment(
+      { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env,
+      {
+        environment: "sandbox",
+        organizationId: "org_test_sponsorship",
+        projectId: "project_1",
+        actor: { type: "user", id: "usr_test_sponsorship" },
+      },
+      "payments.transfer"
+    );
   }
   it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
     readMoneyAdmissionFacts.mockResolvedValue({
@@ -211,13 +220,16 @@ describe("sponsorship identity boundary", () => {
       markStarted: vi.fn().mockResolvedValue(undefined),
       hasStarted: vi.fn(),
     };
-    const feePayment = createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
-      movement: "payments.transfer",
-      environment: "sandbox",
-      organizationId: "org_test_sponsorship",
-      projectId: "project_1",
-      actor: { type: "user", id: "usr_test_sponsorship" },
-    });
+    const feePayment = createSponsorshipFeePayment(
+      { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env,
+      {
+        environment: "sandbox",
+        organizationId: "org_test_sponsorship",
+        projectId: "project_1",
+        actor: { type: "user", id: "usr_test_sponsorship" },
+      },
+      "payments.transfer"
+    );
     const submission = await feePayment.prepareOwnedSubmission(buildTransaction(), lifecycle);
     expect(submission.signedTransaction).toStrictEqual(signedTransaction);
     expect(lifecycle.persistSigned).toHaveBeenCalledWith(submission);
@@ -324,28 +336,48 @@ describe("sponsorship identity boundary", () => {
       status: "active",
     });
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    await createProjectSponsorshipFeePayment(env, {
-      movement: "recurring.collect",
+    const scope = await resolveProjectSponsorshipScope(env, {
       organizationId: "org_stored",
       projectId: "project_stored",
       actor: { type: "wallet", id: "wallet_stored" },
     });
+    expect(scope).toEqual({
+      environment: "production",
+      organizationId: "org_stored",
+      projectId: "project_stored",
+      actor: { type: "wallet", id: "wallet_stored" },
+    });
+    createSponsorshipFeePayment(env, scope, "recurring.collect");
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
       "mainnet-beta"
     );
   });
-  it("rejects a persisted project that does not belong to the claimed organization", async () => {
-    projectMocks.getProject.mockResolvedValue({
-      id: "project_stored",
-      organizationId: "org_other",
-      environment: "production",
-      status: "active",
-    });
+  it.each([
+    { label: "is missing", project: null },
+    {
+      label: "belongs to another organization",
+      project: {
+        id: "project_stored",
+        organizationId: "org_other",
+        environment: "production",
+        status: "active",
+      },
+    },
+    {
+      label: "is archived",
+      project: {
+        id: "project_stored",
+        organizationId: "org_claimed",
+        environment: "production",
+        status: "archived",
+      },
+    },
+  ])("refuses a persisted project that $label", async ({ project }) => {
+    projectMocks.getProject.mockResolvedValue(project);
     await expect(
-      createProjectSponsorshipFeePayment(testEnv, {
-        movement: "recurring.collect",
+      resolveProjectSponsorshipScope(testEnv, {
         organizationId: "org_claimed",
         projectId: "project_stored",
         actor: { type: "wallet", id: "wallet_stored" },
