@@ -14,8 +14,7 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import {
   createRequestSponsorshipFeePayment,
-  resolveRequestSponsorshipScope,
-  resolveSponsoredFeePayer,
+  resolveRequestSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
@@ -61,5 +60,5 @@ export function getFeePayment(c: AppContext, movement: MovementId) {
 
 /** The fee payer a prepared transaction names; no way to sponsor-sign escapes it. */
 export async function getSponsoredFeePayer(c: AppContext): Promise<Address> {
-  return resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
+  return resolveRequestSponsoredFeePayer(c);
 }

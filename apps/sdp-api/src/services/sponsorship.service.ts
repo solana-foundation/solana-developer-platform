@@ -5,14 +5,19 @@ import {
   resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
-import type { MovementId, ProjectEnvironment, SolanaCluster } from "@sdp/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type MovementId,
+  type ProjectEnvironment,
+  type SolanaCluster,
+} from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { getAuth } from "@/lib/auth";
+import { AppError, badRequest } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
@@ -23,22 +28,18 @@ import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
 export interface SponsorshipScope {
+  /**
+   * The project's environment. It alone decides the cluster (`CLUSTER_BY_SDP_ENVIRONMENT`), so the
+   * Kora endpoint, the budget policies and the network-fee RPC always follow the project, never
+   * the process default.
+   */
   environment: ProjectEnvironment;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   actor: {
     type: SponsorshipActorType;
     id: string;
   };
-  /**
-   * The cluster the sponsored transaction executes on. Selects the Kora
-   * endpoint, the budget policies and the network-fee RPC. Omitted means the
-   * process default (`SOLANA_NETWORK`), which is what every flow that builds
-   * against the process RPC wants; a flow that builds per cluster (Earn vault
-   * movements) MUST pass the movement's cluster or a mainnet transaction is
-   * signed by the devnet paymaster and charged to the devnet budget.
-   */
-  cluster?: SolanaCluster;
   /**
    * The movement the sponsored transaction serves. The sponsor refuses to sign
    * a start the organization may not make right now (HOO-1955).
@@ -153,14 +154,11 @@ function requireScopeSegment(value: string, label: string): string {
 export function buildKoraUserId(scope: SponsorshipAddressScope): string {
   const environment = requireScopeSegment(scope.environment, "Sponsorship environment");
   const organizationId = requireScopeSegment(scope.organizationId, "Sponsorship organization id");
-  const tenantScope =
-    scope.projectId === null
-      ? "organization"
-      : `project:${requireScopeSegment(scope.projectId, "Sponsorship project id")}`;
+  const projectId = requireScopeSegment(scope.projectId, "Sponsorship project id");
   const actorType = requireScopeSegment(scope.actor.type, "Sponsorship actor type");
   const actorId = requireScopeSegment(scope.actor.id, "Sponsorship actor id");
 
-  return `sdp:v1:${environment}:${organizationId}:${tenantScope}:${actorType}:${actorId}`;
+  return `sdp:v1:${environment}:${organizationId}:project:${projectId}:${actorType}:${actorId}`;
 }
 
 /** Owned application boundary for constructing a fee-payment provider. */
@@ -170,7 +168,11 @@ export function createSponsorshipFeePayment(
 ): SponsorshipFeePayment {
   const provider = instrumentVendorPort(
     resolveFeePaymentProvider(env),
-    createFeePaymentAdapter(env, buildKoraUserId(scope), scope.cluster)
+    createFeePaymentAdapter(
+      env,
+      buildKoraUserId(scope),
+      CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]
+    )
   );
   return isSelfHostedDeployment(env)
     ? withOwnedSubmissionLifecycle(provider, { env, scope })
@@ -188,14 +190,18 @@ export function resolveSponsoredFeePayer(
 ): Promise<Address> {
   return instrumentVendorPort(
     resolveFeePaymentProvider(env),
-    createFeePaymentAdapter(env, buildKoraUserId(scope), scope.cluster)
+    createFeePaymentAdapter(
+      env,
+      buildKoraUserId(scope),
+      CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]
+    )
   ).getFeePayer();
 }
 
 /** Read Kora security configuration through the same owned construction boundary. */
 export async function getManagedSponsorshipProviderConfiguration(
   env: Env,
-  cluster?: SolanaCluster
+  cluster: SolanaCluster
 ): Promise<SponsorshipProviderConfiguration> {
   const provider = instrumentVendorPort(
     resolveFeePaymentProvider(env),
@@ -210,21 +216,27 @@ export async function getManagedSponsorshipProviderConfiguration(
   return provider.getSponsorshipConfiguration();
 }
 
-/** Resolve a scope exclusively from trusted request middleware state. */
+/**
+ * Resolve the request's sponsorship scope. Project and environment come from the open cluster
+ * scope the project middleware opened, so the paymaster, the budget and the network-fee read
+ * follow the request's project; only the organization and actor come from authentication.
+ *
+ * @param c - The request context, inside the project middleware's cluster scope.
+ * @returns The sponsorship scope.
+ * @throws AppError 400 when the open scope has no project.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipAddressScope {
-  const scope = resolveAuthenticatedSponsorshipScope(c);
-  return { ...scope, projectId: requireProjectId(c) };
-}
-
-/** Resolve either project or organization scope from trusted authentication state. */
-export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipAddressScope {
   const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
+  const { projectId, environment } = currentClusterScope();
+  if (projectId === null) {
+    throw badRequest("Project scope is required");
+  }
 
   return {
     environment,
     organizationId: auth.organizationId,
-    projectId: c.get("projectId") ?? auth.projectId ?? null,
+    projectId,
     actor:
       auth.authType === "api_key"
         ? { type: "api_key", id: auth.id }
@@ -239,9 +251,14 @@ export function createRequestSponsorshipFeePayment(
   return createSponsorshipFeePayment(c.env, { ...resolveRequestSponsorshipScope(c), movement });
 }
 
-/** The fee payer for the request's authenticated scope (project or organization). */
-export function resolveAuthenticatedSponsoredFeePayer(c: AppContext): Promise<Address> {
-  return resolveSponsoredFeePayer(c.env, resolveAuthenticatedSponsorshipScope(c));
+/**
+ * The fee payer for the request's sponsorship scope.
+ *
+ * @param c - The request context, inside the project middleware's cluster scope.
+ * @returns The sponsored fee payer address.
+ */
+export function resolveRequestSponsoredFeePayer(c: AppContext): Promise<Address> {
+  return resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
 }
 
 /**
@@ -255,7 +272,6 @@ export async function createProjectSponsorshipFeePayment(
     organizationId: string;
     projectId: string;
     actor: SponsorshipScope["actor"];
-    cluster?: SolanaCluster;
     movement: MovementId;
   }
 ): Promise<SponsorshipFeePayment> {
@@ -269,7 +285,6 @@ export async function createProjectSponsorshipFeePayment(
     organizationId: project.organizationId,
     projectId: project.id,
     actor: input.actor,
-    cluster: input.cluster,
     movement: input.movement,
   });
 }

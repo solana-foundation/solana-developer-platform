@@ -7,6 +7,7 @@
 
 import { resolveKoraEndpoint } from "@sdp/fee-payment";
 import { Token2022Service } from "@sdp/solana/token-2022";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
@@ -27,7 +28,7 @@ export function createToken2022Service(
   sponsorshipScope: SponsorshipScope
 ): Token2022Service {
   const feePayment =
-    resolveKoraEndpoint(env, sponsorshipScope.cluster) === null
+    resolveKoraEndpoint(env, CLUSTER_BY_SDP_ENVIRONMENT[sponsorshipScope.environment]) === null
       ? undefined
       : createSponsorshipFeePayment(env, sponsorshipScope);
 

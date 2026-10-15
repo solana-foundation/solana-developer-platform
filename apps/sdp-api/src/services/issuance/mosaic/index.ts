@@ -7,6 +7,7 @@
 
 import { resolveKoraEndpoint } from "@sdp/fee-payment";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
@@ -40,7 +41,7 @@ export function createMosaicService(
   const sponsor =
     feePayment === "sponsored" &&
     sponsorshipScope &&
-    resolveKoraEndpoint(env, sponsorshipScope.cluster) !== null
+    resolveKoraEndpoint(env, CLUSTER_BY_SDP_ENVIRONMENT[sponsorshipScope.environment]) !== null
       ? createSponsorshipFeePayment(env, sponsorshipScope)
       : undefined;
   return new MosaicService(env, signer, sponsor, {

@@ -4,8 +4,8 @@ import {
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
-import { resolveDefaultCluster } from "@sdp/rpc";
-import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
+import { createClusterRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -116,28 +116,31 @@ type AdmissionContext = {
 };
 
 /**
- * The budget network a scope draws from: the scope's cluster when the caller
- * named one (Earn movements execute per cluster), else the process default.
- * A mainnet movement on a devnet-default process must reserve against the
- * mainnet policies and trip the mainnet breaker, not devnet's.
+ * The budget network a scope draws from: its project environment's cluster, never the process
+ * default. A production movement on a devnet-default process must reserve against the mainnet
+ * policies and trip the mainnet breaker, not devnet's.
+ *
+ * @param scope - The sponsorship scope.
+ * @param scope.environment - The project environment that decides the cluster.
+ * @returns The budget network.
  */
-function resolveNetwork(
-  env: Pick<Env, "SOLANA_NETWORK">,
-  scope: Pick<SponsorshipScope, "cluster">
-): SponsorshipNetwork {
-  return sponsorshipNetworkForCluster(scope.cluster ?? resolveDefaultCluster(env));
+function resolveNetwork(scope: Pick<SponsorshipScope, "environment">): SponsorshipNetwork {
+  return sponsorshipNetworkForCluster(CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
 }
 
 /**
- * The RPC that prices the network fee for a scope: the process RPC by default,
- * the cluster's own endpoint when the scope names one. A fee quoted on the
- * wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash
- * answers null anyway. An unconfigured cluster throws here and surfaces as
- * "Sponsorship preflight is unavailable", the same fail-closed answer as a
- * dead RPC.
+ * The RPC that prices the network fee on the scope's cluster. A fee quoted on the wrong chain is
+ * not a fee, and `getFeeForMessage` for a foreign blockhash answers null anyway. An unconfigured
+ * cluster throws here and surfaces as "Sponsorship preflight is unavailable", the same fail-closed
+ * answer as a dead RPC.
+ *
+ * @param env - API environment for RPC configuration.
+ * @param scope - The sponsorship scope.
+ * @param scope.environment - The project environment that decides the cluster.
+ * @returns An RPC client for the scope's cluster.
  */
-function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "cluster">) {
-  return scope.cluster ? createClusterRpc(env, scope.cluster) : createRpc(env);
+function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "environment">) {
+  return createClusterRpc(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
 }
 
 function encodeBase64(value: Uint8Array): string {
@@ -217,7 +220,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
-    this.network = resolveNetwork(env, scope);
+    this.network = resolveNetwork(scope);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
     this.getNetworkFee =
