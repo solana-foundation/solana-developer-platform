@@ -88,7 +88,7 @@ function hasValidStoredSignature(
  * @param env - Runtime environment for the project lookup.
  * @param transfers - The transfers to group.
  * @returns The transfers per environment.
- * @throws AppError `INTERNAL_ERROR` when a transfer has no project or its project does not exist.
+ * @throws AppError `INTERNAL_ERROR` when a transfer's project does not exist.
  */
 async function groupByProjectEnvironment<TTransfer extends PaymentTransferRow>(
   env: Env,
@@ -98,9 +98,6 @@ async function groupByProjectEnvironment<TTransfer extends PaymentTransferRow>(
   const environmentByProject = new Map<string, ProjectEnvironment>();
   const byEnvironment = new Map<ProjectEnvironment, TTransfer[]>();
   for (const transfer of transfers) {
-    if (transfer.project_id === null) {
-      throw internalError(`Transfer ${transfer.id} is missing a project`);
-    }
     let environment = environmentByProject.get(transfer.project_id);
     if (environment === undefined) {
       const project = await projects.getProject(transfer.project_id);

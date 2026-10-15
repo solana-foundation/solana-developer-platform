@@ -109,7 +109,7 @@ async function createTransferRecord(
   c: AppContext,
   input: {
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     custodyWalletId: string;
     walletId: string;
     sourceAddress: string;
@@ -240,7 +240,7 @@ async function updateOnchainTransferForRamp(
   const tenant = {
     transferId: existing.id,
     organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
+    projectId: requireProjectId(c),
   };
   // A provider the release channel leaves out is off completely: never fund its deposits.
   assertTransferRampProviderInChannel(c, existing);
@@ -310,7 +310,7 @@ export async function authorizeTransfer(
   // wallet is inactive and would refuse the replay of a transfer that ran.
   authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
-  assertPaymentProjectScope(body.projectId, scope.auth.projectId);
+  assertPaymentProjectScope(body.projectId, requireProjectId(c));
   const operation = resolveOutboundPaymentOperation({
     wallets: scope.wallets,
     sourceCustodyWalletId: body.sourceCustodyWalletId,
@@ -325,7 +325,7 @@ export async function authorizeTransfer(
     rampTransfer = await getPaymentsRepository(c).getTransferById({
       transferId: body.transferId,
       organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
+      projectId: requireProjectId(c),
     });
     if (!rampTransfer) throw notFound("Ramp transfer");
   }
@@ -396,7 +396,7 @@ export async function findTransferRecordReplay(
 
   const row = await getPaymentsRepository(c).findTransferByIdempotency({
     organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
+    projectId: requireProjectId(c),
     idempotencyKey: recordKey,
   });
   if (row === null || row.idempotency_fingerprint === null) return null;
@@ -775,7 +775,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       }
     : await createTransferRecord(c, {
         organizationId: scope.auth.organizationId,
-        projectId: scope.auth.projectId,
+        projectId: requireProjectId(c),
         custodyWalletId: operation.sourceWallet.id,
         walletId: operation.sourceWallet.walletId,
         sourceAddress: operation.sourceWallet.publicKey,
@@ -1033,7 +1033,7 @@ export async function listTransfers(c: AppContext) {
       provider,
       providerReference,
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId: requireProjectId(c),
     });
 
     if (row) assertTransferReadAccess(c, row);
@@ -1080,7 +1080,7 @@ export async function listTransfers(c: AppContext) {
     // can only push persisted rows later in the combined ordering.
     const persistedResultPromise = repo.listTransfers({
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId: requireProjectId(c),
       custodyWalletId: observedCustodyWalletId,
       counterpartyId,
       search,
@@ -1155,7 +1155,7 @@ export async function listTransfers(c: AppContext) {
     const persistedSignatureRows = await repo.listTransfersBySignatures({
       signatures: sigStrings,
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId: requireProjectId(c),
     });
     const scopedPersistedSignatureRows = persistedSignatureRows.filter(
       (row) => row.custody_wallet_id === observedCustodyWalletId
@@ -1174,7 +1174,7 @@ export async function listTransfers(c: AppContext) {
       missingObservedSignatures,
       {
         organizationId: auth.organizationId,
-        projectId: auth.projectId,
+        projectId: requireProjectId(c),
         walletIdsByAddress,
       }
     );
@@ -1216,7 +1216,7 @@ export async function listTransfers(c: AppContext) {
     const queryStartedAt = performance.now();
     const result = await repo.listTransfers({
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId: requireProjectId(c),
       custodyWalletId,
       walletAuthorization:
         custodyWalletId || walletAuthorization === null ? undefined : walletAuthorization,
@@ -1257,7 +1257,7 @@ export async function getTransfer(c: AppContext) {
   const row = await repo.getTransferById({
     transferId: params.data.transferId,
     organizationId: auth.organizationId,
-    projectId: auth.projectId,
+    projectId: requireProjectId(c),
   });
 
   if (!row) throw notFound("Transfer");

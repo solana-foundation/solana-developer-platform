@@ -114,7 +114,7 @@ function buildTransferListWhere(params: ListTransfersInput): {
          JOIN payment_transfers named_pt
            ON named_pt.counterparty_id = search_c.id
           AND named_pt.organization_id = search_c.organization_id
-          AND named_pt.project_id IS NOT DISTINCT FROM search_c.project_id
+          AND named_pt.project_id = search_c.project_id
          WHERE ${counterpartyScope.join(" AND ")}
            AND search_c.display_name ILIKE ? ESCAPE '\\'
        )`
@@ -164,7 +164,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: (row.project_id as string | null | undefined) ?? null,
+    project_id: row.project_id as string,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     counterparty_id: row.counterparty_id as string | null,
@@ -218,7 +218,7 @@ function buildTransferScopeWhere(params: {
   const values: unknown[] = [params.organizationId];
 
   if (!params.includeAllOrganizationProjects) {
-    clauses.push(`${prefix}project_id IS NOT DISTINCT FROM ?`);
+    clauses.push(`${prefix}project_id = ?`);
     values.push(params.projectId);
   }
 
@@ -250,7 +250,7 @@ export function createPostgresPaymentsRepository(
     input: TransferStatusChangeFields & {
       transferId: string;
       organizationId: string;
-      projectId: string | null;
+      projectId: string;
       updatedAt: string;
     },
     guard: {
@@ -438,7 +438,7 @@ export function createPostgresPaymentsRepository(
         values.push(input.organizationId);
       }
       if (input.projectId !== undefined) {
-        clauses.push("project_id IS NOT DISTINCT FROM ?");
+        clauses.push("project_id = ?");
         values.push(input.projectId);
       }
       if (input.expectedStatus !== undefined) {
@@ -865,7 +865,7 @@ export function createPostgresPaymentsRepository(
            LEFT JOIN counterparties c
              ON c.id = pt.counterparty_id
             AND c.organization_id = pt.organization_id
-            AND c.project_id IS NOT DISTINCT FROM pt.project_id
+            AND c.project_id = pt.project_id
            WHERE ${scope.where}`
         )
         .bind(...scope.values)
@@ -894,7 +894,7 @@ export function createPostgresPaymentsRepository(
              LEFT JOIN counterparties c
                ON c.id = pt.counterparty_id
               AND c.organization_id = pt.organization_id
-              AND c.project_id IS NOT DISTINCT FROM pt.project_id
+              AND c.project_id = pt.project_id
              WHERE ${whereClause}
              ORDER BY ${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC
              LIMIT ?
