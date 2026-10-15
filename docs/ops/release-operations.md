@@ -200,7 +200,7 @@ Production never rolls back on its own after a promotion: going back is a delibe
 
 ### When a deploy fails
 
-- **Before the canary** (candidate, readiness, the traffic switch or its health check, the cron or worker update, or a cancel): the run restores the traffic split, cron image and worker image it captured, as it always has, sets `sdp_prod_hold=<sha>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK, PROD HELD`.
+- **Before the canary** (candidate, readiness, the traffic switch or its health check, the cron or worker update, or a cancel): the run restores the traffic split, cron image and worker image it captured, as it always has, sets `sdp_prod_hold=<sha>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK, PROD HELD`. If that restore fails partway, run the quick rollback to finish it.
 - **At the canary**: the canary runs up to three times. Three failures in a row, or a cancel during it, leave API X serving and set the hold, and Slack reports `CANARY FAILED, PROD HELD`. The workflow cannot page anyone itself; those runs count toward `sdp-smoke-consecutive-failures-prod`, which pages once production has three failed runs and no passing one in 20 minutes. Then decide: the quick rollback below, or a fix forward.
 - **After a `breaking` migration**: nothing is restored, because the previous image cannot run on the contracted schema. The run fails and holds production, and the quick rollback refuses. Fix forward through an approval run with `clear_hold` (below).
 

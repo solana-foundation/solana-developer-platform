@@ -741,7 +741,7 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
-          "${hold[@]}" --remove-labels sdp_prod_previous_revision || rollback_failed=1
+          "${hold[@]}" || rollback_failed=1
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
@@ -751,9 +751,14 @@ jobs:
               --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
           fi
           if [[ "${rollback_failed}" -ne 0 ]]; then
-            echo "Automatic restore was incomplete; escalate immediately." >&2
+            echo "Automatic restore was incomplete; escalate immediately. The quick rollback can finish it." >&2
             exit 1
           fi
+          # Only once everything is back: until then the quick rollback needs
+          # sdp_prod_previous_revision to finish the job.
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision ||
+            echo "::warning::Could not clear sdp_prod_previous_revision; the quick rollback would only re-apply the restored build."
           echo "rolled_back=true" >> "${GITHUB_OUTPUT}"
           echo "Restored the build ${DEPLOY_IMAGE_SHA} replaced and set sdp_prod_hold=${DEPLOY_IMAGE_SHA}. Merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 

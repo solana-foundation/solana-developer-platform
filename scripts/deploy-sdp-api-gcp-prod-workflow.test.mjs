@@ -714,9 +714,10 @@ test("a rollout that fails before its canary is restored, as on main, and held",
   assert.equal(settle.code, 0, settle.out);
   assert.deepEqual(settle.calls, [
     `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
-    `${holdCall} --remove-labels sdp_prod_previous_revision`,
+    holdCall,
     `gcloud run jobs update sdp-prod-api-public-cron ${scope} --image registry.example/cron@sha256:old`,
     `gcloud run services update sdp-prod-worker ${scope} --image registry.example/worker@sha256:old`,
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
   ]);
   assert.equal(settle.output, "rolled_back=true\n");
   assert.match(settle.summary, new RegExp(`set sdp_prod_hold=${deploySha}`));
@@ -759,7 +760,8 @@ test("a failed restore still sets the hold and fails the run without reporting a
   });
   assert.equal(settle.code, 1);
   assert.equal(settle.calls.length, 4);
-  assert.equal(settle.calls[1], `${holdCall} --remove-labels sdp_prod_previous_revision`);
+  assert.equal(settle.calls[1], holdCall);
+  assert.ok(!settle.calls.some((call) => call.includes("--remove-labels")));
   assert.match(settle.out, /Automatic restore was incomplete; escalate immediately\./);
   assert.equal(settle.output, "");
 });
