@@ -227,17 +227,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       quote = bvnkResult.quote;
       break;
     }
-    case "coinbase": {
-      quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        destinationWalletAddress,
-        externalCustomerId: counterparty.id,
-        domain: input.domain,
-      });
-      break;
-    }
     case "stripe": {
       quote = await RAMP_PROVIDER_CLIENTS.stripe.createOnrampQuote(rampRuntime(c), {
         assetRail: input.assetRail,

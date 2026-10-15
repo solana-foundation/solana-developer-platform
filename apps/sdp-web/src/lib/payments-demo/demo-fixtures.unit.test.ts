@@ -831,7 +831,6 @@ describe("Pay and Deposit", () => {
     );
     expect(treasury).toHaveLength(5);
     expect(treasury.some((deposit) => deposit.custodyWalletId === null)).toBe(true);
-    expect(treasury.some((deposit) => deposit.type === "onramp")).toBe(true);
   });
 
   it("merges every wallet's transfers when the route has no direct filter", async () => {

@@ -208,11 +208,6 @@ export interface RampOnrampQuoteInput {
   /** Handler-reserved SDP payment transfer id for provider correlation. */
   paymentTransferId?: string;
   bvnkCompliance?: BvnkComplianceInput;
-  /** Buyer contact required by Coinbase headless create-order; sourced from the counterparty. */
-  email?: string;
-  phone?: string;
-  /** Browser origin host the Coinbase Apple Pay link renders on (required for iframe embedding). */
-  domain?: string;
   /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
   customerIpAddress?: string;
   /** Identity pre-fill for the embedded on-ramp widget (Stripe). */

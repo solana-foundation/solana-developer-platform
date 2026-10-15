@@ -7,9 +7,9 @@
 
 ## Context
 
-Ramps launch with Stripe and MoonPay. Mural, MoneyGram and Lightspark are
-removed; Coinbase (HOO-2035) and BVNK (HOO-2037) are next. Adding a provider
-touches about 45 files today, 68 for one with KYC. The target is about 14.
+Ramps launch with Stripe and MoonPay. Mural, MoneyGram, Lightspark and Coinbase
+(HOO-2035) are removed; BVNK (HOO-2037) is next. Adding a provider touches
+about 45 files today, 68 for one with KYC. The target is about 14.
 
 `RampProvider` covers estimates, quotes and a synchronous counterparty check.
 Everything else is a per-provider switch outside it, and the covered half is
@@ -124,7 +124,7 @@ stateful providers fit the model at all.
 - Provider failures lose the provider's wording in API error bodies. Callers get
   the code, the provider status in `details` and an SDP message; operators read
   the provider's wording from `error_diagnostics` in the logs.
-- Until step 3, BVNK and Coinbase stay on the current interface, named as legacy
-  entries in the test-kit map.
+- Until step 3, BVNK stays on the current interface, named as a legacy entry in
+  the test-kit map.
 - A schema stricter than the provider's real responses turns quotes into 503s,
   so schemas require only what adapters already read.

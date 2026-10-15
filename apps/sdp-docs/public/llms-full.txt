@@ -3475,7 +3475,6 @@ The project's environment picks the mode for every request: a Sandbox project us
 | --- | --- | --- | --- | --- | --- |
 | [MoonPay](/docs/payments/ramps-moonpay) | ✓ | ✓ | ✓ | `hosted` | Fast sandbox iteration; broad payment-method coverage (corridor-dependent). |
 | [BVNK](/docs/payments/ramps-bvnk) | ✓ | ✓ | ✓ | `manual_instructions` | Fast sandbox iteration; travel-rule and compliance party metadata. |
-| [Coinbase](/docs/payments/ramps-coinbase) | ✓ (sandbox only) | ✗ | ✓ | `hosted` | Onramp only, no off-ramp needed. |
 | [Stripe](/docs/payments/ramps-stripe) | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | Widget/session-embedded onramp UI; onramp only. |
 
 Each provider's page covers its configuration and limits.
@@ -3553,28 +3552,6 @@ BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
 BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
 
 BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
-
----
-
-### Coinbase
-Source: https://platform.solana.com/docs/payments/ramps-coinbase
-
-> Configure Coinbase as an SDP ramp provider — credentials, capabilities, and limits.
-
-Coinbase is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "coinbase"`.
-
-Coinbase rate estimates work in production; order creation is sandbox-only.
-
-## Configuration
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `COINBASE_CDP_API_KEY_ID` | conditional | CDP Secret API Key id. Same key is used for sandbox and production — sandbox is flagged per-request, not by a separate credential. |
-| `COINBASE_CDP_API_KEY_SECRET` | conditional | CDP Secret API Key secret. Paired with `COINBASE_CDP_API_KEY_ID`; used to sign a per-request JWT. |
-
-Coinbase is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject with "Coinbase Onramp does not support off-ramp." Onramp quotes always return `deliveryMode: "hosted"`: SDP creates a guest-checkout Apple Pay order and returns its payment link as `hostedUrl`.
-
-Order creation (the quote step) is sandbox-only today — it requires buyer agreement and phone-OTP attestation timestamps that SDP's production flow does not yet collect, so a non-sandbox request fails loudly instead of sending a false attestation. Rate estimates have no such restriction and work in both modes. Coinbase also requires email and phone values; quote creation currently fails at the pending just-in-time collection seam.
 
 ---
 

@@ -53,7 +53,6 @@
       "batchEstimateMissing": "Batch estimate response is missing estimate details.",
       "batchTransferRequestFailed": "Batch transfer request failed ({status}).",
       "batchTransferMissing": "Batch transfer response is missing batch details.",
-      "rampEventRequestFailed": "{provider} event request failed ({status}).",
       "rampEventMissing": "{provider} event response is missing transfer details.",
       "counterpartyAccountsRequestFailed": "Failed to load accounts ({status}).",
       "sandboxSimulationRequestFailed": "Sandbox simulation failed ({status}).",
@@ -246,8 +245,6 @@
       "stripeLoadHelp": "The Stripe checkout failed to load. Check your connection and try again.",
       "eventRequestFailed": "Event request failed.",
       "untrustedProviderUrl": "The provider returned an untrusted URL, so it was not loaded. Create a new quote or contact support.",
-      "coinbaseEventFailed": "Failed to record Coinbase event.",
-      "coinbaseOnramp": "Coinbase onramp",
       "status": {
         "waitingForFunding": "Waiting for funding",
         "waitingToSend": "Waiting to send",

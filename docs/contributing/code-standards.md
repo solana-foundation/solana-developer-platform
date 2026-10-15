@@ -68,7 +68,7 @@ A change that triggers one of these must handle it.
 ### Ramp providers
 
 - One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
-- No webhook code in the package. Payload schemas, parsers, and the `WebhookProcessor` live in `apps/sdp-api/src/routes/webhooks/ramps/<id>.ts`, registered in `routes/webhooks/handlers.ts`, and map to `RampSettlementEvent`. Parsers `safeParse` a zod `z.discriminatedUnion` per event type (`bvnk.schema.ts`, `coinbase.ts`); an event type the schema doesn't know maps to an `ignore` event, never a throw.
+- No webhook code in the package. Payload schemas, parsers, and the `WebhookProcessor` live in `apps/sdp-api/src/routes/webhooks/ramps/<id>.ts`, registered in `routes/webhooks/handlers.ts`, and map to `RampSettlementEvent`. Parsers `safeParse` a zod `z.discriminatedUnion` per event type; an event type the schema doesn't know maps to an `ignore` event, never a throw.
 - Provider instances come only from `RAMP_PROVIDER_CLIENTS`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
 - Provider clients never access the database. Route handlers and background jobs access it through repositories.
 

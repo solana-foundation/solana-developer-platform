@@ -303,27 +303,6 @@ export interface MoonpayRampSettlement {
   failureReason?: string;
 }
 
-export interface CoinbaseRampFee {
-  feeAmount: string;
-  feeCurrency: string;
-  feeType: string;
-}
-
-/** Coinbase onramp order economics, captured verbatim from a terminal webhook. */
-export interface CoinbaseRampSettlement {
-  provider: "coinbase";
-  status: "completed" | "failed";
-  paymentCurrency: string;
-  paymentSubtotal: string;
-  paymentTotal: string;
-  purchaseCurrency: string;
-  purchaseAmount: string;
-  exchangeRate: string;
-  fees: CoinbaseRampFee[];
-  txHash?: string;
-  failureReason?: string;
-}
-
 /**
  * BVNK on-ramp settlement economics, from the payout CREATE response
  * (PROCESSING) until the COMPLETE crypto payout webhook or poll replaces it
@@ -405,7 +384,6 @@ export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSett
 
 export type RampTransferSettlement =
   | MoonpayRampSettlement
-  | CoinbaseRampSettlement
   | BvnkRampSettlement
   | BvnkOfframpChannelSettlement;
 
@@ -1287,7 +1265,6 @@ export interface PaymentOnrampQuoteRequest {
   assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  domain?: string;
   rampsMemo?: Record<string, string>;
 }
 
@@ -1326,19 +1303,6 @@ export type PaymentRampQuote =
       hostedUrl: string;
     })
   | (BasePaymentRampQuote & {
-      provider: "coinbase";
-      deliveryMode: "hosted";
-      hostedUrl: string;
-      /** Order economics captured verbatim from the Coinbase create-order response. */
-      paymentCurrency: string;
-      paymentSubtotal: string;
-      paymentTotal: string;
-      purchaseCurrency: string;
-      purchaseAmount: string;
-      exchangeRate: string;
-      fees: CoinbaseRampFee[];
-    })
-  | (BasePaymentRampQuote & {
       provider: "stripe";
       deliveryMode: "session_widget";
       clientSecret: string;
@@ -1346,16 +1310,3 @@ export type PaymentRampQuote =
       publishableKey: string;
       redirectUrl?: string;
     });
-
-export const RAMP_EVENT_PROVIDERS = ["coinbase"] as const;
-export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
-
-/**
- * Coinbase headless on-ramp events, forwarded from the payment-link iframe's
- * postMessage stream (`onramp_api.*`). `orderId` is the create-order id used as
- * the transfer's provider reference. Client events are advisory telemetry only;
- * the signature-verified server-side webhook is the sole settlement authority.
- */
-export type CoinbaseRampEvent =
-  | { kind: "committed"; orderId: string }
-  | { kind: "errored"; orderId: string; reason: string };
