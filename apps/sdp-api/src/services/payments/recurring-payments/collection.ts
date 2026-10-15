@@ -76,7 +76,10 @@ import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -1770,12 +1773,15 @@ export async function collectRecurringPayment(input: {
       source: sourceTokenAccount.tokenAccount,
       tokenProgram,
     });
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      movement: "recurring.collect",
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: input.sourceWallet.walletId },
-    });
+    const feePayment = createSponsorshipFeePayment(
+      input.env,
+      await resolveProjectSponsorshipScope(input.env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: input.sourceWallet.walletId },
+      }),
+      "recurring.collect"
+    );
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({

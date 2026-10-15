@@ -25,10 +25,10 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
@@ -270,7 +270,7 @@ export const prepareCreateSubscriptionPlan = async (
   const updatedPlan = await persistPlanPda(c, plan, planPda);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [owner]
   );

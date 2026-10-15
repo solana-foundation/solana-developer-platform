@@ -44,6 +44,7 @@ import type {
   OwnedSubmissionLifecycle,
   PreparedOwnedSubmission,
   SponsorshipFeePayment,
+  SponsorshipMovementScope,
   SponsorshipScope,
 } from "./sponsorship.service";
 import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
@@ -215,7 +216,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   constructor(
     private readonly env: Env,
-    private readonly scope: SponsorshipScope,
+    private readonly scope: SponsorshipMovementScope,
     private readonly provider: FeePaymentPort,
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {

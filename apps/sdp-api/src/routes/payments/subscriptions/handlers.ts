@@ -42,10 +42,10 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
 import { resolveScope, resolveWallet } from "../wallets";
 import {
@@ -267,7 +267,7 @@ export const prepareSubscriptionAuthorization = async (
     user: subscriber,
   });
   const [subscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
-  const feePayer = await getSponsoredFeePayer(c);
+  const feePayer = await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
   const payer = createNoopSigner(feePayer);
   const subscriberSigner = createNoopSigner(subscriber);
   const initAuthorityInstruction = await getInitSubscriptionAuthorityOverlayInstructionAsync({
@@ -400,7 +400,7 @@ async function prepareSubscriptionLifecycle(
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [subscriber]
   );
@@ -464,7 +464,7 @@ export const prepareSubscriptionCollection = async (
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [caller]
   );

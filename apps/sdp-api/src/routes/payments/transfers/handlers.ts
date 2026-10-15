@@ -72,12 +72,16 @@ import {
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import * as solanaServices from "@/services/solana";
 import {
+  createSponsorshipFeePayment,
+  resolveRequestSponsorshipScope,
+} from "@/services/sponsorship.service";
+import {
   isDefiniteSubmissionError,
   type SignedSubmissionStore,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
+import { type AppContext, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
 import { transferIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
@@ -566,7 +570,11 @@ async function executeSponsoredTransfer(
 
   const rpc = solanaRpc.createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = getFeePayment(c, "payments.transfer");
+  const feePayment = createSponsorshipFeePayment(
+    c.env,
+    resolveRequestSponsorshipScope(c),
+    "payments.transfer"
+  );
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
 

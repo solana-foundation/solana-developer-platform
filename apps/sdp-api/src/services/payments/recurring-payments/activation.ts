@@ -43,7 +43,10 @@ import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
@@ -911,12 +914,15 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-        movement: "recurring.activate",
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        actor: { type: "wallet", id: input.sourceWallet.walletId },
-      });
+      const feePayment = createSponsorshipFeePayment(
+        input.env,
+        await resolveProjectSponsorshipScope(input.env, {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          actor: { type: "wallet", id: input.sourceWallet.walletId },
+        }),
+        "recurring.activate"
+      );
       const feePayer = await feePayment.getFeePayer();
       const payer = createNoopSigner(feePayer);
 

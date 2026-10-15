@@ -7,7 +7,7 @@
 
 import { resolveKoraEndpoint } from "@sdp/fee-payment";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type MovementId } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
@@ -27,22 +27,25 @@ export type MosaicFeePayment = "sponsored" | "wallet";
  * a Kora is configured for the scope's cluster (gasless for the custody wallet) and degrades to
  * signer-paid fees when it is not; "wallet" always makes the signer pay
  * transaction fees from its own SOL.
+ * @param sponsorship - Who is sponsored and the movement the sponsor serves; required when
+ * `feePayment` is "sponsored".
+ * @returns The Mosaic service.
  */
 export function createMosaicService(
   env: Env,
   signer: TransactionSigner,
   feePayment: MosaicFeePayment,
-  sponsorshipScope?: SponsorshipScope
+  sponsorship?: { scope: SponsorshipScope; movement: MovementId }
 ): MosaicService {
-  if (feePayment === "sponsored" && !sponsorshipScope) {
+  if (feePayment === "sponsored" && !sponsorship) {
     throw new Error("Sponsorship scope is required for sponsored issuance");
   }
 
   const sponsor =
     feePayment === "sponsored" &&
-    sponsorshipScope &&
-    resolveKoraEndpoint(env, CLUSTER_BY_SDP_ENVIRONMENT[sponsorshipScope.environment]) !== null
-      ? createSponsorshipFeePayment(env, sponsorshipScope)
+    sponsorship &&
+    resolveKoraEndpoint(env, CLUSTER_BY_SDP_ENVIRONMENT[sponsorship.scope.environment]) !== null
+      ? createSponsorshipFeePayment(env, sponsorship.scope, sponsorship.movement)
       : undefined;
   return new MosaicService(env, signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so

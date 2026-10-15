@@ -48,7 +48,10 @@ import {
   SOL_MINT,
 } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   type SignedSubmissionStore,
   submitSponsoredTransaction,
@@ -247,12 +250,15 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-    movement: input.movement,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    actor: { type: "wallet", id: input.sourceWallet.walletId },
-  });
+  const feePayment = createSponsorshipFeePayment(
+    input.env,
+    await resolveProjectSponsorshipScope(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.sourceWallet.walletId },
+    }),
+    input.movement
+  );
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
   const message = pipe(
     createTransactionMessage({ version: 0 }),
