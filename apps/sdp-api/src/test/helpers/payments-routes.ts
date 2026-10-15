@@ -284,8 +284,60 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
 }
 
 /**
+ * Give a project a BYOK Privy wallet, the only custody Production allows (HOO-1970), with the
+ * custody encryption key the connection's stored credential needs set for the current test.
+ *
+ * @param tenant - The project's owner and the wallet to seed.
+ * @param tenant.organizationId - The organization that owns the project.
+ * @param tenant.projectId - The project the connection belongs to.
+ * @param tenant.createdBy - The user recorded as the connection's creator.
+ * @param tenant.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
+ * @param tenant.publicKey - The address the wallet's signer signs as.
+ * @returns Resolves once the wallet and its connection are seeded.
+ */
+export async function seedProjectPrivyWallet(tenant: {
+  organizationId: string;
+  projectId: string;
+  createdBy: string;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+  onTestFinished(() => {
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  });
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: tenant.organizationId,
+    projectId: tenant.projectId,
+    connectionId: `cconn_${tenant.custodyWalletId}`,
+    credentialId: `pcred_${tenant.custodyWalletId}`,
+    createdBy: tenant.createdBy,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: tenant.organizationId,
+      credentialId: `pcred_${tenant.custodyWalletId}`,
+      appId: `app_${tenant.custodyWalletId}`,
+      appSecret: `secret_${tenant.custodyWalletId}`,
+    }),
+    providerAccountFingerprint: `sha256:${tenant.custodyWalletId}`,
+    wallets: [
+      {
+        id: tenant.custodyWalletId,
+        walletId: `privy_${tenant.custodyWalletId}`,
+        publicKey: tenant.publicKey,
+        label: "Production Payments Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: tenant.custodyWalletId,
+  });
+}
+
+/**
  * Re-home the seeded API key onto the organization's Production project and give that project a
- * BYOK Privy wallet, the only custody Production allows (HOO-1970).
+ * BYOK Privy wallet.
  *
  * @param wallet - The Production wallet to seed.
  * @param wallet.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
@@ -296,36 +348,12 @@ export async function seedProductionPrivyWallet(wallet: {
   custodyWalletId: string;
   publicKey: string;
 }): Promise<void> {
-  const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
-  onTestFinished(() => {
-    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
-  });
-  await seedTestPrivyConnection(getDb(env), {
+  await seedProjectPrivyWallet({
     organizationId: TEST_ORG.id,
     projectId: TEST_PRODUCTION_PROJECT_ID,
-    connectionId: "cconn_payments_production",
-    credentialId: "pcred_payments_production",
     createdBy: TEST_USER.id,
-    stored: await writeTestPrivyCredentialSecret(env, {
-      organizationId: TEST_ORG.id,
-      credentialId: "pcred_payments_production",
-      appId: "payments-production-app",
-      appSecret: "payments-production-secret",
-    }),
-    providerAccountFingerprint: "sha256:payments-production",
-    wallets: [
-      {
-        id: wallet.custodyWalletId,
-        walletId: "privy_payments_production",
-        publicKey: wallet.publicKey,
-        label: "Production Payments Wallet",
-        purpose: "transfer",
-        status: "active",
-      },
-    ],
-    lastCheckStatus: "success",
-    defaultCustodyWalletId: wallet.custodyWalletId,
+    custodyWalletId: wallet.custodyWalletId,
+    publicKey: wallet.publicKey,
   });
   await getDb(env)
     .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")

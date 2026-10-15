@@ -30,9 +30,13 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
+  enableMainnetSponsorship,
+  MAINNET_USDC_MINT,
+  seedProjectPrivyWallet,
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -126,41 +130,6 @@ function ownedSubmissionAdapter(
       );
     },
   };
-}
-
-function mockSourceTokenAccountRpc(params: {
-  mint: string;
-  tokenAccount: string;
-  decimals: number;
-}) {
-  createRpcMock.mockReturnValue({
-    getTokenAccountsByOwner: () => ({
-      send: async () => ({
-        value: [
-          {
-            pubkey: params.tokenAccount,
-            account: {
-              data: {
-                parsed: {
-                  info: {
-                    mint: params.mint,
-                    tokenAmount: {
-                      amount: "1000000000",
-                      decimals: params.decimals,
-                      uiAmountString: "1000",
-                    },
-                  },
-                },
-              },
-            },
-          },
-        ],
-      }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
 async function seedAuthAndWallet(): Promise<void> {
@@ -347,6 +316,10 @@ async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise
 }
 
 async function seedCounterparty(externalId: string): Promise<string> {
+  return seedProjectCounterparty(TEST_PROJECT.id, externalId);
+}
+
+async function seedProjectCounterparty(projectId: string, externalId: string): Promise<string> {
   const id = `cpty_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
@@ -365,7 +338,7 @@ async function seedCounterparty(externalId: string): Promise<string> {
     .bind(
       id,
       TEST_ORG.id,
-      TEST_PROJECT.id,
+      projectId,
       externalId,
       "individual",
       "Batch Test Counterparty",
@@ -381,13 +354,25 @@ async function seedCryptoWalletCounterpartyAccounts(
   counterpartyId: string,
   walletAddresses: string[]
 ): Promise<string[]> {
+  return seedProjectCryptoWalletCounterpartyAccounts(
+    TEST_PROJECT.id,
+    counterpartyId,
+    walletAddresses
+  );
+}
+
+async function seedProjectCryptoWalletCounterpartyAccounts(
+  projectId: string,
+  counterpartyId: string,
+  walletAddresses: string[]
+): Promise<string[]> {
   const now = new Date().toISOString();
   const ids = walletAddresses.map(() => `counterparty_account_${crypto.randomUUID()}`);
   const placeholders = walletAddresses.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
   const values = walletAddresses.flatMap((walletAddress, index) => [
     ids[index],
     TEST_ORG.id,
-    TEST_PROJECT.id,
+    projectId,
     counterpartyId,
     "crypto_wallet",
     "Batch payment wallet",
@@ -456,6 +441,23 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
+  const rpc = installClusterRpcStub();
+
+  function answerSourceTokenAccount(mint: string) {
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_TOKEN_ACCOUNT,
+          mint,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
@@ -502,12 +504,7 @@ describe("payment transfer batches", () => {
   });
 
   it("estimates a SOL transfer batch", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_estimate_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -572,16 +569,11 @@ describe("payment transfer batches", () => {
         sponsored: true,
       },
     });
-    expect(getFeeForMessageMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getFeeForMessage")).toHaveLength(1);
   });
 
   it("estimates a batch when counterpartyId is omitted (derived from account)", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_derive_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -1947,11 +1939,7 @@ describe("payment transfer batches", () => {
         lamports: 4200000000n,
         owner: tokenProgram,
       } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-      mockSourceTokenAccountRpc({
-        mint: expectedMint,
-        tokenAccount: TEST_TOKEN_ACCOUNT,
-        decimals: 6,
-      });
+      answerSourceTokenAccount(expectedMint);
 
       const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
       createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
@@ -2036,6 +2024,85 @@ describe("payment transfer batches", () => {
       expect(required(settledBatch).status).toBe("confirmed");
     }
   );
+
+  it("builds a Production project's USDC batch on mainnet-beta with the mainnet mint", async () => {
+    const productionProjectId = `${TEST_PROJECT.id}_production`;
+    const sourceSigner = await generateKeyPairSigner();
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    await seedProjectPrivyWallet({
+      organizationId: TEST_ORG.id,
+      projectId: productionProjectId,
+      createdBy: TEST_USER.id,
+      custodyWalletId: "cwlt_batch_production",
+      publicKey: sourceSigner.address,
+    });
+    await getDb(env)
+      .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+      .bind(productionProjectId, TEST_API_KEY.id)
+      .run();
+    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_CACHED_API_KEY,
+      projectId: productionProjectId,
+      environment: "production",
+    });
+    await enableMainnetSponsorship();
+    answerSourceTokenAccount(MAINNET_USDC_MINT);
+    const counterpartyId = await seedProjectCounterparty(
+      productionProjectId,
+      "batch_production_counterparty"
+    );
+    const counterpartyAccountIds = await seedProjectCryptoWalletCounterpartyAccounts(
+      productionProjectId,
+      counterpartyId,
+      [TEST_SOLANA_ADDRESSES.wallet2]
+    );
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: "cwlt_batch_production",
+          token: "USDC",
+          recipients: counterpartyAccountIds.map((counterpartyAccountId) => ({
+            counterpartyId,
+            counterpartyAccountId,
+            amount: "1.25",
+          })),
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(rpc.calls).toContainEqual({
+      cluster: "mainnet-beta",
+      method: "getTokenAccountsByOwner",
+    });
+    expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+    const stored = await getDb(env)
+      .prepare(
+        `SELECT b.project_id, b.token AS batch_token, t.token AS transfer_token
+           FROM payment_transfer_batches b
+           JOIN payment_transfer_recipients r ON r.batch_id = b.id
+           JOIN payment_transfers t ON t.id = r.transfer_id
+          WHERE b.organization_id = ?`
+      )
+      .bind(TEST_ORG.id)
+      .all<{ project_id: string; batch_token: string; transfer_token: string }>();
+    expect(stored.results).toEqual([
+      {
+        project_id: productionProjectId,
+        batch_token: MAINNET_USDC_MINT,
+        transfer_token: MAINNET_USDC_MINT,
+      },
+    ]);
+  });
 
   it("returns a submitted chunk as processing without confirming in-request", async () => {
     const sourceSigner = await generateKeyPairSigner();
