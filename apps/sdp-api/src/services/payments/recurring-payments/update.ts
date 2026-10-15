@@ -1798,6 +1798,12 @@ export async function updateRecurringPayment(input: {
   createdBy: string | null;
   /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
   idempotency: RecurringPaymentUpdateIdempotency | null;
+  /**
+   * Money admission (HOO-1955, HOO-2099) for one custody wallet the update
+   * will sign with, run before the attempt is claimed and only when it signs:
+   * a refusal leaves the recurring payment untouched.
+   */
+  admitStart: (custodyWalletId: string) => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1854,6 +1860,12 @@ export async function updateRecurringPayment(input: {
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
   if (requiresRuntimeExecution) {
+    // Both wallets when the source changes: the caller must be able to sign
+    // with the wallet it moves the mandate away from as well as the new one.
+    await input.admitStart(input.sourceWallet.id);
+    if (sourceChanged) {
+      await input.admitStart(resolved.sourceWallet.id);
+    }
     const signingService = createSigningService(input.env);
     await signingService.admitRuntimeExecution(
       input.organizationId,

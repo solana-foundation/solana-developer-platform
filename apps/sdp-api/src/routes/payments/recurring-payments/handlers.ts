@@ -358,6 +358,13 @@ export const updateRecurringPayment = async (
     request: body,
     createdBy: await resolveCreatorUserId(c),
     idempotency: requiredIdempotency(c),
+    admitStart: (custodyWalletId) =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", movement: "recurring.update", subjectId: recurringPayment.id },
+        { custodyWalletId }
+      ),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
