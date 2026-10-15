@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { StripeWebhookProcessor } from "./stripe";
+import { stripeWebhook } from "@/services/ramps/webhooks/stripe";
 
 const STRIPE_ENV = {
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_test",
@@ -11,21 +11,28 @@ function signStripeBody(rawBody: string, timestamp: string, secret: string): str
 }
 
 /** Verifies `body` signed with the sandbox secret at the `environment` endpoint. */
-function verifySigned(body: Record<string, unknown>, environment: "sandbox" | "production") {
+async function verifySigned(body: Record<string, unknown>, environment: "sandbox" | "production") {
   const rawBody = JSON.stringify(body);
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = signStripeBody(rawBody, timestamp, "whsec_test");
-  return new StripeWebhookProcessor().verify({
+  await stripeWebhook.verify({
     env: STRIPE_ENV,
     environment,
     headers: new Headers({ "stripe-signature": `t=${timestamp},v1=${signature}` }),
     rawBody,
   });
+  return stripeWebhook.parse(rawBody, environment);
 }
 
-describe("StripeWebhookProcessor", () => {
+describe("stripeWebhook", () => {
+  it("uses only Stripe delivery ids for deduplication", () => {
+    expect(stripeWebhook.eventId('{"id":"evt_123AbC"}')).toBe("evt_123AbC");
+    expect(stripeWebhook.eventId('{"id":"cos_session"}')).toBeNull();
+    expect(stripeWebhook.eventId("{bad-json")).toBeNull();
+  });
+
   it("maps onramp session statuses to settlement event kinds", () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     const event = (status: string, extra?: Record<string, unknown>) => ({
       type: "crypto.onramp_session.updated",
       data: { object: extra ? { id: "cos_1", status, ...extra } : { id: "cos_1", status } },
@@ -57,7 +64,7 @@ describe("StripeWebhookProcessor", () => {
   });
 
   it("reports the rail a completed session delivered, null for an asset SDP does not sell", () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     const completed = (transactionDetails: Record<string, unknown>) =>
       processor.parse({
         type: "crypto.onramp_session.updated",
@@ -82,7 +89,7 @@ describe("StripeWebhookProcessor", () => {
   });
 
   it("throws on a completed session without its destination currency or network", () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     const completed = (transactionDetails?: Record<string, unknown>) => () =>
       processor.parse({
         type: "crypto.onramp_session.updated",
@@ -103,7 +110,7 @@ describe("StripeWebhookProcessor", () => {
   });
 
   it("throws on a known event type with a malformed envelope", () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     expect(() => processor.parse({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
       "missing the session object"
     );
@@ -119,7 +126,7 @@ describe("StripeWebhookProcessor", () => {
   });
 
   it("accepts a correctly signed webhook and rejects a forged one", async () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     const rawBody = JSON.stringify({
       type: "crypto.onramp_session.updated",
       livemode: false,
@@ -134,11 +141,7 @@ describe("StripeWebhookProcessor", () => {
       headers: new Headers({ "stripe-signature": `t=${timestamp},v1=${signature}` }),
       rawBody,
     });
-    expect(payload).toEqual({
-      type: "crypto.onramp_session.updated",
-      livemode: false,
-      data: {},
-    });
+    expect(payload).toBe(rawBody);
 
     await expect(
       processor.verify({
@@ -160,7 +163,7 @@ describe("StripeWebhookProcessor", () => {
   });
 
   it("rejects a correctly signed but stale webhook", async () => {
-    const processor = new StripeWebhookProcessor();
+    const processor = stripeWebhook;
     const rawBody = JSON.stringify({
       type: "crypto.onramp_session.updated",
       livemode: false,

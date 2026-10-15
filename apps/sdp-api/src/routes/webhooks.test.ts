@@ -1046,7 +1046,9 @@ describe("BVNK ramp webhook", () => {
   }
   async function expectNoBvnkWebhookEvents() {
     const pending = await getDb(env)
-      .prepare("SELECT count(*) AS count FROM ramp_webhook_events WHERE provider = 'bvnk'")
+      .prepare(
+        "SELECT count(*) AS count FROM ramp_webhook_events WHERE provider = 'bvnk' AND status <> 'discharged'"
+      )
       .first<{
         count: number;
       }>();
@@ -1310,7 +1312,7 @@ describe("BVNK ramp webhook", () => {
       fundingWalletEvent(FUNDING_WALLET_ID, { customerId: "another-customer" }),
       { headers: {}, environment: "sandbox" }
     );
-    await expectNoBvnkWebhookEvents();
+    await expectTerminalWebhookEvent("sandbox", "belongs to another customer");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
   it("parks an orphan duplicate wallet event as terminal and leaves the row untouched", async () => {
@@ -1334,7 +1336,7 @@ describe("BVNK ramp webhook", () => {
         environment: "sandbox",
       }
     );
-    await expectNoBvnkWebhookEvents();
+    await expectTerminalWebhookEvent("sandbox", "targets a different wallet");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
   it("records an unassigned-reference funding wallet event and leaves the row untouched", async () => {
@@ -2313,7 +2315,7 @@ describe("BVNK ramp webhook", () => {
       data: { status: "SIGNED", reference: "unknown-agreement-session" },
     });
     await sendBvnkWebhook(event, { headers: {}, environment: "sandbox" });
-    await expectNoBvnkWebhookEvents();
+    await expectTerminalWebhookEvent("sandbox", "unknown-agreement-session");
   });
   it("acknowledges a non-SIGNED agreement session without changing the row", async () => {
     await seedAgreementSession();
@@ -2526,8 +2528,12 @@ describe("MoonPay ramp webhook", () => {
   it("refuses a completed transaction that does not name its crypto", async () => {
     const { currency: _currency, ...withoutCrypto } = completedPayload.data;
     const res = await sendMoonpayWebhook({ ...completedPayload, data: withoutCrypto });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a transfer when MoonPay delivered another crypto", async () => {
     const res = await sendMoonpayWebhook({
@@ -2547,8 +2553,12 @@ describe("MoonPay ramp webhook", () => {
         quoteCurrencyAmount: 16.31,
       },
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await readMoonpayTransferStatus()).toBe("awaiting_payment");
+    const row = await getDb(env)
+      .prepare("SELECT status, apply_outcome FROM ramp_webhook_events WHERE provider = 'moonpay'")
+      .first<{ status: string; apply_outcome: string }>();
+    expect(row).toEqual({ status: "discharged", apply_outcome: "discarded" });
   });
   it("does not complete a sale of another crypto", async () => {
     await getDb(env)

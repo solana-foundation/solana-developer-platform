@@ -194,7 +194,7 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
       reference: "moonpay_refused",
     });
 
-    expect(result).toEqual({ applied: false });
+    expect(result).toEqual({ applied: false, outcome: "refused" });
     expect(await readStatus("xfr_refused")).toBe("settling");
     expect(logEvent).toHaveBeenCalledWith(
       "info",

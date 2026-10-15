@@ -11,7 +11,7 @@ import type {
   CounterpartyProviderAccountRow,
 } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
-import type { bvnkWebhookSchema } from "@/routes/webhooks/ramps/bvnk.schema";
+import type { bvnkWebhookSchema } from "@/services/ramps/webhooks/bvnk.schema";
 import type { Env } from "@/types/env";
 
 export const TEST_BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";

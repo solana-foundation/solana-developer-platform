@@ -122,9 +122,9 @@ function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId 
 export async function applyRampSettlementEvent(
   env: Env,
   event: RampSettlementEvent
-): Promise<{ applied: boolean }> {
+): Promise<{ applied: boolean; outcome: "applied" | "ignored" | "unmatched" | "refused" }> {
   if (event.kind === "ignore") {
-    return { applied: false };
+    return { applied: false, outcome: "ignored" };
   }
 
   // Reconciliation key: the provider-issued quote/session reference the row
@@ -143,18 +143,18 @@ export async function applyRampSettlementEvent(
       provider: event.provider,
       provider_reference: event.reference,
     });
-    return { applied: false };
+    return { applied: false, outcome: "unmatched" };
   }
   if (transfer.provider !== event.provider) {
-    return { applied: false };
+    return { applied: false, outcome: "refused" };
   }
   if (!isRampTransferType(transfer.type)) {
-    return { applied: false };
+    return { applied: false, outcome: "refused" };
   }
   // Out-of-order or redelivered events must not regress a settled transfer
   // (e.g. a retried PENDING arriving after COMPLETED).
   if (isSettlementFinalStatus(transfer.status)) {
-    return { applied: false };
+    return { applied: false, outcome: "refused" };
   }
   // A lock the provider did not enforce must not write another asset's amount
   // onto the row, so a delivery the provider reports must be the transfer's asset.
@@ -174,7 +174,7 @@ export async function applyRampSettlementEvent(
       delivered_asset_rail: event.deliveredAssetRail,
       transfer_token: transfer.token,
     });
-    return { applied: false };
+    return { applied: false, outcome: "refused" };
   }
 
   const update = buildRampSettlementUpdate(transfer, event);
@@ -242,5 +242,5 @@ export async function applyRampSettlementEvent(
     from_status: transfer.status,
     to_status: RAMP_TRANSFER_TRANSITIONS[update.transition].to,
   });
-  return { applied };
+  return { applied, outcome: applied ? "applied" : "refused" };
 }

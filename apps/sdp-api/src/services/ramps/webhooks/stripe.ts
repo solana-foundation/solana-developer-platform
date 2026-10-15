@@ -125,8 +125,23 @@ async function verifyStripeSignatures(input: {
   throw unauthorized("Invalid Stripe webhook signature");
 }
 
-export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {
-  readonly provider = "stripe";
+export const stripeWebhook = {
+  provider: "stripe" as const,
+  signature: {
+    header: "stripe-signature",
+    encoding: "hex",
+    signedPayload: "timestamp-prefixed",
+  } as const,
+
+  eventId(rawBody: string): string | null {
+    try {
+      const root = readRecord(JSON.parse(rawBody));
+      const id = root ? readString(root.id) : undefined;
+      return id && /^evt_[A-Za-z0-9]+$/.test(id) ? id : null;
+    } catch {
+      return null;
+    }
+  },
 
   async verify({
     env,
@@ -153,27 +168,33 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
       signatures: parsed.signatures,
     });
 
-    let payload: unknown;
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
+    return rawBody;
+  },
+
+  parse(payload: unknown, environment?: SdpEnvironment): RampSettlementEvent {
+    let decoded: unknown = payload;
+    if (typeof payload === "string") {
+      try {
+        decoded = JSON.parse(payload);
+      } catch {
+        throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
+      }
     }
-    const mode = stripeEventModeSchema.safeParse(payload);
-    if (!mode.success) {
+    const mode = stripeEventModeSchema.safeParse(decoded);
+    if (environment !== undefined && !mode.success) {
       throw badRequest("Stripe webhook is missing livemode", { provider: this.provider });
     }
-    if (mode.data.livemode !== (environment === "production")) {
+    if (
+      environment !== undefined &&
+      mode.success &&
+      mode.data.livemode !== (environment === "production")
+    ) {
       throw badRequest(
         `Stripe ${mode.data.livemode ? "live" : "test"} event sent to the ${environment} webhook`,
         { provider: this.provider }
       );
     }
-    return payload;
-  }
-
-  parse(payload: unknown): RampSettlementEvent {
-    const root = readRecord(payload);
+    const root = readRecord(decoded);
     if (!root) {
       throw badRequest("Stripe webhook body must be an object", { provider: this.provider });
     }
@@ -242,13 +263,13 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
       };
     }
     return { provider: this.provider, kind, reference };
-  }
+  },
 
   async process(env: Env, _environment: SdpEnvironment, event: RampSettlementEvent) {
     if (event.kind === "ignore") {
       getLogger().info(`[stripe webhook] ignored event: ${event.reason}`);
-      return;
+      return "ignored" as const;
     }
-    await applyRampSettlementEvent(env, event);
-  }
-}
+    return (await applyRampSettlementEvent(env, event)).outcome;
+  },
+} satisfies WebhookProcessor<unknown, RampSettlementEvent>;

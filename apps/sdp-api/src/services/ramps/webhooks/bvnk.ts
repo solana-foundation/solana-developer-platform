@@ -951,8 +951,17 @@ async function handleBvnkPaymentChannelTransactionConfirmed(
   );
 }
 
-export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParsedWebhook> {
-  readonly provider = "bvnk";
+export const bvnkWebhook = {
+  provider: "bvnk" as const,
+  signature: {
+    header: "x-signature",
+    encoding: "base64",
+    signedPayload: "raw-body",
+  } as const,
+
+  eventId(): null {
+    return null;
+  },
 
   /**
    * Verifies the HMAC signature of a BVNK webhook body.
@@ -996,8 +1005,8 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
         ? Date.parse(timestamp.data.timestamp) / 1000
         : Number.NaN,
     });
-    return payload;
-  }
+    return context.rawBody;
+  },
 
   /**
    * Parses a verified BVNK webhook payload into a typed event.
@@ -1005,7 +1014,15 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
    * @returns A parsed event, or an ignore signal for events SDP does not handle.
    */
   parse(payload: unknown): BvnkParsedWebhook {
-    const envelope = bvnkWebhookEnvelopeSchema.safeParse(payload);
+    let decoded: unknown = payload;
+    if (typeof payload === "string") {
+      try {
+        decoded = JSON.parse(payload);
+      } catch {
+        throw badRequest("BVNK webhook body must be valid JSON", { provider: this.provider });
+      }
+    }
+    const envelope = bvnkWebhookEnvelopeSchema.safeParse(decoded);
     if (!envelope.success) {
       throw badRequest("BVNK webhook is missing an event", { provider: this.provider });
     }
@@ -1018,7 +1035,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
         provider: this.provider,
       });
     }
-    const parsed = bvnkWebhookSchema.safeParse(payload);
+    const parsed = bvnkWebhookSchema.safeParse(decoded);
     if (parsed.success) {
       return parsed.data;
     }
@@ -1026,7 +1043,7 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
       provider: this.provider,
       errors: z.flattenError(parsed.error).fieldErrors,
     });
-  }
+  },
 
   /**
    * Applies a parsed BVNK webhook event.
@@ -1034,43 +1051,55 @@ export class BvnkWebhookProcessor implements WebhookProcessor<unknown, BvnkParse
    * @param environment - Sandbox or production ramp environment.
    * @param webhook - The parsed webhook event.
    */
-  async process(env: Env, environment: SdpEnvironment, webhook: BvnkParsedWebhook): Promise<void> {
+  async process(
+    env: Env,
+    environment: SdpEnvironment,
+    webhook: BvnkParsedWebhook
+  ): Promise<"applied" | "ignored"> {
     switch (webhook.event) {
       case "ignore":
         getLogger().info(`[bvnk webhook] ignored event: ${webhook.reason}`);
-        return;
+        return "ignored";
       case "bvnk:payment:payin:status-change":
-        return handleBvnkPayinStatusChange(env, environment, webhook.data);
+        await handleBvnkPayinStatusChange(env, environment, webhook.data);
+        return "applied";
       case "payment:v2:payin:status-change":
         getLogger().info(
           { payin_id: webhook.data.id, status: webhook.data.status },
           "[bvnk webhook] v2 pay-in acknowledged-ignored"
         );
-        return;
+        return "ignored";
       case "bvnk:payment:crypto:status-change":
-        return handleBvnkCryptoPayoutStatusChange(env, environment, webhook.data);
+        await handleBvnkCryptoPayoutStatusChange(env, environment, webhook.data);
+        return "applied";
       case "bvnk:payment:channel:transaction-detected":
-        return handleBvnkPaymentChannelTransactionDetected(env, environment, webhook);
+        await handleBvnkPaymentChannelTransactionDetected(env, environment, webhook);
+        return "applied";
       case "bvnk:payment:channel:transaction-confirmed":
-        return handleBvnkPaymentChannelTransactionConfirmed(env, environment, webhook);
+        await handleBvnkPaymentChannelTransactionConfirmed(env, environment, webhook);
+        return "applied";
       case "bvnk:platform:customer:status-change":
-        return handleBvnkCustomerStatusChange(env, environment, webhook);
+        await handleBvnkCustomerStatusChange(env, environment, webhook);
+        return "applied";
       case "bvnk:platform:customer:update":
-        return handleBvnkPlatformCustomerUpdate(env, environment, webhook);
+        await handleBvnkPlatformCustomerUpdate(env, environment, webhook);
+        return "applied";
       case "bvnk:platform:customer:agreement-session-status-change":
-        return handleBvnkPlatformCustomerAgreementSessionStatusChange(env, environment, webhook);
+        await handleBvnkPlatformCustomerAgreementSessionStatusChange(env, environment, webhook);
+        return "applied";
       case "ledger:v2:wallet:status-change":
       case "bvnk:ledger:wallet:create":
-        return applyBvnkWalletEvent(
+        await applyBvnkWalletEvent(
           env,
           environment,
           parseBvnkWalletName(webhook.data.name),
           webhook.data
         );
+        return "applied";
       default: {
         const exhaustive: never = webhook;
         return exhaustive;
       }
     }
-  }
-}
+  },
+} satisfies WebhookProcessor<unknown, BvnkParsedWebhook>;

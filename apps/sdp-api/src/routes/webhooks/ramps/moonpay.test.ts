@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { MoonpayWebhookProcessor } from "./moonpay";
 
 const ORGANIZATION_ID = "org_moonpay_webhook_test";
 const PROJECT_ID = "prj_moonpay_webhook_test";
@@ -11,8 +11,8 @@ const USER_ID = "usr_moonpay_webhook_test";
 const TRANSFER_ID = "xfr_157805c4-5d9f-404c-b206-1b59b13b492e";
 const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
 
-describe("MoonpayWebhookProcessor.process", () => {
-  const processor = new MoonpayWebhookProcessor();
+describe("moonpayWebhook.process", () => {
+  const processor = moonpayWebhook;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -101,10 +101,10 @@ describe("MoonpayWebhookProcessor.process", () => {
   });
 });
 
-describe("MoonpayWebhookProcessor.verify", () => {
+describe("moonpayWebhook.verify", () => {
   it("refuses the production endpoint, which has no managed key", async () => {
     await expect(
-      new MoonpayWebhookProcessor().verify({
+      moonpayWebhook.verify({
         env: { MOONPAY_SANDBOX_WEBHOOK_KEY: "moonpay_sandbox_webhook_key" },
         environment: "production",
         headers: new Headers({ "moonpay-signature-v2": "t=1,s=deadbeef" }),

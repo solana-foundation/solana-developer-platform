@@ -1,5 +1,6 @@
 import { bvnkConfirmedChannelEvent } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
 import { describe, expect, it } from "vitest";
+import { bvnkWebhook } from "@/services/ramps/webhooks/bvnk";
 import {
   BVNK_WEBHOOK_TIMESTAMP,
   bvnkAgreementSessionStatusChangeEvent,
@@ -7,11 +8,10 @@ import {
   bvnkPlatformCustomerUpdateEvent,
   bvnkV1PayinEvent,
 } from "@/test/helpers/bvnk";
-import { BvnkWebhookProcessor } from "./bvnk";
 
-describe("BvnkWebhookProcessor.parse", () => {
+describe("bvnkWebhook.parse", () => {
   it("parses a platform customer update webhook", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(processor.parse(bvnkPlatformCustomerUpdateEvent())).toEqual({
       event: "bvnk:platform:customer:update",
@@ -20,14 +20,14 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("parses an agreement-session status-change webhook", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
     const event = bvnkAgreementSessionStatusChangeEvent();
 
     expect(processor.parse(event)).toEqual(event);
   });
 
   it("parses the observed wallet status-change shape and strips customer PII", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(
       processor.parse({
@@ -65,7 +65,7 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("parses the v1 fiat pay-in status-change webhook and stringifies its amount", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(processor.parse(bvnkV1PayinEvent())).toEqual({
       event: "bvnk:payment:payin:status-change",
@@ -83,7 +83,7 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("parses the observed crypto payout shape and strips PII and extra keys", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(
       processor.parse({
@@ -126,14 +126,14 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
   it("parses a channel transaction-detected webhook", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
     expect(processor.parse(bvnkChannelTransactionEvent("transaction-detected", {}))).toEqual({
       event: "bvnk:payment:channel:transaction-detected",
       data: { reference: "sdp_offramp_xfr_00000000-0000-4000-8000-0000000000f2" },
     });
   });
   it("parses an unowned confirmed channel reference without attributing it", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
     const result = processor.parse(
       bvnkConfirmedChannelEvent({ reference: "unowned_test_reference" })
     );
@@ -143,7 +143,7 @@ describe("BvnkWebhookProcessor.parse", () => {
     });
   });
   it("parses the full confirmed payload retaining only settlement and proof fields", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
     const result = processor.parse(bvnkConfirmedChannelEvent({}));
     expect(result.event).toBe("bvnk:payment:channel:transaction-confirmed");
     if (result.event !== "bvnk:payment:channel:transaction-confirmed")
@@ -194,7 +194,7 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("ignores an unhandled BVNK event instead of throwing", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(
       processor.parse({
@@ -205,7 +205,7 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("ignores an unhandled BVNK event without a data object", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(processor.parse({ event: "bvnk:totally:new-event" })).toEqual({
       event: "ignore",
@@ -214,7 +214,7 @@ describe("BvnkWebhookProcessor.parse", () => {
   });
 
   it("rejects a handled BVNK event missing its data object with a 400", () => {
-    const processor = new BvnkWebhookProcessor();
+    const processor = bvnkWebhook;
 
     expect(() => processor.parse({ event: "bvnk:platform:customer:status-change" })).toThrowError(
       'BVNK webhook "bvnk:platform:customer:status-change" is missing a data object'

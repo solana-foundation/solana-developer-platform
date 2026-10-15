@@ -5,13 +5,17 @@ import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
+import { AppError } from "@/lib/errors";
 import { isRampProviderAvailable } from "@/lib/feature-flags";
-import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
+import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
+import {
+  TerminalRampWebhookError,
+  type WebhookProcessor,
+} from "@/services/ramps/webhooks/processor";
 import {
   isWebhookRampProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
-} from "@/routes/webhooks/ramps/registry";
-import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
+} from "@/services/ramps/webhooks/registry";
 import type { Env } from "@/types/env";
 
 /**
@@ -33,9 +37,13 @@ export const RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS = 2 * 60 * 1000;
 
 export const RAMP_WEBHOOK_EVENT_REPLAY_BATCH = 50;
 
+export const RAMP_WEBHOOK_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_exhausted";
 
 export const RAMP_WEBHOOK_EVENT_DISCARDED_EVENT = "sdp_api_ramp_webhook_event_discarded";
+
+class InvalidRampWebhookError extends TerminalRampWebhookError {}
 
 /**
  * The identity a parked row is stamped with; a later deploy changes it.
@@ -83,26 +91,59 @@ export async function applyStoredRampWebhookEvent(
   const processor: WebhookProcessor<unknown, unknown> =
     RAMP_PROVIDER_WEBHOOK_PROCESSOR[row.provider];
   try {
-    await processor.process(env, row.environment, processor.parse(row.payload));
-    await events.deleteEvent(row.id);
-    return true;
+    let parsed: unknown;
+    try {
+      parsed = processor.parse(row.rawBody, row.environment);
+    } catch (error) {
+      if (error instanceof AppError && error.code === "BAD_REQUEST") {
+        if (row.environment === "sandbox") {
+          await events.dischargeEvent(row.id, "discarded");
+          logEvent("warn", {
+            event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
+            flow: "ramp-settlement",
+            webhook_event_id: row.id,
+            provider: row.provider,
+            environment: row.environment,
+            outcome: "invalid",
+          });
+          return false;
+        }
+        throw new InvalidRampWebhookError(error.message);
+      }
+      throw error;
+    }
+
+    const outcome = await processor.process(env, row.environment, parsed);
+    if (outcome === "unmatched" || outcome === "refused") {
+      const terminal = outcome === "refused";
+      const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
+      await events.recordFailure({
+        id: row.id,
+        error: `provider event ${outcome}`,
+        attempts: spentAttempts,
+        maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+        appRevision: currentAppRevision(env),
+        terminal,
+        outcome,
+      });
+      if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
+        logEvent("error", {
+          event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,
+          flow: "ramp-settlement",
+          webhook_event_id: row.id,
+          provider: row.provider,
+          environment: row.environment,
+          outcome,
+          attempts: spentAttempts,
+        });
+      }
+      return false;
+    }
+    await events.dischargeEvent(row.id, outcome === "ignored" ? "ignored" : "applied");
+    return outcome !== "ignored";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const terminal = error instanceof TerminalRampWebhookError;
-    if (terminal && row.environment === "sandbox") {
-      await events.deleteEvent(row.id);
-      logEvent("warn", {
-        event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
-        flow: "ramp-settlement",
-        webhook_event_id: row.id,
-        provider: row.provider,
-        environment: row.environment,
-        attempts,
-        error: message,
-        error_diagnostics: paymentsErrorDiagnostics(error),
-      });
-      return false;
-    }
     const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
     await events.recordFailure({
       id: row.id,
@@ -111,6 +152,12 @@ export async function applyStoredRampWebhookEvent(
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
       terminal,
+      outcome:
+        error instanceof InvalidRampWebhookError
+          ? "invalid"
+          : terminal
+            ? "refused"
+            : "retryable_error",
     });
     if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
@@ -142,13 +189,17 @@ export async function replayRampWebhookEvents(
   env: Env,
   rampProviderStages: SdpRampProviderStages
 ): Promise<number> {
+  const events = createPostgresRampWebhookEventsRepository(getDb(env));
+  await events.pruneDischarged(
+    new Date(Date.now() - RAMP_WEBHOOK_EVENT_RETENTION_MS).toISOString(),
+    100
+  );
   const excludedProviders = RAMP_PROVIDERS.filter(
     (provider) => !isRampProviderAvailable(env, provider, rampProviderStages)
   );
   if (excludedProviders.length === RAMP_PROVIDERS.length) {
     return 0;
   }
-  const events = createPostgresRampWebhookEventsRepository(getDb(env));
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
   const appRevision = currentAppRevision(env);
 

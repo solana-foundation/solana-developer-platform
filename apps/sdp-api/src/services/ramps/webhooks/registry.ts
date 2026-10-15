@@ -1,14 +1,14 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest } from "@/lib/errors";
-import { BvnkWebhookProcessor } from "./bvnk";
-import { MoonpayWebhookProcessor } from "./moonpay";
+import { bvnkWebhook } from "./bvnk";
+import { moonpayWebhook } from "./moonpay";
 import type { WebhookProcessor } from "./processor";
-import { StripeWebhookProcessor } from "./stripe";
+import { stripeWebhook } from "./stripe";
 
 export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
-  moonpay: new MoonpayWebhookProcessor(),
-  bvnk: new BvnkWebhookProcessor(),
-  stripe: new StripeWebhookProcessor(),
+  moonpay: moonpayWebhook,
+  bvnk: bvnkWebhook,
+  stripe: stripeWebhook,
 } as const satisfies Record<RampProviderId, WebhookProcessor<unknown, unknown>>;
 
 export type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
