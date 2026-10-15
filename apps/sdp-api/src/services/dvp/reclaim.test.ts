@@ -29,6 +29,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import { conflict } from "@/lib/errors";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
@@ -43,19 +44,14 @@ const releaseClaim = vi.hoisted(() => vi.fn());
 const listForTrade = vi.hoisted(() => vi.fn());
 const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 const confirmTransaction = vi.hoisted(() => vi.fn());
-const resolveProjectSponsorshipScope = vi.hoisted(() => vi.fn());
-const createSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const resolveProjectSponsorshipScope = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeMint = vi.hoisted(() => vi.fn());
 
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveProjectSponsorshipScope,
-  createSponsorshipFeePayment,
-}));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
@@ -165,6 +161,12 @@ describe("reclaimDvpTradeLeg", () => {
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
+    vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
+      resolveProjectSponsorshipScope
+    );
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+      createSponsorshipFeePayment
+    );
     resolveProjectSponsorshipScope.mockResolvedValue({
       environment: "sandbox",
       organizationId: "org_dvp_sponsor",

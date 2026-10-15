@@ -1,18 +1,12 @@
 import type { Address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
+import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
-const resolveProjectSponsorshipScope = vi.hoisted(() => vi.fn());
-const createSponsorshipFeePayment = vi.hoisted(() => vi.fn());
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveProjectSponsorshipScope,
-  createSponsorshipFeePayment,
-}));
-
-const { resolveVaultSponsorship, vaultRentPayer } = await import("./vault-sponsorship");
+const resolveProjectSponsorshipScope = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 
 const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q" as Address;
 
@@ -43,6 +37,12 @@ function scope(env: Partial<Env> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
+    resolveProjectSponsorshipScope
+  );
+  vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+    createSponsorshipFeePayment
+  );
   resolveProjectSponsorshipScope.mockResolvedValue(WALLET_SCOPE);
   createSponsorshipFeePayment.mockReturnValue({
     getFeePayer: vi.fn().mockResolvedValue(SPONSOR),

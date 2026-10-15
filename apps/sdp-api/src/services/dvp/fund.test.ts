@@ -25,6 +25,7 @@ import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import { type AppError, conflict } from "@/lib/errors";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import {
   acceptTransaction,
   buildDvpTradeRow,
@@ -45,19 +46,14 @@ const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
 const rebindSignature = vi.hoisted(() => vi.fn());
 const hasClaim = vi.hoisted(() => vi.fn());
-const resolveProjectSponsorshipScope = vi.hoisted(() => vi.fn());
-const createSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const resolveProjectSponsorshipScope = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
 let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveProjectSponsorshipScope,
-  createSponsorshipFeePayment,
-}));
 vi.mock("./read-chain", () => ({ readEscrowState, readDvpAccounts }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/dvp")>()),
@@ -145,6 +141,12 @@ describe("fundDvpTradeLeg", () => {
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
+    vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
+      resolveProjectSponsorshipScope
+    );
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+      createSponsorshipFeePayment
+    );
     resolveProjectSponsorshipScope.mockResolvedValue({
       environment: "sandbox",
       organizationId: "org_dvp_sponsor",
