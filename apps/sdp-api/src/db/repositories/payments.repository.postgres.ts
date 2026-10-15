@@ -919,6 +919,7 @@ export function createPostgresPaymentsRepository(
     },
 
     async listTransfersByStatus({
+      environment,
       statuses,
       types,
       hasSignature,
@@ -936,8 +937,8 @@ export function createPostgresPaymentsRepository(
         return [];
       }
 
-      const clauses = [`pt.status IN (${buildInClause(statuses.length)})`];
-      const values: unknown[] = [...statuses];
+      const clauses = ["p.environment = ?", `pt.status IN (${buildInClause(statuses.length)})`];
+      const values: unknown[] = [environment, ...statuses];
 
       if (types?.length) {
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
@@ -961,6 +962,7 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
            WHERE ${clauses.join(" AND ")}
            ORDER BY pt.updated_at ASC, pt.id ASC
            LIMIT ?
@@ -972,7 +974,7 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async listConfirmedTransfersToPoll({ confirmedAfter, limit }) {
+    async listConfirmedTransfersToPoll({ environment, confirmedAfter, limit }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.listConfirmedTransfersToPoll is system-only"
@@ -983,14 +985,16 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
-           WHERE pt.status = ?
+           JOIN projects p ON p.id = pt.project_id
+           WHERE p.environment = ?
+             AND pt.status = ?
              AND pt.type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
              AND pt.signature IS NOT NULL
              AND pt.confirmed_at > ?
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
-        .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
+        .bind(environment, pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
         .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);

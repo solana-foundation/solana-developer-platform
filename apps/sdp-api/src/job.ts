@@ -29,6 +29,7 @@ import {
   isPrivateChannelsEnabled,
 } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
@@ -201,7 +202,7 @@ export async function runCronJob(): Promise<void> {
               (async () => {
                 // Keep revocation recovery ahead of payment reconciliation.
                 await reconcileRevokedApiKeyCache(env);
-                await trackPendingTransfers(env);
+                await runInEachClusterScope(() => trackPendingTransfers(env));
               })(),
               reconcileSponsorshipBudgets(env),
             ]);
