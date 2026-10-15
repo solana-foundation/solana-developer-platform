@@ -1,6 +1,15 @@
 import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types";
 import { z } from "zod";
 
+/**
+ * A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` raised as an error, so a page can
+ * tell it from a refusal: the action may have run, so the page refreshes what
+ * it shows instead of only showing the message.
+ */
+export class IdempotencyOutcomeUnknownError extends Error {
+  override name = "IdempotencyOutcomeUnknownError";
+}
+
 /** Canonical HTTP header used for retry-safe value-moving requests. */
 export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 
