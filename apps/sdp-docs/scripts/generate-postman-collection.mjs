@@ -221,9 +221,12 @@ const SAVED_KEY_VARIABLE = [
  * saved. The key is retired once the operation has a definitive answer: a
  * replay, a 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below 500
  * other than 409 and 429 (the dashboard's rule, except that on money routes it
- * keeps the key on `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`). A timeout runs no test
- * script and a 5xx keeps the key, so pressing Send again retries the same
- * operation instead of starting another.
+ * keeps the key on `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`). A 422
+ * `IDEMPOTENCY_KEY_REUSED` keeps the key too: it says only that this send
+ * differed from the key's original request, not that the original settled, so
+ * the user restores the original request or clears the variable deliberately.
+ * A timeout runs no test script and a 5xx keeps the key, so pressing Send again
+ * retries the same operation instead of starting another.
  * Each send remembers the key it used (a request-local variable) and retires
  * only that key, so a late answer to an earlier send never clears the key a
  * newer send saved.
@@ -256,7 +259,8 @@ function idempotencyKeyEvents() {
           "  let code;",
           "  try { code = pm.response.json().error.code; } catch (e) {}",
           '  const outcomeUnknown = status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";',
-          "  if (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429)) {",
+          '  const reused = status === 422 && code === "IDEMPOTENCY_KEY_REUSED";',
+          "  if (!reused && (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429))) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}",

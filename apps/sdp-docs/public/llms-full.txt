@@ -292,7 +292,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
 
-Keys are scoped to the credential that sent them. A rotated API key is a new credential, so a retry under the new API key with the old `Idempotency-Key` gets `422`. A retry under a new `Idempotency-Key` is a new request and can move money again. After a rotation, read the resource with `GET` (for example `GET /v1/payments/transfers` or `GET /v1/payments/recurring-payments/{id}`) to learn whether the original request ran before you send it again.
+Keys are scoped to the credential that sent them. A rotated API key is a new credential: for 24 hours after the original request, a retry under the new API key with the old `Idempotency-Key` gets `422`; after that, the old key's record is gone and the same retry runs as a new request and can move money again, as can any retry under a new `Idempotency-Key`. So after any API key rotation, read the resource with `GET` (for example `GET /v1/payments/transfers` or `GET /v1/payments/recurring-payments/{id}`) to learn whether the original request ran, and never resend a money request under the new credential without checking first.
 
 An organization that has been deleted or has lost production access is refused before the key is read: `401` or `403`, even for a retry of a request that completed.
 
@@ -314,7 +314,7 @@ With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a 
 
 The dashboard sends a key on every request to the routes that require one, and keeps it until it gets a definitive answer, so a retried click never moves money twice.
 
-The [Postman collection](/docs/reference/postman-collection) saves one key per operation for the required routes (the `idempotencyKey.<operationId>` collection variable). It mints the key only when the variable is unset and clears it after a definitive answer: a replay, `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below `500` other than `409` and `429`. Resending after a timeout or a `5xx` reuses the key. Clear the variable yourself to start a new operation with an identical body.
+The [Postman collection](/docs/reference/postman-collection) saves one key per operation for the required routes (the `idempotencyKey.<operationId>` collection variable). It mints the key only when the variable is unset and clears it after a definitive answer: a replay, `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, or any status below `500` other than `409`, `429` and `422 IDEMPOTENCY_KEY_REUSED`. Resending after a timeout or a `5xx` reuses the key. A `422 IDEMPOTENCY_KEY_REUSED` keeps it as well, because it means only that the request differed from the key's original: restore the original request to retry it, or clear the variable once you have checked with `GET` that the original settled. Clear the variable yourself to start a new operation with an identical body.
 
 ## Recommendations
 

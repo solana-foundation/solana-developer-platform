@@ -52,8 +52,8 @@ export interface IdempotencyDocumentation {
 const IDEMPOTENCY_CONTRACT =
   "1-255 printable ASCII characters; send a UUID per logical operation and reuse it on every retry. " +
   "Within 24 hours, a retry with the same key and the same request returns the stored status and body with the response header `Idempotent-Replayed: true`. " +
-  "Keys are scoped to the credential: the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`. " +
-  "A rotated API key is a new credential, so after a rotation read the resource with GET to see whether the original request ran before sending it again. " +
+  "Keys are scoped to the credential: within 24 hours, the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`; after that, the same key from a different credential runs as a new request. " +
+  "A rotated API key is a new credential, so after any rotation read the resource with GET to see whether the original request ran, and never resend a money request under the new credential without checking first. " +
   "A key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. " +
   "A 400, 401, 403, 409 or 429 refusal is not stored, so the same key runs again once the cause is fixed. " +
   "Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. " +

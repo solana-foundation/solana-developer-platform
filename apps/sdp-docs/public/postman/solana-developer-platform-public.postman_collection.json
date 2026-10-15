@@ -45,7 +45,8 @@
           "  let code;",
           "  try { code = pm.response.json().error.code; } catch (e) {}",
           "  const outcomeUnknown = status === 409 && code === \"IDEMPOTENCY_KEY_OUTCOME_UNKNOWN\";",
-          "  if (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429)) {",
+          "  const reused = status === 422 && code === \"IDEMPOTENCY_KEY_REUSED\";",
+          "  if (!reused && (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429))) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}"
