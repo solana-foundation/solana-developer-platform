@@ -44,15 +44,15 @@ The bootstrap path:
 
 <Step>
 
-From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environment: Sandbox**. This is your bootstrap credential.
+From the dashboard, open your sandbox project and create an API key with **Everything** ticked under Permissions. This is your bootstrap credential.
 
-![Create API key dialog in the SDP dashboard, with Role set to Admin and Environment set to Sandbox.](/issue-a-regulated-stablecoin/01-create-api-key-dialog.png)
+![Create API key dialog in the SDP dashboard.](/issue-a-regulated-stablecoin/01-create-api-key-dialog.png)
 
 </Step>
 
 <Step>
 
-With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
+With the bootstrap key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
 
 ```json title="response.json"
 {
@@ -79,7 +79,7 @@ With the Admin key, call `GET /v1/projects` and pick the project with slug `defa
 
 <Step>
 
-In the dashboard, create two keys in the project: one with the Developer role for routine create, mint, and burn calls, and one with the Admin role for compliance operations (screening, freeze, seize, force-burn). API keys cannot create keys, so this step is done by a signed-in member.
+In the dashboard, create two keys in the project. The **Developer key** holds Read, Manage and Execute on Issuance, for routine create, mint, and burn calls. The **Admin key** also holds Issuance's Enforce and Compliance's Execute, for screening, freeze, seize, and force-burn. API keys cannot create keys, so this step is done by a signed-in member.
 
 <Callout type="warn">
 The full key is shown only once. Capture it into your secrets manager immediately; SDP does not surface it again.
@@ -480,10 +480,10 @@ await sdpAdmin.post(
 
 ### The institutional pattern that holds this together
 
-Every endpoint in this section requires the `tokens:admin` permission. That is by design. Keep two project-scoped API keys:
+Every endpoint in this section requires `issuance.enforce` (screening requires `compliance.execute`). That is by design. Keep two project-scoped API keys:
 
-- **Developer key**: routine create, mint, and burn calls.
-- **Admin key**: screen, freeze, seize, and force-burn.
+- **Developer key**: `issuance.manage` and `issuance.execute`, for routine create, mint, and burn calls.
+- **Admin key**: also `issuance.enforce` and `compliance.execute`, to screen, freeze, seize, and force-burn.
 
 The compliance officer reviewing this design sees a clean separation: routine issuance cannot escalate into compliance actions without a deliberate credential change. Every call writes an entry through SDP's audit service. That trail is the artifact a regulator will eventually ask for, and it is not opt-in.
 
@@ -639,7 +639,7 @@ A successful response includes the on-chain signature once the transaction confi
 
 ### 2. Freeze the destination
 
-To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `tokens:admin`, which the Developer key does not carry:
+To demonstrate the on-chain block, freeze the destination's TPUSD account using the Admin key. Freeze requires `issuance.enforce`, which the Developer key does not hold:
 
 ```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
@@ -740,7 +740,7 @@ The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment 
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
+- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh bootstrap key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base.

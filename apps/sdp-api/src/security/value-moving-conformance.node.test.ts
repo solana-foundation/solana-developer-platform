@@ -391,7 +391,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP settle: Allowed Operations run before the settlement authority signs. */
+    /** DvP settle: the route's action is checked before the settlement authority signs. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
@@ -422,7 +422,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP fund: Allowed Operations run before a custody wallet's tokens leave. */
+    /** DvP fund: the route's action is checked before a custody wallet's tokens leave. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
