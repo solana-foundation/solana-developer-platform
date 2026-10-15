@@ -318,6 +318,7 @@ async function finalizeConfirmedTransfers(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
     );
@@ -475,6 +476,7 @@ async function syncProcessingTransfersOnChain(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getSignatureStatuses RPC call failed"
     );
@@ -561,6 +563,7 @@ async function reconcileSignedSubmissionCacheMisses(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getBlockHeight RPC call failed"
     );
@@ -695,6 +698,7 @@ async function getArchivedStatuses(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
     );
