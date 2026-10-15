@@ -140,7 +140,9 @@ FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
 the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
 Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
-via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
+via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. Without
+`SOLANA_MAINNET_RPC_URL` (Doppler dev has it) the mainnet Kora is skipped and
+only the devnet one runs. To
 use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`
 instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
