@@ -135,8 +135,8 @@ Kora is a fee-payment provider, not a signing provider. `pnpm dev:kora` starts
 the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
 Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
 via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
-use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`
-instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
+use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and that cluster's
+`KORA_<CLUSTER>_URL` (`KORA_DEVNET_URL` / `KORA_MAINNET_URL`) instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
 Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
@@ -289,7 +289,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:local:up`, then `KORA_RPC_URL=http://127.0.0.1:18081`)
+- Running Kora instance (`pnpm kora:local:up`, then `KORA_DEVNET_URL=http://127.0.0.1:18081`)
 - Funded Solana devnet account
 
 ## Database Migrations

@@ -184,7 +184,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
 
       throw new AppError(
         "SOLANA_RPC_ERROR",
-        `Kora signer-check request failed: ${error.message}. Verify KORA_RPC_URL/KORA_API_KEY and Kora service health.`
+        `Kora signer-check request failed: ${error.message}. Verify KORA_<CLUSTER>_URL/KORA_<CLUSTER>_API_KEY and Kora service health.`
       );
     }
 
