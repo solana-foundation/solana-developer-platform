@@ -144,54 +144,6 @@ async function seedActiveConnectionWallet(params: {
   ]);
 }
 
-async function seedCoinbaseOnrampTransfer(params: {
-  id: string;
-  providerReference: string;
-  amount: string;
-  providerData: Record<string, unknown>;
-}): Promise<string> {
-  const counterpartyId = await seedCounterparty({ id: `cpty_${params.id}` });
-  const status = "pending" satisfies PaymentTransferStatus;
-  const now = new Date().toISOString();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO payment_transfers (
-         id, organization_id, project_id, wallet_id, source_address, destination_address,
-         token, amount, memo, type, direction, status, provider, provider_reference,
-         delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
-         initiated_by_key_id, created_at, updated_at, counterparty_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      params.id,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
-      TEST_WALLET_ID,
-      null,
-      TEST_SOLANA_ADDRESSES.wallet2,
-      "USDC",
-      params.amount,
-      null,
-      "onramp",
-      "inbound",
-      status,
-      "coinbase",
-      params.providerReference,
-      "hosted",
-      "USD",
-      "25",
-      params.providerData,
-      null,
-      null,
-      null,
-      now,
-      now,
-      counterpartyId
-    )
-    .run();
-  return counterpartyId;
-}
-
 // Today every ramp provider is `experimental`; these stages put only MoonPay in
 // `beta`, so a `beta` deployment runs Ramps with MoonPay alone.
 const moonpayOnlyBetaApp = createApp({
@@ -1541,13 +1493,20 @@ describe("Payments routes — ramps", () => {
       });
     });
 
-    it("keeps the stored provider reference for non-BVNK providers", async () => {
+    it("reads a retired Coinbase transfer without exposing its old settlement shape", async () => {
       await seedRampTransfer({
         id: "xfr_a3_coinbase",
         provider: "coinbase",
         providerReference: "coinbase_order_a3",
         status: "pending",
       });
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET provider_data = ?::jsonb WHERE id = ?")
+        .bind(
+          { settlement: { provider: "coinbase", status: "completed", paymentTotal: "25" } },
+          "xfr_a3_coinbase"
+        )
+        .run();
 
       const res = await app.request(
         "/v1/payments/transfers/xfr_a3_coinbase",
@@ -1560,9 +1519,11 @@ describe("Payments routes — ramps", () => {
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: { transfer: { providerReference: string } };
+        data: { transfer: { provider: string; providerReference: string; settlement?: unknown } };
       };
+      expect(body.data.transfer.provider).toBe("coinbase");
       expect(body.data.transfer.providerReference).toBe("coinbase_order_a3");
+      expect(body.data.transfer.settlement).toBeUndefined();
     });
   });
 
@@ -1931,21 +1892,6 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("sandbox pay-in simulation", () => {
-    let originalCoinbaseApiKeyId: string | undefined;
-    let originalCoinbaseApiKeySecret: string | undefined;
-
-    beforeEach(() => {
-      originalCoinbaseApiKeyId = env.COINBASE_CDP_API_KEY_ID;
-      originalCoinbaseApiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
-      env.COINBASE_CDP_API_KEY_ID = "test-coinbase-simulation-api-key-id";
-      env.COINBASE_CDP_API_KEY_SECRET = "test-coinbase-simulation-api-key-secret";
-    });
-
-    afterEach(() => {
-      env.COINBASE_CDP_API_KEY_ID = originalCoinbaseApiKeyId;
-      env.COINBASE_CDP_API_KEY_SECRET = originalCoinbaseApiKeySecret;
-    });
-
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
     const GENERIC_SIM_SEED = {
       provider: "bvnk",
@@ -2266,18 +2212,6 @@ describe("Payments routes — ramps", () => {
         status: 400,
         message: "Only on-ramp transfers",
       },
-      {
-        name: "a provider without sandbox simulation",
-        transferId: "xfr_sim_rejected_coinbase",
-        seed: {
-          ...GENERIC_SIM_SEED,
-          provider: "coinbase",
-          providerReference: "Quote:coinbase-sim-1",
-        },
-        counterpartyProviderData: {},
-        status: 400,
-        message: "not available for provider: coinbase",
-      },
     ];
 
     it.each(REJECTED_BEFORE_CLAIM_CASES)(
@@ -2382,43 +2316,6 @@ describe("Payments routes — ramps", () => {
       const body: { error: { message: string } } = await res.json();
       expect(body.error.message).toContain('Unrecognized key: "provider"');
     });
-  });
-
-  it("keeps browser ramp terminal callbacks advisory", async () => {
-    const headers = {
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Content-Type": "application/json",
-    };
-    await seedCoinbaseOnrampTransfer({
-      id: "xfr_coinbase_advisory",
-      providerReference: "coinbase_order_advisory",
-      amount: "25",
-      providerData: {},
-    });
-
-    const coinbase = await app.request(
-      "/v1/payments/ramps/coinbase/events",
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ kind: "committed", orderId: "coinbase_order_advisory" }),
-      },
-      env
-    );
-
-    expect(coinbase.status).toBe(204);
-    const rows = await getDb(env)
-      .prepare(
-        `SELECT id, status, provider_data
-         FROM payment_transfers
-         WHERE id = 'xfr_coinbase_advisory'`
-      )
-      .all<{ id: string; status: string; provider_data: Record<string, unknown> }>();
-    expect(rows.results).toHaveLength(1);
-    for (const row of rows.results) {
-      expect(row.status).toBe("pending");
-      expect(row.provider_data).toMatchObject({ clientEvent: { advisory: true } });
-    }
   });
 
   describe("metered quotas", () => {

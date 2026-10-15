@@ -30,7 +30,6 @@ const KITS = {
   moonpay: MOONPAY_TEST_KIT,
   stripe: STRIPE_TEST_KIT,
   bvnk: { removedBy: "HOO-2037" },
-  coinbase: { removedBy: "HOO-2035" },
 } as const satisfies Record<RampProviderId, RampProviderTestKit | { removedBy: string }>;
 
 const DECIMAL = /^\d+(\.\d+)?$/;

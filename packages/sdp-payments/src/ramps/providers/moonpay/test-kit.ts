@@ -1,22 +1,11 @@
 import { createHmac } from "node:crypto";
-import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { CONTRACT_WALLET, type RampProviderTestKit, type RecordedExchange } from "../../test-kit";
 
-const API_KEYS = {
-  sandbox: "pk_test_contract",
-  production: "pk_live_contract",
-} as const satisfies Record<SdpEnvironment, string>;
+const API_KEY = "pk_test_contract";
+const SECRET_KEY = "sk_test_contract";
 
-const SECRET_KEYS = {
-  sandbox: "sk_test_contract",
-  production: "sk_live_contract",
-} as const satisfies Record<SdpEnvironment, string>;
-
-/** The widget hosts a hosted quote may point at, by mode. */
-const WIDGET_HOSTS = {
-  sandbox: ["buy-sandbox.moonpay.com", "sell-sandbox.moonpay.com"],
-  production: ["buy.moonpay.com", "sell.moonpay.com"],
-} as const satisfies Record<SdpEnvironment, readonly string[]>;
+/** The widget hosts a hosted sandbox quote may point at. */
+const WIDGET_HOSTS = ["buy-sandbox.moonpay.com", "sell-sandbox.moonpay.com"];
 
 const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 
@@ -64,14 +53,14 @@ const SELL_QUOTE_EXCHANGE: RecordedExchange = {
  * The signature is recomputed here as MoonPay checks it: an HMAC-SHA256 of the
  * query without it, keyed by the mode's secret.
  */
-function signedForMode(hostedUrl: string, mode: SdpEnvironment): boolean {
+function signedWithSandboxKeys(hostedUrl: string): boolean {
   const url = new URL(hostedUrl);
   const signature = url.searchParams.get("signature");
   url.searchParams.delete("signature");
   return (
-    WIDGET_HOSTS[mode].some((host) => host === url.host) &&
-    url.searchParams.get("apiKey") === API_KEYS[mode] &&
-    signature === createHmac("sha256", SECRET_KEYS[mode]).update(url.search).digest("base64")
+    WIDGET_HOSTS.some((host) => host === url.host) &&
+    url.searchParams.get("apiKey") === API_KEY &&
+    signature === createHmac("sha256", SECRET_KEY).update(url.search).digest("base64")
   );
 }
 
@@ -80,13 +69,8 @@ function signedForMode(hostedUrl: string, mode: SdpEnvironment): boolean {
  * URLs built locally, so they record no exchange and are checked by URL.
  */
 export const MOONPAY_TEST_KIT: RampProviderTestKit = {
-  env: {
-    MOONPAY_SANDBOX_API_KEY: API_KEYS.sandbox,
-    MOONPAY_SANDBOX_SECRET_KEY: SECRET_KEYS.sandbox,
-    MOONPAY_API_KEY: API_KEYS.production,
-    MOONPAY_SECRET_KEY: SECRET_KEYS.production,
-  },
-  managedModes: SDP_ENVIRONMENTS,
+  env: { MOONPAY_SANDBOX_API_KEY: API_KEY, MOONPAY_SANDBOX_SECRET_KEY: SECRET_KEY },
+  managedModes: ["sandbox"],
   onramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "50" },
@@ -121,10 +105,9 @@ export const MOONPAY_TEST_KIT: RampProviderTestKit = {
       exchanges: [],
     },
   },
-  usesModeCredential: (request, mode) =>
-    new URL(request.url).searchParams.get("apiKey") === API_KEYS[mode],
-  quoteUsesModeCredential: (quote, mode) =>
-    quote.deliveryMode === "hosted" && signedForMode(quote.hostedUrl, mode),
+  usesModeCredential: (request) => new URL(request.url).searchParams.get("apiKey") === API_KEY,
+  quoteUsesModeCredential: (quote) =>
+    quote.deliveryMode === "hosted" && signedWithSandboxKeys(quote.hostedUrl),
   malformedEstimate: {
     direction: "onramp",
     exchange: { ...BUY_QUOTE_EXCHANGE, body: { ...BUY_QUOTE, feeAmount: "1.5" } },

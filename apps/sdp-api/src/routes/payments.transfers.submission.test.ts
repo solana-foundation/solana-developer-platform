@@ -11,6 +11,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
+import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -250,6 +251,90 @@ describe("Payments routes — signed submission", () => {
       const row = await latestTransferRow();
       expect(row.status).toBe("failed");
       expect(row.signature).toBeTruthy();
+    });
+
+    async function errorBody(response: Response) {
+      // SAFETY: the app's error envelope; the tests read these fields only.
+      return (await response.json()) as {
+        error: { code: string; message: string };
+        meta?: { requestId?: string };
+      };
+    }
+
+    async function expireIdempotencyKey(key: string) {
+      await getDb(env)
+        .prepare("DELETE FROM idempotency_keys WHERE idempotency_key = ?")
+        .bind(key)
+        .run();
+    }
+
+    it("stores a 400 raised after the row, and past 24 hours answers it from the row", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockResolvedValueOnce({
+        signature:
+          "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy",
+        slot: 100n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, { Custom: 1 }] },
+      } as unknown as Awaited<ReturnType<typeof solanaRpc.confirmTransaction>>);
+      const key = "failed-after-row-400";
+
+      const first = await transferRequest("1", key);
+      expect(first.status).toBe(400);
+      const firstBody = await errorBody(first);
+      expect(firstBody.error.code).toBe("TRANSACTION_FAILED");
+
+      // Within 24 hours the stored answer replays: the same 400, never a 200.
+      const retry = await transferRequest("1", key);
+      expect(retry.status).toBe(400);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await errorBody(retry)).error).toEqual(firstBody.error);
+
+      // Past 24 hours the failed row answers with the same status and code.
+      await expireIdempotencyKey(key);
+      const late = await transferRequest("1", key);
+      expect(late.status).toBe(400);
+      const lateBody = await errorBody(late);
+      expect(lateBody.error.code).toBe("TRANSACTION_FAILED");
+      expect(lateBody.error.message).toContain("new Idempotency-Key");
+      // The same envelope as a fresh error: the request id and trace header.
+      expect(lateBody.meta?.requestId).toMatch(/^req_/);
+      expect(late.headers.get("X-SDP-Trace-ID")).toBeTruthy();
+      // The row's answer is marked a replay, so a client retires the key, and is
+      // stored under the key again.
+      expect(late.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(
+        await getDb(env)
+          .prepare("SELECT status, response_status FROM idempotency_keys WHERE idempotency_key = ?")
+          .bind(key)
+          .first<{ status: string; response_status: number | null }>()
+      ).toEqual({ status: "completed", response_status: 400 });
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+      expect(await listTransferRows()).toHaveLength(1);
+    });
+
+    it("stores a 409 signer mismatch raised after the row and replays it", async () => {
+      createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
+        new AppError("CONFLICT", "Custody signer does not match the selected wallet")
+      );
+      const key = "failed-after-row-409";
+
+      const first = await transferRequest("1", key);
+      expect(first.status).toBe(409);
+      expect((await latestTransferRow()).status).toBe("failed");
+
+      const retry = await transferRequest("1", key);
+      expect(retry.status).toBe(409);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await errorBody(retry)).error.message).toBe(
+        "Custody signer does not match the selected wallet"
+      );
+
+      await expireIdempotencyKey(key);
+      const late = await transferRequest("1", key);
+      expect(late.status).toBe(409);
+      expect((await errorBody(late)).error.code).toBe("CONFLICT");
+      expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 
     it("keeps a submitted transfer processing with its signature when confirmation fails", async () => {

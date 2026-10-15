@@ -2,7 +2,6 @@ import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type {
   BvnkOfframpChannelSettlement,
   BvnkRampSettlement,
-  CoinbaseRampSettlement,
   MoonpayRampSettlement,
   PaymentTransferSummary,
   SolanaCluster,
@@ -117,36 +116,6 @@ const MOONPAY_FIELDS: readonly TransferDetailFieldSpec<MoonpayRampSettlement>[] 
     labelKey: "DashboardPayments.transferDetails.solanaSignature",
     signature: (settlement) =>
       settlement.cryptoTransactionId === undefined ? null : settlement.cryptoTransactionId,
-  },
-];
-
-const COINBASE_FIELDS: readonly TransferDetailFieldSpec<CoinbaseRampSettlement>[] = [
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.providerFee",
-    text: (settlement) => {
-      const fee = settlement.fees.find((entry) => entry.feeType === "FEE_TYPE_EXCHANGE");
-      return fee ? formatDisplayAmount(fee.feeAmount, fee.feeCurrency) : null;
-    },
-  },
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.networkFee",
-    text: (settlement) => {
-      const fee = settlement.fees.find((entry) => entry.feeType === "FEE_TYPE_NETWORK");
-      return fee && Number(fee.feeAmount) > 0
-        ? formatDisplayAmount(fee.feeAmount, fee.feeCurrency)
-        : null;
-    },
-  },
-  {
-    kind: "text",
-    labelKey: "DashboardPayments.transferDetails.exchangeRate",
-    text: (settlement) =>
-      `1 ${settlement.purchaseCurrency} = ${formatDisplayAmount(
-        settlement.exchangeRate,
-        settlement.paymentCurrency
-      )}`,
   },
 ];
 
@@ -305,17 +274,6 @@ function moonpayBuilder(
   return [...receipt, ...settlementRows];
 }
 
-function coinbaseBuilder(
-  transfer: PaymentTransferSummary,
-  context: TransferDetailFieldContext,
-  t: Translate
-): ProviderTransferDetailRow[] {
-  const settlement = transfer.settlement;
-  return settlement !== undefined && settlement.provider === "coinbase"
-    ? rowsFromSpecs(COINBASE_FIELDS, settlement, context, t)
-    : [];
-}
-
 function bvnkBuilder(
   transfer: PaymentTransferSummary,
   context: TransferDetailFieldContext,
@@ -407,7 +365,6 @@ const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
   Record<PersistedRampProviderId, Partial<Record<RampTransferDirection, ProviderRowBuilder>>>
 > = {
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
-  coinbase: { onramp: coinbaseBuilder },
   bvnk: { onramp: bvnkBuilder, offramp: bvnkOfframpBuilder },
 };
 

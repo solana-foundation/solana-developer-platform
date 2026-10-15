@@ -68,10 +68,6 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/lib/ramps.ts:42:21:Coinbase",
-    "reason": "Ramp provider brand name"
-  },
-  {
     "candidate": "src/lib/ramps.ts:44:19:Stripe",
     "reason": "Ramp provider brand name"
   },
@@ -206,5 +202,9 @@
   {
     "candidate": "src/flags/index.ts:95:5:`NEW DESIGN for ${area}. Requires the new-design flag; off serves that area's previous design.`",
     "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
+  },
+  {
+    "candidate": "src/components/dashboard-nav.ts:284:11:overview",
+    "reason": "Design-module id passed to isDesignModuleOn, never rendered; the label comes from the catalog"
   }
 ]

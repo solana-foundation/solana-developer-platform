@@ -19,8 +19,13 @@ import { isCredentialKey, REDACTED } from "./policy";
 // backreference anchors the alternation to the whole quoted key. The separator
 // is mandatory each repetition, so the group cannot split a run two ways and
 // the pattern stays linear.
-const SENSITIVE_JSON_FIELD_PATTERN =
-  /(["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(["'])(.*?)\3/gi;
+//
+// The pattern only finds a sensitive key and the quote that opens its value;
+// `quotedValueEnd` finds where the value closes. A quote token may carry
+// backslashes (a body serialized more than once), and the lookbehind starts a
+// token only where its backslash run starts, so a long run is scanned once.
+const SENSITIVE_JSON_FIELD_START =
+  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(\\*)(["'])/gi;
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
@@ -30,20 +35,68 @@ const PRIVATE_KEY_PATTERN =
 const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]+)/gi;
 
 export function redactCredentialString(value: string): string {
-  return value
+  const withoutHeaders = value
     .replace(PRIVATE_KEY_PATTERN, REDACTED)
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
-    )
-    .replace(
-      SENSITIVE_JSON_FIELD_PATTERN,
-      (_match, quote: string, key: string, valueQuote: string) =>
-        `${quote}${key}${quote}:${valueQuote}${REDACTED}${valueQuote}`
-    )
-    .replace(
-      SENSITIVE_ASSIGNMENT_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
     );
+  return redactSensitiveJsonFields(withoutHeaders).replace(
+    SENSITIVE_ASSIGNMENT_PATTERN,
+    (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+  );
+}
+
+/**
+ * Replaces the value of every quoted sensitive field with REDACTED, in one
+ * pass that resumes after each value it redacts.
+ */
+function redactSensitiveJsonFields(text: string): string {
+  const start = new RegExp(SENSITIVE_JSON_FIELD_START);
+  let redacted = "";
+  let copiedUpTo = 0;
+  for (let match = start.exec(text); match !== null; match = start.exec(text)) {
+    const [field, keyQuote, key, valueBackslashes, valueQuote] = match;
+    const valueStart = match.index + field.length;
+    const value = quotedValueEnd(text, valueStart, valueBackslashes.length, valueQuote);
+    redacted +=
+      text.slice(copiedUpTo, match.index) +
+      `${keyQuote}${key}${keyQuote}:${valueBackslashes}${valueQuote}${REDACTED}` +
+      text.slice(value.contentEnd, value.end);
+    copiedUpTo = value.end;
+    start.lastIndex = value.end;
+  }
+  return redacted + text.slice(copiedUpTo);
+}
+
+/**
+ * Where a quoted value that opened with `depth` backslashes before `quote`
+ * ends. Serializing a body once more doubles every backslash and adds one, so
+ * at this depth a quote whose backslash run is `depth` modulo `2 * (depth + 1)`
+ * closes the value, a shorter run closes an outer string, and any other run is
+ * an escaped quote inside the value. A value that never closes runs to the end.
+ *
+ * @returns Where the value's content ends and where its closing quote ends.
+ */
+function quotedValueEnd(
+  text: string,
+  from: number,
+  depth: number,
+  quote: string
+): { contentEnd: number; end: number } {
+  const period = 2 * (depth + 1);
+  let run = 0;
+  for (let index = from; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\") {
+      run += 1;
+      continue;
+    }
+    if (char === quote && (run < depth || run % period === depth)) {
+      return { contentEnd: index - Math.min(run, depth), end: index + 1 };
+    }
+    run = 0;
+  }
+  return { contentEnd: text.length, end: text.length };
 }
 
 function isLikelyAuthToken(scheme: string, token: string): boolean {

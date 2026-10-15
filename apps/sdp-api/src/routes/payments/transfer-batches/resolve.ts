@@ -14,9 +14,10 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getCounterpartyAccountsRepository } from "../context";
 import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
-import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
+import { type ResolvedScope, resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
@@ -107,35 +108,23 @@ function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number)
 }
 
 /**
- * Resolves recipient inputs against their counterparty accounts in one
- * batched lookup, validating ownership and normalizing amounts.
+ * Resolves recipient inputs against the counterparty accounts `authorize`
+ * loaded, normalizing amounts. An account archived since is refused here, as
+ * new work, never in the access check.
  *
  * @param params.recipients - Recipient inputs from the request body.
+ * @param params.accounts - The named accounts, by id, as authorize loaded them.
  * @param params.decimals - Decimal places of the batch token.
  * @returns Recipients with resolved destination addresses and base-unit amounts.
  */
-async function resolveRecipients(params: {
-  c: AppContext;
-  organizationId: string;
-  projectId: string;
+function resolveRecipients(params: {
   recipients: TransferBatchRecipientInput[];
+  accounts: ReadonlyMap<string, CounterpartyAccountRow>;
   decimals: number;
-}): Promise<ResolvedRecipient[]> {
-  const accountsRepository = getCounterpartyAccountsRepository(params.c);
-
-  const accounts = await accountsRepository.listCounterpartyAccountsByIdsInProject({
-    counterpartyAccountIds: [...new Set(params.recipients.map((r) => r.counterpartyAccountId))],
-    organizationId: params.organizationId,
-    projectId: params.projectId,
-  });
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
-
+}): ResolvedRecipient[] {
   return params.recipients.map((recipient, index) => {
-    const account = accountById.get(recipient.counterpartyAccountId);
-    if (!account) {
-      throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
-    }
-    if (recipient.counterpartyId && account.counterparty_id !== recipient.counterpartyId) {
+    const account = params.accounts.get(recipient.counterpartyAccountId);
+    if (account?.status !== "active") {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
 
@@ -152,47 +141,106 @@ async function resolveRecipients(params: {
   });
 }
 
+/** What a batch's access check loads: no RPC, no state checks. */
+export interface AuthorizedBatchRequest {
+  scope: ResolvedScope;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  sourceAddress: Address;
+  /** Every account the recipients name, whatever its status. */
+  accounts: ReadonlyMap<string, CounterpartyAccountRow>;
+}
+
 /**
- * Resolves and authorizes a transfer-batch request: project scope, source
- * wallet access, token context, and all recipients.
+ * The access check for a batch (HOO-1918): project scope, source wallet access
+ * from the key's snapshot, and every named counterparty account in the
+ * project and under the counterparty the recipient names. Status is state and
+ * is checked later, so a request that already ran is still answered.
  *
- * @param c - Request context.
- * @param input - Parsed create/estimate request body.
- * @param requiredWalletPermissions - Permissions the API key must hold on the source wallet.
- * @returns Everything the estimate and create paths need to build transactions.
+ * @param retainedCustodyWalletId - Resolve this wallet even when inactive, so a replay of a request that ran is answered.
  */
-export async function resolveBatchRequest(
+export async function authorizeBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2],
+  /** Null when the caller already checked the source wallet's binding fresh. */
+  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2] | null,
   retainedCustodyWalletId?: string
-): Promise<ResolvedBatchRequest> {
+): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
   const scope = await resolveScope(c, retainedCustodyWalletId);
   assertPaymentProjectScope(input.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
-
+  if (requiredWalletPermissions !== null) {
+    assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
+  }
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
-  const token = normalizePaymentToken(input.token, c.env);
-  const rpc = solanaRpc.createRpc(c.env);
-  const tokenContext = await resolveTokenContext(rpc, token, sourceAddress);
-  const recipients = await resolveRecipients({
-    c,
+
+  const rows = await getCounterpartyAccountsRepository(c).listCounterpartyAccountsByIdsInProject({
+    counterpartyAccountIds: [...new Set(input.recipients.map((r) => r.counterpartyAccountId))],
     organizationId: scope.auth.organizationId,
     projectId,
+    status: "any",
+  });
+  const accounts = new Map(rows.map((account) => [account.id, account]));
+  for (const recipient of input.recipients) {
+    const account = accounts.get(recipient.counterpartyAccountId);
+    if (
+      !account ||
+      (recipient.counterpartyId && account.counterparty_id !== recipient.counterpartyId)
+    ) {
+      throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
+    }
+  }
+  return { scope, projectId, sourceWallet, sourceAddress, accounts };
+}
+
+/**
+ * What a batch moves, resolved after its access check: the token context (RPC)
+ * and each recipient's destination and amount. New work only; a replay never
+ * reaches it.
+ */
+export async function resolveBatchMovement(
+  c: AppContext,
+  input: CreateTransferBatchInput,
+  authorized: AuthorizedBatchRequest
+): Promise<ResolvedBatchRequest> {
+  const token = normalizePaymentToken(input.token, c.env);
+  const rpc = solanaRpc.createRpc(c.env);
+  const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
+  const recipients = resolveRecipients({
     recipients: input.recipients,
+    accounts: authorized.accounts,
     decimals: tokenContext.decimals,
   });
   return {
-    scope,
-    projectId,
-    sourceWallet,
-    sourceAddress,
+    scope: authorized.scope,
+    projectId: authorized.projectId,
+    sourceWallet: authorized.sourceWallet,
+    sourceAddress: authorized.sourceAddress,
     tokenContext,
     recipients,
     totalAmount: sumDecimalAmounts(recipients.map((recipient) => recipient.amount)),
     rpc,
   };
+}
+
+/**
+ * Resolves and authorizes a transfer-batch request in one go, for the estimate.
+ *
+ * @param c - Request context.
+ * @param input - Parsed create/estimate request body.
+ * @param requiredWalletPermissions - Permissions the API key must hold on the source wallet.
+ * @returns Everything the estimate path needs to build transactions.
+ */
+export async function resolveBatchRequest(
+  c: AppContext,
+  input: CreateTransferBatchInput,
+  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2]
+): Promise<ResolvedBatchRequest> {
+  return resolveBatchMovement(
+    c,
+    input,
+    await authorizeBatchRequest(c, input, requiredWalletPermissions)
+  );
 }

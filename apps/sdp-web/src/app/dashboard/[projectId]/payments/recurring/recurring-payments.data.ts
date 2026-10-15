@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { IdempotencyOutcomeUnknownError, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 
@@ -140,7 +141,7 @@ const recurringPaymentsListEnvelopeSchema = z.object({ data: recurringPaymentsLi
 const recurringPaymentEnvelopeSchema = z.object({ data: recurringPaymentResponseSchema });
 const collectionAttemptsEnvelopeSchema = z.object({ data: collectionAttemptsResponseSchema });
 const apiErrorEnvelopeSchema = z.object({
-  error: z.union([z.string(), z.object({ message: z.string() })]),
+  error: z.union([z.string(), z.object({ message: z.string(), code: z.string().optional() })]),
   message: z.string().optional(),
 });
 
@@ -189,6 +190,17 @@ async function readDashboardEnvelope<T>(
 ): Promise<T> {
   const body = schema.parse(await response.json());
   if (!response.ok) {
+    const code =
+      "error" in body && typeof body.error === "object" ? (body.error.code ?? null) : null;
+    const uncertain = uncertainMoneyAnswerMessage({
+      status: response.status,
+      replayed: false,
+      code,
+    });
+    if (uncertain !== null) {
+      // The money rule keeps the key, so a retry is answered under it.
+      throw new IdempotencyOutcomeUnknownError(t(uncertain));
+    }
     throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
   }
   if (!("data" in body)) {

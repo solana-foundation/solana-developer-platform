@@ -38,7 +38,7 @@ import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
-const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
+export const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 // A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
@@ -204,6 +204,33 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
   await finalizeConfirmedTransfers(env, repo, now, nowIso);
+  await failStrandedTransferBatches(env, now);
+}
+
+/** Past any request's lifetime (renewal cap plus lease), with room to spare. */
+const STRANDED_BATCH_AGE_MS = 60 * 60 * 1000;
+const STRANDED_BATCH_PAGE_SIZE = 50;
+
+/**
+ * Settles batches whose request died after the batch and its recipients
+ * committed but before a chunk transfer was written (HOO-1918). Those
+ * recipients were never sent (a chunk's transfer row and links commit before
+ * its broadcast), and no transfer row exists for the sweep above to settle, so
+ * without a same-key retry the batch would stay processing forever. They are
+ * failed and the batch status recomputed, as the record finder does on a retry.
+ */
+async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
+  const batches = createSystemPaymentTransferBatchesRepository(env);
+  const stranded = await batches.listStrandedTransferBatches({
+    createdBefore: new Date(now.getTime() - STRANDED_BATCH_AGE_MS).toISOString(),
+    limit: STRANDED_BATCH_PAGE_SIZE,
+  });
+  for (const batch of stranded) {
+    await batches.failUnsentTransferRecipients({
+      ...batch,
+      error: "The batch request ended before this recipient's transfer was sent",
+    });
+  }
 }
 
 /**

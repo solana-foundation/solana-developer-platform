@@ -27,6 +27,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
+import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
@@ -50,6 +51,7 @@ import {
   notFound,
   transactionFailed,
 } from "@/lib/errors";
+import { normalizeDecimalString } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -77,17 +79,32 @@ import {
   subscriptionProgramMetadataUri,
 } from "./shared";
 
-type RecurringPaymentUpdateSnapshot = {
-  sourceCustodyWalletId: string | null;
-  counterpartyId: string;
-  counterpartyAccountId: string;
-  token: string;
-  amount: string;
-  periodHours: number;
-  firstCollectionAt: string | null;
-  nextCollectionDueAt: string | null;
-  metadataUri: string | null;
-};
+/** An update request's Idempotency-Key and the fingerprint of its validated body. */
+export interface RecurringPaymentUpdateIdempotency {
+  key: string;
+  fingerprint: string;
+}
+
+const recurringPaymentUpdateSnapshotSchema = z.object({
+  sourceCustodyWalletId: z.string().nullable(),
+  counterpartyId: z.string(),
+  counterpartyAccountId: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  periodHours: z.number(),
+  firstCollectionAt: z.string().nullable(),
+  nextCollectionDueAt: z.string().nullable(),
+  metadataUri: z.string().nullable(),
+});
+
+type RecurringPaymentUpdateSnapshot = z.infer<typeof recurringPaymentUpdateSnapshotSchema>;
+
+/**
+ * The values an update attempt saved (`before_values`, `after_values`): any
+ * subset of the snapshot's fields, and nothing else.
+ */
+const savedUpdateValuesSchema = recurringPaymentUpdateSnapshotSchema.partial().strict();
+type SavedUpdateValues = z.infer<typeof savedUpdateValuesSchema>;
 
 const RECURRING_PAYMENT_UPDATE_FIELDS = [
   "sourceCustodyWalletId",
@@ -114,8 +131,8 @@ type ResolvedRecurringPaymentUpdate = {
   nextCollectionDueAt: string | null;
   metadataUri: string | null;
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>;
-  beforeValues: Record<string, unknown>;
-  afterValues: Record<string, unknown>;
+  beforeValues: SavedUpdateValues;
+  afterValues: SavedUpdateValues;
 };
 
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
@@ -161,8 +178,12 @@ function buildUpdateDiff(
   beforeValues: Partial<RecurringPaymentUpdateSnapshot>;
   afterValues: Partial<RecurringPaymentUpdateSnapshot>;
 } {
-  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter(
-    (field) => before[field] !== after[field]
+  // An amount is compared by value, so a respelling ("1" and "1.0") is no change
+  // and never broadcasts a replacement.
+  const changedFields = RECURRING_PAYMENT_UPDATE_FIELDS.filter((field) =>
+    field === "amount"
+      ? normalizeDecimalString(before.amount) !== normalizeDecimalString(after.amount)
+      : before[field] !== after[field]
   );
   const beforeValues: Partial<RecurringPaymentUpdateSnapshot> = { ...before };
   const afterValues: Partial<RecurringPaymentUpdateSnapshot> = { ...after };
@@ -174,23 +195,43 @@ function sameStringSet(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value) => right.includes(value));
 }
 
-function sameFlatRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  const keys = Object.keys(left);
-  return sameStringSet(keys, Object.keys(right)) && keys.every((key) => left[key] === right[key]);
+/** One snapshot field: an amount by value ("30" and "30.0" are one amount), the rest as stored. */
+function sameSnapshotValue(
+  field: RecurringPaymentUpdateField,
+  left: SavedUpdateValues,
+  right: SavedUpdateValues
+): boolean {
+  if (field === "amount" && left.amount !== undefined && right.amount !== undefined) {
+    return normalizeDecimalString(left.amount) === normalizeDecimalString(right.amount);
+  }
+  return left[field] === right[field];
+}
+
+/** The same fields, each the same value (`sameSnapshotValue`). */
+function sameSavedValues(left: SavedUpdateValues, right: SavedUpdateValues): boolean {
+  return RECURRING_PAYMENT_UPDATE_FIELDS.every(
+    (field) => field in left === field in right && sameSnapshotValue(field, left, right)
+  );
 }
 
 function updateAttemptMatchesRequest(
   attempt: PaymentRecurringPaymentUpdateAttemptRow,
   input: {
     changedFields: string[];
-    beforeValues: Record<string, unknown>;
-    afterValues: Record<string, unknown>;
+    beforeValues: SavedUpdateValues;
+    afterValues: SavedUpdateValues;
   }
 ): boolean {
+  // Parsed where they are read: a row whose saved values are not a snapshot
+  // subset is not this request's attempt.
+  const before = savedUpdateValuesSchema.safeParse(attempt.before_values);
+  const after = savedUpdateValuesSchema.safeParse(attempt.after_values);
   return (
+    before.success &&
+    after.success &&
     sameStringSet(attempt.changed_fields, input.changedFields) &&
-    sameFlatRecord(attempt.before_values, input.beforeValues) &&
-    sameFlatRecord(attempt.after_values, input.afterValues)
+    sameSavedValues(before.data, input.beforeValues) &&
+    sameSavedValues(after.data, input.afterValues)
   );
 }
 
@@ -363,6 +404,68 @@ async function recordRecurringPaymentUpdateEvent(input: {
   }
 }
 
+/**
+ * Records that a keyed PATCH was answered without an attempt of its own: a
+ * request that changes nothing, or one that finished a stale attempt another
+ * key claimed. The confirmed attempt carries this request's key and
+ * fingerprint and changes nothing, so a retry once the key's shared record has
+ * expired is answered from it instead of applying its terms again over a newer
+ * edit. The fingerprint check is the key step's, as for any update attempt.
+ * An unkeyed request, or one whose own attempt carries its key, records nothing.
+ */
+async function recordAnsweredUpdate(input: {
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
+  /** The key on the attempt this request ran; null when it ran none. */
+  ranAttemptKey: string | null;
+}): Promise<void> {
+  if (input.idempotency === null || input.idempotency.key === input.ranAttemptKey) {
+    return;
+  }
+  const answeredAt = new Date().toISOString();
+  const attempt = await input.recurringRepo.createUpdateAttempt({
+    id: `prpu_${crypto.randomUUID()}`,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+    mode: "metadata_schedule",
+    status: "confirmed",
+    stage: "finalize",
+    oldPlanId: null,
+    oldSubscriptionId: null,
+    newPlanId: null,
+    newSubscriptionId: null,
+    newSourceCustodyWalletId: null,
+    planUpdateSignature: null,
+    planCreationSignature: null,
+    authorizationSetupSignature: null,
+    authorizationSignature: null,
+    oldCancelSignature: null,
+    changedFields: [],
+    beforeValues: {},
+    afterValues: {},
+    error: null,
+    createdBy: input.createdBy,
+    createdAt: answeredAt,
+    updatedAt: answeredAt,
+    idempotencyKey: input.idempotency.key,
+    idempotencyFingerprint: input.idempotency.fingerprint,
+  });
+  if (!attempt) {
+    throw internalError("Failed to journal recurring payment update");
+  }
+}
+
+/**
+ * Updates a schedule that never went on chain. The row, a confirmed update
+ * attempt carrying the request's key and fingerprint, and the update event
+ * commit together, so a retry of the same request is answered from the attempt
+ * (HOO-1918), as a pending schedule's cancel is.
+ */
 async function updatePendingRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -370,8 +473,14 @@ async function updatePendingRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   resolved: ResolvedRecurringPaymentUpdate;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo: createPaymentRecurringPaymentsRepository(input.env, createTenantScope(input)),
+      ranAttemptKey: null,
+    });
     return input.recurringPayment;
   }
 
@@ -379,10 +488,75 @@ async function updatePendingRecurringPayment(input: {
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
   const updatedAt = new Date().toISOString();
-  const recurringRepo = createPaymentRecurringPaymentsRepository(
-    input.env,
-    createTenantScope(input)
-  );
+  return getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const updated = await updatePendingRecurringPaymentRow(recurringRepo, {
+      ...input,
+      changedDestinationOrToken,
+      updatedAt,
+    });
+    const attempt = await recurringRepo.createUpdateAttempt({
+      id: `prpu_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      mode: "metadata_schedule",
+      status: "confirmed",
+      stage: "finalize",
+      oldPlanId: null,
+      oldSubscriptionId: null,
+      newPlanId: null,
+      newSubscriptionId: null,
+      newSourceCustodyWalletId:
+        input.resolved.sourceWallet.id === input.recurringPayment.source_custody_wallet_id
+          ? null
+          : input.resolved.sourceWallet.id,
+      planUpdateSignature: null,
+      planCreationSignature: null,
+      authorizationSetupSignature: null,
+      authorizationSignature: null,
+      oldCancelSignature: null,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      error: null,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+      updatedAt,
+      idempotencyKey: input.idempotency?.key ?? null,
+      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+    });
+    if (!attempt) {
+      throw internalError("Failed to journal recurring payment update");
+    }
+    await recordRecurringPaymentUpdateEvent({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attemptId: attempt.id,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+    });
+    return updated;
+  });
+}
+
+async function updatePendingRecurringPaymentRow(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: PaymentRecurringPaymentRow;
+    resolved: ResolvedRecurringPaymentUpdate;
+    changedDestinationOrToken: boolean;
+    updatedAt: string;
+  }
+): Promise<PaymentRecurringPaymentRow> {
+  const { changedDestinationOrToken, updatedAt } = input;
   const updated = await recurringRepo.updateRecurringPayment({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -407,20 +581,6 @@ async function updatePendingRecurringPayment(input: {
   if (!updated) {
     throw conflict("Recurring payment changed while updating; retry with the latest payment");
   }
-
-  await recordRecurringPaymentUpdateEvent({
-    recurringRepo,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    attemptId: null,
-    changedFields: input.resolved.changedFields.map(String),
-    beforeValues: input.resolved.beforeValues,
-    afterValues: input.resolved.afterValues,
-    createdBy: input.createdBy,
-    createdAt: updatedAt,
-  });
-
   return updated;
 }
 
@@ -437,7 +597,10 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
+  // A stale claim resumes the in-flight attempt under its original key, or
+  // records this request's key and fingerprint on it when it has none.
   if (input.recoveringStaleUpdate) {
     const existing = await input.recurringRepo.getLatestUpdateAttempt({
       organizationId: input.organizationId,
@@ -463,6 +626,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: null,
+          adoptIdempotencyKey: input.idempotency?.key ?? null,
+          adoptIdempotencyFingerprint: input.idempotency?.fingerprint ?? null,
           updatedAt: input.nowIso,
         })
       );
@@ -494,6 +659,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     createdBy: input.createdBy,
     createdAt: input.nowIso,
     updatedAt: input.nowIso,
+    idempotencyKey: input.idempotency?.key ?? null,
+    idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
   });
 
   if (!attempt) {
@@ -585,6 +752,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   nextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -660,6 +828,18 @@ async function finalizeMetadataScheduleUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -675,6 +855,7 @@ async function runMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -785,6 +966,7 @@ async function runMetadataScheduleUpdate(input: {
     resolved: input.resolved,
     nextCollectionDueAt: nextDueAt,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -987,6 +1169,7 @@ async function finalizeReplacementUpdate(input: {
   currentPeriodStartAt: string;
   nextCollectionDueAt: string;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -1119,6 +1302,18 @@ async function finalizeReplacementUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -1134,6 +1329,7 @@ async function runReplacementUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (
     !input.claimed.plan_pda ||
@@ -1488,6 +1684,7 @@ async function runReplacementUpdate(input: {
     currentPeriodStartAt: finalizedAt,
     nextCollectionDueAt: safeNextDue,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -1600,6 +1797,8 @@ export async function updateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1618,6 +1817,7 @@ export async function updateRecurringPayment(input: {
       recurringPayment: input.recurringPayment,
       resolved,
       createdBy: input.createdBy,
+      idempotency: input.idempotency,
     });
   }
 
@@ -1651,9 +1851,6 @@ export async function updateRecurringPayment(input: {
     recurringPayment: settled.recurringPayment,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
-  if (sourceChanged) {
-  }
-
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =
     mode === "replacement" || resolved.metadataUri !== settled.recurringPayment.metadata_uri;
@@ -1674,6 +1871,12 @@ export async function updateRecurringPayment(input: {
   }
 
   if (resolved.changedFields.length === 0) {
+    await recordAnsweredUpdate({
+      ...input,
+      recurringRepo,
+      recurringPayment: settled.recurringPayment,
+      ranAttemptKey: null,
+    });
     return settled.recurringPayment;
   }
 
@@ -1713,6 +1916,7 @@ export async function updateRecurringPayment(input: {
       createdBy: input.createdBy,
       nowIso,
       recoveringStaleUpdate,
+      idempotency: input.idempotency,
     });
     return { claimed, attempt };
   });
@@ -1721,9 +1925,10 @@ export async function updateRecurringPayment(input: {
   }
   const { attempt, claimed } = claimResult;
 
+  let updated: PaymentRecurringPaymentRow;
   try {
     if (mode === "metadata_schedule") {
-      return await runMetadataScheduleUpdate({
+      updated = await runMetadataScheduleUpdate({
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -1734,21 +1939,23 @@ export async function updateRecurringPayment(input: {
         resolved,
         request: input.request,
         createdBy: input.createdBy,
+        idempotency: input.idempotency,
+      });
+    } else {
+      updated = await runReplacementUpdate({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        oldSourceWallet: input.sourceWallet,
+        claimed,
+        subscription: settled.subscription,
+        attempt,
+        resolved,
+        request: input.request,
+        createdBy: input.createdBy,
+        idempotency: input.idempotency,
       });
     }
-
-    return await runReplacementUpdate({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      oldSourceWallet: input.sourceWallet,
-      claimed,
-      subscription: settled.subscription,
-      attempt,
-      resolved,
-      request: input.request,
-      createdBy: input.createdBy,
-    });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     getLogger().error(
@@ -1805,4 +2012,6 @@ export async function updateRecurringPayment(input: {
 
     throw error;
   }
+
+  return updated;
 }

@@ -1,115 +1,68 @@
 "use client";
 
 import { z } from "zod";
+import {
+  type ApiAnswer,
+  answerRetiresKey,
+  moneyAnswerRetiresKey,
+  storageFingerprint,
+} from "./idempotency";
 
 /**
- * Browser-side durability for a value-moving IDEMPOTENCY KEY, per request
- * fingerprint — the machinery behind every dashboard money flow whose API route
- * requires a key: the Earn vault deposit and exit
- * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`) and Private
- * Channels deposit, withdrawal and member transfer
- * (`integrations/private-channels/value-movement-tracking.ts`). It lives here
- * rather than beside any one of them because they share every rule, and two
- * copies of a double-spend guard is how one drifts.
+ * Browser-side durability for an IDEMPOTENCY KEY, per request fingerprint: the
+ * machinery behind every dashboard key holder (HOO-1918). The Earn vault
+ * deposit and exits, Private Channels movements, Payments transfers and
+ * batches, `dashboard-fetch`'s per-action keys and the per-input values of
+ * {@link createActionMemo} (server-action keys, frozen payment-request
+ * expiries) all keep their keys here, under one rule (`answerRetiresKey`).
  *
- * These routes sign and RECORD a transaction before broadcasting it, so between
- * the click and the chain there is a window where SDP holds signed bytes whose
- * fate nobody knows yet. A retry inside that window must carry the SAME key, or
- * the chain will happily accept the same transfer twice — there is no
- * provider-side dedupe behind these routes. A React ref cannot do that job: it
- * dies with the modal and with the tab's page load.
- *
- * Each store holds ONLY keys. Which movements are in flight lives on the
- * server (`GET /v1/earn/vault-deposits` / `/vault-withdrawals`), which is
- * workspace-scoped by construction; browser state could not see a transaction
- * signed in another tab and restored the previous project's watches after a
- * workspace switch. The key stays here because it is genuinely client-owned:
- * the client mints it, and it has to survive to be re-sent.
- *
- * `sessionStorage`, not `localStorage`: per-tab working state about a
- * transaction in flight should die with the tab rather than resurface days
- * later in a different context.
- *
- * Reads retain a memory fallback, but Earn must successfully persist a pending
- * marker with beginSubmission before sending. A refused write cannot authorize
- * a POST whose identity would disappear on reload.
+ * A retry must carry the SAME key, or the API takes it as a second request
+ * and can move money twice. A React ref cannot do that job: it dies with the
+ * modal and with the tab's page load. So a key is kept in `sessionStorage` per
+ * tab (not `localStorage`: working state about a request in flight should die
+ * with the tab), from the moment it is claimed until an answer retires it, and
+ * it is never evicted before then.
  */
 
 /**
- * Expiry applies only to drafts that have never been submitted. A POST pins
- * the key before transport begins; elapsed time and blockhash expiry do not
- * prove that an earlier broadcast failed. Only a parsed outcome can retire it.
- */
-const IDEMPOTENCY_TTL_MS = 15 * 60_000;
-
-/**
- * Cap on EXPIRING entries, so a long session of typing amounts cannot grow the
- * store without limit. Held entries are exempt — see `withinStorageBound`.
- */
-const MAX_STORED_ENTRIES = 20;
-
-/**
- * One stored entry, validated at the boundary rather than narrowed by hand.
- *
- * A store is written by an older build of this same page as often as by the
- * current one, so its contents are untrusted JSON. `expiresAt` is OPTIONAL so
- * an entry from a build that predates the field keeps working under the
- * conservative pending state instead of being dropped as unrecognized; dropping it would mint
- * a fresh key for a request already in flight, which is the one outcome this
- * module must never produce.
- *
- * `null` on `expiresAt` means "does not expire while this tab lives", which is
- * not the unbounded claim it looks like: the whole store is `sessionStorage`,
- * so the tab session is already the outer bound.
+ * One stored entry, validated at the boundary. Entries written by an earlier
+ * build carry extra fields (an expiry, a pending mark); they are read as plain
+ * kept keys, so an upgrade never drops a key for a request in flight.
  */
 const storedEntrySchema = z.object({
   /** The request fingerprint this key belongs to. */
   id: z.string().min(1),
   value: z.string().min(1),
-  createdAt: z.number().finite(),
-  expiresAt: z.union([z.number().finite(), z.null()]).optional(),
-  /** A POST may have executed; only its own durable answer can retire it. */
-  uncertain: z.boolean().optional(),
 });
 
 type StoredEntry = z.infer<typeof storedEntrySchema>;
 
-/** Pending submissions and approval holds are both exempt from eviction. */
-function isHeldEntry(entry: StoredEntry): boolean {
-  return entry.expiresAt === null;
-}
-
-/** Whether an entry is still claimable, honouring its own expiry over the default. */
-function isLiveEntry(entry: StoredEntry, now: number, ttlMs: number): boolean {
-  if (entry.expiresAt !== undefined) {
-    return entry.expiresAt === null || now < entry.expiresAt;
-  }
-  return now - entry.createdAt < ttlMs;
-}
+/**
+ * The signed-in user and organization every store's entries belong to. A key
+ * minted by one user is refused (422) when another user sends it, and an
+ * unanswered key is kept until answered, so a second user in the same tab
+ * would be stuck on the first user's key. Namespacing keeps each user's and
+ * org's entries apart, and keeps the first user's unanswered keys for when
+ * they sign back in.
+ */
+let keyScope = "";
 
 /**
- * Bound the store — by evicting EXPIRING entries only. A held entry is never
- * dropped.
- *
- * The two kinds are not comparable, in either direction that matters: an
- * expiring entry is minted by typing a new amount and costs at most a replay
- * if dropped, while a HELD entry exists only because a real POST was parked by
- * the policy gate — dropping it mints a fresh key on the next submit, which
- * opens a SECOND approval request for the same intent and can move the
- * customer's money twice. Full rationale in the deposit module's history; the
- * floor of ONE exists because callers write the entry they just claimed as the
- * last element, and a budget of zero would evict the very key `claim` is about
- * to return.
+ * Sets the scope from the dashboard's signed-in user and org
+ * (`getDashboardCacheScopeKey`). The dashboard workspace provider calls it as
+ * it renders, before any child reads a key.
  */
-function withinStorageBound(entries: readonly StoredEntry[]): StoredEntry[] {
-  const held = entries.filter(isHeldEntry);
-  const room = Math.max(1, MAX_STORED_ENTRIES - held.length);
-  const expiring = entries.filter((entry) => !isHeldEntry(entry));
-  const keptExpiring = expiring.slice(-room);
+export function setIdempotencyKeyScope(scope: string): void {
+  keyScope = scope;
+}
 
-  // Filter the original array so insertion order — newest last — survives.
-  const kept = new Set<StoredEntry>([...held, ...keptExpiring]);
-  return entries.filter((entry) => kept.has(entry));
+/** The signed-in user and org the stores are scoped to now (`setIdempotencyKeyScope`). */
+export function idempotencyKeyScope(): string {
+  return keyScope;
+}
+
+function scopedKey(storeKey: string): string {
+  return keyScope ? `${storeKey}:${keyScope}` : storeKey;
 }
 
 function storage(): Storage | null {
@@ -126,50 +79,26 @@ function storage(): Storage | null {
 
 /**
  * The in-memory tier, authoritative only when the browser refuses to store.
- *
- * A dead store must cost DURABILITY, never correctness. Re-deriving nothing
- * and minting a fresh key on each call would turn an ambiguous retry into a
- * second on-chain movement — the precise failure this module exists to
- * prevent — so the degraded path still has to answer "is this the same
- * request" for as long as the page lives. Written on every save so it is warm
- * the moment storage stops answering mid-session.
+ * A dead store must cost durability, never correctness: the degraded path
+ * still answers "is this the same request" for as long as the page lives.
+ * Written on every save so it is warm the moment storage stops answering.
  */
 const memoryEntries = new Map<string, readonly StoredEntry[]>();
 
 /**
- * Store keys whose LAST write failed to reach `sessionStorage` while reads
- * still work — the asymmetric failure a quota produces: `setItem` throws,
- * `getItem` keeps serving the stale previous state.
- *
- * Every write lands in `memoryEntries` unconditionally before the storage
- * attempt, so memory is always the newest complete snapshot; a readable
- * storage can only be EQUAL to it (the write succeeded) or OLDER (it failed).
- * Preferring readable-but-stale storage after a failed write is how a
- * just-claimed key vanished on the next read — minting a fresh key for a
- * request already in flight — and how a hold marker written only to memory was
- * lost, letting an executed approval present as a fresh submission.
- *
- * So: a failed write flips the key to memory-preferred; the next successful
- * write means storage has caught up and flips it back. While storage is
- * healthy it stays the authority, so an external clear genuinely clears and a
- * state written by a previous page load is honoured.
- *
- * The `FloorMemo` stores below share this set under their own versioned keys,
- * with the same semantics: memory there is the newest floor snapshot, and a
- * readable-but-stale storage must never un-remember a live key's floor.
- *
- * The residual, stated honestly: memory dies with the page, so a failed write
- * followed by a RELOAD serves the stale storage. Nothing client-side can close
- * that — durability was refused — which is exactly why the server double-checks
- * every reused key.
+ * Store keys whose last write failed to reach `sessionStorage` while reads
+ * still work, the asymmetric failure a quota produces. Memory is written first
+ * on every save, so after a failed write the readable storage is stale and
+ * memory is preferred until a write lands again. While storage is healthy it
+ * stays the authority, so an external clear genuinely clears. The `FloorMemo`
+ * stores below share this set under their own keys.
  */
 const storageDivergedKeys = new Set<string>();
 
 /**
- * `usable: false` means this browser will not hand anything back at all —
- * distinct from a usable store that simply holds nothing under this key. Only
- * the first falls through to memory: a store that answers is the authority, so
- * clearing it genuinely clears, rather than being undone by a warm shadow copy.
+ * `usable: false` means this browser will not hand anything back at all,
+ * distinct from a usable store that holds nothing under this key. Only the
+ * first falls through to memory.
  */
 function readStoredText(
   storeKey: string
@@ -183,11 +112,10 @@ function readStoredText(
   }
 }
 
-function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
+/** @param storeKey - The full `sessionStorage` name, scope included. */
+function readEntries(storeKey: string): StoredEntry[] {
   let parsed: unknown;
   if (storageDivergedKeys.has(storeKey)) {
-    // Storage is behind memory for this key (a write failed after the page
-    // loaded), so the readable state is stale by construction.
     parsed = memoryEntries.get(storeKey) ?? [];
   } else {
     const stored = readStoredText(storeKey);
@@ -204,40 +132,48 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
     }
   }
   if (!Array.isArray(parsed)) return [];
-
-  // Parsed per entry at the boundary: a half-recognized entry is dropped, never
-  // coerced.
-  const now = Date.now();
+  // Parsed per entry: a half-recognized entry is dropped, never coerced.
   return parsed.flatMap((entry) => {
     const candidate = storedEntrySchema.safeParse(entry);
-    if (!candidate.success) return [];
-    // Older clients did not distinguish an unused key from an unanswered POST.
-    // Preserve those entries on upgrade instead of expiring a possible intent.
-    if (candidate.data.uncertain === undefined && candidate.data.expiresAt !== null) {
-      return [{ ...candidate.data, uncertain: true, expiresAt: null }];
-    }
-    return isLiveEntry(candidate.data, now, ttlMs) ? [candidate.data] : [];
+    return candidate.success ? [candidate.data] : [];
   });
 }
 
-function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
-  const bounded = withinStorageBound(entries);
-  // Memory first and unconditionally: it is the tier that cannot fail, and it
-  // has to already hold the value if the store refuses the very next write.
-  memoryEntries.set(storeKey, bounded);
+/**
+ * The value session storage itself holds for this fingerprint, read past the
+ * memory tier: a key found here survives a reload as it is.
+ *
+ * @param storeKey - The full `sessionStorage` name, scope included.
+ */
+function storedValue(storeKey: string, fingerprint: string): string | undefined {
+  const stored = readStoredText(storeKey);
+  if (!stored.usable || stored.raw === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(stored.raw);
+    if (!Array.isArray(parsed)) return undefined;
+    for (const entry of parsed) {
+      const candidate = storedEntrySchema.safeParse(entry);
+      if (candidate.success && candidate.data.id === fingerprint) return candidate.data.value;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
 
+/** @param storeKey - The full `sessionStorage` name, scope included. */
+function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
+  // Memory first and unconditionally: it has to hold the value if the store
+  // refuses this write.
+  memoryEntries.set(storeKey, entries);
   const store = storage();
   if (!store) return false;
   try {
-    store.setItem(storeKey, JSON.stringify(bounded));
-    // Storage has caught up with memory; it is the authority again.
+    store.setItem(storeKey, JSON.stringify(entries));
     storageDivergedKeys.delete(storeKey);
     return true;
   } catch {
-    // Quota or a refusing store. Losing the durability is strictly better than
-    // losing the movement — but a still-READABLE storage is now behind memory,
-    // and serving it would un-write the entry we just wrote. Flip this key to
-    // memory-preferred until a write lands.
+    // Quota or a refusing store: storage is now behind memory for this key.
     storageDivergedKeys.add(storeKey);
     return false;
   }
@@ -245,116 +181,125 @@ function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolea
 
 /**
  * Test-only: clear the module-scope tiers so specs are order-independent.
- * Production never calls this — the whole point of the tiers is surviving
- * everything short of the page itself.
  *
  * @internal
  */
 export function resetIdempotencyKeyStoresForTests(): void {
   memoryEntries.clear();
   storageDivergedKeys.clear();
+  keyScope = "";
 }
 
 export interface IdempotencyKeyStore {
+  /** Whether a key is kept for this request: an earlier attempt left it unretired. */
+  has(fingerprint: string): boolean;
   /**
-   * The idempotency key for this request, minting and persisting one the first
-   * time. Called again for the same fingerprint — a retry, or the same form
-   * after a reload — it returns the SAME key, which is what makes the retry a
-   * retry.
+   * The request's key: the one kept for it, or a new one minted the first
+   * time, and written to storage either way. `persisted: false` means the
+   * browser refused the write, so a reload would lose the key; a money route
+   * must not send then.
+   *
+   * @param mint - Makes the value the first time; a fresh UUID by default.
    */
-  claim(fingerprint: string): string;
+  claim(fingerprint: string, mint?: () => string): { key: string; persisted: boolean };
   /**
-   * `claim` paired with the answer to "did this call hand back a live key or
-   * mint a fresh one?" — answered from the SAME read that produced the key. A
-   * caller that mints request-scoped state alongside the key (the vault flows'
-   * quote-derived floor) must replay that state when the key is reused, and
-   * the flag has to describe the key it is attached to: answering it from a
-   * separate, TTL-sensitive read can disagree with `claim` — an entry expiring
-   * between the two reads would report a reuse while `claim` minted fresh, and
-   * the previous key's remembered state would ride a brand-new key.
+   * Retires the key: the next submit of this request is a new action. Only
+   * the claimed key is retired, in the user and org scope that claimed it: a
+   * late answer to an earlier attempt never retires a newer key for the same
+   * request, or a key another scope kept for it.
+   *
+   * @param key - The key `claim` returned for the attempt being settled.
    */
-  claimReportingReuse(fingerprint: string): { key: string; wasReused: boolean };
-  /**
-   * Pin a key for as long as a provider session on it is live (a ramp widget
-   * the customer completes on the provider's side can take far longer than the
-   * default TTL, and a lapsed key there would resubmit the same intent under a
-   * fresh key). The way OUT of a hold is the caller's: a definitive API answer
-   * releasing it.
-   */
-  hold(fingerprint: string): void;
-  /** Whether this request's key is pinned by a live hold. */
-  isHeld(fingerprint: string): boolean;
-  /** Persist before sending a POST. False means the caller must not send. */
-  markUncertain(fingerprint: string): boolean;
-  isUncertain(fingerprint: string): boolean;
-  beginSubmission(fingerprint: string): { wasUncertain: boolean } | null;
-  /**
-   * Retire a key once the API has ANSWERED for it. Only call this on a
-   * definitive answer: a key released while its request may still have been
-   * recorded turns the next retry into a second movement; a key held too long
-   * only costs a replay, which the API reports honestly as `replayed`.
-   */
-  release(fingerprint: string): void;
+  release(fingerprint: string, key: string): void;
 }
 
-type IdempotencyKeyOutcome =
-  | { ok: true; status: number; data: { kind: string } }
-  | { ok: false; status: number | null; body?: unknown };
+/** One per flow, each under its own versioned `sessionStorage` key. */
+export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
+  /** The scoped storage name each claim was made under, by `[fingerprint, key]`. */
+  const claimedIn = new Map<string, string>();
 
-/**
- * Whether the API has ANSWERED for an idempotency key, which is the only
- * condition under which retiring it is safe. Shared by both vault money flows;
- * structural over the fetch result so each keeps its own response type.
- *
- * The asymmetry drives every branch: a key released too early turns the next
- * retry into a SECOND on-chain movement, while a key held too long costs at
- * worst a replay the API reports honestly as `replayed`.
- *
- * - A first-attempt 4xx may retire a fresh key. Once any earlier attempt is
- *   uncertain, only a durable result resolves it. Later HTTP classes do not.
- * - Everything else might have written: `status === null` is a transport
- *   failure, a 2xx whose body did not parse is an answer nobody could read,
- *   and a 5xx is the dangerous one — a gateway timing out downstream of an API
- *   that already recorded and broadcast looks exactly like a provider being
- *   unavailable before it did.
- */
-function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
-  if (result.ok) {
-    return true;
-  }
-  return result.status !== null && result.status >= 400 && result.status < 500;
+  return {
+    has(fingerprint) {
+      return readEntries(scopedKey(storeKey)).some((entry) => entry.id === fingerprint);
+    },
+
+    claim(fingerprint, mint = () => crypto.randomUUID()) {
+      const name = scopedKey(storeKey);
+      const entries = readEntries(name);
+      const kept = entries.find((entry) => entry.id === fingerprint)?.value;
+      if (kept !== undefined && storedValue(name, fingerprint) === kept) {
+        // Already persisted: the retry needs no rewrite, so a store that now
+        // refuses writes never blocks the retry of an earlier attempt.
+        claimedIn.set(JSON.stringify([fingerprint, kept]), name);
+        return { key: kept, persisted: true };
+      }
+      const key = kept ?? mint();
+      // A new key, or one kept only in memory, must reach storage to count.
+      const persisted = writeEntries(name, [
+        ...entries.filter((entry) => entry.id !== fingerprint),
+        { id: fingerprint, value: key },
+      ]);
+      claimedIn.set(JSON.stringify([fingerprint, key]), name);
+      return { key, persisted };
+    },
+
+    release(fingerprint, key) {
+      const claim = JSON.stringify([fingerprint, key]);
+      // A claim this page never made (it was made before a reload) is settled
+      // in the current scope; matching the key still keeps a newer one.
+      const name = claimedIn.get(claim) ?? scopedKey(storeKey);
+      claimedIn.delete(claim);
+      const entries = readEntries(name);
+      const isClaimed = (entry: StoredEntry) => entry.id === fingerprint && entry.value === key;
+      if (!entries.some(isClaimed)) return;
+      writeEntries(
+        name,
+        entries.filter((entry) => !isClaimed(entry))
+      );
+    },
+  };
 }
 
 /**
- * Apply the shared retire-or-preserve rule to one API answer, and say which
- * was applied — callers keeping per-key state beside the store (the deposit
- * flow's floor memo) retire that state on exactly the same rule rather than
- * re-deriving it and drifting.
+ * Applies the one rule to an answer: a success, a replay or a 422 retires the
+ * request's key; anything else keeps it for the retry.
+ *
+ * @param key - The key the answered attempt was sent under (see `release`).
+ * @returns Whether the key was retired.
  */
-export function applyIdempotencyKeyOutcome(
+export function settleIdempotencyKey(
   store: IdempotencyKeyStore,
   fingerprint: string,
-  result: IdempotencyKeyOutcome,
-  wasUncertain = store.isUncertain(fingerprint) || store.isHeld(fingerprint)
-): "retired" | "kept" {
-  if (answerRetiresIdempotencyKey(result) && (result.ok || !wasUncertain)) {
-    store.release(fingerprint);
-    return "retired";
-  }
-  store.markUncertain(fingerprint);
-  return "kept";
+  key: string,
+  answer: ApiAnswer
+): boolean {
+  if (!answerRetiresKey(answer)) return false;
+  store.release(fingerprint, key);
+  return true;
+}
+
+/** {@link settleIdempotencyKey} on the money rule (`moneyAnswerRetiresKey`). */
+export function settleMoneyIdempotencyKey(
+  store: IdempotencyKeyStore,
+  fingerprint: string,
+  key: string,
+  answer: ApiAnswer
+): boolean {
+  if (!moneyAnswerRetiresKey(answer)) return false;
+  store.release(fingerprint, key);
+  return true;
 }
 
 /**
- * A bounded per-tab memo of the floor each in-flight fingerprint's key was
- * MINTED with. The fingerprint deliberately carries the user's TOLERANCE, not
- * the quote-derived floor (a floor moves with the live rate, and a fingerprint
- * must be reproducible from user input after a reload) — but the API's own
- * idempotency fingerprint includes the floor and refuses a replay whose floor
- * changed, so a held key must resubmit the exact floor it first carried. Same
- * tiers as the key store: `sessionStorage` so it survives the reload the held
- * key survives, memory when storage is refused, and a hard bound so an
- * abandoned tab cannot grow it without limit.
+ * A per-tab memo of the floor each kept fingerprint's key was MINTED with. The
+ * fingerprint deliberately carries the user's TOLERANCE, not the quote-derived
+ * floor (a floor moves with the live rate, and a fingerprint must be
+ * reproducible from user input after a reload) — but the API's own idempotency
+ * fingerprint includes the floor and refuses a replay whose floor changed, so a
+ * kept key must resubmit the exact floor it first carried. Same tiers as the
+ * key store: `sessionStorage` so it survives the reload the kept key survives,
+ * and memory when storage is refused. Like the keys, a floor is never evicted;
+ * it is forgotten when its key retires.
  */
 export interface FloorMemo {
   /** Record the floor `fingerprint`'s key is being submitted with. */
@@ -372,8 +317,6 @@ export interface FloorMemo {
   resetForTests(): void;
 }
 
-const FLOOR_MEMO_BOUND = 32;
-
 /**
  * One per money flow, each under its own versioned `sessionStorage` key.
  *
@@ -381,17 +324,16 @@ const FLOOR_MEMO_BOUND = 32;
  * above: a floor `setItem()` that throws while `getItem()` still answers is a
  * PARTIAL write — the readable storage is now behind the memory snapshot the
  * write did reach, and serving it would un-remember the floor a live key was
- * just minted with (the retry then reads `unavailable`, and once the key's TTL
- * lapses the unchanged intent mints a fresh key and a second value-moving
- * deposit). So a failed write flips this storage key to memory-preferred until
+ * just minted with (the retry then reads `unavailable` and stops). So a failed write flips this storage key to memory-preferred until
  * a later write lands and re-synchronizes the full snapshot — including
  * `forget()`, whose removal must not resurface from stale storage.
  */
-export function createFloorMemo(storageKey: string): FloorMemo {
+export function createFloorMemo(unscopedKey: string): FloorMemo {
   type Entries = Record<string, string | null>;
-  let memory: Entries = {};
+  const memories = new Map<string, Entries>();
 
-  function read(): Entries {
+  function read(storageKey: string): Entries {
+    const memory = memories.get(storageKey) ?? {};
     if (storageDivergedKeys.has(storageKey)) {
       // Storage is behind memory for this key (a write failed after the page
       // loaded), so the readable state is stale by construction.
@@ -412,8 +354,8 @@ export function createFloorMemo(storageKey: string): FloorMemo {
     }
   }
 
-  function write(entries: Entries): void {
-    memory = { ...entries };
+  function write(storageKey: string, entries: Entries): void {
+    memories.set(storageKey, { ...entries });
     try {
       window.sessionStorage.setItem(storageKey, JSON.stringify(entries));
       // Storage has caught up with memory; it is the authority again.
@@ -429,26 +371,26 @@ export function createFloorMemo(storageKey: string): FloorMemo {
 
   return {
     remember(fingerprint, floor) {
-      const entries = read();
+      const storageKey = scopedKey(unscopedKey);
+      const entries = read(storageKey);
       delete entries[fingerprint];
       entries[fingerprint] = floor;
-      const keys = Object.keys(entries);
-      for (const stale of keys.slice(0, Math.max(0, keys.length - FLOOR_MEMO_BOUND))) {
-        delete entries[stale];
-      }
-      write(entries);
+      write(storageKey, entries);
     },
     recall(fingerprint) {
-      const entries = read();
+      const entries = read(scopedKey(unscopedKey));
       return fingerprint in entries ? entries[fingerprint] : undefined;
     },
     forget(fingerprint) {
-      const entries = read();
+      const storageKey = scopedKey(unscopedKey);
+      const entries = read(storageKey);
+      if (!(fingerprint in entries)) return;
       delete entries[fingerprint];
-      write(entries);
+      write(storageKey, entries);
     },
     resetForTests() {
-      memory = {};
+      const storageKey = scopedKey(unscopedKey);
+      memories.clear();
       storageDivergedKeys.delete(storageKey);
       try {
         window.sessionStorage.removeItem(storageKey);
@@ -459,76 +401,62 @@ export function createFloorMemo(storageKey: string): FloorMemo {
   };
 }
 
-/** One per money flow, each under its own versioned `sessionStorage` key. */
-export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
-  /** One read decides reuse and produces the key, so the two can never disagree. */
-  function claimReporting(fingerprint: string): { key: string; wasReused: boolean } {
-    const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-    const existing = entries.find((entry) => entry.id === fingerprint);
-    if (existing) return { key: existing.value, wasReused: true };
+export interface ActionMemo<T> {
+  /**
+   * The value this input was first sent with, or `build()`'s, remembered.
+   * Call it once per send, right before it.
+   */
+  valueFor(input: string, build: () => T): T;
+  /**
+   * Records the send's answer: one that retires the key forgets the value,
+   * only if it is still the one this send went out with (see `release`).
+   *
+   * @param value - What `valueFor` returned for the send being answered.
+   */
+  settle(input: string, value: T, answer: ApiAnswer): void;
+}
 
-    const key = crypto.randomUUID();
-    writeEntries(storeKey, [
-      ...entries.filter((entry) => entry.id !== fingerprint),
-      { id: fingerprint, value: key, createdAt: Date.now(), uncertain: false },
-    ]);
-    return { key, wasReused: false };
-  }
-
+/**
+ * What one user action was first sent with (its Idempotency-Key, or a value
+ * read from the clock), per form input, kept in an {@link IdempotencyKeyStore}
+ * until the action's answer retires it. The same input finds the same value
+ * after an edit and back (A to B to A) and after a reload, so a retry resends
+ * the first attempt's request. Inputs are stored as digests
+ * ({@link storageFingerprint}), so form contents never sit in storage; values
+ * are stored as JSON, so `schema` must not transform: a value has to
+ * serialize back to what was stored. A store that refuses writes keeps the
+ * value in memory for this page, and the send still goes out: no caller is a
+ * money route.
+ *
+ * @param storeKey - The `sessionStorage` key.
+ * @param schema - What a stored value must be; anything else is rebuilt.
+ */
+export function createActionMemo<T>(storeKey: string, schema: z.ZodType<T>): ActionMemo<T> {
+  const store = createIdempotencyKeyStore(storeKey);
+  const decode = (raw: string): { data: T } | null => {
+    try {
+      const parsed = schema.safeParse(JSON.parse(raw));
+      return parsed.success ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
   return {
-    claim(fingerprint) {
-      return claimReporting(fingerprint).key;
+    valueFor(input, build) {
+      const fingerprint = storageFingerprint(input);
+      const mint = () => JSON.stringify(build());
+      const kept = store.claim(fingerprint, mint).key;
+      let remembered = decode(kept);
+      if (!remembered) {
+        store.release(fingerprint, kept);
+        remembered = decode(store.claim(fingerprint, mint).key);
+      }
+      if (!remembered) throw new Error(`${storeKey}: build() made a value its schema rejects`);
+      return remembered.data;
     },
 
-    claimReportingReuse(fingerprint) {
-      return claimReporting(fingerprint);
-    },
-
-    hold(fingerprint) {
-      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-      const held = entries.find((entry) => entry.id === fingerprint);
-      if (!held) return;
-      writeEntries(storeKey, [
-        ...entries.filter((entry) => entry.id !== fingerprint),
-        { ...held, expiresAt: null, uncertain: false },
-      ]);
-    },
-
-    isHeld(fingerprint) {
-      const entry = readEntries(storeKey, IDEMPOTENCY_TTL_MS).find(
-        (candidate) => candidate.id === fingerprint
-      );
-      return entry?.expiresAt === null && entry.uncertain !== true;
-    },
-
-    markUncertain(fingerprint) {
-      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-      const entry = entries.find((candidate) => candidate.id === fingerprint);
-      if (!entry) return false;
-      return writeEntries(storeKey, [
-        ...entries.filter((candidate) => candidate.id !== fingerprint),
-        { ...entry, expiresAt: null, uncertain: true },
-      ]);
-    },
-
-    isUncertain(fingerprint) {
-      return readEntries(storeKey, IDEMPOTENCY_TTL_MS).some(
-        (entry) => entry.id === fingerprint && entry.uncertain === true
-      );
-    },
-
-    beginSubmission(fingerprint) {
-      const wasUncertain = this.isUncertain(fingerprint) || this.isHeld(fingerprint);
-      return this.markUncertain(fingerprint) ? { wasUncertain } : null;
-    },
-
-    release(fingerprint) {
-      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
-      if (!entries.some((entry) => entry.id === fingerprint)) return;
-      writeEntries(
-        storeKey,
-        entries.filter((entry) => entry.id !== fingerprint)
-      );
+    settle(input, value, answer) {
+      settleIdempotencyKey(store, storageFingerprint(input), JSON.stringify(value), answer);
     },
   };
 }

@@ -7,7 +7,6 @@ import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
 import { env as baseEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
-import events from "./events";
 import { listOfframpCurrencies } from "./offramp/handlers";
 import { listOnrampCurrencies } from "./onramp/handlers";
 import { filterProviders } from "./shared";
@@ -40,7 +39,6 @@ function buildApp(stages: SdpRampProviderStages) {
   app.get("/offered", (c) => c.json({ providers: filterProviders(c, RAMP_PROVIDERS, undefined) }));
   app.get("/counterparties/:counterpartyId/requirements", getCounterpartyRequirements);
   app.get("/counterparties/:counterpartyId/provider-accounts", listCounterpartyProviderAccounts);
-  app.route("/", events);
   app.onError((err, c) => {
     if (err instanceof AppError) {
       return c.json(err.toResponse(), err.statusCode as 400);
@@ -64,7 +62,6 @@ describe("ramp providers outside the release channel", () => {
     const response = await app.request("/offered", {}, env);
     expect(await response.json()).toEqual({ providers: ["moonpay"] });
   });
-
   it.each(["onramp", "offramp"])("lists only included providers' %s currencies", async (dir) => {
     const response = await app.request(`/${dir}/currency`, {}, env);
     expect(response.status).toBe(200);
@@ -79,19 +76,11 @@ describe("ramp providers outside the release channel", () => {
       "/counterparties/cp_1/requirements?provider=stripe&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",
     ],
     ["GET", "/counterparties/cp_1/provider-accounts?provider=stripe"],
-    ["POST", "/coinbase/events"],
   ])("refuses %s %s, which names an excluded provider, with 403", async (method, path) => {
     const response = await app.request(path, { method }, env);
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({
       error: { message: expect.stringContaining("not available in this release channel") },
     });
-  });
-
-  it("serves an included provider's client events past the release channel gate", async () => {
-    const included = buildApp({ ...MOONPAY_ONLY, coinbase: "beta" });
-    // An empty body fails validation: the request got past the gate.
-    const response = await included.request("/coinbase/events", { method: "POST" }, env);
-    expect(response.status).toBe(400);
   });
 });

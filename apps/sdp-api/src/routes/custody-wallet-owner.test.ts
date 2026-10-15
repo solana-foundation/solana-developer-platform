@@ -1,9 +1,12 @@
+import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { privyWalletExternalId } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
@@ -130,15 +133,34 @@ async function seedFixture(): Promise<void> {
   );
 }
 
-async function createWallet(body: Record<string, unknown>): Promise<Response> {
-  return app.request(
-    "/v1/wallets",
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${API_KEY.raw}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-    env
+async function createWallet(
+  body: Record<string, unknown>,
+  idempotencyKey?: string
+): Promise<Response> {
+  const headers = new Headers({
+    Authorization: `Bearer ${API_KEY.raw}`,
+    "Content-Type": "application/json",
+  });
+  if (idempotencyKey) {
+    headers.set("Idempotency-Key", idempotencyKey);
+  }
+  return app.request("/v1/wallets", { method: "POST", headers, body: JSON.stringify(body) }, env);
+}
+
+/**
+ * The process died before the key's response was stored (after the provider
+ * call, or after the wallet row): the key is left `in_progress` with an ended
+ * lease, so the next request with it takes the key over and runs again.
+ */
+async function crashBeforeKeyStored(idempotencyKey: string): Promise<number> {
+  return getDb(env).execute(
+    `UPDATE idempotency_keys
+     SET status = 'in_progress', claim_token = 'crashed', locked_until = now() - interval '1 second',
+         -- Past the renewal cap plus the lease too, so the claim counts as dead.
+         claimed_at = now() - interval '1 hour',
+         response_status = NULL, response_headers = NULL, response_body = NULL
+     WHERE idempotency_key = ?`,
+    [idempotencyKey]
   );
 }
 
@@ -300,5 +322,228 @@ describe("Custody wallet owner contract", () => {
       data: { publicKey: CONNECTION_WALLET_PUBLIC_KEY },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
+  });
+
+  describe("under an Idempotency-Key", () => {
+    const KEY = "custody-create-key-1";
+    const requestId = (key: string) =>
+      deriveCustodyWalletCreateRequestId(
+        { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID, principal: API_KEY.id },
+        key
+      );
+
+    it.each([
+      ["Managed", { provider: "privy", label: "Treasury" }, {}],
+      ["BYOK", { connectionId: CONNECTION_ID, label: "Settlement" }, { credentialRequest: true }],
+    ])("sends Privy the same request id on a retry of a %s create", async (_kind, body, extra) => {
+      // The first attempt's outcome is unknown: Privy may have made the wallet.
+      provisionPrivyWalletMock
+        .mockRejectedValueOnce(new SigningError("Privy timed out", "NETWORK_ERROR"))
+        .mockResolvedValueOnce({ walletId: "keyed_created", address: CREATED_PUBLIC_KEY });
+
+      expect((await createWallet(body, KEY)).status).toBeGreaterThanOrEqual(400);
+      await crashBeforeKeyStored(KEY);
+      expect((await createWallet(body, KEY)).status).toBe(201);
+
+      const expected = {
+        ...extra,
+        externalId: privyWalletExternalId(requestId(KEY)),
+        idempotencyKey: requestId(KEY),
+      };
+      expect(provisionPrivyWalletMock).toHaveBeenCalledTimes(2);
+      expect(provisionPrivyWalletMock.mock.calls[0]?.[1]).toEqual(expected);
+      expect(provisionPrivyWalletMock.mock.calls[1]?.[1]).toEqual(expected);
+    });
+
+    it.each([
+      ["Managed", { provider: "privy", label: "Treasury" }],
+      ["BYOK", { connectionId: CONNECTION_ID, label: "Settlement" }],
+    ])(
+      "takes over a crashed create and answers it from the %s wallet row, not the terminal 409, without calling the provider",
+      async (_kind, body) => {
+        provisionPrivyWalletMock.mockResolvedValueOnce({
+          walletId: "keyed_created",
+          address: CREATED_PUBLIC_KEY,
+        });
+        const first = await createWallet(body, KEY);
+        expect(first.status).toBe(201);
+        const created = (await first.json()) as { data: unknown };
+        expect(await crashBeforeKeyStored(KEY)).toBe(1);
+        provisionPrivyWalletMock.mockClear();
+        const rowsBefore = await readWalletRows();
+
+        const retry = await createWallet(body, KEY);
+
+        // recovery: "record" lets the lapsed claim be taken over; without it a
+        // store route answers 409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN.
+        expect(retry.status).toBe(201);
+        expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+        expect(((await retry.json()) as { data: unknown }).data).toEqual(created.data);
+        expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+        expect(await readWalletRows()).toEqual(rowsBefore);
+        expect(
+          await getDb(env).queryOne(
+            "SELECT idempotency_request_id FROM custody_wallets WHERE wallet_id = ?",
+            ["privy_keyed_created"]
+          )
+        ).toEqual({ idempotency_request_id: requestId(KEY) });
+      }
+    );
+
+    it("refuses a retry whose body differs from the request that made the wallet row", async () => {
+      provisionPrivyWalletMock.mockResolvedValueOnce({
+        walletId: "keyed_created",
+        address: CREATED_PUBLIC_KEY,
+      });
+      expect((await createWallet({ provider: "privy", label: "Treasury" }, KEY)).status).toBe(201);
+      // Past the key's 24 hours: only the wallet row remembers the request.
+      await getDb(env).execute("DELETE FROM idempotency_keys WHERE idempotency_key = ?", [KEY]);
+      provisionPrivyWalletMock.mockClear();
+
+      const retry = await createWallet({ provider: "privy", label: "Other" }, KEY);
+
+      expect(retry.status).toBe(422);
+      expect(await retry.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED" } });
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    });
+
+    it("derives a different request id for a different key, tenant or credential", () => {
+      const scope = {
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        principal: API_KEY.id,
+      };
+      const ids = [
+        deriveCustodyWalletCreateRequestId(scope, KEY),
+        deriveCustodyWalletCreateRequestId(scope, "custody-create-key-2"),
+        deriveCustodyWalletCreateRequestId({ ...scope, organizationId: "org_other" }, KEY),
+        deriveCustodyWalletCreateRequestId({ ...scope, projectId: "prj_other" }, KEY),
+        deriveCustodyWalletCreateRequestId({ ...scope, principal: "key_other" }, KEY),
+      ];
+
+      expect(deriveCustodyWalletCreateRequestId(scope, KEY)).toBe(ids[0]);
+      expect(new Set(ids).size).toBe(ids.length);
+      // The raw client key never reaches a provider.
+      for (const id of ids) {
+        expect(id).not.toContain(KEY);
+        expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      }
+    });
+
+    it("answers a Managed provider failure with a stored 503, not a 400", async () => {
+      provisionPrivyWalletMock.mockRejectedValueOnce(
+        new SigningError("Privy API error: 500 - upstream", "NETWORK_ERROR")
+      );
+
+      const response = await createWallet({ provider: "privy", label: "Treasury" }, KEY);
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_UNAVAILABLE" } });
+      expect(
+        await getDb(env).queryOne(
+          "SELECT status, response_status FROM idempotency_keys WHERE idempotency_key = ?",
+          [KEY]
+        )
+      ).toEqual({ status: "completed", response_status: 503 });
+    });
+
+    // Privy dedupes on the request id, so the loser usually gets the winner's
+    // own wallet back, and its insert can fail on the owner-and-wallet unique
+    // constraint rather than the request id's.
+    it.each([
+      [
+        "Managed",
+        "another",
+        { provider: "privy", label: "Treasury" },
+        { custodyConfigId: CONFIG_ID },
+      ],
+      [
+        "Managed",
+        "the same",
+        { provider: "privy", label: "Treasury" },
+        { custodyConfigId: CONFIG_ID },
+      ],
+      [
+        "BYOK",
+        "another",
+        { connectionId: CONNECTION_ID, label: "Settlement" },
+        { custodyConnectionId: CONNECTION_ID },
+      ],
+      [
+        "BYOK",
+        "the same",
+        { connectionId: CONNECTION_ID, label: "Settlement" },
+        { custodyConnectionId: CONNECTION_ID },
+      ],
+    ])(
+      "answers a %s create that loses the race for its request id, holding %s provider wallet, from the row that won",
+      async (_kind, loserWallet, body, owner) => {
+        provisionPrivyWalletMock.mockImplementationOnce(async () => {
+          // A concurrent attempt under the same key recorded its wallet first.
+          const claim = await getDb(env).queryOne<{ fingerprint: string }>(
+            "SELECT fingerprint FROM idempotency_keys WHERE idempotency_key = ?",
+            [KEY]
+          );
+          await seedTestCustodyRows(env, {
+            configs: [],
+            wallets: [
+              {
+                id: "cwlt_raced_winner",
+                owner:
+                  "custodyConfigId" in owner
+                    ? { kind: "config", custodyConfigId: owner.custodyConfigId }
+                    : { kind: "connection", custodyConnectionId: owner.custodyConnectionId },
+                walletId: "privy_raced_winner",
+                publicKey: CREATED_PUBLIC_KEY,
+                label: body.label,
+                purpose: null,
+                status: "active",
+              },
+            ],
+          });
+          await getDb(env).execute(
+            `UPDATE custody_wallets SET idempotency_request_id = ?, idempotency_fingerprint = ?
+              WHERE id = 'cwlt_raced_winner'`,
+            [requestId(KEY), claim?.fingerprint ?? null]
+          );
+          return {
+            walletId: loserWallet === "the same" ? "raced_winner" : "raced_loser",
+            address: CREATED_PUBLIC_KEY,
+          };
+        });
+
+        const response = await createWallet(body, KEY);
+
+        expect(response.status).toBe(201);
+        expect(await response.json()).toMatchObject({
+          data: { wallet: { id: "cwlt_raced_winner", walletId: "privy_raced_winner", ...owner } },
+        });
+        expect(
+          (await readWalletRows()).filter((row) => row.wallet_id === "privy_raced_loser")
+        ).toEqual([]);
+        // Every audit intent the losing attempt opened has its outcome: none is
+        // left for reconciliation.
+        expect(
+          await getDb(env).queryOne(
+            `SELECT COUNT(*)::integer AS count FROM audit_logs i
+              WHERE i.metadata::jsonb->>'auditPhase' = 'intent'
+                AND NOT EXISTS (
+                  SELECT 1 FROM audit_logs o
+                   WHERE o.metadata::jsonb->>'auditIntentId' = i.resource_id
+                )`
+          )
+        ).toEqual({ count: 0 });
+        if ("custodyConnectionId" in owner) {
+          // The BYOK outcome names the wallet that won, not the loser's unsaved id.
+          expect(
+            await getDb(env).queryOne(
+              `SELECT resource_id FROM audit_logs
+                WHERE resource_type = 'custody_wallet'
+                  AND metadata::jsonb->>'result' = 'already_recorded'`
+            )
+          ).toEqual({ resource_id: "cwlt_raced_winner" });
+        }
+      }
+    );
   });
 });

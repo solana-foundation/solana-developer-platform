@@ -12,6 +12,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
+import * as pruneIdempotencyKeysModule from "@/services/jobs/prune-idempotency-keys";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
@@ -226,6 +227,12 @@ describe("runCronJob", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(retireOrphanedSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
+    // A work function, so it is swapped on the shared module rather than mocked.
+    vi.spyOn(pruneIdempotencyKeysModule, "pruneIdempotencyKeys").mockResolvedValue({
+      deleted: 0,
+      unfinished: 0,
+      capped: false,
+    });
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset().mockResolvedValue({
       cleaned: 0,
       skipped: 0,
@@ -603,6 +610,7 @@ describe("runCronJob", () => {
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-detect-orphaned-earn-split-swaps",
       "sdp-api-managed-poll-rings-indexing",
+      "sdp-api-managed-prune-idempotency-keys",
       "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",
       "sdp-api-managed-reconcile-ramp-transfers",
@@ -668,6 +676,21 @@ describe("runCronJob", () => {
 
     expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+  });
+
+  // Behind no flag (every module's keys expire) and non-fatal: a claim already
+  // ignores an expired key, so a failed sweep only costs disk.
+  it("prunes expired idempotency keys without failing the job when the prune throws", async () => {
+    const env = makeEnv();
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+    vi.mocked(pruneIdempotencyKeysModule.pruneIdempotencyKeys).mockRejectedValueOnce(
+      new Error("database busy")
+    );
+
+    await expect(runCronJob()).resolves.toBeUndefined();
+
+    expect(pruneIdempotencyKeysModule.pruneIdempotencyKeys).toHaveBeenCalledExactlyOnceWith(env);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
   });
 
   it("keeps DvP failures non-fatal and runs later ticks alongside credential cleanup", async () => {

@@ -3,12 +3,13 @@
 import type { PrivateChannelDeposit } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import type { MessageKey } from "@/i18n/messages";
+import type { ApiAnswer } from "@/lib/idempotency";
 import { createPrivateChannelDeposit, fetchPrivateChannelDeposit } from "@/lib/private-channels";
 import {
   createSdpApiClient,
   extractSdpApiErrorMessage,
   requestProjectHref,
-  SdpApiResponseError,
+  sdpApiAnswer,
 } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
@@ -42,7 +43,7 @@ export interface CreateDepositInput {
 export type CreateDepositResult =
   | { ok: true; deposit: PrivateChannelDeposit }
   | { ok: false; kind: "validation"; messageKey: MessageKey }
-  | { ok: false; kind: "server"; message: string; status: number | null };
+  | { ok: false; kind: "server"; message: string; answer: ApiAnswer };
 
 export async function createDepositAction(input: CreateDepositInput): Promise<CreateDepositResult> {
   if (!input.walletId) {
@@ -75,7 +76,7 @@ export async function createDepositAction(input: CreateDepositInput): Promise<Cr
       ok: false,
       kind: "server",
       message: extractSdpApiErrorMessage(error),
-      status: error instanceof SdpApiResponseError ? error.status : null,
+      answer: sdpApiAnswer(error),
     };
   }
 }

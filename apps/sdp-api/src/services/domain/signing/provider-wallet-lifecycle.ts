@@ -43,10 +43,25 @@ type WalletCreateContext<TParsed extends ProviderConfigRecord = ProviderConfigRe
   projectId: string;
   params: {
     label?: string;
+    /**
+     * Derived from the request's Idempotency-Key, scoped to the tenant and credential.
+     * Providers that dedupe on a request id receive it, so a retry after a
+     * crash is answered with the wallet the first attempt made.
+     */
+    requestId?: string;
   };
   parsed: TParsed;
   cipher?: CustodyCipher;
 };
+
+/**
+ * The Privy `external_id` for a keyed wallet create. Privy holds one external
+ * id per wallet in an app, so a retry finds the wallet even after its
+ * idempotency window.
+ */
+export function privyWalletExternalId(requestId: string): string {
+  return `sdp_cw_${requestId}`;
+}
 
 type WalletDeleteContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;
@@ -98,8 +113,18 @@ const providerWalletLifecycleRegistry = {
     },
   },
   privy: {
-    create: async ({ env }) => {
-      const provisioned = await withProvisioningError("Privy", () => provisionPrivyWallet(env, {}));
+    create: async ({ env, params }) => {
+      const provisioned = await withProvisioningError("Privy", () =>
+        provisionPrivyWallet(
+          env,
+          params.requestId
+            ? {
+                externalId: privyWalletExternalId(params.requestId),
+                idempotencyKey: params.requestId,
+              }
+            : {}
+        )
+      );
 
       return {
         walletId: normalizePrivyWalletId(provisioned.walletId),
@@ -108,16 +133,21 @@ const providerWalletLifecycleRegistry = {
     },
   },
   coinbase_cdp: {
-    create: async ({ env, orgId, projectId, parsed }) => {
+    create: async ({ env, orgId, projectId, params, parsed }) => {
       // Additional wallets get a unique seed: every create provisions a fresh
       // account, and a name collision is an error rather than a silent reuse.
+      // A keyed create seeds the name with its request id instead, so a retry
+      // resolves to the account the first attempt made: by CDP's idempotency
+      // key, and past it by the name, which only that request can derive.
       const provisioned = await withProvisioningError("Coinbase CDP", () =>
         provisionCoinbaseCdpAccount(env, {
           orgId,
           projectId,
-          walletSeed: crypto.randomUUID(),
+          walletSeed: params.requestId ?? crypto.randomUUID(),
           network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,
+          idempotencyKey: params.requestId,
+          reuseExisting: params.requestId !== undefined,
         })
       );
 

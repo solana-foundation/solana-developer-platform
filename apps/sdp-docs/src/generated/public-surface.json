@@ -12,7 +12,7 @@
     "private_channels",
     "helius_rings"
   ],
-  "rampProviders": ["moonpay", "bvnk", "coinbase", "stripe"],
+  "rampProviders": ["moonpay", "bvnk", "stripe"],
   "allowedOperations": [
     {
       "family": "privacy",
@@ -79,5 +79,5 @@
     "private_channels",
     "helius_rings"
   ],
-  "allRampProviders": ["moonpay", "bvnk", "coinbase", "stripe"]
+  "allRampProviders": ["moonpay", "bvnk", "stripe"]
 }

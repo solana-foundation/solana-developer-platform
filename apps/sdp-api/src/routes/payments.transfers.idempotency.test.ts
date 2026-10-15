@@ -2,7 +2,10 @@ import type * as feePaymentAdapters from "@sdp/fee-payment";
 import { FeePaymentError } from "@sdp/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   getRecentBlockhashMock,
@@ -10,7 +13,10 @@ import {
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
+  TEST_ORG,
+  TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  TEST_USER,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
@@ -65,13 +71,77 @@ describe("Payments routes — transfer idempotency", () => {
     expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
     const stored = await readTransferRow(firstJson.data.transfer.id);
     expect(stored.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    if (!stored.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
-    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
-      "custodyWalletId",
-      TEST_CUSTODY_WALLET_ID
-    );
+    // The row records the key layer's fingerprint, which replayFromRecord compares.
+    const keyRecord = await getDb(env)
+      .prepare("SELECT fingerprint FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("xfer-key-1")
+      .first<{ fingerprint: string }>();
+    expect(stored.idempotency_fingerprint).toBe(keyRecord?.fingerprint);
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
+  it("binds the domain row to its credential: past the key record, the same credential replays and another runs as new", async () => {
+    createFeePaymentAdapterMock.mockReturnValue({
+      providerId: "mock",
+      getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+      getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+        ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+        signerAddress: TEST_MOCK_FEE_PAYER,
+      }),
+      signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      signAndSend: vi.fn(),
+    } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+    const otherKey = {
+      id: "key_payments_other",
+      raw: "sk_test_payments_other",
+      prefix: "sk_test_oth",
+    };
+    await seedProjectApiKey(getDb(env), env, {
+      key: otherKey,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["*"],
+    });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+    };
+    const expireKeyRecords = () =>
+      getDb(env).execute(
+        "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = ?",
+        ["xfer-shared-key"]
+      );
+
+    const first = await postTransfer(body, { idempotencyKey: "xfer-shared-key" });
+    expect(first.status).toBe(200);
+    const firstId = (await readTransferResponse(first)).data.transfer.id;
+    await expireKeyRecords();
+
+    const sameCredential = await postTransfer(body, { idempotencyKey: "xfer-shared-key" });
+    expect(sameCredential.status).toBe(200);
+    expect((await readTransferResponse(sameCredential)).data.transfer.id).toBe(firstId);
+    expect(await countTransferRows()).toBe(1);
+    await expireKeyRecords();
+
+    // A new transfer signs new bytes: a fresh blockhash keeps its signature distinct.
+    getRecentBlockhashMock.mockResolvedValue({
+      blockhash: TEST_SOLANA_ADDRESSES.wallet3 as Awaited<
+        ReturnType<typeof solanaRpc.getRecentBlockhash>
+      >["blockhash"],
+      lastValidBlockHeight: 1000n,
+    });
+    const otherCredential = await postTransfer(body, {
+      idempotencyKey: "xfer-shared-key",
+      auth: { kind: "api_key", raw: otherKey.raw },
+    });
+    expect(otherCredential.status).toBe(200);
+    expect((await readTransferResponse(otherCredential)).data.transfer.id).not.toBe(firstId);
+    expect(await countTransferRows()).toBe(2);
   });
 
   it("replays a failed transfer on retry without submitting again", async () => {
@@ -110,9 +180,13 @@ describe("Payments routes — transfer idempotency", () => {
     });
 
     expect(first.status).toBeGreaterThanOrEqual(400);
-    expect(second.status).toBe(200);
-    const secondBody = await readTransferResponse(second);
-    expect(secondBody.data.transfer.status).toBe("failed");
+    // The retry is answered with the same error as the request that failed the row
+    // (HOO-1918), never a 200 for the failed row.
+    expect(second.status).toBe(first.status);
+    const [firstError, secondError] = (await Promise.all([first.json(), second.json()])) as {
+      error: { code: string };
+    }[];
+    expect(secondError?.error.code).toBe(firstError?.error.code);
     expect(signAsFeePayerMock).toHaveBeenCalledOnce();
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -126,18 +200,91 @@ describe("Payments routes — transfer idempotency", () => {
       amount: "1",
     };
 
-    const [first, second] = await Promise.all([
+    const responses = await Promise.all([
       postTransfer(body, { idempotencyKey: "xfer-race-key" }),
       postTransfer(body, { idempotencyKey: "xfer-race-key" }),
     ]);
 
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
-    const firstJson = await readTransferResponse(first);
-    const secondJson = await readTransferResponse(second);
-    expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
+    // The shared step lets one run; the other is told the key is in flight
+    // (HOO-1918) and its retry replays the winner's answer.
+    const winner = responses.find((response) => response.status === 200);
+    const loser = responses.find((response) => response.status === 409);
+    if (!winner || !loser) {
+      throw new Error(`expected one 200 and one 409, got ${responses.map((r) => r.status)}`);
+    }
+    expect(((await loser.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_IN_FLIGHT"
+    );
+    const retry = await postTransfer(body, { idempotencyKey: "xfer-race-key" });
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+    const winnerJson = await readTransferResponse(winner);
+    expect((await readTransferResponse(retry)).data.transfer.id).toBe(winnerJson.data.transfer.id);
     expect(await countTransferRows()).toBe(1);
     expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
+  it("fingerprints the amount canonically, so 1.0 and 1 are one transfer", async () => {
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+    };
+
+    const first = await postTransfer(
+      { ...body, amount: "1.0" },
+      { idempotencyKey: "xfer-spelling" }
+    );
+    expect(first.status).toBe(200);
+    const respelled = await postTransfer(
+      { ...body, amount: "1" },
+      { idempotencyKey: "xfer-spelling" }
+    );
+
+    expect(respelled.status).toBe(200);
+    expect(respelled.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(respelled)).data.transfer.id).toBe(
+      (await readTransferResponse(first)).data.transfer.id
+    );
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("refuses an unknown ramp transferId before claiming the key", async () => {
+    const response = await postTransfer(
+      {
+        transferId: "ptx_missing_ramp_deposit",
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { idempotencyKey: "xfer-missing-ramp" }
+    );
+
+    expect(response.status).toBe(404);
+    // Refused before the claim: no 404 is stored under the key for 24 hours.
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("xfer-missing-ramp")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
+  });
+
+  it("refuses a transfer without an Idempotency-Key before anything runs", async () => {
+    const response = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { idempotencyKey: null }
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+    expect(await countTransferRows()).toBe(0);
   });
 
   it("rejects the same Idempotency-Key with a different body", async () => {
@@ -167,10 +314,13 @@ describe("Payments routes — transfer idempotency", () => {
       },
       { idempotencyKey: headers["Idempotency-Key"] }
     );
-    expect(conflict.status).toBe(409);
+    expect(conflict.status).toBe(422);
+    expect(((await conflict.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED"
+    );
   });
 
-  it("does not dedup when no Idempotency-Key is supplied", async () => {
+  it("does not dedup two requests under different Idempotency-Keys", async () => {
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(

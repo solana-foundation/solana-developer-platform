@@ -1,4 +1,7 @@
 import type { Arguments } from "swr";
+import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
+import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-query-key";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 
 const WALLET_CARD_BALANCE_FALLBACK_PREFIX = "wallet-card-balance-fallback:";
 
@@ -15,4 +18,9 @@ export const custodyQueryKeys = {
     (Array.isArray(key) && (key[0] === "wallet-balances" || key[0] === "wallet-activity")) ||
     key === custodyQueryKeys.walletCardBalances() ||
     (typeof key === "string" && key.startsWith(WALLET_CARD_BALANCE_FALLBACK_PREFIX)),
+  /** The wallet inventories other features read (payments, Earn, issuance pickers). */
+  isWalletInventoryKey: (key: Arguments) =>
+    key === paymentsQueryKeys.actionWallets() ||
+    key === earnQueryKeys.fundingWallets() ||
+    issuanceQueryKeys.isWalletInventoryKey(key),
 };

@@ -278,9 +278,88 @@ describe("Payments routes — on-chain transfers", () => {
     expect(rows[0]?.signature).toBeTruthy();
     expect(rows[0]?.signed_transaction).toBeTruthy();
 
+    // A second request to fund the same deposit (a retry after a crash, or
+    // another key) is answered from the funded row and sends nothing again
+    // (HOO-1918), instead of a 409 the client could never get past.
+    const sendsBefore = sendTransactionMock.mock.calls.length;
     const duplicate = await postTransfer(JSON.parse(requestBody), {});
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(200);
+    const duplicateBody = await readTransferResponse(duplicate);
+    expect(duplicateBody.data.transfer.id).toBe(body.data.transfer.id);
+    expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
+  });
+
+  // Jina (#2334): past the key's record, the deposit row answered the same key
+  // with a changed memo, because recovery compared only the on-chain fields.
+  it("compares a funded deposit's retry by the fingerprint its key recorded", async () => {
+    const transferId = generatePaymentTransferId();
+    const repository = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    await repository.createTransfer({
+      id: transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: null,
+      token: SOL_MINT,
+      amount: "1",
+      memo: null,
+      type: "offramp",
+      direction: "outbound",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerReference: "moonpay-ramp-deposit-fingerprint",
+      deliveryMode: "hosted",
+      fiatCurrency: "USD",
+      fiatAmount: "100",
+      providerData: {
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1.0" },
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey: null,
+      idempotencyFingerprint: null,
+    });
+    const idempotencyKey = crypto.randomUUID();
+    const request = {
+      transferId,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "1",
+      memo: "first",
+    };
+    const funded = await postTransfer(request, { idempotencyKey });
+    expect(funded.status, await funded.clone().text()).toBe(200);
+    // The shared record expires; the deposit row is what answers now.
+    await getDb(env)
+      .prepare(
+        "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = ?"
+      )
+      .bind(idempotencyKey)
+      .run();
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const changed = await postTransfer({ ...request, memo: "changed" }, { idempotencyKey });
+    expect(changed.status).toBe(422);
+    expect(((await changed.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED"
+    );
+
+    const same = await postTransfer(request, { idempotencyKey });
+    expect(same.status).toBe(200);
+    expect(same.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(same)).data.transfer.id).toBe(transferId);
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });
 
   it("refuses to fund an off-ramp deposit at a provider outside the release channel", async () => {

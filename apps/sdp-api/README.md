@@ -10,7 +10,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, Coinbase, or Stripe
+- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, or Stripe
 - **Earn:** discover yield strategies and build self-custodial deposit or withdrawal transactions
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
@@ -135,8 +135,8 @@ Kora is a fee-payment provider, not a signing provider. `pnpm dev:kora` starts
 the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
 Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
 via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
-use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`
-instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
+use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and that cluster's
+`KORA_<CLUSTER>_URL` (`KORA_DEVNET_URL` / `KORA_MAINNET_URL`) instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
 Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
@@ -264,8 +264,8 @@ CHAINALYSIS_API_KEY=your_key
 ELLIPTIC_API_TOKEN=your_token
 
 # Fiat ramps
-MOONPAY_API_KEY=pk_...
-MOONPAY_SECRET_KEY=sk_...
+MOONPAY_SANDBOX_API_KEY=pk_test_...
+MOONPAY_SANDBOX_SECRET_KEY=sk_test_...
 
 ```
 
@@ -289,7 +289,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:local:up`, then `KORA_RPC_URL=http://127.0.0.1:18081`)
+- Running Kora instance (`pnpm kora:local:up`, then `KORA_DEVNET_URL=http://127.0.0.1:18081`)
 - Funded Solana devnet account
 
 ## Database Migrations
@@ -342,6 +342,14 @@ image cannot run against. A migration that must break compatibility declares
 outside the migrations directory except test files. Production applies it only
 once it serves the commit before it, and never restores the previous image
 after it.
+
+Migrations run while the previous revision serves traffic, so the runner caps
+each lock wait at 5 s (`lock_timeout`) and retries the file a few times; locks
+it acquires are still held until it commits. The same CI check rejects common
+DDL that holds a blocking lock for a whole scan or build (an index without
+`CONCURRENTLY`, a foreign key without `NOT VALID`, an unproven `SET NOT NULL`).
+Rules, gaps and the `-- sdp:migration-locks: blocking` escape hatch:
+`docs/ops/release-operations.md`, "Schema compatibility".
 
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and

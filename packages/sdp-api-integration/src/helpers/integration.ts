@@ -19,6 +19,7 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { koraEndpoint } from "./kora";
 
 const {
   app,
@@ -38,7 +39,7 @@ const {
 } = apiTestSupport;
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
-const KORA_CONFIGURED = !!env.KORA_RPC_URL;
+const KORA_CONFIGURED = koraEndpoint !== null;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 const INTEGRATION_CUSTODY_PROVIDER = getIntegrationCustodyProvider();
 const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
@@ -229,8 +230,26 @@ type IntegrationRequestInit = RequestInit & {
   timeoutMs?: number;
 };
 
+const UNKEYED_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Gives every mutating request an Idempotency-Key unless the caller set one,
+ * because value-moving routes require it (HOO-1918). A test that exercises
+ * retries passes its own key so both attempts share it.
+ */
+function withIdempotencyKey(init: RequestInit): RequestInit {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers);
+  if (UNKEYED_METHODS.has(method) || headers.has("Idempotency-Key")) {
+    return init;
+  }
+  headers.set("Idempotency-Key", crypto.randomUUID());
+  return { ...init, headers };
+}
+
 export async function request(url: string, init: IntegrationRequestInit = {}) {
-  const { timeoutMs, ...requestInit } = init;
+  const { timeoutMs, ...unkeyedInit } = init;
+  const requestInit = withIdempotencyKey(unkeyedInit);
 
   if (!timeoutMs || timeoutMs <= 0) {
     return app.request(url, requestInit, env);
@@ -453,7 +472,7 @@ async function fundAddressViaKoraFeePayer(
   lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl || !env.KORA_RPC_URL) {
+  if (!rpcUrl || !KORA_CONFIGURED) {
     return false;
   }
 

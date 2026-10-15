@@ -192,6 +192,7 @@ async function collectRow(
       initiatedByKeyId: null,
       collectionSource: "automated",
       admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+      idempotencyKey: null,
     });
     return "ok";
   } catch (error) {
@@ -222,6 +223,8 @@ async function recoverLifecycleRow(
       projectId: row.project_id,
       sourceWallet,
       recurringPayment: row,
+      // The cron resumes a row under the key of the request that claimed it.
+      idempotencyKey: null,
     };
     if (isActivatingRecurringPaymentStatus(row.status)) {
       const { scope, context } = admissionFor(row, "recurring.activate");

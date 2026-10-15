@@ -31,9 +31,11 @@ import { readOndoUsdyRate } from "./usdy-rate";
  * strategy is HOLDING USDY: the deposit is a custody-signed USDC→USDY swap on
  * the secondary market, the position is the wallet's USDY balance, and the
  * exit is the reverse swap. The primary mint/redeem facility is deliberately
- * not used — fresh primary mints carry a 40–50 day Reg S transfer lockup and
- * sub-$100k redemptions wait out that window (PRO-1803, measured against
- * Ondo's docs 2026-09-02) — so nothing here needs an Ondo credential.
+ * not used (PRO-1803): it needs Ondo onboarding, and Ondo lists its on-chain
+ * entry point (`USDY_InstantManager`) on Ethereum, BNB Chain and Tempo, not
+ * Solana. So nothing here needs an Ondo credential. Ondo's docs state no
+ * lockup duration for it (re-checked 2026-10-15); the figure SDP used to cite
+ * is retired, see docs/earn/ondo-catalogue-inventory.md.
  *
  * ── Where the rate comes from ───────────────────────────────────────────────
  * Nothing on Solana publishes USDY's rate of return, only its price. The row's
@@ -205,8 +207,8 @@ export class OndoEarnClient extends StubEarnClient {
         // into one.
         apyType: "variable",
         currentApy: rate.currentApy,
-        // Exit is a secondary-market swap: always open, no lock. The 40–50 day
-        // Reg S lockup applies only to PRIMARY mints, which SDP does not use.
+        // Exit is a secondary-market swap: always open, no lock. SDP never
+        // touches Ondo's primary facility, so none of its terms apply.
         liquidityTerm: "instant",
         riskMetadata: {
           // Ondo issues and manages the instrument; the attribution traces to
@@ -217,12 +219,21 @@ export class OndoEarnClient extends StubEarnClient {
           // the instrument on the cluster this row is fundable on, not its
           // cross-chain total.
           ...(rate.solanaTvlUsd === undefined ? {} : { tvlUsd: rate.solanaTvlUsd }),
-          // What an integrator's compliance team asks before offering a Reg S
-          // instrument, stated on the row itself (PRO-1832). Neither constraint
-          // is enforced on-chain by SDP: the offering party screens its end
-          // users, and the issuer can freeze any USDY token account. The longer
-          // record is docs/earn/ondo-catalogue-inventory.md.
-          eligibility: "Reg S: non-US persons only; not enforced on-chain",
+          // What an integrator's compliance team asks before offering USDY,
+          // stated on the row itself (PRO-1832). `eligibility` summarizes
+          // Ondo's eligibility page (fetched 2026-10-15): the US and Canada by
+          // name and every other prohibited jurisdiction by link, so one Ondo
+          // adds later is still covered. Neither SDP nor the chain enforces it:
+          // the offering party screens its end users, and the issuer can
+          // freeze any USDY token account. The full lists are in
+          // docs/earn/ondo-catalogue-inventory.md.
+          eligibility:
+            "Ondo bars individuals and entities in the US, Canada and the other jurisdictions " +
+            "it lists, and Reg S US persons or anyone acting for them, from subscribing for, " +
+            "acquiring or redeeming USDY; buy orders placed from the US are barred too. " +
+            "Qualified/professional investors only in Brazil, the EEA, Hong Kong, Malaysia, " +
+            "Singapore, Switzerland and the UK. Not enforced on-chain or by SDP. Full rules: " +
+            "https://docs.ondo.finance/general-access-products/usdy/eligibility",
           issuerControls: "Ondo holds the USDY mint and freeze authority",
         },
       },

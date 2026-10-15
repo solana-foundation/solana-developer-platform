@@ -268,30 +268,6 @@ const moonpayRampSettlementSchema = z
   })
   .openapi({ description: "MoonPay on-ramp settlement economics." });
 
-const coinbaseRampSettlementSchema = z
-  .object({
-    provider: z.literal("coinbase"),
-    status: z.enum(["completed", "failed"]),
-    paymentCurrency: z.string().openapi({ description: "Fiat currency paid." }),
-    paymentSubtotal: z.string().openapi({ description: "Fiat subtotal." }),
-    paymentTotal: z.string().openapi({ description: "Fiat total paid." }),
-    purchaseCurrency: z.string().openapi({ description: "Crypto currency purchased." }),
-    purchaseAmount: z.string().openapi({ description: "Crypto amount purchased." }),
-    exchangeRate: z.string().openapi({ description: "Exchange rate." }),
-    fees: z
-      .array(
-        z.object({
-          feeAmount: z.string(),
-          feeCurrency: z.string(),
-          feeType: z.string(),
-        })
-      )
-      .openapi({ description: "Fee legs." }),
-    txHash: z.string().optional().openapi({ description: "On-chain transaction hash." }),
-    failureReason: z.string().optional().openapi({ description: "Provider failure reason." }),
-  })
-  .openapi({ description: "Coinbase on-ramp settlement economics." });
-
 const bvnkRampSettlementBaseSchema = z.object({
   provider: z.literal("bvnk"),
   payinId: z.string().openapi({ description: "BVNK pay-in id (fiat leg)." }),
@@ -392,11 +368,7 @@ const bvnkSettlementSchema = z.union([
   bvnkOfframpChannelSettlementSchema,
 ]);
 
-const rampTransferSettlementSchema = z.union([
-  moonpayRampSettlementSchema,
-  coinbaseRampSettlementSchema,
-  bvnkSettlementSchema,
-]);
+const rampTransferSettlementSchema = z.union([moonpayRampSettlementSchema, bvnkSettlementSchema]);
 
 export const transferSchema = z
   .object({

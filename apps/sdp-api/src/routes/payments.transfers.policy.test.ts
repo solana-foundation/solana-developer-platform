@@ -9,6 +9,7 @@ import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
+  seedCachedKey,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -248,6 +249,37 @@ describe("Payments routes — transfer wallet access", () => {
     expect(replay.status).toBe(403);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
+  // Greptile (#2267): authentication reads the key's bindings fresh on every
+  // request (HOO-2048), so a binding removed while the auth cache still holds
+  // it cannot read the stored response.
+  it("refuses a replay once a selected-wallet key loses its binding", async () => {
+    // Writes the binding to the cache and, as authentication reads it, to Postgres.
+    await seedCachedKey({
+      walletScope: "selected",
+      walletBindings: [
+        { walletId: TEST_WALLET_ID, custodyWalletId: TEST_CUSTODY_WALLET_ID, permissions: ["*"] },
+      ],
+    });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+    };
+    const idempotencyKey = "selected-replay-revoked";
+    expect((await postTransfer(body, { idempotencyKey })).status).toBe(200);
+
+    // Still wallet-scoped (a key with no bindings at all reaches every wallet),
+    // but no longer bound to this one.
+    await getDb(env)
+      .prepare("UPDATE api_key_wallet_permissions SET wallet_id = 'wal_other' WHERE api_key_id = ?")
+      .bind(TEST_API_KEY.id)
+      .run();
+    const retry = await postTransfer(body, { idempotencyKey });
+    expect(retry.status).toBe(403);
+    expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+  });
+
   it("denies a cached selected-wallet binding after its Provider ID becomes ambiguous", async () => {
     await seedSelectedApiKeyWalletBindings([
       {

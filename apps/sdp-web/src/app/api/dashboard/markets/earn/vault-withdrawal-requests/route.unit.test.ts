@@ -12,7 +12,7 @@ describe("dashboard queued-withdrawal request proxy", () => {
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
   });
 
-  it("forwards only the idempotency key on create", async () => {
+  it("leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers on create", async () => {
     const request = new Request("https://dashboard.example.test/api/requests", {
       method: "POST",
       headers: {
@@ -29,7 +29,6 @@ describe("dashboard queued-withdrawal request proxy", () => {
       request,
       traceSource: "route.dashboard.earn.vault_withdrawal_requests.create",
       path: "/v1/earn/vault-withdrawal-requests",
-      upstreamHeaders: { "Idempotency-Key": "queue-key" },
     });
   });
 

@@ -626,19 +626,8 @@ async function createCollectionAttemptUnderRecurringLock(input: {
     if (!(await lockOpenCollectionCycle(tx, input))) return null;
 
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    if (input.enforceCooldown) {
-      const retryBefore = new Date(
-        new Date(input.attemptedAt).getTime() -
-          RECURRING_PAYMENT_COLLECTION_CONFIG.retryAfterMinutes * 60 * 1000
-      ).toISOString();
-      const recentFailure = await subscriptionsRepo.getCollectionAttemptByDue({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        subscriptionId,
-        dueAt,
-        statuses: FAILED_COLLECTION_ATTEMPT_STATUSES,
-      });
-      if (recentFailure && recentFailure.updated_at > retryBefore) return null;
+    if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
+      return null;
     }
 
     return subscriptionsRepo.createCollectionAttempt({
@@ -658,6 +647,128 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       createdAt: input.attemptedAt,
       updatedAt: input.attemptedAt,
     });
+  });
+}
+
+async function hasRecentCollectionFailure(
+  subscriptionsRepo: PaymentSubscriptionsRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: RecurringPaymentCollectionCycleRow;
+    attemptedAt: string;
+  }
+): Promise<boolean> {
+  const retryBefore = new Date(
+    new Date(input.attemptedAt).getTime() -
+      RECURRING_PAYMENT_COLLECTION_CONFIG.retryAfterMinutes * 60 * 1000
+  ).toISOString();
+  const recentFailure = await subscriptionsRepo.getCollectionAttemptByDue({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId: input.recurringPayment.subscription_id,
+    dueAt: input.recurringPayment.next_collection_due_at,
+    statuses: FAILED_COLLECTION_ATTEMPT_STATUSES,
+  });
+  return recentFailure !== null && recentFailure.updated_at > retryBefore;
+}
+
+/**
+ * Claims a due period for a collection: under the lock collectors take before
+ * they sign, one transaction writes the attempt (carrying the request's
+ * Idempotency-Key, HOO-1918) and the transfer it will submit, linked. Every
+ * keyed attempt therefore has a transfer, and a same-key retry is answered
+ * from them. Returns null when the cycle moved on or another attempt holds it.
+ */
+async function claimCollectionUnderRecurringLock(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
+  attemptedAt: string;
+  metadata: PaymentSubscriptionCollectionAttemptMetadata;
+  enforceCooldown: boolean;
+  initiatedByKeyId: string | null;
+  idempotencyKey: string | null;
+}): Promise<{
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  transfer: PaymentTransferRow;
+} | null> {
+  const { recurringPayment } = input;
+  return getDb(input.env).transaction(async (tx) => {
+    if (!(await lockOpenCollectionCycle(tx, input))) return null;
+
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
+      return null;
+    }
+    const claimed = await subscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: recurringPayment.subscription_id,
+      transferId: null,
+      token: recurringPayment.token,
+      amount: recurringPayment.amount,
+      dueAt: recurringPayment.next_collection_due_at,
+      attemptedAt: input.attemptedAt,
+      status: "processing",
+      signature: null,
+      error: null,
+      metadata: input.metadata,
+      createdAt: input.attemptedAt,
+      updatedAt: input.attemptedAt,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (!claimed) return null;
+
+    const paymentsRepo = createPostgresPaymentsRepository(tx, createTenantScope(input));
+    const transfer = await paymentsRepo.createTransfer({
+      id: generatePaymentTransferId(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.sourceWallet.id,
+      walletId: input.sourceWallet.walletId,
+      counterpartyId: recurringPayment.counterparty_id,
+      sourceAddress: input.sourceWallet.publicKey,
+      destinationAddress: recurringPayment.destination_address,
+      token: recurringPayment.token,
+      amount: recurringPayment.amount,
+      memo: null,
+      type: "transfer",
+      direction: "outbound",
+      status: "processing",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {
+        recurringPaymentId: recurringPayment.id,
+        subscriptionId: recurringPayment.subscription_id,
+        collectionDueAt: recurringPayment.next_collection_due_at,
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: input.initiatedByKeyId,
+    });
+    if (!transfer) {
+      throw internalError("Failed to create collection transfer");
+    }
+    const attempt = await subscriptionsRepo.updateCollectionAttempt({
+      attemptId: claimed.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      transferId: transfer.id,
+      status: "processing",
+      updatedAt: input.attemptedAt,
+    });
+    if (!attempt || attempt.transfer_id !== transfer.id) {
+      throw internalError("Failed to link collection attempt to transfer");
+    }
+    return { attempt, transfer };
   });
 }
 
@@ -1199,6 +1310,8 @@ async function recoverRecurringPaymentCollection(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   dueAt: string;
+  /** A keyed collect request adopting the attempt records its key on it (HOO-1918). */
+  idempotencyKey?: string | null;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -1280,6 +1393,22 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredAttempt = existing;
   const recoveredTransfer = transfer;
+  if (input.idempotencyKey) {
+    // This request now answers for the period: a retry of it finds the attempt
+    // instead of collecting the next one once the due date moves on. An attempt
+    // another key already answers for is that request's (a null-key cron
+    // attempt is adopted): recovering it here would leave this key free to pull
+    // the next period, so it is refused as in flight, unstored.
+    const adopted = await input.subscriptionsRepo.adoptCollectionAttemptIdempotencyKey({
+      attemptId: existing.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (!adopted) {
+      throw conflict("Recurring payment collection is already processing");
+    }
+  }
 
   try {
     await confirmSubscriptionSignature(
@@ -1442,6 +1571,8 @@ export async function collectRecurringPayment(input: {
    * collection never asks.
    */
   admitStart: () => Promise<void>;
+  /** The manual request's Idempotency-Key, written on the attempt it claims; null for the cron. */
+  idempotencyKey: string | null;
 }): Promise<RecurringPaymentCollectionResult> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!hasRecoverableRecurringPaymentCollection(input.recurringPayment.status)) {
@@ -1479,6 +1610,7 @@ export async function collectRecurringPayment(input: {
     recurringPayment: input.recurringPayment,
     subscription,
     dueAt,
+    idempotencyKey: input.idempotencyKey,
   });
   if (recovered) return recovered;
   if (!isCollectableRecurringPaymentStatus(input.recurringPayment.status)) {
@@ -1540,22 +1672,23 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Subscription must be active before collection");
     }
 
-    attempt = await createCollectionAttemptUnderRecurringLock({
+    const linkedCollection = await claimCollectionUnderRecurringLock({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      recurringPayment: input.recurringPayment,
+      sourceWallet: input.sourceWallet,
+      recurringPayment,
       attemptedAt: nowIso,
-      status: "processing",
-      error: null,
       metadata: initialCollectionMetadata({
         recurringPaymentId: input.recurringPayment.id,
         source: input.collectionSource,
         initiatedByKeyId: input.initiatedByKeyId,
       }),
       enforceCooldown: input.collectionSource === "automated",
+      initiatedByKeyId: input.initiatedByKeyId,
+      idempotencyKey: input.idempotencyKey,
     });
-    if (!attempt) {
+    if (!linkedCollection) {
       const recoveredAfterConflict = await recoverRecurringPaymentCollection({
         env: input.env,
         recurringRepo,
@@ -1566,6 +1699,7 @@ export async function collectRecurringPayment(input: {
         recurringPayment: input.recurringPayment,
         subscription,
         dueAt,
+        idempotencyKey: input.idempotencyKey,
       });
       if (recoveredAfterConflict) {
         return recoveredAfterConflict;
@@ -1573,59 +1707,6 @@ export async function collectRecurringPayment(input: {
       throw conflict("Recurring payment collection is already processing");
     }
 
-    const claimedAttempt = attempt;
-    const linkedCollection = await getDb(input.env).transaction(async (tx) => {
-      const transactionPaymentsRepo = createPostgresPaymentsRepository(
-        tx,
-        createTenantScope(input)
-      );
-      const transactionSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-      const createdTransfer = await transactionPaymentsRepo.createTransfer({
-        id: generatePaymentTransferId(),
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        custodyWalletId: input.sourceWallet.id,
-        walletId: input.sourceWallet.walletId,
-        counterpartyId: input.recurringPayment.counterparty_id,
-        sourceAddress: input.sourceWallet.publicKey,
-        destinationAddress: input.recurringPayment.destination_address,
-        token: input.recurringPayment.token,
-        amount: input.recurringPayment.amount,
-        memo: null,
-        type: "transfer",
-        direction: "outbound",
-        status: "processing",
-        provider: null,
-        providerReference: null,
-        deliveryMode: null,
-        fiatCurrency: null,
-        fiatAmount: null,
-        providerData: {
-          recurringPaymentId: input.recurringPayment.id,
-          subscriptionId: subscription.id,
-          collectionDueAt: dueAt,
-        },
-        serializedTx: null,
-        signature: null,
-        slot: null,
-        initiatedByKeyId: input.initiatedByKeyId,
-      });
-      if (!createdTransfer) {
-        throw internalError("Failed to create collection transfer");
-      }
-      const linkedAttempt = await transactionSubscriptionsRepo.updateCollectionAttempt({
-        attemptId: claimedAttempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        transferId: createdTransfer.id,
-        status: "processing",
-        updatedAt: new Date().toISOString(),
-      });
-      if (!linkedAttempt || linkedAttempt.transfer_id !== createdTransfer.id) {
-        throw internalError("Failed to link collection attempt to transfer");
-      }
-      return { attempt: linkedAttempt, transfer: createdTransfer };
-    });
     attempt = linkedCollection.attempt;
     transfer = linkedCollection.transfer;
     submissionStore = createRecurringCollectionSignedSubmissionStore({

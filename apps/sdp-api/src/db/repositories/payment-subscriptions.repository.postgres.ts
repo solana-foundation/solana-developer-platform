@@ -1,4 +1,5 @@
 import {
+  COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
   PAYMENT_SUBSCRIPTION_PLAN_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES,
@@ -532,8 +533,9 @@ export function createPostgresPaymentSubscriptionsRepository(
              error,
              metadata,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             updated_at,
+             idempotency_key
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -551,7 +553,8 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.error,
           JSON.stringify(input.metadata),
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey ?? null
         )
         .run();
 
@@ -560,6 +563,47 @@ export function createPostgresPaymentSubscriptionsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async findCollectionAttemptByIdempotencyKey({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_subscription_collection_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND idempotency_key = ?
+              AND status = ANY(?::text[])
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(organizationId, projectId, idempotencyKey, [
+          ...COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
+    },
+
+    async adoptCollectionAttemptIdempotencyKey({
+      attemptId,
+      organizationId,
+      projectId,
+      idempotencyKey,
+    }) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET idempotency_key = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND (idempotency_key IS NULL OR idempotency_key = ?)
+            RETURNING id`
+        )
+        .bind(idempotencyKey, attemptId, organizationId, projectId, idempotencyKey)
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {

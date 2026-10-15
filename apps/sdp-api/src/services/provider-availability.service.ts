@@ -1,4 +1,4 @@
-import { hasStripeManagedKeys } from "@sdp/payments/ramps";
+import { hasMoonpayManagedKeys, hasStripeManagedKeys } from "@sdp/payments/ramps";
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
@@ -237,13 +237,10 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
   ramps: {
     moonpay: {
       label: "MoonPay",
-      isConfigured: (env, testMode) => {
-        const prod = hasAllEnv(env, ["MOONPAY_API_KEY", "MOONPAY_SECRET_KEY"]);
-        const sandbox = hasAllEnv(env, ["MOONPAY_SANDBOX_API_KEY", "MOONPAY_SANDBOX_SECRET_KEY"]);
-        if (testMode === true) return sandbox;
-        if (testMode === false) return prod;
-        return prod || sandbox;
-      },
+      // The client's own key check, so a live key under the sandbox names
+      // reads as unconfigured here too. Production is never managed.
+      isConfigured: (env, testMode) =>
+        hasMoonpayManagedKeys(env, testMode === false ? "production" : "sandbox"),
     },
     bvnk: {
       label: "BVNK",
@@ -262,12 +259,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
         if (testMode === false) return prod;
         return prod || sandbox;
       },
-    },
-    coinbase: {
-      label: "Coinbase Onramp",
-      // Onramp uses the account-wide CDP Secret API Key (same key across environments).
-      isConfigured: (env) =>
-        hasAllEnv(env, ["COINBASE_CDP_API_KEY_ID", "COINBASE_CDP_API_KEY_SECRET"]),
     },
     stripe: {
       label: "Stripe",

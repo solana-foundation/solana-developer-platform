@@ -128,6 +128,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         createdBy: TEST_USER.id,
         createdAt,
         updatedAt: createdAt,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
       });
 
     const exact = await create("recpay_repo_exact_filter", TEST_CUSTODY_WALLET_ID);
@@ -236,6 +238,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       createdBy: TEST_USER.id,
       createdAt,
       updatedAt: createdAt,
+      idempotencyKey: null,
+      idempotencyFingerprint: null,
     });
     expect(created).not.toBeNull();
     if (created === null) throw new Error("Failed to create recurring payment");
@@ -288,6 +292,8 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       createdBy: TEST_USER.id,
       createdAt,
       updatedAt: createdAt,
+      idempotencyKey: null,
+      idempotencyFingerprint: null,
     });
     expect(created).not.toBeNull();
     if (created === null) throw new Error("Failed to create recurring payment");
