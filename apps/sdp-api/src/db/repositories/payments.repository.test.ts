@@ -10,6 +10,7 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -1230,38 +1231,33 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
     production: "xfr_job_production",
   } as const satisfies Record<SdpEnvironment, string>;
 
-  beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
   afterAll(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await resetPaymentFixtures();
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: "cfg_payments_repo_production",
-          organizationId: TEST_ORG.id,
-          projectId: PRODUCTION_PROJECT_ID,
-          provider: "privy",
-          configEncrypted: "encrypted",
-          status: "active",
-        },
-      ],
+    await seedTestPrivyConnection(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: PRODUCTION_PROJECT_ID,
+      connectionId: "cconn_payments_repo_production",
+      credentialId: "pcred_payments_repo_production",
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+      providerAccountFingerprint: "sha256:payments-repo-production",
       wallets: [
         {
           id: "cwlt_payments_repo_production",
-          owner: { kind: "config", custodyConfigId: "cfg_payments_repo_production" },
           walletId: "wallet_payments_repo_production",
           publicKey: "Production111",
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
         },
       ],
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: "cwlt_payments_repo_production",
     });
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer({
