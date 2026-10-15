@@ -319,8 +319,6 @@ export async function advanceCounterpartyRequirements(
       return readyCounterparty("moonpay", input.direction);
     case "bvnk":
       return advanceBvnkRequirements(c, input);
-    case "coinbase":
-      return readyCounterparty("coinbase", input.direction);
     case "stripe":
       return readyCounterparty("stripe", input.direction);
     default: {

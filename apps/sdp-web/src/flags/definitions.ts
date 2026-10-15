@@ -272,7 +272,6 @@ export function defineDashboardFlags({
 
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
-  const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
   return {
@@ -293,7 +292,6 @@ export function defineDashboardFlags({
     newDesignActivity,
     rampProviderMoonpay,
     rampProviderBvnk,
-    rampProviderCoinbase,
     rampProviderStripe,
   };
 }

@@ -384,7 +384,6 @@
     "rampLightsparkDescription": "Rails de liquidação fiduciária pela Lightning Network.",
     "rampBvnkDescription": "Pagamentos empresariais entre moeda fiduciária e stablecoins.",
     "rampMoneygramDescription": "Transferências em dinheiro e por banco pela rede MoneyGram.",
-    "rampCoinbaseDescription": "On-ramp e off-ramp de moeda fiduciária por contas Coinbase.",
     "rampMuralDescription": "Rails de pagamentos e faturamento em stablecoin.",
     "rampStripeDescription": "On-ramp de moeda fiduciária pelo checkout da Stripe.",
     "complianceRangeDescription": "Triagem de transações e monitoramento de risco para Solana.",

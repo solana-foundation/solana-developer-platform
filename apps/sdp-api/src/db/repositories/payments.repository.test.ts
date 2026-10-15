@@ -590,7 +590,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await expect(
       repo.setProviderReferenceIfEmpty({
         ...input,
-        provider: "coinbase",
+        provider: "stripe",
       })
     ).resolves.toBeNull();
   });

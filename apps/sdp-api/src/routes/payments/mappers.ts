@@ -28,7 +28,6 @@ function rampProviderReference(row: TransferRow): string | undefined {
     case "bvnk":
       return bvnkProviderReference(row);
     case "moonpay":
-    case "coinbase":
     case "stripe":
       return row.provider_reference === null ? undefined : row.provider_reference;
     default: {

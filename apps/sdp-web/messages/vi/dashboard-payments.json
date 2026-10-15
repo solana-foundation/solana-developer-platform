@@ -31,7 +31,6 @@
       "batchEstimateMissing": "Phản hồi ước tính batch thiếu chi tiết.",
       "batchTransferRequestFailed": "Yêu cầu chuyển batch thất bại ({status}).",
       "batchTransferMissing": "Phản hồi chuyển batch thiếu chi tiết.",
-      "rampEventRequestFailed": "Yêu cầu sự kiện {provider} thất bại ({status}).",
       "rampEventMissing": "Phản hồi sự kiện {provider} thiếu chi tiết chuyển.",
       "counterpartyAccountsRequestFailed": "Không tải được tài khoản ({status}).",
       "sandboxSimulationRequestFailed": "Mô phỏng sandbox thất bại ({status}).",
@@ -218,8 +217,6 @@
       "moneygramWidgetLoadFailed": "Không tải được widget MoneyGram.",
       "unsupportedMoneygramTransaction": "Giao dịch không hỗ trợ: {asset} trên {chain}.",
       "sourceWalletNoUsdc": "Wallet nguồn không có số dư USDC để gửi.",
-      "coinbaseEventFailed": "Không ghi được sự kiện Coinbase.",
-      "coinbaseOnramp": "Coinbase onramp",
       "status": {
         "waitingForFunding": "Đang chờ nạp",
         "waitingToSend": "Đang chờ gửi",

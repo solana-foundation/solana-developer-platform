@@ -365,7 +365,6 @@
     "rampLightsparkDescription": "Rails thanh toán fiat trên Lightning Network.",
     "rampBvnkDescription": "Thanh toán doanh nghiệp giữa fiat và Stablecoin.",
     "rampMoneygramDescription": "Chuyển tiền mặt và ngân hàng qua mạng MoneyGram.",
-    "rampCoinbaseDescription": "On-ramp và off-ramp fiat qua tài khoản Coinbase.",
     "rampMuralDescription": "Rails chi trả Stablecoin và lập hóa đơn.",
     "rampStripeDescription": "On-ramp fiat qua Stripe checkout.",
     "complianceRangeDescription": "Sàng lọc giao dịch và giám sát rủi ro cho Solana.",

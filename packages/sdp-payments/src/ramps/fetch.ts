@@ -144,7 +144,7 @@ const providerErrorText = z.string().regex(/\S/).optional().catch(undefined);
 
 /**
  * Parses a provider error body down to its message, scrubbed: a nested
- * `error.message`, then `message`, `reason`, or Coinbase/CDP's `errorMessage`.
+ * `error.message`, then `message`, `reason`, or `errorMessage`.
  * Ramp providers validate the counterparty fields we submit and echo them back
  * in the failure ("email jane@doe.test is already registered", "phone must be
  * E.164"), so the identifier never survives, only the wording. A body that is

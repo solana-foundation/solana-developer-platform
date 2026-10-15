@@ -68,10 +68,6 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/lib/ramps.ts:42:21:Coinbase",
-    "reason": "Ramp provider brand name"
-  },
-  {
     "candidate": "src/lib/ramps.ts:44:19:Stripe",
     "reason": "Ramp provider brand name"
   },

@@ -278,8 +278,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       precreatedTransferId = pendingTransfer.id;
       break;
     }
-    case "coinbase":
-      throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
     default: {

@@ -297,7 +297,6 @@ describe("release channels", () => {
     const bvnkInBeta: SdpRampProviderStages = {
       moonpay: "experimental",
       bvnk: "beta",
-      coinbase: "experimental",
       stripe: "experimental",
     };
     expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);

@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  CoinbaseRampEvent,
   Counterparty,
   CounterpartyAccount,
   CryptoRailId,
@@ -19,7 +18,6 @@ import type {
   PaymentTransferBatchRequest,
   PaymentTransferRecipient,
   RampDirection,
-  RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
   PaymentTransferEnvelope as TransferEnvelope,
@@ -654,36 +652,6 @@ export async function createTransferBatch(
     recipients: body.data.recipients,
     transfers: body.data.transfers,
   };
-}
-
-async function postRampEvent(
-  provider: RampEventProvider,
-  event: CoinbaseRampEvent,
-  t: Translate
-): Promise<void> {
-  const response = await dashboardRequest(`/api/dashboard/payments/ramps/events/${provider}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(event),
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.rampEventRequestFailed", {
-          provider,
-          status: response.status,
-        })
-      )
-    );
-  }
-}
-
-export function postCoinbaseRampEvent(event: CoinbaseRampEvent, t: Translate): Promise<void> {
-  return postRampEvent("coinbase", event, t);
 }
 
 export async function fetchCounterpartyAccounts(

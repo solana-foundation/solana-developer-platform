@@ -617,7 +617,7 @@ describe("Clerk auth request cache", () => {
       name: "New Clerk Organization",
       slug: "new-clerk-organization",
       private_metadata: {
-        sdp: { tier: "enterprise", providerOverrides: { ramps: { coinbase: false } } },
+        sdp: { tier: "enterprise", providerOverrides: { ramps: { moonpay: false } } },
       },
     }));
 
@@ -658,7 +658,7 @@ describe("Clerk auth request cache", () => {
     expect(organization.tier).toBe("enterprise");
     assert(typeof organization.settings === "string");
     expect(JSON.parse(organization.settings)).toEqual({
-      providerOverrides: { ramps: { coinbase: false } },
+      providerOverrides: { ramps: { moonpay: false } },
     });
 
     const projects = await getDb(env)
