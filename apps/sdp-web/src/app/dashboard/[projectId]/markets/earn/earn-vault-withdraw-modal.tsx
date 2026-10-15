@@ -900,7 +900,8 @@ export function EarnVaultWithdrawModal({
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording the answer.
-    // A money movement: an unknown outcome keeps the key (`moneyAnswerRetiresKey`).
+    // A money movement: an unknown outcome or a reused key keeps the key
+    // (`moneyAnswerRetiresKey`).
     const retired = settleMoneyIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,

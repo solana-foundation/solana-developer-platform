@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
@@ -375,7 +375,7 @@ function TransferFormState({
     startTransition(async () => {
       try {
         const result = await createTransferAction({ ...requestPayload, idempotencyKey });
-        settleIdempotencyKey(
+        settleMoneyIdempotencyKey(
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,
           idempotencyKey,
