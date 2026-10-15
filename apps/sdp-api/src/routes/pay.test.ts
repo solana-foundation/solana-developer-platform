@@ -1,7 +1,7 @@
 import type { FeePaymentPort } from "@sdp/fee-payment";
 import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT, type SponsorshipReservationStatus } from "@sdp/types";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -162,7 +162,7 @@ describe("Public payment request routes", () => {
       const reservations = () =>
         getDb(env).queryMany<{
           actor_id: string;
-          status: string;
+          status: SponsorshipReservationStatus;
           signed_transaction: string | null;
         }>(
           `SELECT actor_id, status, signed_transaction FROM sponsorship_budget_reservations
