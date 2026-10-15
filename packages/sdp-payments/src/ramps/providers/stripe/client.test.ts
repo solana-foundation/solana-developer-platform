@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "../../../errors";
+import { RAMP_PROVIDER_CLIENTS } from "../../index";
 import { replayExchanges } from "../../test-kit";
 import { StripeRampClient } from "./client";
 import { STRIPE_SESSION_TERMS, STRIPE_TEST_KIT, stripeSessionExchange } from "./test-kit";
@@ -69,5 +70,74 @@ describe("StripeRampClient session terms", () => {
       }),
       refusedFor(["destination_networks", "lock_wallet_address"])
     );
+  });
+});
+
+describe("StripeRampClient credentials", () => {
+  /** Estimates the kit's onramp with `env` in `mode`, recording every request. */
+  async function estimateWith(env: Record<string, string>, mode: "sandbox" | "production") {
+    assert.ok(STRIPE_TEST_KIT.onramp, "the Stripe kit records an onramp");
+    const replay = replayExchanges(STRIPE_TEST_KIT.onramp.estimate.exchanges);
+    const settled = await RAMP_PROVIDER_CLIENTS.stripe
+      .estimateOnramp({ env, mode }, STRIPE_TEST_KIT.onramp.estimate.input)
+      .then(
+        () => ({ ok: true as const }),
+        (cause: unknown) => ({ ok: false as const, cause })
+      );
+    return { settled, requests: replay.requests.length + replay.unrecorded.length };
+  }
+
+  function refusedBeforeAnyRequest(
+    result: Awaited<ReturnType<typeof estimateWith>>,
+    message: string
+  ): void {
+    assert.equal(result.requests, 0, "no request reaches Stripe");
+    assert.ok(!result.settled.ok, "the estimate is refused");
+    assert.ok(result.settled.cause instanceof SdpPaymentsError);
+    assert.equal(result.settled.cause.code, "PROVIDER_NOT_CONFIGURED");
+    assert.equal(result.settled.cause.message, message);
+  }
+
+  it("refuses production projects, which bring their own keys", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(STRIPE_TEST_KIT.env, "production"),
+      "Stripe is not configured for production projects."
+    );
+  });
+
+  it("refuses a live secret key mounted under the sandbox names", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(
+        { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" },
+        "sandbox"
+      ),
+      "Stripe sandbox keys must be test-mode keys."
+    );
+  });
+
+  it("refuses a live publishable key mounted under the sandbox names", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(
+        { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_live_mounted_by_mistake" },
+        "sandbox"
+      ),
+      "Stripe sandbox keys must be test-mode keys."
+    );
+  });
+
+  it("refuses when the sandbox keys are missing", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith({ STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_contract" }, "sandbox"),
+      "Stripe sandbox is not configured. Set STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_PUBLISHABLE_KEY."
+    );
+  });
+
+  it("accepts a restricted test-mode secret key", async () => {
+    const result = await estimateWith(
+      { ...STRIPE_TEST_KIT.env, STRIPE_SANDBOX_SECRET_KEY: "rk_test_restricted" },
+      "sandbox"
+    );
+    assert.ok(result.settled.ok, "the estimate succeeds");
+    assert.equal(result.requests, 1);
   });
 });

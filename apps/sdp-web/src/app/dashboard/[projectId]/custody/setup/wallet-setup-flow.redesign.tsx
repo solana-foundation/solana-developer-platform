@@ -41,7 +41,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
+import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
 import type {
   AvailableCustodyModes,
   ProjectCustodyAvailability,
@@ -842,7 +842,7 @@ function useCreateWallet({
   const router = useRouter();
   const href = useProjectHref();
   const refreshWalletInventory = useWalletInventoryRefresh();
-  const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
+  const { dashboardCacheScope, flags, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const submissionInFlightRef = useRef(false);
 
@@ -881,7 +881,7 @@ function useCreateWallet({
         }
 
         if (selectedProjectId) {
-          completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
+          recordQuickStartStep(flags, dashboardCacheScope, "wallet");
         }
         refreshWalletInventory();
         router.refresh();

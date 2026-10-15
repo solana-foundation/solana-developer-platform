@@ -740,11 +740,10 @@ transaction signed by the organization custody wallet or external owner.
     money-OUT path, the one failure ADR 0002 rules out.
     `isEarnVaultSponsorshipEnabled` therefore takes the cluster and answers
     from CONFIGURATION: the flag, plus a Kora for that cluster
-    (`isFeePaymentConfiguredForCluster`, @sdp/fee-payment): `KORA_RPC_URL` serves
-    the `SOLANA_NETWORK` cluster, `KORA_RPC_URL_MAINNET` / `KORA_RPC_URL_DEVNET`
-    the other; there is no built-in default URL. The bare trio is legacy: the
-    project's environment picks the cluster, so a deployment wires BOTH suffix
-    trios (PRO-2007) and never relies on `SOLANA_NETWORK` to pick a paymaster. The movement's cluster rides `SponsorshipScope.cluster`, so the
+    (`isFeePaymentConfiguredForCluster`, @sdp/fee-payment): `KORA_DEVNET_URL` /
+    `KORA_MAINNET_URL`; there is no built-in default URL and no unsuffixed
+    fallback, so a deployment wires BOTH cluster trios (PRO-2007) and never
+    relies on `SOLANA_NETWORK` to pick a paymaster. The movement's cluster rides `SponsorshipScope.cluster`, so the
     matching Kora signs, the matching budget network is charged and the fee is
     priced on the matching RPC (`createClusterRpc`). Opening mainnet is wiring
     the mainnet Kora in after its policy is opened and `sbp_mainnet_global`

@@ -59,6 +59,11 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
+- **Migrations run while the previous revision still serves traffic.** `pnpm check:migration-compat`
+  rejects one the previous image cannot run against and common DDL that holds a blocking lock on an
+  existing table: build an index `CONCURRENTLY`, alone in a `-- sdp:migration-mode: non-transactional`
+  file, and add a foreign key `NOT VALID`, validated in a later migration. Rules and what it misses:
+  `docs/ops/release-operations.md`, "Schema compatibility".
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.

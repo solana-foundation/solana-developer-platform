@@ -1,0 +1,172 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { QuickStartStatus } from "./dashboard-quick-start.redesign";
+
+beforeEach(() => {
+  vi.resetModules();
+  window.localStorage.clear();
+});
+afterEach(() => vi.restoreAllMocks());
+
+const status: QuickStartStatus = {
+  custodyProvider: null,
+  apiKeyCount: 0,
+  lastCallAt: null,
+};
+
+describe("resolveQuickStartSteps", () => {
+  it("reads the setup state: custody skipped, no call yet", async () => {
+    const { resolveQuickStartSteps, countSettledQuickStartSteps, isQuickStartComplete } =
+      await import("./dashboard-quick-start.redesign");
+    const steps = resolveQuickStartSteps({
+      status,
+      skipped: { custody: "2026-09-25T09:00:00.000Z" },
+    });
+    expect(steps).toEqual([
+      { id: "custody", state: "skipped" },
+      { id: "first-call", state: "pending" },
+    ]);
+    expect(countSettledQuickStartSteps(steps)).toBe(1);
+    expect(isQuickStartComplete(steps)).toBe(false);
+  });
+
+  it("lets a connected provider win over an earlier skip", async () => {
+    const { resolveQuickStartSteps } = await import("./dashboard-quick-start.redesign");
+    const steps = resolveQuickStartSteps({
+      status: { ...status, custodyProvider: "privy" },
+      skipped: { custody: "2026-09-20T09:00:00.000Z" },
+    });
+    expect(steps[0]).toEqual({ id: "custody", state: "done" });
+  });
+
+  it("completes only when every signal is in, not when steps are skipped", async () => {
+    const { resolveQuickStartSteps, isQuickStartComplete } = await import(
+      "./dashboard-quick-start.redesign"
+    );
+    const skipped = resolveQuickStartSteps({
+      status: { ...status, lastCallAt: "2026-09-25T09:30:00.000Z", apiKeyCount: 1 },
+      skipped: { custody: "2026-09-25T09:00:00.000Z" },
+    });
+    expect(isQuickStartComplete(skipped)).toBe(false);
+    const done = resolveQuickStartSteps({
+      status: {
+        ...status,
+        custodyProvider: "privy",
+        lastCallAt: "2026-09-25T09:30:00.000Z",
+        apiKeyCount: 1,
+      },
+      skipped: {},
+    });
+    expect(isQuickStartComplete(done)).toBe(true);
+  });
+});
+
+describe("quick start preferences", () => {
+  const key = "sdp:quick-start:v2:user:org";
+
+  it("persists dismissal, folding and skips across a fresh page load", async () => {
+    const firstPage = await import("./dashboard-quick-start.redesign");
+    firstPage.skipQuickStartStep(key, "custody", new Date("2026-09-25T09:00:00.000Z"));
+    firstPage.setQuickStartCollapsed(key, "sidebar", true);
+    firstPage.dismissQuickStart(key);
+    vi.resetModules();
+    const nextPage = await import("./dashboard-quick-start.redesign");
+    expect(nextPage.readQuickStartPrefs(key)).toEqual({
+      dismissed: true,
+      collapsed: false,
+      sidebarCollapsed: true,
+      skipped: { custody: "2026-09-25T09:00:00.000Z" },
+    });
+    nextPage.resumeQuickStart(key);
+    expect(nextPage.readQuickStartPrefs(key)).toMatchObject({
+      dismissed: false,
+      sidebarCollapsed: false,
+      skipped: { custody: "2026-09-25T09:00:00.000Z" },
+    });
+  });
+
+  it("returns the same snapshot until the stored value changes", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const first = guide.readQuickStartPrefs(key);
+    expect(guide.readQuickStartPrefs(key)).toBe(first);
+    guide.setQuickStartCollapsed(key, "overview", true);
+    expect(guide.readQuickStartPrefs(key)).not.toBe(first);
+  });
+
+  it("ignores a corrupt stored value", async () => {
+    window.localStorage.setItem(key, "{not json");
+    const guide = await import("./dashboard-quick-start.redesign");
+    expect(guide.readQuickStartPrefs(key)).toBe(guide.EMPTY_QUICK_START_PREFS);
+  });
+
+  it("keeps working for the session when storage is blocked", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    guide.dismissQuickStart(key);
+    expect(guide.readQuickStartPrefs(key).dismissed).toBe(true);
+  });
+
+  it("notifies subscribers when another tab changes the guide", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const onChange = vi.fn();
+    const unsubscribe = guide.subscribeQuickStart(onChange);
+    window.localStorage.setItem(key, JSON.stringify({ dismissed: true }));
+    window.dispatchEvent(new StorageEvent("storage", { key }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(guide.readQuickStartPrefs(key).dismissed).toBe(true);
+    unsubscribe();
+  });
+
+  it("tells a mounted guide its status is stale", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const onStale = vi.fn();
+    const unsubscribe = guide.subscribeQuickStartStatusStale(onStale);
+    guide.invalidateQuickStartStatus();
+    expect(onStale).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    guide.invalidateQuickStartStatus();
+    expect(onStale).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recordQuickStartStep", () => {
+  const scope = { orgId: "org_test", userId: "user_test" };
+
+  it("re-reads the server status when the Overview module's guide is on", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const legacy = await import("./dashboard-quick-start");
+    const onStale = vi.fn();
+    const unsubscribe = guide.subscribeQuickStartStatusStale(onStale);
+    guide.recordQuickStartStep(
+      { newDesign: true, newDesignModules: { overview: true } },
+      scope,
+      "wallet"
+    );
+    expect(onStale).toHaveBeenCalledTimes(1);
+    expect(legacy.readQuickStart(legacy.quickStartKey(scope))).toBe("api-key");
+    unsubscribe();
+  });
+
+  it("advances the previous design's guide when the Overview module is off", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const legacy = await import("./dashboard-quick-start");
+    const onStale = vi.fn();
+    const unsubscribe = guide.subscribeQuickStartStatusStale(onStale);
+    // The Wallets redesign can run beside the previous Home and its guide.
+    guide.recordQuickStartStep(
+      { newDesign: true, newDesignModules: { overview: false, wallets: true } },
+      scope,
+      "wallet"
+    );
+    expect(onStale).not.toHaveBeenCalled();
+    expect(legacy.readQuickStart(legacy.quickStartKey(scope))).toBe("done");
+    guide.recordQuickStartStep({ newDesign: false }, { ...scope, orgId: "org_other" }, "api-key");
+    expect(legacy.readQuickStart(legacy.quickStartKey({ ...scope, orgId: "org_other" }))).toBe(
+      "wallet"
+    );
+    unsubscribe();
+  });
+});

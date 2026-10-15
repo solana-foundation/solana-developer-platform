@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 
 const { Client } = pg;
 const NON_TRANSACTIONAL_DIRECTIVE = /^--\s*sdp:migration-mode:\s*non-transactional\s*$/m;
+// DDL waiting on a lock queues every later query on that table behind it, so a
+// migration gives up its place after this long instead of stalling live traffic.
+const DEFAULT_LOCK_TIMEOUT = "5s";
+// Up to four retries after a lock timeout, with 15 s of backoff in all.
+const DEFAULT_LOCK_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+const LOCK_NOT_AVAILABLE = "55P03";
 
 export function getPostgresMigrationMode(sql) {
   return NON_TRANSACTIONAL_DIRECTIVE.test(sql) ? "non-transactional" : "transactional";
@@ -81,6 +88,8 @@ function concurrentIndexName(sql, migrationFile) {
   return match[1];
 }
 
+// No lock timeout here: a concurrent build never blocks reads or writes, and its
+// waits for older transactions would trip one and leave an INVALID index.
 async function applyNonTransactionalMigration({ client, migrationFile, sql }) {
   const indexName = concurrentIndexName(sql, migrationFile);
   const validity = await client.query(
@@ -100,26 +109,69 @@ async function applyNonTransactionalMigration({ client, migrationFile, sql }) {
   await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
 }
 
-async function runInTransaction(client, run) {
-  await client.query("BEGIN");
-  try {
-    await run();
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
+/**
+ * Run `run` in one transaction under a transaction-local lock timeout, retrying
+ * the whole transaction while a lock wait times out. The timeout never reaches
+ * the session's advisory lock or a non-transactional build, and a file's own
+ * `SET LOCAL lock_timeout` runs later in the transaction, so it wins.
+ */
+async function runInTransaction(
+  client,
+  run,
+  { label, lockTimeout = DEFAULT_LOCK_TIMEOUT, lockRetryDelaysMs = DEFAULT_LOCK_RETRY_DELAYS_MS }
+) {
+  for (let attempt = 0; ; attempt++) {
+    await client.query("BEGIN");
+    try {
+      await client.query("SELECT set_config('lock_timeout', $1, true)", [lockTimeout]);
+      await run();
+      await client.query("COMMIT");
+      return;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      const delay = lockRetryDelaysMs[attempt];
+      if (error.code !== LOCK_NOT_AVAILABLE || delay === undefined) throw error;
+      console.warn(
+        `${label}: ${error.message}; retrying in ${delay} ms (attempt ${attempt + 2} of ${lockRetryDelaysMs.length + 1})`
+      );
+      await sleep(delay);
+    }
   }
 }
 
-export async function applyPostgresMigration({ client, migrationFile, sql }) {
+export async function applyPostgresMigration({
+  client,
+  migrationFile,
+  sql,
+  lockTimeout,
+  lockRetryDelaysMs,
+}) {
   if (getPostgresMigrationMode(sql) === "non-transactional") {
     await applyNonTransactionalMigration({ client, migrationFile, sql });
     return;
   }
 
-  await runInTransaction(client, async () => {
-    await client.query(sql);
-    await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
+  await runInTransaction(
+    client,
+    async () => {
+      await client.query(sql);
+      await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [migrationFile]);
+    },
+    { label: migrationFile, lockTimeout, lockRetryDelaysMs }
+  );
+}
+
+export async function applyRepeatableMigration({
+  client,
+  repeatableFile,
+  sql,
+  lockTimeout,
+  lockRetryDelaysMs,
+}) {
+  await runInTransaction(client, () => client.query(sql), {
+    label: `repeatable/${repeatableFile}`,
+    lockTimeout,
+    lockRetryDelaysMs,
   });
 }
 
@@ -164,7 +216,7 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
       .sort((left, right) => left.localeCompare(right));
     for (const repeatableFile of repeatableFiles) {
       const sql = fs.readFileSync(path.join(repeatableDir, repeatableFile), "utf8");
-      await runInTransaction(client, () => client.query(sql));
+      await applyRepeatableMigration({ client, repeatableFile, sql });
     }
   } finally {
     await client.end().catch(() => {});

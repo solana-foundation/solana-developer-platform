@@ -56,8 +56,15 @@ stateful providers fit the model at all.
   `resolveRampProviderClient` answers 503 for any id that is not live, retired
   ids included.
 - **Provider responses are validated.** `providerFetchJson` takes a zod schema,
-  and a response that does not match is `PROVIDER_UNAVAILABLE`. A schema
-  requires exactly what the adapter reads, no more.
+  and a success that does not match, is not JSON, or cannot be read is
+  `PROVIDER_RESPONSE_INVALID` (502). A schema requires exactly what the adapter
+  reads, no more.
+- **Every provider failure records its outcome.** `details.outcome` is
+  `rejected` when the provider answered and refused, and `unknown` when the
+  action may have happened: a transport failure, a timeout, 408, 409, 5xx, or a
+  success SDP could not read. Only the provider HTTP layer sets it
+  (`classifyProviderFailure`), an error without one counts as unknown, and a
+  once-only claim is released only on `rejected`.
 - **Error data is public or internal, never both.** `message` and `details` on
   `SdpPaymentsError` are public: error bodies and transfer rows carry them, so
   they hold only SDP's own wording. The provider's message, codes and field

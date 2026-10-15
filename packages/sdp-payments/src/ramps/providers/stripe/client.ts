@@ -1,5 +1,10 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import type { Counterparty, PaymentRampEstimate, PaymentRampQuote } from "@sdp/types";
+import type {
+  Counterparty,
+  PaymentRampEstimate,
+  PaymentRampQuote,
+  SdpEnvironment,
+} from "@sdp/types";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
@@ -143,15 +148,61 @@ const stripeOnrampQuotesSchema = z.object({
   ),
 });
 
-function readStripeConfig(env: Record<string, string | undefined>): StripeConfig {
-  const secretKey = env.STRIPE_SECRET_KEY?.trim();
-  const publishableKey = env.STRIPE_PUBLISHABLE_KEY?.trim();
-  if (!secretKey || !publishableKey) {
-    throw providerNotConfigured(
-      "Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY."
-    );
+/** The env keys SDP's managed Stripe credentials live under. */
+interface StripeManagedEnv {
+  readonly STRIPE_SANDBOX_SECRET_KEY?: string;
+  readonly STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
+}
+
+/** A test-mode Stripe secret key: standard (`sk_`) or restricted (`rk_`). */
+const STRIPE_TEST_SECRET_KEY = /^(sk|rk)_test_/;
+const STRIPE_TEST_PUBLISHABLE_KEY = /^pk_test_/;
+
+/**
+ * The managed Stripe keys for `mode`, or why SDP can't use them. SDP holds
+ * sandbox keys only; a production project brings its own (HOO-1943), so
+ * production fails closed until it can. Both keys must be test-mode keys, so
+ * a live key mounted under the sandbox names can never reach Stripe.
+ */
+function readStripeManagedKeys(
+  env: StripeManagedEnv,
+  mode: SdpEnvironment
+): { ok: true; config: StripeConfig } | { ok: false; reason: string } {
+  if (mode === "production") {
+    return { ok: false, reason: "Stripe is not configured for production projects." };
   }
-  return { secretKey, publishableKey };
+  const secretKey = env.STRIPE_SANDBOX_SECRET_KEY?.trim();
+  const publishableKey = env.STRIPE_SANDBOX_PUBLISHABLE_KEY?.trim();
+  if (!secretKey || !publishableKey) {
+    return {
+      ok: false,
+      reason:
+        "Stripe sandbox is not configured. Set STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_PUBLISHABLE_KEY.",
+    };
+  }
+  if (
+    !STRIPE_TEST_SECRET_KEY.test(secretKey) ||
+    !STRIPE_TEST_PUBLISHABLE_KEY.test(publishableKey)
+  ) {
+    return { ok: false, reason: "Stripe sandbox keys must be test-mode keys." };
+  }
+  return { ok: true, config: { secretKey, publishableKey } };
+}
+
+/**
+ * Whether SDP's managed Stripe keys can serve `mode`: the same check every
+ * Stripe call makes before its first request, so availability never disagrees.
+ */
+export function hasStripeManagedKeys(env: StripeManagedEnv, mode: SdpEnvironment): boolean {
+  return readStripeManagedKeys(env, mode).ok;
+}
+
+function readStripeConfig(env: StripeManagedEnv, mode: SdpEnvironment): StripeConfig {
+  const keys = readStripeManagedKeys(env, mode);
+  if (!keys.ok) {
+    throw providerNotConfigured(keys.reason);
+  }
+  return keys.config;
 }
 
 function normalizeStripeOnrampAsset(cryptoToken: string): { currency: string; network: string } {
@@ -332,10 +383,10 @@ export class StripeRampClient implements RampProvider {
   }
 
   async estimateOnramp(
-    { env }: RampRuntimeContext,
+    { env, mode }: RampRuntimeContext,
     input: RampEstimateOnrampInput
   ): Promise<PaymentRampEstimate> {
-    const config = readStripeConfig(env);
+    const config = readStripeConfig(env, mode);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
 
     const quotes = await stripeGet(
@@ -405,10 +456,10 @@ export class StripeRampClient implements RampProvider {
   }
 
   async createOnrampQuote(
-    { env }: RampRuntimeContext,
+    { env, mode }: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    const config = readStripeConfig(env);
+    const config = readStripeConfig(env, mode);
     const { currency, network } = normalizeStripeOnrampAsset(input.assetRail);
     if (!input.fiatCurrency) {
       throw badRequest("Stripe on-ramp requires a fiat currency.", { provider: this.id });

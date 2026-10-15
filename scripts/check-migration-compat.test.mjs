@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   checkMigrationChange,
+  findBlockingStatements,
   findBreakingStatements,
   findRemovedViewColumns,
 } from "./check-migration-compat.mjs";
@@ -11,6 +12,9 @@ const SQL = "apps/sdp-api/src/db/migrations/postgres/0102_example.sql";
 const POSTGRES = new URL("../apps/sdp-api/src/db/migrations/postgres/", import.meta.url);
 const check = (sql, changed = [SQL]) => checkMigrationChange(changed, () => sql);
 const reasons = (sql) => findBreakingStatements(sql).map((finding) => finding.split(":")[0]);
+const blockers = (sql, history) =>
+  findBlockingStatements(sql, history).map((finding) => finding.split(",")[0]);
+const readMigration = (name) => readFileSync(new URL(name, POSTGRES), "utf8");
 
 test("additive migrations pass", () => {
   const sql =
@@ -26,7 +30,8 @@ test("additive migrations pass", () => {
     "COMMENT ON COLUMN a.b IS 'has -- dashes; and a semicolon';\n" +
     "-- DROP TABLE a;";
   assert.deepEqual(findBreakingStatements(sql), []);
-  assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/routes/a.ts"]), []);
+  const locksAccepted = `-- sdp:migration-locks: blocking\n${sql}`;
+  assert.deepEqual(check(locksAccepted, [SQL, "apps/sdp-api/src/routes/a.ts"]), []);
 });
 
 test("backfills of columns and tables this file adds pass, rewrites of existing data do not", () => {
@@ -343,10 +348,212 @@ test("repeatable views: removed output columns are contractions", () => {
 });
 
 test("existing migrations: a same-file backfill passes and a data repair is flagged", () => {
-  const read = (name) => readFileSync(new URL(name, POSTGRES), "utf8");
-  assert.deepEqual(findBreakingStatements(read("0118_earn_queued_withdrawal_schedule.sql")), []);
-  assert.deepEqual(reasons(read("0116_bvnk_offramp_provider_data.sql")), [
+  assert.deepEqual(
+    findBreakingStatements(readMigration("0118_earn_queued_withdrawal_schedule.sql")),
+    []
+  );
+  assert.deepEqual(reasons(readMigration("0116_bvnk_offramp_provider_data.sql")), [
     "rewrites rows",
     "rewrites rows",
   ]);
+});
+
+test("unnamed table constraints are constraints, not columns", () => {
+  assert.deepEqual(
+    reasons(
+      "ALTER TABLE a ADD UNIQUE (existing_col);\n" +
+        "ALTER TABLE a ADD FOREIGN KEY (existing_col) REFERENCES b (id);\n" +
+        "ALTER TABLE a ADD CHECK (existing_col IS NOT NULL);"
+    ),
+    ["adds a unique constraint over existing columns", "adds a foreign key over existing columns"]
+  );
+});
+
+test("index builds on existing tables need CONCURRENTLY", () => {
+  assert.deepEqual(
+    blockers(
+      "CREATE INDEX idx_a ON a (x);\n" +
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_b ON ONLY public.b USING gin (x);\n" +
+        'CREATE INDEX ON "c"(x);\n' +
+        "CREATE TABLE IF NOT EXISTS d (id TEXT);\n" +
+        "CREATE INDEX idx_d ON d (id);\n" +
+        "DO $$\nBEGIN\n  CREATE INDEX idx_e ON e (x);\nEND $$;"
+    ),
+    Array(5).fill("builds an index without CONCURRENTLY")
+  );
+  assert.deepEqual(
+    findBlockingStatements(
+      "-- sdp:migration-mode: non-transactional\nCREATE INDEX CONCURRENTLY IF NOT EXISTS idx_a ON a (x);"
+    ),
+    []
+  );
+  assert.deepEqual(
+    findBlockingStatements(
+      "CREATE TABLE n (id TEXT PRIMARY KEY, v TEXT);\n" +
+        "CREATE UNIQUE INDEX idx_n ON n (v);\n" +
+        "DO $$\nBEGIN\n  CREATE TABLE m (id TEXT);\n  CREATE INDEX idx_m ON m (id);\nEND $$;"
+    ),
+    []
+  );
+});
+
+test("foreign keys on existing tables need NOT VALID", () => {
+  assert.deepEqual(
+    blockers(
+      "ALTER TABLE a ADD CONSTRAINT a_b_fk FOREIGN KEY (b_id) REFERENCES b (id);\n" +
+        "ALTER TABLE a ADD FOREIGN KEY (c_id) REFERENCES c (id) ON DELETE CASCADE;\n" +
+        "ALTER TABLE a ADD COLUMN d_id TEXT REFERENCES d (id);\n" +
+        "ALTER TABLE a ADD COLUMN e_id TEXT, ADD CONSTRAINT a_e_fk FOREIGN KEY (e_id) REFERENCES e (id);"
+    ),
+    [
+      "adds a foreign key without NOT VALID",
+      "adds a foreign key without NOT VALID",
+      "adds a column with an inline REFERENCES",
+      "adds a foreign key without NOT VALID",
+    ]
+  );
+  assert.deepEqual(
+    findBlockingStatements(
+      "ALTER TABLE a ADD CONSTRAINT a_b_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID;\n" +
+        "ALTER TABLE a ADD COLUMN note TEXT DEFAULT 'REFERENCES x';\n" +
+        "CREATE TABLE n (id TEXT PRIMARY KEY, a_id TEXT REFERENCES a (id));\n" +
+        "ALTER TABLE n ADD CONSTRAINT n_a_fk FOREIGN KEY (a_id) REFERENCES a (id);\n" +
+        "ALTER TABLE n ADD COLUMN b_id TEXT REFERENCES b (id);"
+    ),
+    []
+  );
+});
+
+test("a NOT VALID constraint is validated by a later migration, not the one that adds it", () => {
+  assert.deepEqual(
+    blockers(
+      "ALTER TABLE a ADD CONSTRAINT a_b_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID;\n" +
+        "ALTER TABLE a VALIDATE CONSTRAINT a_b_fk;"
+    ),
+    ["validates a constraint in the migration that adds it"]
+  );
+  assert.deepEqual(
+    blockers(
+      "ALTER TABLE a ADD CONSTRAINT a_b_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID, VALIDATE CONSTRAINT a_b_fk;"
+    ),
+    ["validates a constraint in the migration that adds it"]
+  );
+  assert.deepEqual(findBlockingStatements("ALTER TABLE a VALIDATE CONSTRAINT a_b_fk;"), []);
+  assert.deepEqual(
+    findBlockingStatements(
+      "ALTER TABLE a ADD CONSTRAINT shared_fk FOREIGN KEY (b_id) REFERENCES b (id) NOT VALID;\n" +
+        "ALTER TABLE c VALIDATE CONSTRAINT shared_fk;"
+    ),
+    []
+  );
+  assert.deepEqual(findBlockingStatements(readMigration("0100_transaction_status_checks.sql")), []);
+  assert.deepEqual(
+    findBlockingStatements(readMigration("0109_transaction_status_checks_validate.sql")),
+    []
+  );
+});
+
+test("SET NOT NULL needs a CHECK an earlier migration added and validated before it", () => {
+  const added = ["ALTER TABLE a ADD CONSTRAINT a_x_not_null CHECK (x IS NOT NULL) NOT VALID;"];
+  const validated = [...added, "ALTER TABLE a VALIDATE CONSTRAINT a_x_not_null;"];
+  const setNotNull = "ALTER TABLE a ALTER COLUMN x SET NOT NULL;";
+  const flagged = ["sets NOT NULL without a validated CHECK (column IS NOT NULL)"];
+
+  assert.deepEqual(blockers(setNotNull), flagged);
+  assert.deepEqual(blockers(setNotNull, added), flagged);
+  assert.deepEqual(
+    blockers(`ALTER TABLE a ADD CONSTRAINT a_x_not_null CHECK (x IS NOT NULL);\n${setNotNull}`),
+    flagged
+  );
+  assert.deepEqual(
+    blockers("ALTER TABLE a VALIDATE CONSTRAINT a_x_not_null, ALTER COLUMN x SET NOT NULL;", added),
+    flagged
+  );
+  assert.deepEqual(
+    blockers(`ALTER TABLE a DROP CONSTRAINT a_x_not_null;\n${setNotNull}`, validated),
+    flagged
+  );
+  for (const sameStatement of [
+    "ALTER TABLE a DROP CONSTRAINT a_x_not_null, ALTER COLUMN x SET NOT NULL;",
+    "ALTER TABLE a ALTER COLUMN x SET NOT NULL, DROP CONSTRAINT a_x_not_null;",
+  ]) {
+    assert.deepEqual(blockers(sameStatement, validated), flagged);
+  }
+  assert.deepEqual(blockers(setNotNull, [...validated, "ALTER TABLE a DROP COLUMN x;"]), flagged);
+  assert.deepEqual(blockers("ALTER TABLE a ALTER COLUMN y SET NOT NULL;", validated), flagged);
+
+  assert.deepEqual(
+    findBlockingStatements(
+      `ALTER TABLE a VALIDATE CONSTRAINT a_x_not_null;\n${setNotNull}\nALTER TABLE a DROP CONSTRAINT a_x_not_null;`,
+      added
+    ),
+    []
+  );
+  assert.deepEqual(findBlockingStatements(setNotNull, validated), []);
+  assert.deepEqual(
+    findBlockingStatements(setNotNull, [
+      'ALTER TABLE a ADD CONSTRAINT a_x CHECK (("x" IS NOT NULL));',
+    ]),
+    []
+  );
+  assert.deepEqual(
+    findBlockingStatements(
+      "ALTER TABLE a ADD COLUMN z TEXT;\n" +
+        "UPDATE a SET z = '';\n" +
+        "ALTER TABLE a ALTER COLUMN z SET NOT NULL;\n" +
+        "CREATE TABLE n (v TEXT);\n" +
+        "ALTER TABLE n ALTER COLUMN v SET NOT NULL;"
+    ),
+    []
+  );
+});
+
+test("a blocking migration needs the locks directive, which excuses nothing else", () => {
+  const violations = check("CREATE INDEX idx_a ON a (x);");
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /CREATE INDEX CONCURRENTLY IF NOT EXISTS/);
+  assert.match(violations[0], /sdp:migration-locks: blocking/);
+
+  const accepted = "-- sdp:migration-locks: blocking\nCREATE INDEX idx_a ON a (x);";
+  assert.deepEqual(check(accepted, [SQL, "apps/sdp-api/src/routes/a.ts"]), []);
+  assert.equal(check(`${accepted}\nALTER TABLE a DROP COLUMN b;`).length, 1);
+});
+
+test("the change check reads each changed file's migration history", () => {
+  const sql =
+    "-- sdp:migration-compat: breaking\n" +
+    "ALTER TABLE a VALIDATE CONSTRAINT a_x_not_null;\n" +
+    "ALTER TABLE a ALTER COLUMN x SET NOT NULL;";
+  const history = ["ALTER TABLE a ADD CONSTRAINT a_x_not_null CHECK (x IS NOT NULL) NOT VALID;"];
+  const requested = [];
+  const readHistory = (file) => {
+    requested.push(file);
+    return history;
+  };
+
+  assert.deepEqual(
+    checkMigrationChange(
+      [SQL],
+      () => sql,
+      () => null,
+      readHistory
+    ),
+    []
+  );
+  assert.deepEqual(requested, [SQL]);
+  assert.equal(checkMigrationChange([SQL], () => sql).length, 1);
+});
+
+test("existing migrations: 0132's foreign key blocks, the concurrent build and the view do not", () => {
+  assert.deepEqual(blockers(readMigration("0132_counterparty_provider_accounts_scope_fk.sql")), [
+    "adds a foreign key without NOT VALID",
+  ]);
+  assert.deepEqual(
+    findBlockingStatements(readMigration("0122_earn_kamino_receipt_repair_index.sql")),
+    []
+  );
+  assert.deepEqual(
+    findBlockingStatements(readMigration("repeatable/unified_transactions.sql")),
+    []
+  );
 });

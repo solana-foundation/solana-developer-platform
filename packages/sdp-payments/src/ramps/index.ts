@@ -8,8 +8,8 @@ import type { RampProvider } from "./types";
 
 export { BvnkRampClient } from "./providers/bvnk/client";
 export { CoinbaseRampClient } from "./providers/coinbase/client";
-export { MoonpayRampClient } from "./providers/moonpay/client";
-export { StripeRampClient } from "./providers/stripe/client";
+export { hasMoonpayManagedKeys, MoonpayRampClient } from "./providers/moonpay/client";
+export { hasStripeManagedKeys, StripeRampClient } from "./providers/stripe/client";
 export type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,

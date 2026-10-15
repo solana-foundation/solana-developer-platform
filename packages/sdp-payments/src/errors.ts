@@ -8,6 +8,7 @@ export type SdpPaymentsErrorCode =
   | "INTERNAL_ERROR"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_RESPONSE_INVALID"
   | "ESTIMATE_NOT_AVAILABLE";
 
 const ERROR_STATUS_CODES: Record<SdpPaymentsErrorCode, number> = {
@@ -17,6 +18,7 @@ const ERROR_STATUS_CODES: Record<SdpPaymentsErrorCode, number> = {
   INTERNAL_ERROR: 500,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
+  PROVIDER_RESPONSE_INVALID: 502,
   ESTIMATE_NOT_AVAILABLE: 503,
 };
 
@@ -27,6 +29,7 @@ const DEFAULT_ERROR_MESSAGES: Record<SdpPaymentsErrorCode, string> = {
   INTERNAL_ERROR: "An internal error occurred",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
+  PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
   ESTIMATE_NOT_AVAILABLE:
     "An indicative estimate is not available; the rate is known at quote time",
 };
