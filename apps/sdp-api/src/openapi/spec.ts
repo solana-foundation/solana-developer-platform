@@ -274,10 +274,18 @@ function describeActionRefusals(document: OpenAPIObject): void {
       if (!operation) continue;
       const action = declaredActionForOperation(method, path);
       if (!action) continue;
-      const existing = operation.responses["403"] ?? operation.responses["401"];
+      const documented = operation.responses["403"];
+      const existing = documented ?? operation.responses["401"];
+      const requirement = `Forbidden. Requires the \`${action}\` action: an API key must hold it (a module's \`manage\` or \`execute\` also covers its \`read\`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and \`error.details.action\` names the action. Any other 403 names its own reason.`;
+      // A route that documents its own 403 reasons (anything but the generic
+      // "Error" from errorResponses) keeps them after the action requirement.
+      const ownReasons =
+        documented && "description" in documented && documented.description !== "Error"
+          ? documented.description
+          : null;
       operation.responses["403"] = {
         ...existing,
-        description: `Forbidden. Requires the \`${action}\` action: an API key must hold it (a module's \`manage\` or \`execute\` also covers its \`read\`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and \`error.details.action\` names the action. Any other 403 names its own reason.`,
+        description: ownReasons ? `${requirement}\n\n${ownReasons}` : requirement,
       };
     }
   }

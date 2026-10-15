@@ -88,6 +88,22 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("keeps a route's own 403 reasons after its action requirement", () => {
+    const forbidden = createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.responses?.[
+      "403"
+    ] as { description: string } | undefined;
+    expect(forbidden?.description).toContain("Requires the `wallets.configure` action");
+    expect(forbidden?.description).toContain("custody_mode_not_allowed");
+  });
+
+  it("gives a route without its own 403 reasons the action requirement alone", () => {
+    const forbidden = createOpenApiDocument().paths?.["/v1/payments/transfers"]?.get?.responses?.[
+      "403"
+    ] as { description: string } | undefined;
+    expect(forbidden?.description).toMatch(/^Forbidden\. Requires the `transfers\.read` action/);
+    expect(forbidden?.description).not.toContain("\n\nError");
+  });
+
   // Keys are credentials, not administrators (HOO-2099): key, member, project
   // member and organization administration answer a signed-in person only.
   it("documents administration as Clerk-session only and keeps it out of the public document", () => {
