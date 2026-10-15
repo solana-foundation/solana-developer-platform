@@ -223,6 +223,7 @@ async function updateOnchainTransferForRamp(
     scope: ResolvedScope;
     operation: OutboundPaymentOperation;
     destinationAddress: string;
+    idempotency: { key: string; fingerprint: string } | null;
   }
 ): Promise<TransferRow> {
   const { existing, scope, operation, destinationAddress } = input;
@@ -271,6 +272,7 @@ async function updateOnchainTransferForRamp(
     token: operation.token,
     amount: operation.amount,
     initiatedByKeyId: scope.auth.id,
+    idempotency: input.idempotency,
     updatedAt: new Date().toISOString(),
   });
   if (!updated) {
@@ -345,9 +347,11 @@ export async function admitTransferExecution(
  * that already ran is always answered.
  *
  * - A keyed transfer: the row recorded under this key with the same fingerprint.
- * - Funding a ramp deposit (`transferId`): the deposit row once it carries the
- *   on-chain values this request asked for, so a retry after a crash is
- *   answered with it instead of a 409 "already has an on-chain transaction".
+ * - Funding a ramp deposit (`transferId`): the deposit row once funded, so a
+ *   retry after a crash is answered with it instead of a 409 "already has an
+ *   on-chain transaction". The key that funded it is compared by the
+ *   fingerprint it recorded (other terms, a changed memo, are a 422); another
+ *   key is answered when it names the same deposit.
  */
 export async function findTransferRecordReplay(
   c: AppContext,
@@ -358,16 +362,24 @@ export async function findTransferRecordReplay(
   const body = input.body as CreateTransferBody;
   const { scope, operation, rampTransfer: existing } = input.authorized;
   if (body.transferId) {
+    if (!existing || !rampTransferHasOnchainValues(existing)) return null;
+    if (existing.idempotency_key === recordKey && existing.idempotency_fingerprint !== null) {
+      // This key funded the deposit: the step compares the fingerprint it
+      // recorded, as for any keyed transfer, so other terms are a 422.
+      return {
+        fingerprint: existing.idempotency_fingerprint,
+        respond: () => replayTransferRow(c, existing),
+      };
+    }
     if (
-      existing &&
-      rampTransferHasOnchainValues(existing) &&
+      existing.idempotency_key !== recordKey &&
       existing.custody_wallet_id === operation.sourceWallet.id &&
       existing.destination_address === body.destination &&
       existing.token === operation.token &&
       existing.amount !== null &&
       compareDecimalAmounts(existing.amount, operation.amount) === 0
     ) {
-      // The deposit row names its own request: checked here, not by fingerprint.
+      // Another request funded it: answered with the deposit it asked for.
       return { fingerprint: null, respond: () => replayTransferRow(c, existing) };
     }
     return null;
@@ -744,6 +756,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           scope,
           operation,
           destinationAddress: body.destination,
+          idempotency,
         }),
         replayed: false,
       }

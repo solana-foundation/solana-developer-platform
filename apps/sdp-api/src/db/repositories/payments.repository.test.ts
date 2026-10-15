@@ -234,6 +234,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         token: "SOL",
         amount: "1",
         initiatedByKeyId: "key_ramp_onchain",
+        idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
@@ -249,6 +250,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       token: "SOL",
       amount: "1",
       initiatedByKeyId: "key_ramp_onchain",
+      idempotency: null,
       updatedAt: "2026-08-31T10:00:00.000Z",
     });
 
@@ -287,6 +289,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         token: "SOL",
         amount: "1",
         initiatedByKeyId: "key_ramp_occupied",
+        idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();

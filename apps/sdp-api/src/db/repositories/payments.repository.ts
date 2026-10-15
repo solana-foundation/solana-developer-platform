@@ -223,6 +223,12 @@ export interface PaymentsRepository {
     token: string;
     amount: string;
     initiatedByKeyId: string;
+    /**
+     * The funding request's record key and fingerprint (HOO-1918), recorded on
+     * the deposit row so a retry after the key's record expires is compared
+     * like any keyed transfer; null for an unkeyed request.
+     */
+    idempotency: { key: string; fingerprint: string } | null;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   findTransferByIdempotency(params: {
