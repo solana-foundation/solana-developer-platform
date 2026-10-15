@@ -237,7 +237,6 @@ async function seedRouteState(): Promise<void> {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -246,7 +245,6 @@ async function seedRouteState(): Promise<void> {
     ...cachedApiKey,
     id: SCOPED_API_KEY.id,
     walletScope: "selected",
-    walletBindings: [{ walletId: COLLEAGUE_WALLET_ID, permissions: ["payments:write"] }],
   });
 
   await db.batch([
@@ -312,8 +310,9 @@ async function seedRouteState(): Promise<void> {
       ),
     db
       .prepare(`INSERT INTO api_keys
-      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
-      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active')`)
+      (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status,
+       wallet_scope)
+      VALUES (?, ?, ?, ?, 'Scoped PC key', ?, ?, ?, 'active', 'selected')`)
       .bind(
         SCOPED_API_KEY.id,
         ORGANIZATION_ID,
@@ -324,9 +323,9 @@ async function seedRouteState(): Promise<void> {
         [...cachedApiKey.grants]
       ),
     db
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pcv', ?, ?, ?)`)
-      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID, ["private_channels.execute"]),
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
+      .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID),
     db
       .prepare(
         `INSERT INTO private_channel_users
@@ -866,8 +865,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("denies stale all-wallet access after the key is restricted in the database", async () => {
     await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akwp-pcv-restricted', ?, ?, '["payments:write"]')`)
+      .prepare(`UPDATE api_keys SET wallet_scope = 'selected' WHERE id = ?`)
+      .bind(API_KEY.id)
+      .run();
+    await getDb(env)
+      .prepare(`INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+      SELECT ?, id FROM custody_wallets WHERE wallet_id = ?`)
       .bind(API_KEY.id, COLLEAGUE_WALLET_ID)
       .run();
     expect(

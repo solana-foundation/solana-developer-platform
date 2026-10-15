@@ -35,6 +35,7 @@ import {
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintTokenProgram,
@@ -672,6 +673,7 @@ export async function activateRecurringPayment(input: {
       projectId: input.projectId,
       updatedAt: nowIso,
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+      activatedBy: currentMandateActivator(),
     });
     if (!claimed) return null;
     const attempt = await createClaimedActivationAttempt({

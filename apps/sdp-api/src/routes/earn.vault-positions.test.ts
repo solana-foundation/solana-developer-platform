@@ -12,7 +12,6 @@ import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -72,7 +71,6 @@ function cachedKey(): SeededApiKey {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -365,53 +363,6 @@ describe("GET /v1/earn/vault-positions", () => {
     } finally {
       env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = original;
     }
-  });
-
-  it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
-    const secondConfigId = "cfg_vault_positions_second";
-    const secondWalletId = "cwlt_vault_positions_second";
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: secondConfigId,
-          organizationId: ORG,
-          projectId: PROJECT_A,
-          provider: "para",
-          configEncrypted: "encrypted",
-          status: "active",
-        },
-      ],
-      wallets: [
-        {
-          id: secondWalletId,
-          owner: { kind: "config", custodyConfigId: secondConfigId },
-          walletId: PROVIDER_WALLET_A,
-          publicKey: PUBLIC_KEY_B,
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-      ],
-    });
-    await createPosition({ providerReference: "vault_project_binding" });
-    await createPosition({
-      walletId: secondWalletId,
-      providerReference: "vault_second_binding",
-      signature: "sig_second_binding",
-    });
-    const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-    await seedApiKeyRow(env, keyHash, {
-      ...cachedKey(),
-      signingWalletId: PROVIDER_WALLET_A,
-      walletBindings: [{ walletId: PROVIDER_WALLET_A, permissions: ["earn:read"] }],
-    });
-
-    const response = await getPositions();
-    const body = (await response.json()) as { data: { positions: unknown[] } };
-
-    expect(response.status).toBe(200);
-    expect(body.data.positions).toEqual([]);
-    expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
   it("returns stable bounded keyset pages without overlap", async () => {

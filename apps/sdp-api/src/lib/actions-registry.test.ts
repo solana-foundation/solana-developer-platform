@@ -113,9 +113,9 @@ describe("action registry", () => {
   });
 
   it("grants nothing for stored strings that name Object.prototype members", () => {
-    expect(
-      expandStoredGrants(["constructor", "__proto__", "toString", "hasOwnProperty"])
-    ).toEqual([]);
+    expect(expandStoredGrants(["constructor", "__proto__", "toString", "hasOwnProperty"])).toEqual(
+      []
+    );
   });
 
   it("names every action module.verb with a verb its module has", () => {

@@ -234,7 +234,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via simulated memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Signs a server-authored memo message with the wallet selected by an authenticated API key or Clerk JWT, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+      "Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

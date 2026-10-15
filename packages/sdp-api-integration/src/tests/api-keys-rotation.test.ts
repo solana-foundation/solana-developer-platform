@@ -83,8 +83,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
         name: `Rotation key ${Date.now()}`,
         grants: [...API_KEY_GRANTABLE_ACTIONS],
         walletScope: "selected",
-        signingWalletId: wallet.walletId,
-        signingWalletIds: [wallet.walletId],
+        walletIds: [wallet.id],
       }),
     });
 

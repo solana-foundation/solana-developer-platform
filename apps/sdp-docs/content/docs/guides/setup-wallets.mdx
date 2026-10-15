@@ -153,7 +153,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Other modules name it the same way (their pages say which field). Wallet-scoped API keys bind the wallet's `walletId` in `signingWalletIds`.
+Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Other modules name it the same way (their pages say which field). An API key limited to selected wallets lists the same `id` in `walletIds`.
 
 ```typescript title="transfer-request.ts"
 const body = {

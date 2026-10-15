@@ -137,7 +137,7 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
+  it("documents exact signer-check runtime failures and requires its Provider-ID request", () => {
     const operation = createPublicOpenApiDocument({ releaseChannel: "stable" }).paths?.[
       "/v1/wallets/signer-check"
     ]?.post;
@@ -146,7 +146,8 @@ describe("OpenAPI spec", () => {
     expect(operation?.responses).toHaveProperty("409");
     const request = getJsonSchema(operation?.requestBody);
     expect(request.properties).toEqual({ walletId: expect.any(Object) });
-    expect(request.required).toBeUndefined();
+    // A wallet scope has no default signing wallet, so the request names one.
+    expect(request.required).toEqual(["walletId"]);
   });
 
   it("documents path-based versioning policy", () => {

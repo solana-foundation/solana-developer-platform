@@ -16,7 +16,6 @@ import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeSide } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { getAllowedApiKeyCustodyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
 
@@ -59,11 +58,8 @@ export interface DvpInboundTrade {
  * that decides what you can SEE cannot drift from the rule that decides what
  * you can FUND.
  *
- * Scoped the same way `/v1/wallets` scopes its listing, through
- * `getAllowedApiKeyCustodyWalletIdsForPermissions`, so a key bound to a subset
- * of wallets discovers trades for that subset and no more. Without it a
- * narrowly bound key would learn about trades naming wallets it has no rights
- * over, which is the same disclosure the binding exists to prevent.
+ * Project-scoped (HOO-2099): every read but the wallet list and wallet detail
+ * is, and funding a side is decided by the custody signer.
  *
  * @param env - The request environment, for the database and runtime targets.
  * @param request - Org, project and auth the addresses are resolved for.
@@ -73,28 +69,16 @@ export async function callerPartyAddresses(
   env: Env,
   request: DvpInboundRequest
 ): Promise<Map<string, DvpCallerWallet>> {
-  const allowedWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(request.auth, [
-    "wallets:read",
-  ]);
-  if (allowedWalletIds !== null && allowedWalletIds.length === 0) {
-    return new Map();
-  }
-
   const wallets = await new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
     organizationId: request.organizationId,
     projectId: request.projectId,
   });
 
-  const visible =
-    allowedWalletIds === null
-      ? wallets
-      : wallets.filter((wallet) => allowedWalletIds.includes(wallet.id));
-
   // Keyed by address because that is what a trade names. A project can hold the
   // same address under two records in principle; last one wins and either is
   // the same wallet.
   return new Map(
-    visible
+    wallets
       .filter((wallet) => typeof wallet.publicKey === "string" && wallet.publicKey.length > 0)
       .map((wallet) => [wallet.publicKey as string, { id: wallet.id, name: wallet.label }])
   );

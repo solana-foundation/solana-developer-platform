@@ -9,14 +9,12 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import type { HeliusRingsActor } from "@/services/helius-rings";
 import { getRingsSetupStatus } from "@/services/helius-rings/connection.service";
 import type { Env } from "@/types/env";
 import {
   type AppContext,
-  allowedRingsWalletIds,
   getHeliusRingsOperationRepository,
   getHeliusRingsService,
   getHeliusRingsWalletRepository,
@@ -103,9 +101,6 @@ export async function createRingsWallet(c: AppContext) {
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
   const { tenant } = tenantOf(c);
-  // The custody wallet named in the body, not a rings wallet that exists yet —
-  // so the scope check goes straight to the provider id the key is bound to.
-  assertApiKeyWalletAccess(getAuth(c), parsed.data.walletId, ["payments:write"]);
 
   const scope = await resolveScope(c);
   const custodyWallet = resolveWallet(scope.wallets, parsed.data.walletId);
@@ -126,27 +121,18 @@ export async function createRingsWallet(c: AppContext) {
 
 /**
  * GET /wallets — the project's rings wallets, newest first.
- *
- * Filtered rather than refused: a wallet-scoped key asking for its wallets
- * wants the ones it holds, not a 403. The repository applies the scope before
- * the list limit so unauthorized rows cannot consume the page.
  */
 export async function listRingsWallets(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
-  const allowed = allowedRingsWalletIds(c, ["payments:read"]);
-  const rows = await getHeliusRingsWalletRepository(c).listWallets({
-    ...tenant,
-    limit,
-    ...(allowed ? { sdpWalletIds: [...allowed] } : {}),
-  });
+  const rows = await getHeliusRingsWalletRepository(c).listWallets({ ...tenant, limit });
   return success(c, { wallets: rows.map(mapHeliusRingsWalletRow) });
 }
 
 /** GET /wallets/:walletId */
 export async function getRingsWallet(c: AppContext) {
   const { tenant } = tenantOf(c);
-  const row = await requireRingsWallet(c, tenant, requireParam(c, "walletId"), ["payments:read"]);
+  const row = await requireRingsWallet(c, tenant, requireParam(c, "walletId"));
   return success(c, { wallet: mapHeliusRingsWalletRow(row) });
 }
 
@@ -159,7 +145,7 @@ export async function getRingsWallet(c: AppContext) {
  */
 export async function syncRingsWallet(c: AppContext) {
   const { tenant } = tenantOf(c);
-  await requireRingsWallet(c, tenant, requireParam(c, "walletId"), ["payments:write"]);
+  await requireRingsWallet(c, tenant, requireParam(c, "walletId"));
   const service = getHeliusRingsService(c, tenant);
   const result = await withRingsErrors(() => service.syncWallet(requireParam(c, "walletId")));
   const priced = await priceRingsBalances(c.env, result.balances);
@@ -186,7 +172,7 @@ export async function rekeyRingsWallet(c: AppContext) {
 
   const { auth, tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
-  const ringsWallet = await requireRingsWallet(c, tenant, walletId, ["payments:write"]);
+  const ringsWallet = await requireRingsWallet(c, tenant, walletId);
 
   const scope = await resolveScope(c);
   const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
@@ -292,7 +278,7 @@ export async function voidRingsOperation(c: AppContext) {
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
   const { auth, tenant } = tenantOf(c);
-  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"));
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.voidOperation(
@@ -315,7 +301,7 @@ export async function voidRingsOperation(c: AppContext) {
  */
 export async function recheckRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
-  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"));
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.completeIfIndexed(requireParam(c, "operationId"))
@@ -329,7 +315,7 @@ export async function recheckRingsOperation(c: AppContext) {
 export async function listRingsZones(c: AppContext) {
   const { tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
-  await requireRingsWallet(c, tenant, walletId, ["payments:read"]);
+  await requireRingsWallet(c, tenant, walletId);
   const zones = await getHeliusRingsZoneRepository(c).listZonesByWallet({ walletId });
   return success(c, { zones: zones.map(mapHeliusRingsZoneRow) });
 }
@@ -341,7 +327,7 @@ export async function createRingsZone(c: AppContext) {
 
   const { tenant } = tenantOf(c);
   const walletId = requireParam(c, "walletId");
-  await requireRingsWallet(c, tenant, walletId, ["payments:write"]);
+  await requireRingsWallet(c, tenant, walletId);
 
   const zone = await getHeliusRingsZoneRepository(c).createZone({
     walletId,
@@ -360,7 +346,7 @@ export async function prepareRingsOperation(c: AppContext) {
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
 
   const { tenant } = tenantOf(c);
-  await requireRingsWallet(c, tenant, parsed.data.walletId, ["payments:write"]);
+  await requireRingsWallet(c, tenant, parsed.data.walletId);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() => service.prepareOperation(parsed.data));
   return success(c, { operation }, 201);
@@ -368,26 +354,13 @@ export async function prepareRingsOperation(c: AppContext) {
 
 /**
  * GET /operations — the project's activity feed, newest first.
- *
- * Filtered to the wallets the key may read. Operations name their wallet by
- * rings id, so the visible set is resolved through the wallet rows rather than
- * assumed from the operation.
  */
 export async function listRingsOperations(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
-  const allowed = allowedRingsWalletIds(c, ["payments:read"]);
-
-  const walletIds = allowed
-    ? await getHeliusRingsWalletRepository(c).listWalletIdsBySdpWalletIds({
-        ...tenant,
-        sdpWalletIds: [...allowed],
-      })
-    : undefined;
   const rows = await getHeliusRingsOperationRepository(c).listOperationsByProject({
     ...tenant,
     limit,
-    ...(walletIds === undefined ? {} : { walletIds }),
   });
   return success(c, {
     operations: rows.map(mapHeliusRingsOperationSummaryRow),
@@ -397,7 +370,7 @@ export async function listRingsOperations(c: AppContext) {
 /** GET /operations/:operationId — full detail with the event timeline. */
 export async function getRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
-  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:read"]);
+  await requireRingsOperation(c, tenant, requireParam(c, "operationId"));
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.getOperationWithEvents(requireParam(c, "operationId"))
@@ -411,9 +384,7 @@ export async function getRingsOperation(c: AppContext) {
  */
 export async function executeRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
-  const _waiting = await requireRingsOperation(c, tenant, requireParam(c, "operationId"), [
-    "payments:write",
-  ]);
+  const _waiting = await requireRingsOperation(c, tenant, requireParam(c, "operationId"));
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.executeOperation(requireParam(c, "operationId"))
@@ -431,7 +402,7 @@ export async function retryRingsOperation(c: AppContext) {
 
   const { tenant } = tenantOf(c);
   const failedId = requireParam(c, "operationId");
-  const _failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
+  const _failed = await requireRingsOperation(c, tenant, failedId);
 
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>

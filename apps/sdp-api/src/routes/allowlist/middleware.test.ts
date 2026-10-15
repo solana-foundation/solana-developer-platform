@@ -49,7 +49,7 @@ describe("allowlist adminAuth", () => {
         projectId: "prj_customer",
         grants: ALL_API_KEY_GRANTS,
         environment: "production",
-        signingWalletId: null,
+        walletAccess: { scope: "all" } as const,
       });
     });
 

@@ -41,12 +41,7 @@ import {
   rampRuntime,
   resolveSdpEnvironment,
 } from "../context";
-import {
-  assertPaymentWalletExactAccess,
-  type ResolvedScope,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
+import { type ResolvedScope, resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
@@ -197,7 +192,6 @@ export async function resolveRampQuoteRequest(
   }
 
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }
 

@@ -78,7 +78,6 @@ function cachedKey(): SeededApiKey {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };

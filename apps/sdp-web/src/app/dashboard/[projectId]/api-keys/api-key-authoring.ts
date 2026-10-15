@@ -24,8 +24,8 @@ export interface ApiKeyAuthoringDraft {
   name: string;
   expiresAt: string;
   walletScope: ApiKeyWalletScope;
+  /** Custody wallet ids (`custody_wallets.id`) a selected key may sign with. */
   selectedWalletIds: string[];
-  defaultWalletId: string;
   /** The key's explicit grants, in registry order. */
   grants: Action[];
 }
@@ -37,8 +37,8 @@ export interface ApiKeyAuthoringExistingKey {
   grants: Action[];
   expiresAt: string | null;
   walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
+  /** Custody wallet ids a selected key lists. */
+  walletIds: string[];
 }
 
 export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
@@ -47,7 +47,6 @@ export function createApiKeyAuthoringDraft(): ApiKeyAuthoringDraft {
     expiresAt: "",
     walletScope: "all",
     selectedWalletIds: [],
-    defaultWalletId: "",
     grants: [],
   };
 }
@@ -195,23 +194,28 @@ export function summarizeGrants(
   return rows;
 }
 
-export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): {
-  walletScope: ApiKeyWalletScope;
-  signingWalletId?: string;
-  signingWalletIds?: string[];
-} {
+/** Whether any grant lets the key move money or sign (an `execute` action). */
+export function grantsIncludeExecute(grants: readonly Action[]): boolean {
+  return grants.some((grant) => actionVerbOf(grant) === "execute");
+}
+
+/**
+ * The wallet scope a new key starts with, until the person picks one: a key
+ * that can execute starts on Selected wallets, so it signs with nothing it
+ * was not given (HOO-2099); a read-only key starts on All.
+ */
+export function defaultWalletScopeForGrants(grants: readonly Action[]): ApiKeyWalletScope {
+  return grantsIncludeExecute(grants) ? "selected" : "all";
+}
+
+export type EndpointWalletPayload =
+  | { walletScope: "all" }
+  | { walletScope: "selected"; walletIds: string[] };
+
+/** The API's wallet fields: the scope, and for a selected key its custody wallet ids. */
+export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): EndpointWalletPayload {
   if (draft.walletScope === "all") {
     return { walletScope: "all" };
   }
-
-  const selectedWalletIds = Array.from(new Set(draft.selectedWalletIds));
-  const signingWalletId = selectedWalletIds.includes(draft.defaultWalletId)
-    ? draft.defaultWalletId
-    : selectedWalletIds[0];
-
-  return {
-    walletScope: "selected",
-    signingWalletId,
-    signingWalletIds: selectedWalletIds,
-  };
+  return { walletScope: "selected", walletIds: Array.from(new Set(draft.selectedWalletIds)) };
 }

@@ -80,7 +80,7 @@ function buildApiKeyApp() {
       projectId: PROJECT_ID,
       grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
-      signingWalletId: null,
+      walletAccess: { scope: "all" } as const,
     });
     c.set("projectId", PROJECT_ID);
     await next();

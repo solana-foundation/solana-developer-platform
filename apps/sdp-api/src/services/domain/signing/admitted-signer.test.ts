@@ -68,6 +68,8 @@ describe("admittedSigner", () => {
       subject_id: "cwlt_admitted_signer",
       organization_id: "org_admitted_signer",
       project_id: "prj_admitted_signer",
+      principal_kind: null,
+      principal: null,
       reason: "organization_inactive",
     });
     events.mockRestore();

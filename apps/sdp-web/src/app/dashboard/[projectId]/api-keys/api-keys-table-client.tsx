@@ -4,7 +4,6 @@ import type {
   Action,
   ApiKeyEnvironment,
   ApiKeyStatus,
-  ApiKeyWalletBinding,
   ApiKeyWalletScope,
   PaymentsDashboardWallet,
 } from "@sdp/types";
@@ -41,9 +40,8 @@ export interface ApiKeyRecord {
   environment: ApiKeyEnvironment;
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
-  signingWalletId: string | null;
-  signingWalletIds: string[];
-  walletBindings: ApiKeyWalletBinding[];
+  /** Custody wallet ids a selected key lists. */
+  walletIds: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -77,10 +75,7 @@ function getWalletNames(
     return { label: t("DashboardCustody.allWallets"), title: t("DashboardCustody.allWallets") };
   }
 
-  const walletIds =
-    key.walletBindings.length > 0
-      ? key.walletBindings.map((binding) => binding.walletId)
-      : key.signingWalletIds;
+  const walletIds = key.walletIds;
   const walletNames = walletIds.map((walletId) => walletLabelById.get(walletId) ?? walletId);
 
   if (walletNames.length === 0) {
@@ -148,7 +143,7 @@ export function ApiKeysTableClient({
   }, [apiKeys]);
 
   const walletLabelById = useMemo(() => {
-    return new Map(wallets.map((wallet) => [wallet.walletId, formatWalletLabel(wallet)]));
+    return new Map(wallets.map((wallet) => [wallet.id, formatWalletLabel(wallet)]));
   }, [wallets]);
 
   if (sortedApiKeys.length === 0) {

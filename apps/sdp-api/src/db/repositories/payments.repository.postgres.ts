@@ -53,34 +53,8 @@ function buildTransferListWhere(params: ListTransfersInput): {
   };
 
   addEquals("pt.project_id", params.projectId ?? undefined);
-  if (params.walletAuthorization) {
-    const authorizationClauses: string[] = [];
-    if (params.walletAuthorization.custodyWalletIds.length > 0) {
-      authorizationClauses.push(
-        `pt.custody_wallet_id IN (${buildInClause(params.walletAuthorization.custodyWalletIds.length)})`
-      );
-      values.push(...params.walletAuthorization.custodyWalletIds);
-    }
-    if (params.walletAuthorization.providerWalletIds.length > 0) {
-      authorizationClauses.push(
-        `(pt.custody_wallet_id IS NULL AND pt.wallet_id IN (${buildInClause(params.walletAuthorization.providerWalletIds.length)}))`
-      );
-      values.push(...params.walletAuthorization.providerWalletIds);
-    }
-    clauses.push(
-      authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
-    );
-  }
   addEquals("pt.custody_wallet_id", params.custodyWalletId);
   addEquals("pt.wallet_id", params.walletId);
-  // walletIds is an authorization allowlist, not an optional filter: an empty
-  // list means "authorized for no wallet" and must match nothing, while the
-  // other addIn params legitimately treat an empty/absent list as no filter.
-  if (params.walletIds !== undefined && params.walletIds.length === 0) {
-    clauses.push("1 = 0");
-  } else {
-    addIn("pt.wallet_id", params.walletIds);
-  }
   addEquals("pt.counterparty_id", params.counterpartyId);
 
   if (params.walletAddress) {

@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Permission } from "@sdp/types";
 import { getAddressDecoder } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -34,7 +33,6 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -62,7 +60,6 @@ const PARTY_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -268,38 +265,6 @@ async function seedCustodyWallets(): Promise<void> {
       )
       .bind(THIRD_WALLET.id, CUSTODY_CONFIG_ID, THIRD_WALLET.walletId, UNRELATED_ADDRESS),
   ]);
-}
-
-/**
- * Re-seeds the key as wallet-scoped, bound to one custody wallet: its row and
- * its binding row, which authentication reads fresh on every request.
- */
-async function seedWalletScopedKey(
-  wallet: { id: string; walletId: string },
-  permissions: Permission[] = ["*"]
-): Promise<void> {
-  const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES (?, ?, ?, ?)`
-    )
-    .bind(`akwp_dvp_${wallet.id}`, TEST_API_KEY.id, wallet.walletId, JSON.stringify(permissions))
-    .run();
-
-  const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-  await seedApiKeyRow(env, keyHash, {
-    ...TEST_CACHED_API_KEY,
-    walletScope: "selected",
-    signingWalletId: wallet.walletId,
-    walletBindings: [
-      {
-        walletId: wallet.walletId,
-        custodyWalletId: wallet.id,
-        permissions,
-      },
-    ],
-  });
 }
 
 /**
@@ -634,52 +599,6 @@ describe("DvP routes", () => {
     expect(settlement.results).toHaveLength(0);
   });
 
-  // A wallet-scoped key only sees trades its bound wallets are party to, so a
-  // create naming neither would 201 and then 404 on every read — refused up
-  // front instead.
-  it("refuses a wallet-scoped key creating a trade naming none of its wallets", async () => {
-    await seedWalletScopedKey(BOUND_WALLET);
-
-    const res = await app.request(
-      "/v1/dvp/trades",
-      {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify(
-          createBody({
-            partyA: { address: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn" },
-            partyB: { address: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg" },
-          })
-        ),
-      },
-      env
-    );
-    expect(res.status).toBe(403);
-
-    const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
-    expect(trades.results).toHaveLength(0);
-  });
-
-  // Visibility filters on payments:read, so a write-only binding creates a
-  // trade the same key can never read back — refused like the unnamed case.
-  it("refuses a scoped key whose named party wallet has write but not read", async () => {
-    await seedWalletScopedKey(BOUND_WALLET, ["payments:write"]);
-
-    const res = await app.request(
-      "/v1/dvp/trades",
-      {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify(createBody({ partyA: { walletId: BOUND_WALLET.id } })),
-      },
-      env
-    );
-    expect(res.status).toBe(403);
-
-    const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
-    expect(trades.results).toHaveLength(0);
-  });
-
   // A rotated key stays `active` in the row; the deadline alone retires it.
   it("refuses a key past its rotation deadline", async () => {
     await getDb(env)
@@ -951,139 +870,6 @@ describe("DvP routes", () => {
     });
   });
 
-  describe("action wallet revoked after viewing", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-    });
-
-    it.each([
-      { action: "fund", change: "permission" },
-      { action: "reclaim", change: "permission" },
-      { action: "fund", change: "connection" },
-      { action: "reclaim", change: "connection" },
-    ])(
-      "refuses $action after $change revocation without switching wallets",
-      async ({ action, change }) => {
-        const fetch = vi
-          .spyOn(globalThis, "fetch")
-          .mockRejectedValue(new Error("Unexpected external request"));
-        const db = getDb(env);
-        await seedTradeFor({ tradeId: "dvp_stale_action" });
-        await seedPartyOrg();
-        const selected = await seedPartyConnectionWallet("selected", "2020-01-01");
-        const alternative = await seedPartyConnectionWallet("alternative", "2021-01-01");
-        const wallets = [selected, alternative];
-        await db.batch(
-          wallets.map((wallet) =>
-            db
-              .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-          VALUES (?, ?, ?, ?)`)
-              .bind(
-                `binding_${wallet.id}`,
-                PARTY_API_KEY.id,
-                wallet.walletId,
-                JSON.stringify(["*"])
-              )
-          )
-        );
-        const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
-        await seedApiKeyRow(env, keyHash, {
-          ...PARTY_CACHED_API_KEY,
-          walletScope: "selected",
-          walletBindings: wallets.map((wallet) => ({
-            walletId: wallet.walletId,
-            custodyWalletId: wallet.id,
-            permissions: ["*"],
-          })),
-        });
-
-        const view = await app.request(
-          "/v1/dvp/trades/dvp_stale_action",
-          { headers: partyAuthHeaders() },
-          env
-        );
-        expect(view.status).toBe(200);
-        const viewBody = await view.json();
-        const actionWallet = viewBody.data.trade.legs.a.party.actionWallet;
-        expect(actionWallet).toEqual({
-          id: selected.id,
-          name: "Connection desk",
-          isRuntimeExecutionAllowed: true,
-        });
-
-        // Keep the cached authorization and the displayed wallet stale on purpose.
-        if (change === "permission") {
-          await db
-            .prepare(
-              "UPDATE api_key_wallet_permissions SET permissions = ? WHERE api_key_id = ? AND wallet_id = ?"
-            )
-            .bind(
-              JSON.stringify(["payments:read", "wallets:read"]),
-              PARTY_API_KEY.id,
-              selected.walletId
-            )
-            .run();
-        } else {
-          await db
-            .prepare(
-              "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?"
-            )
-            .bind(selected.connectionId)
-            .run();
-        }
-
-        // The preceding GET may observe the chain; measure only the signing request.
-        fetch.mockClear();
-        const res = await app.request(
-          `/v1/dvp/trades/dvp_stale_action/${action}`,
-          {
-            method: "POST",
-            headers: partyAuthHeaders(),
-            body: JSON.stringify({ side: "a", walletId: actionWallet.id }),
-          },
-          env
-        );
-        expect(res.status).toBe(403);
-        expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
-        // Both wallets have the party address; refusal must precede any RPC or Provider access.
-        expect(fetch).not.toHaveBeenCalled();
-
-        // The other wallet remains admitted and authorized after either change.
-        await seedApiKeyRow(env, keyHash, {
-          ...PARTY_CACHED_API_KEY,
-          walletScope: "selected",
-          walletBindings: wallets.map((wallet) => ({
-            walletId: wallet.walletId,
-            custodyWalletId: wallet.id,
-            permissions:
-              wallet.id === selected.id && change === "permission"
-                ? ["payments:read", "wallets:read"]
-                : ["*"],
-          })),
-        });
-        const refreshed = await app.request(
-          "/v1/dvp/trades/dvp_stale_action",
-          { headers: partyAuthHeaders() },
-          env
-        );
-        expect(refreshed.status).toBe(200);
-        expect(await refreshed.json()).toMatchObject({
-          data: {
-            trade: {
-              legs: {
-                a: {
-                  party: {
-                    actionWallet: { id: alternative.id, isRuntimeExecutionAllowed: true },
-                  },
-                },
-              },
-            },
-          },
-        });
-      }
-    );
-  });
-
   // A response never states ownership — it derives it for the caller. The
   // full-shape assertions below are the field-additions projection sweep:
   // checking spot fields would let an added field pass silently, so the whole
@@ -1155,91 +941,6 @@ describe("DvP routes", () => {
                 party: {
                   wallet: { id: BOUND_WALLET.id },
                   actionWallet: null,
-                },
-              },
-            },
-          },
-        },
-      });
-    });
-
-    it("does not disclose a write-only execution wallet through a readable same-address wallet", async () => {
-      await getDb(env)
-        .prepare(`INSERT INTO custody_wallets
-        (id, custody_config_id, wallet_id, public_key, label, status, created_at)
-        VALUES ('cwlt_write_only', ?, 'provider_write_only', ?, 'Hidden desk', 'active', '2020-01-01')`)
-        .bind(CUSTODY_CONFIG_ID, PARTY_A_ADDRESS)
-        .run();
-      await seedWalletScopedKey(BOUND_WALLET, ["payments:read", "wallets:read"]);
-      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedApiKeyRow(env, keyHash, {
-        ...TEST_CACHED_API_KEY,
-        walletScope: "selected",
-        walletBindings: [
-          {
-            walletId: BOUND_WALLET.walletId,
-            custodyWalletId: BOUND_WALLET.id,
-            permissions: ["payments:read", "wallets:read"],
-          },
-          {
-            walletId: "provider_write_only",
-            custodyWalletId: "cwlt_write_only",
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-      await seedTradeFor({ tradeId: "dvp_hidden_action" });
-
-      const res = await app.request(
-        "/v1/dvp/trades/dvp_hidden_action",
-        { headers: authHeaders() },
-        env
-      );
-      const body = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(body).toMatchObject({
-        data: {
-          trade: {
-            legs: {
-              a: {
-                party: {
-                  wallet: { id: BOUND_WALLET.id },
-                  actionWallet: null,
-                },
-              },
-            },
-          },
-        },
-      });
-      expect(JSON.stringify(body)).not.toContain("Hidden desk");
-      expect(JSON.stringify(body)).not.toContain("cwlt_write_only");
-    });
-
-    it("uses the existing write binding to choose among same-address wallets", async () => {
-      await getDb(env)
-        .prepare(`INSERT INTO custody_wallets
-        (id, custody_config_id, wallet_id, public_key, status, created_at)
-        VALUES ('cwlt_older_unbound', ?, 'provider_older', ?, 'active', '2020-01-01')`)
-        .bind(CUSTODY_CONFIG_ID, PARTY_A_ADDRESS)
-        .run();
-      await seedWalletScopedKey(BOUND_WALLET);
-      await seedTradeFor({ tradeId: "dvp_bound_action" });
-
-      const res = await app.request(
-        "/v1/dvp/trades/dvp_bound_action",
-        { headers: authHeaders() },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({
-        data: {
-          trade: {
-            legs: {
-              a: {
-                party: {
-                  actionWallet: { id: BOUND_WALLET.id },
                 },
               },
             },
@@ -1886,161 +1587,5 @@ describe("DvP routes", () => {
         });
       }
     );
-  });
-
-  describe("wallet scope", () => {
-    beforeEach(async () => {
-      await seedCustodyWallets();
-    });
-
-    it("hides a trade the bound wallet is not party to: absent from list, 404 on get, row untouched", async () => {
-      await seedWalletScopedKey(THIRD_WALLET);
-      await seedTradeFor({ tradeId: "dvp_unrelated_trade" });
-
-      const list = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-      const listBody = (await list.json()) as { data: { trades: { id: string }[] } };
-      expect(listBody.data.trades).toEqual([]);
-
-      const get = await app.request(
-        "/v1/dvp/trades/dvp_unrelated_trade",
-        { headers: authHeaders() },
-        env
-      );
-      // 404 rather than 403, so nothing leaks about which trades exist.
-      expect(get.status).toBe(404);
-
-      // The reads must not have touched the row.
-      const row = await getDb(env)
-        .prepare("SELECT status, escrow_a_amount FROM dvp_trades WHERE id = ?")
-        .bind("dvp_unrelated_trade")
-        .first<{ status: string; escrow_a_amount: string | null }>();
-      expect(row).toEqual({ status: "created", escrow_a_amount: null });
-    });
-  });
-
-  // The party fallback answers for the ORGANIZATION; a wallet-scoped key must
-  // still be bound to the wallet that makes a side theirs (handlers.ts:851).
-  describe("party fallback wallet scope", () => {
-    beforeEach(async () => {
-      await seedPartyOrg();
-    });
-
-    async function seedPartyScopedKey(custodyWalletId: string, walletId: string): Promise<void> {
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-           VALUES (?, ?, ?, ?)`
-        )
-        .bind(
-          `akwp_dvp_party_${custodyWalletId}`,
-          PARTY_API_KEY.id,
-          walletId,
-          JSON.stringify(["*"])
-        )
-        .run();
-      const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
-      await seedApiKeyRow(env, keyHash, {
-        ...PARTY_CACHED_API_KEY,
-        walletScope: "selected",
-        signingWalletId: walletId,
-        walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
-      });
-    }
-
-    it("404s a scoped party key whose bindings exclude the party wallet, even though the org holds one", async () => {
-      // The org's custody resolves side A to cwlt_dvp_party; this key is bound
-      // only to an unrelated wallet, so the fallback must refuse it the same
-      // way the scoped lookup above did.
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(
-          "cwlt_dvp_party_unrelated",
-          "cust_dvp_party",
-          "dvp_party_wallet_unrelated",
-          UNRELATED_ADDRESS
-        )
-        .run();
-      await seedPartyScopedKey("cwlt_dvp_party_unrelated", "dvp_party_wallet_unrelated");
-      await seedTradeFor({ tradeId: "dvp_party_scoped_hidden" });
-
-      const res = await app.request(
-        "/v1/dvp/trades/dvp_party_scoped_hidden",
-        { headers: partyAuthHeaders() },
-        env
-      );
-
-      expect(res.status).toBe(404);
-    });
-
-    // The complement: bound to the party wallet itself, the same trade answers.
-    it("shows the trade to a scoped party key bound to the party wallet", async () => {
-      await seedPartyScopedKey("cwlt_dvp_party", "dvp_party_wallet");
-      await seedTradeFor({ tradeId: "dvp_party_scoped_visible" });
-
-      const res = await app.request(
-        "/v1/dvp/trades/dvp_party_scoped_visible",
-        { headers: partyAuthHeaders() },
-        env
-      );
-      expect(res.status).toBe(200);
-
-      const body = (await res.json()) as { data: { trade: { yourSide: string; kind: string } } };
-      expect(body.data.trade.yourSide).toBe("a");
-      expect(body.data.trade.kind).toBe("principal");
-    });
-  });
-
-  // `payments:write` says the key may write. It does not say which wallet, and
-  // a wallet named in a create either pays the fee and rent (the payer) or is
-  // staged for funding (a party slot). Without this check a selected-wallet
-  // key could spend any custody wallet in the project.
-  describe("create wallet scope", () => {
-    beforeEach(async () => {
-      await seedCustodyWallets();
-    });
-
-    it("refuses a custody wallet outside the key's bindings", async () => {
-      await seedWalletScopedKey(BOUND_WALLET);
-
-      const res = await app.request(
-        "/v1/dvp/trades",
-        {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify(createBody({ partyA: { walletId: UNBOUND_WALLET.id } })),
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-    });
-
-    // The complement. Without it, a guard that rejected everything would look
-    // identical to a guard that works.
-    it("admits the key's own bound wallet past the scope check", async () => {
-      await seedWalletScopedKey(BOUND_WALLET);
-
-      const res = await app.request(
-        "/v1/dvp/trades",
-        {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify(createBody({ partyA: { walletId: BOUND_WALLET.id } })),
-        },
-        env
-      );
-
-      // Not 201: the request now runs on past the scope check into the mint
-      // pre-flight, which reads chain state that route tests do not provide.
-      // Asserting the error is not a FORBIDDEN is what proves the scope gate let
-      // it through — a guard that rejected everything with some other status
-      // would still satisfy a bare `not.toBe(403)`.
-      expect(res.status).not.toBe(403);
-      const body = (await res.json()) as { error?: { code?: string } };
-      expect(body.error?.code).not.toBe("FORBIDDEN");
-    });
   });
 });

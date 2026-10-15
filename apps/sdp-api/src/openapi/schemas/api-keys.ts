@@ -1,4 +1,4 @@
-import { API_KEY_GRANTABLE_ACTIONS, PERMISSIONS } from "@sdp/types";
+import { API_KEY_GRANTABLE_ACTIONS, API_KEY_WALLET_SCOPES } from "@sdp/types";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
@@ -30,32 +30,21 @@ export const apiKeyEnvironmentSchema = z
   .enum(["sandbox", "production"])
   .openapi({ description: "API key environment.", example: "sandbox" });
 
-export const apiKeyWalletScopeSchema = z.enum(["all", "selected"]).openapi({
-  description: "Whether the key can use all wallets in scope or only explicitly selected wallets.",
+export const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
+  description:
+    "Which custody wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs nothing. The scope applies when SDP signs; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
   example: "selected",
+});
+
+export const apiKeyWalletIdsSchema = z.array(z.string()).openapi({
+  description:
+    "The custody wallets (`id` from `GET /v1/wallets`, `cwlt_...`) a `selected` key may sign with. Empty for `all`.",
+  example: ["cwlt_0f2c8c1e"],
 });
 
 export const apiKeyStatusSchema = z
   .enum(["active", "revoked", "expired", "deactivated"])
   .openapi({ description: "API key status.", example: "active" });
-
-export const permissionSchema = z.enum(PERMISSIONS).openapi({
-  description: "Permission allowed on one bound wallet.",
-  example: "payments:write",
-});
-
-export const apiKeyWalletBindingSchema = z
-  .object({
-    walletId: z.string().openapi({
-      description: "Custody wallet ID attached to the API key.",
-      example: "privy_wallet_123",
-    }),
-    permissions: z.array(permissionSchema).openapi({
-      description: "Permissions allowed when this wallet is selected.",
-      example: ["payments:write", "tokens:write"],
-    }),
-  })
-  .openapi({ description: "Wallet-level permission binding for an API key." });
 
 export const apiKeyListItemSchema = z
   .object({
@@ -66,17 +55,7 @@ export const apiKeyListItemSchema = z
     environment: apiKeyEnvironmentSchema,
     status: apiKeyStatusSchema,
     walletScope: apiKeyWalletScopeSchema,
-    signingWalletId: z.string().nullable().openapi({
-      description: "Default custody wallet bound to this API key for signing.",
-      example: "privy_wallet_123",
-    }),
-    signingWalletIds: z.array(z.string()).openapi({
-      description: "All custody wallet IDs bound to this API key.",
-      example: ["privy_wallet_123", "dfns_wallet_456"],
-    }),
-    walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
-      description: "Wallet bindings and wallet-level permission sets for this API key.",
-    }),
+    walletIds: apiKeyWalletIdsSchema,
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
       example: "2025-01-10T12:00:00.000Z",
@@ -115,17 +94,7 @@ export const apiKeyDetailSchema = z
         example: ["203.0.113.0/24"],
       }),
     walletScope: apiKeyWalletScopeSchema,
-    signingWalletId: z.string().nullable().openapi({
-      description: "Default custody wallet bound to this API key for signing.",
-      example: "privy_wallet_123",
-    }),
-    signingWalletIds: z.array(z.string()).openapi({
-      description: "All custody wallet IDs bound to this API key.",
-      example: ["privy_wallet_123", "dfns_wallet_456"],
-    }),
-    walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
-      description: "Wallet bindings and wallet-level permission sets for this API key.",
-    }),
+    walletIds: apiKeyWalletIdsSchema,
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
       example: "2025-01-10T12:00:00.000Z",
@@ -222,11 +191,35 @@ export const revokeApiKeyResponseSchema = z
       description: "Revocation timestamp.",
       example: "2025-01-10T12:00:00.000Z",
     }),
+    recurringPayments: z
+      .object({
+        canceled: z.array(z.string()).openapi({
+          description: "Recurring payments this key activated that are now canceled.",
+        }),
+        failed: z.array(z.string()).openapi({
+          description: "Recurring payments that could not be canceled; cancel them individually.",
+        }),
+      })
+      .nullable()
+      .openapi({
+        description:
+          "Null unless the request set `cancelRecurringPayments`. The key is revoked either way.",
+      }),
   })
   .openapi({ description: "API key revocation response payload." });
 
+/** Fields keys used before grants and wallet scope: refused with a 400, never documented. */
+const retiredApiKeyFieldMask = {
+  role: true,
+  permissions: true,
+  allowedOperations: true,
+  signingWalletId: true,
+  signingWalletIds: true,
+  walletBindings: true,
+} as const;
+
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
-  .omit({ connectionId: true, role: true, permissions: true, allowedOperations: true })
+  .omit({ connectionId: true, ...retiredApiKeyFieldMask })
   .extend({
     name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
@@ -243,8 +236,13 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:
-        "Explicit wallet access mode. Use 'all' to allow every wallet in scope or 'selected' to bind specific wallets.",
+        "Which custody wallets the key may sign with: `all` in its project, or only the `selected` ones in `walletIds` (plus a provisioned wallet). Required.",
       example: "selected",
+    }),
+    walletIds: withOpenApi(apiKeyCreateSchemaBase.shape.walletIds, {
+      description:
+        "Custody wallet ids (`id` from `GET /v1/wallets`) a `selected` key may sign with. Not allowed with `all`. Omitted or empty, a `selected` key signs nothing.",
+      example: ["cwlt_0f2c8c1e"],
     }),
     allowedIps: withOpenApi(apiKeyCreateSchemaBase.shape.allowedIps, {
       description: "Optional list of IPv4/IPv6 addresses or CIDR ranges allowed to use the key.",
@@ -253,19 +251,6 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
-    }),
-    signingWalletId: withOpenApi(apiKeyCreateSchemaBase.shape.signingWalletId, {
-      description: "Optional default custody wallet ID to bind this key to.",
-      example: "privy_wallet_123",
-    }),
-    signingWalletIds: withOpenApi(apiKeyCreateSchemaBase.shape.signingWalletIds, {
-      description:
-        "Optional list of custody wallet IDs to bind to this key. The first wallet becomes default unless signingWalletId is explicitly set.",
-      example: ["privy_wallet_123", "dfns_wallet_456"],
-    }),
-    walletBindings: withOpenApi(apiKeyCreateSchemaBase.shape.walletBindings, {
-      description:
-        "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
     provisionWallet: withOpenApi(custodyWalletOwnerRequestSchema.optional(), {
       description:
@@ -294,7 +279,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
   });
 
 export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
-  .omit({ role: true, permissions: true, allowedOperations: true })
+  .omit(retiredApiKeyFieldMask)
   .extend({
     name: withOpenApi(apiKeyUpdateSchemaBase.shape.name, {
       description: "Updated key name.",
@@ -306,8 +291,12 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     }),
     walletScope: withOpenApi(apiKeyUpdateSchemaBase.shape.walletScope, {
       description:
-        "Updated wallet access mode. Provide this when changing wallet bindings, or by itself to reset the key to all wallets.",
-      example: "all",
+        "Replaces the key's wallet scope. With `selected`, `walletIds` replaces its wallets (omitted: none). Omit both to keep the current scope.",
+      example: "selected",
+    }),
+    walletIds: withOpenApi(apiKeyUpdateSchemaBase.shape.walletIds, {
+      description: 'Custody wallet ids for a `selected` key. Requires `walletScope: "selected"`.',
+      example: ["cwlt_0f2c8c1e"],
     }),
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
       description: "Updated IPv4/IPv6 address or CIDR allowlist. Use null to clear.",
@@ -321,19 +310,6 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",
       example: "2026-01-01T00:00:00.000Z",
-    }),
-    signingWalletId: withOpenApi(apiKeyUpdateSchemaBase.shape.signingWalletId, {
-      description: "Updated default signing wallet binding. Use null to clear all wallet bindings.",
-      example: "privy_wallet_123",
-    }),
-    signingWalletIds: withOpenApi(apiKeyUpdateSchemaBase.shape.signingWalletIds, {
-      description:
-        "Updated list of wallet IDs bound to this key. Use null to clear all wallet bindings.",
-      example: ["privy_wallet_123", "dfns_wallet_456"],
-    }),
-    walletBindings: withOpenApi(apiKeyUpdateSchemaBase.shape.walletBindings, {
-      description:
-        "Updated wallet-level permission bindings. Use null to clear all wallet bindings.",
     }),
   })
   .openapi({ description: "Update API key request body." });

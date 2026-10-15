@@ -232,6 +232,15 @@ export interface UpdatePaymentRecurringPaymentDestinationTokenAccountInput {
   updatedAt: string;
 }
 
+/**
+ * Who activated or resumed a recurring payment, recorded on the claim for
+ * audit and for "revoke this key and cancel what it activated" (APE-343).
+ * Null keeps the stored value: the job's recovery and a cancel record nobody.
+ */
+export type RecurringPaymentActivator =
+  | { apiKeyId: string; userId: null }
+  | { apiKeyId: null; userId: string };
+
 export interface ClaimPaymentRecurringPaymentLifecycleInput {
   recurringPaymentId: string;
   organizationId: string;
@@ -239,6 +248,7 @@ export interface ClaimPaymentRecurringPaymentLifecycleInput {
   operation: PaymentRecurringPaymentLifecycleOperation;
   updatedAt: string;
   staleBefore?: string;
+  activatedBy: RecurringPaymentActivator | null;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -426,15 +436,9 @@ export interface GetLatestPaymentRecurringPaymentActivationAttemptInput {
   statuses?: readonly PaymentRecurringPaymentAttemptStatus[];
 }
 
-export interface PaymentRecurringWalletAuthorization {
-  custodyWalletIds: string[];
-  providerWalletIds: string[];
-}
-
 export interface ListPaymentRecurringPaymentsInput {
   organizationId: string;
   projectId: string;
-  walletAuthorization: PaymentRecurringWalletAuthorization | null;
   status?: PaymentRecurringPaymentStatus;
   counterpartyId?: string;
   limit: number;
@@ -499,7 +503,14 @@ export interface PaymentRecurringPaymentsRepository {
     projectId: string;
     updatedAt: string;
     staleBefore?: string;
+    activatedBy: RecurringPaymentActivator | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
+  /** Active recurring payments a key activated or last resumed, for revoke-and-cancel. */
+  listActiveRecurringPaymentsActivatedByApiKey(params: {
+    organizationId: string;
+    projectId: string;
+    apiKeyId: string;
+  }): Promise<PaymentRecurringPaymentRow[]>;
   resetRecurringPaymentActivationIfNotActive(params: {
     recurringPaymentId: string;
     organizationId: string;
@@ -569,7 +580,6 @@ export interface PaymentRecurringPaymentsRepository {
     recurringPaymentId: string;
     organizationId: string;
     projectId: string;
-    walletAuthorization: PaymentRecurringWalletAuthorization | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
   listRecurringPayments(
     params: ListPaymentRecurringPaymentsInput

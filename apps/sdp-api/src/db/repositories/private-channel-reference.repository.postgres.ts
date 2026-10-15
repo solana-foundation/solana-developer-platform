@@ -95,11 +95,8 @@ export function createPostgresPrivateChannelReferenceRepository(
         },
       ];
 
-      // Organization/project scope is always applied. Selected scope additionally
-      // mirrors API-key wallet bindings.
-      if (walletScope.scope !== "none") {
-        const selectedWalletClause =
-          walletScope.scope === "selected" ? "AND w.wallet_id = ANY(?::text[])" : "";
+      // Organization/project scope is always applied.
+      if (walletScope.scope === "all") {
         branches.push({
           sql: `SELECT 'wallet' AS kind, k.key AS key,
                        COALESCE(NULLIF(w.label, ''), w.wallet_id) AS name
@@ -107,12 +104,8 @@ export function createPostgresPrivateChannelReferenceRepository(
                   JOIN custody_configs cc ON cc.id = w.custody_config_id
                   CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
                  WHERE cc.organization_id = ?
-                   AND cc.project_id = ?
-                   ${selectedWalletClause}`,
-          binds:
-            walletScope.scope === "all"
-              ? [organizationId, projectId]
-              : [organizationId, projectId, walletScope.walletIds],
+                   AND cc.project_id = ?`,
+          binds: [organizationId, projectId],
         });
       }
 

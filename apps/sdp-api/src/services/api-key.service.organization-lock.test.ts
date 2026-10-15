@@ -30,6 +30,7 @@ const INPUT: CreateApiKeyInput = {
   grantChannel: { releaseChannel: "experimental", rampProviderStages: SDP_RAMP_PROVIDER_STAGES },
   name: "Racing key",
   grants: ["transfers.read"],
+  walletScope: { scope: "all" },
 };
 
 function createKey(): Promise<unknown> {

@@ -161,21 +161,6 @@ describe("payment request public tokens", () => {
     });
   });
 
-  it("refuses the link to a wallet-bound key without payments:write on the receiving wallet", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('akw_request_token', ?, 'wlt_request_token', '["payments:read"]')`
-      )
-      .bind(MANAGE_KEY.id)
-      .run();
-
-    const res = await get(`/v1/payments/requests/${requestId}/link`, MANAGE_KEY);
-
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(await res.json())).not.toContain(publicToken);
-  });
-
   it("answers 404 for a request in another project", async () => {
     const res = await get("/v1/payments/requests/preq_missing", MANAGE_KEY);
     expect(res.status).toBe(404);

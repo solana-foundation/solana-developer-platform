@@ -2,9 +2,9 @@
  * Legacy permission strings.
  *
  * Callers are authorized by actions (./actions): an API key holds explicit
- * grants and a member holds their organization role's actions. These strings
- * remain only as the vocabulary of an API key's per-wallet bindings
- * (`api_key_wallet_permissions`), which the wallet-scope work replaces.
+ * grants and a member holds their organization role's actions; an API key's
+ * wallet scope is a list of custody wallets, with no per-wallet permissions.
+ * These strings remain only where older stored data still names them.
  */
 
 // Resource-level permissions

@@ -150,13 +150,8 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
 export interface ListTransfersInput {
   organizationId: string;
   projectId: string;
-  walletAuthorization?: {
-    custodyWalletIds: string[];
-    providerWalletIds: string[];
-  };
   custodyWalletId?: string;
   walletId?: string;
-  walletIds?: string[];
   walletAddress?: string;
   counterpartyId?: string;
   search?: string;

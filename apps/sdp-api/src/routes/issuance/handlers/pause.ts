@@ -57,7 +57,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     type: "pause",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -89,7 +88,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     auth,
     currentAuthority: pauseAuthorityRaw,
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -153,7 +151,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
-      requiredWalletPermissions: ["tokens:admin"],
     });
     const signer = authority.signer;
 
@@ -238,7 +235,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     type: "unpause",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -270,7 +266,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     auth,
     currentAuthority: pauseAuthorityRaw,
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
@@ -334,7 +329,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
-      requiredWalletPermissions: ["tokens:admin"],
     });
     const signer = authority.signer;
 

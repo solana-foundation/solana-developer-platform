@@ -213,6 +213,7 @@ describe("ApiKeyService.createApiKey grant guard", () => {
         createdByUserId: "usr_1",
         name: "escalated",
         grants: ["api_keys.manage"],
+        walletScope: { scope: "all" },
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
@@ -232,6 +233,7 @@ describe("ApiKeyService.createApiKey grant guard", () => {
         createdByUserId: "usr_1",
         name: "escalated",
         grants: ["issuance.authority"],
+        walletScope: { scope: "all" },
       })
     ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
 
@@ -253,6 +255,7 @@ describe("ApiKeyService grants outside the release channel", () => {
         createdByUserId: "usr_1",
         name: "out of channel",
         grants: ["transfers.read", "issuance.execute", "earn.execute"],
+        walletScope: { scope: "all" },
       })
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",

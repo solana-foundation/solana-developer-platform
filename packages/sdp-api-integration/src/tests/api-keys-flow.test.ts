@@ -91,7 +91,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
         name: `PRO-966 key ${Date.now()}`,
         grants: ["issuance.manage", "issuance.execute", "transfers.execute", "wallets.read"],
         walletScope: "selected",
-        signingWalletId: sourceWallet.walletId,
+        walletIds: [sourceWallet.id],
       }),
     });
 

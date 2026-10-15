@@ -32,7 +32,7 @@ function claimFromHeader(app: Hono<{ Bindings: Env }>): void {
       projectId: "prj_movement_steps",
       grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
-      signingWalletId: null,
+      walletAccess: { scope: "all" },
     });
     const key = c.req.header("Idempotency-Key");
     if (key !== undefined) {

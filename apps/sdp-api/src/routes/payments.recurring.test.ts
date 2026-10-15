@@ -427,20 +427,8 @@ async function seedReplacementCustodyWallet(params: {
   });
 }
 
-async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-       VALUES (?, ?, ?, '["*"]')`
-    )
-    .bind(`akw_${custodyWalletId}`, TEST_API_KEY.id, walletId)
-    .run();
-  await seedCachedKey({
-    walletScope: "selected",
-    signingWalletId: walletId,
-    signingWalletIds: [walletId],
-    walletBindings: [{ walletId, custodyWalletId, permissions: ["*"] }],
-  });
+async function bindApiKeyToWallet(custodyWalletId: string): Promise<void> {
+  await seedCachedKey({ walletScope: "selected", walletIds: [custodyWalletId] });
 }
 
 async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPayment> {
@@ -4498,7 +4486,7 @@ describe("Payments routes — recurring", () => {
     async ({ expectedStatus, expectedMessage, request }) => {
       await seedUnboundWallet();
       const payment = await seedPendingRecurringPayment();
-      await bindApiKeyToWallet(UNBOUND_WALLET_ID, UNBOUND_CUSTODY_WALLET_ID);
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
       const before = await recurringExecutionSnapshot(payment.id);
       const executionCalls = recurringExecutionCallCounts();
 
@@ -4552,7 +4540,7 @@ describe("Payments routes — recurring", () => {
   it("rejects a source change to a wallet outside the API key bindings", async () => {
     await seedUnboundWallet();
     const payment = await seedPendingRecurringPayment();
-    await bindApiKeyToWallet(TEST_WALLET_ID, TEST_CUSTODY_WALLET_ID);
+    await bindApiKeyToWallet(TEST_CUSTODY_WALLET_ID);
 
     const allowedResponse = await app.request(
       `/v1/payments/recurring-payments/${payment.id}`,

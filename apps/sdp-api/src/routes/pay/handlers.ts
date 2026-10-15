@@ -91,7 +91,8 @@ export async function createSponsoredTransaction(
   await assertMoneyStartAdmitted(
     c.env,
     { organizationId: request.organization_id, projectId: request.project_id },
-    { surface: "http", movement: "payments.pay_request", subjectId: request.id }
+    { surface: "http", movement: "payments.pay_request", subjectId: request.id },
+    { custodyWalletId: null }
   );
 
   const sponsored = await issuePaymentRequestTransaction(c, {

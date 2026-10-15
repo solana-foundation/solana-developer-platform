@@ -24,7 +24,7 @@ import {
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
+import { admitPaymentWalletRuntimeExecution } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
@@ -61,10 +61,9 @@ export async function authorizeTransferBatch(
 ): Promise<AuthorizedBatchRequest> {
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
-  // Read fresh, never from the cached snapshot, which drops a binding once its
-  // wallet is inactive and would refuse the replay of a batch that ran.
-  authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
-  return authorizeBatchRequest(c, body, null, body.sourceCustodyWalletId);
+  // Whether the caller may sign with the source wallet is the custody
+  // signer's decision (HOO-2099).
+  return authorizeBatchRequest(c, body, body.sourceCustodyWalletId);
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */

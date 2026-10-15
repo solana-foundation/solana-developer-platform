@@ -1,4 +1,5 @@
 import {
+  COLLECTABLE_RECURRING_PAYMENT_STATUSES,
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
@@ -36,8 +37,8 @@ import type {
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptRow,
   PaymentRecurringPaymentUpdateEventRow,
-  PaymentRecurringWalletAuthorization,
   RecoverableCollectionRecurringPaymentRow,
+  RecurringPaymentActivator,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -51,27 +52,15 @@ import type {
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
-function addWalletAuthorization(
-  clauses: string[],
-  values: DatabaseBindValues,
-  authorization: PaymentRecurringWalletAuthorization | null
-): void {
-  if (!authorization) return;
+/** Records who activated a recurring payment; a null activator keeps what is stored. */
+const ACTIVATED_BY_ASSIGNMENTS = `activated_by_api_key_id =
+                    CASE WHEN ?::boolean THEN ?::text ELSE activated_by_api_key_id END,
+                  activated_by_user_id =
+                    CASE WHEN ?::boolean THEN ?::text ELSE activated_by_user_id END`;
 
-  const authorizationClauses: string[] = [];
-  if (authorization.custodyWalletIds.length > 0) {
-    authorizationClauses.push("source_custody_wallet_id = ANY(?::text[])");
-    values.push(authorization.custodyWalletIds);
-  }
-  if (authorization.providerWalletIds.length > 0) {
-    authorizationClauses.push(
-      "(source_custody_wallet_id IS NULL AND source_wallet_id = ANY(?::text[]))"
-    );
-    values.push(authorization.providerWalletIds);
-  }
-  clauses.push(
-    authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
-  );
+function activatedByBindings(activatedBy: RecurringPaymentActivator | null) {
+  const record = activatedBy !== null;
+  return [record, activatedBy?.apiKeyId ?? null, record, activatedBy?.userId ?? null] as const;
 }
 
 function toPostgresTextArray(values: string[]): string {
@@ -599,7 +588,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = 'activating',
-                  updated_at = ?
+                  updated_at = ?,
+                  ${ACTIVATED_BY_ASSIGNMENTS}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -611,6 +601,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .bind(
           params.updatedAt,
+          ...activatedByBindings(params.activatedBy),
           params.recurringPaymentId,
           params.organizationId,
           params.projectId,
@@ -764,7 +755,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = ?,
-                  updated_at = ?
+                  updated_at = ?,
+                  ${ACTIVATED_BY_ASSIGNMENTS}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -777,6 +769,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .bind(
           processingStatus,
           input.updatedAt,
+          ...activatedByBindings(input.activatedBy),
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
@@ -1341,6 +1334,24 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       });
     },
 
+    async listActiveRecurringPaymentsActivatedByApiKey(params) {
+      const rows = await db
+        .prepare(
+          `SELECT *
+             FROM payment_recurring_payments
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND activated_by_api_key_id = ?
+              AND status = ANY(?::text[])
+            ORDER BY created_at ASC`
+        )
+        .bind(params.organizationId, params.projectId, params.apiKeyId, [
+          ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+        ])
+        .all<Record<string, unknown>>();
+      return rows.results.map(mapRecurringPaymentRow);
+    },
+
     async getRecurringPaymentById(params) {
       const clauses = ["id = ?", "organization_id = ?", "project_id = ?"];
       const values: DatabaseBindValues = [
@@ -1348,8 +1359,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         params.organizationId,
         params.projectId,
       ];
-
-      addWalletAuthorization(clauses, values, params.walletAuthorization);
 
       const row = await db
         .prepare(
@@ -1375,8 +1384,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         clauses.push("counterparty_id = ?");
         values.push(params.counterpartyId);
       }
-      addWalletAuthorization(clauses, values, params.walletAuthorization);
-
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db

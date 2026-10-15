@@ -33,7 +33,7 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
       projectId: "prj_ramp_currency_test",
       grants: ALL_API_KEY_GRANTS,
       environment,
-      signingWalletId: null,
+      walletAccess: { scope: "all" } as const,
     });
     // projectContextMiddleware sets this for every actor in the real app.
     c.set("projectEnvironment", environment);

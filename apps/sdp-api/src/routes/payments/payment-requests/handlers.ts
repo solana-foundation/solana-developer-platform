@@ -12,14 +12,13 @@ import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { assertPaymentWalletExactAccess, resolveScope, resolveWallet } from "../wallets";
+import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createPaymentRequestSchema,
   listPaymentRequestsQuerySchema,
@@ -112,17 +111,10 @@ export async function getPaymentRequest(c: AppContext) {
 /**
  * The request's payment link token. Sharing the link is a manage-level act
  * (anyone holding it can build the request's fee-sponsored transaction), so
- * the route needs `payment_requests.manage`, and a wallet-bound key must hold
- * `payments:write` on the receiving wallet, as creation does.
+ * the route needs `payment_requests.manage`.
  */
 export async function getPaymentRequestLink(c: AppContext) {
-  const auth = getAuth(c);
   const row = await readPaymentRequest(c);
-
-  assertApiKeyWalletAccess(auth, row.wallet_id, ["payments:write"]);
-  if (row.custody_wallet_id) {
-    assertPaymentWalletExactAccess(c, row.custody_wallet_id, ["payments:write"]);
-  }
 
   const response: PaymentRequestLink = { id: row.id, publicToken: row.public_token };
   return success(c, response);

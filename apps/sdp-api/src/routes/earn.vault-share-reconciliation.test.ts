@@ -7,7 +7,6 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import app from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -50,13 +49,9 @@ const ORG = "org_share_reconciliation";
 const USER = "usr_share_reconciliation";
 const PROJECT_A = "prj_share_reconciliation_a";
 const CONFIG_A = "cfg_share_reconciliation_a";
-const CONFIG_A2 = "cfg_share_reconciliation_a2";
 const WALLET_A = "cwlt_share_reconciliation_a";
-const WALLET_A2 = "cwlt_share_reconciliation_a2";
 const PROVIDER_WALLET_A = "privy_share_reconciliation_a";
-const PROVIDER_WALLET_A2 = "para_share_reconciliation_a2";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
-const PUBLIC_KEY_A2 = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT_CATALOGUED = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const SHARE_MINT_RECORDED = "So11111111111111111111111111111111111111112";
@@ -83,7 +78,6 @@ function cachedKey(): SeededApiKey {
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };
@@ -142,32 +136,6 @@ async function seedScope(): Promise<void> {
       ]
     ),
   ]);
-}
-
-async function seedSecondProjectAWallet(): Promise<void> {
-  await seedTestCustodyRows(env, {
-    configs: [
-      {
-        id: CONFIG_A2,
-        organizationId: ORG,
-        projectId: PROJECT_A,
-        provider: "para",
-        configEncrypted: "encrypted",
-        status: "active",
-      },
-    ],
-    wallets: [
-      {
-        id: WALLET_A2,
-        owner: { kind: "config", custodyConfigId: CONFIG_A2 },
-        walletId: PROVIDER_WALLET_A2,
-        publicKey: PUBLIC_KEY_A2,
-        label: null,
-        purpose: null,
-        status: "active",
-      },
-    ],
-  });
 }
 
 async function seedStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}) {
@@ -978,28 +946,6 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         expect.objectContaining({ positionId: cancelled.position.id, ambiguousBacking: true }),
       ]);
     });
-  });
-
-  it("never reads or reports a wallet outside the key's binding scope", async () => {
-    await seedSecondProjectAWallet();
-    await seedStrategy();
-    getSplTokenBalances.mockResolvedValue([balance(SHARE_MINT_CATALOGUED, "500")]);
-    const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-    await seedApiKeyRow(env, keyHash, {
-      ...cachedKey(),
-      signingWalletId: PROVIDER_WALLET_A,
-      walletBindings: [{ walletId: PROVIDER_WALLET_A, permissions: ["earn:read"] }],
-    });
-
-    const response = await getReconciliation();
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as ReportBody;
-
-    expect(getSplTokenBalances).toHaveBeenCalledTimes(1);
-    expect(getSplTokenBalances.mock.calls[0]?.[1]).toBe(PUBLIC_KEY_A);
-    expect(body.data.unrecordedHoldings).toEqual([
-      expect.objectContaining({ custodyWalletId: WALLET_A, walletAddress: PUBLIC_KEY_A }),
-    ]);
   });
 
   it("names an unreadable wallet, withdraws its zero-share findings, and touches no rows", async () => {

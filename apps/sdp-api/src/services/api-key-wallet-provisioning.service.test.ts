@@ -52,14 +52,13 @@ const CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
 const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/wallets"), {
   env,
 });
-auditContext.set("apiKey", CACHED_API_KEY);
+auditContext.set("apiKey", { ...CACHED_API_KEY, walletAccess: { scope: "all" } });
 
 const createConfigWalletMock = vi.spyOn(SigningService.prototype, "createWallet");
 const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
@@ -278,10 +277,10 @@ describe("provisionApiKeyWallet", () => {
       const body = (await response.json()) as { data: { apiKey: { id: string } } };
       const binding = await getDb(env)
         .prepare(
-          `SELECT p.wallet_id, w.id AS resolved_custody_wallet_id, w.custody_connection_id
-           FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
-           WHERE p.api_key_id = ?`
+          `SELECT w.wallet_id, w.id AS resolved_custody_wallet_id, w.custody_connection_id
+           FROM api_key_signing_wallets s
+           JOIN custody_wallets w ON w.id = s.custody_wallet_id
+           WHERE s.api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first();
@@ -423,7 +422,7 @@ describe("provisionApiKeyWallet", () => {
           name: "Existing Connection wallet key",
           grants: ["transfers.read"],
           walletScope: "selected",
-          signingWalletId: "privy_api_key_default",
+          walletIds: ["cwlt_api_key_provisioning_default"],
         }),
       },
       env
@@ -434,13 +433,13 @@ describe("provisionApiKeyWallet", () => {
     expect(
       await getDb(env)
         .prepare(
-          `SELECT wallet_id
-           FROM api_key_wallet_permissions
+          `SELECT custody_wallet_id
+           FROM api_key_signing_wallets
            WHERE api_key_id = ?`
         )
         .bind(body.data.apiKey.id)
         .first()
-    ).toEqual({ wallet_id: "privy_api_key_default" });
+    ).toEqual({ custody_wallet_id: "cwlt_api_key_provisioning_default" });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
@@ -493,10 +492,10 @@ describe("provisionApiKeyWallet", () => {
       expect(
         await db
           .prepare(
-            `SELECT p.wallet_id, w.id AS custody_wallet_id
-           FROM api_key_wallet_permissions p
-           JOIN custody_wallets w ON w.wallet_id = p.wallet_id
-           WHERE p.api_key_id = ?`
+            `SELECT w.wallet_id, w.id AS custody_wallet_id
+           FROM api_key_signing_wallets s
+           JOIN custody_wallets w ON w.id = s.custody_wallet_id
+           WHERE s.api_key_id = ?`
           )
           .bind(body.data.apiKey.id)
           .first()

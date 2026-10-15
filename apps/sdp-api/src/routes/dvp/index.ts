@@ -38,11 +38,9 @@ dvp.use("*", requireDvpFeature);
 dvp.use("*", unifiedAuthMiddleware());
 dvp.use("*", projectContextMiddleware());
 
-// Every route below pairs `wallets:read` with its own scope, the way Payments
-// does (`routes/payments/index.ts:131`). These routes all resolve a custody
-// wallet, and the per-wallet ownership assertion is a documented no-op for a
-// key with no wallet bindings — so for exactly the keys that assertion cannot
-// govern, the router permission is the only gate they have to meet.
+// Each route declares one action. Trade reads are project-scoped; a key's
+// wallet scope applies when SDP signs a funding, payer or settlement
+// transaction, at the custody signer (HOO-2099).
 
 // Creating a trade is permissionless on chain and costs rent, so it is a write.
 // It also does NOT commit either party: only the payer signs, and the trade is a

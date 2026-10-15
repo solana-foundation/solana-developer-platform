@@ -28,7 +28,7 @@ function buildApp(stages: SdpRampProviderStages) {
       projectId: "prj_ramp_channel_test",
       grants: ALL_API_KEY_GRANTS,
       environment: "sandbox",
-      signingWalletId: null,
+      walletAccess: { scope: "all" } as const,
     });
     // projectContextMiddleware sets this for every actor in the real app.
     c.set("projectEnvironment", "sandbox");

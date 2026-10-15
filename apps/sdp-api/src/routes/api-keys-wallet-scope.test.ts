@@ -40,30 +40,29 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
 
 const TEST_CONFIG_ID = "cust_cfg_api_key_wallet_scope";
-const BINDING_FAILURE_CONSTRAINT = "sdp_test_fail_api_key_wallet_permission_insert";
+const LIST_FAILURE_CONSTRAINT = "sdp_test_fail_api_key_signing_wallet_insert";
 
-async function removeBindingFailureConstraint(): Promise<void> {
+async function removeListFailureConstraint(): Promise<void> {
   await getDb(env)
     .prepare(
-      `ALTER TABLE api_key_wallet_permissions
-       DROP CONSTRAINT IF EXISTS ${BINDING_FAILURE_CONSTRAINT}`
+      `ALTER TABLE api_key_signing_wallets
+       DROP CONSTRAINT IF EXISTS ${LIST_FAILURE_CONSTRAINT}`
     )
     .run();
 }
 
-async function installBindingFailureConstraint(): Promise<void> {
-  await removeBindingFailureConstraint();
+async function installListFailureConstraint(): Promise<void> {
+  await removeListFailureConstraint();
   await getDb(env)
     .prepare(
-      `ALTER TABLE api_key_wallet_permissions
-       ADD CONSTRAINT ${BINDING_FAILURE_CONSTRAINT}
-       CHECK (wallet_id <> 'wal_scope_b') NOT VALID`
+      `ALTER TABLE api_key_signing_wallets
+       ADD CONSTRAINT ${LIST_FAILURE_CONSTRAINT}
+       CHECK (custody_wallet_id <> 'cwlt_scope_b') NOT VALID`
     )
     .run();
 }
@@ -148,32 +147,6 @@ async function seedAuthAndWallets(): Promise<void> {
   });
 }
 
-async function seedDuplicateScopeAWallet(): Promise<void> {
-  await seedTestCustodyRows(env, {
-    configs: [
-      {
-        id: "cust_cfg_api_key_wallet_scope_duplicate",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        provider: "privy",
-        configEncrypted: "test-config",
-        status: "active",
-      },
-    ],
-    wallets: [
-      {
-        id: "cwlt_scope_a_duplicate",
-        owner: { kind: "config", custodyConfigId: "cust_cfg_api_key_wallet_scope_duplicate" },
-        walletId: "wal_scope_a",
-        publicKey: "pub_scope_a_duplicate",
-        label: "Duplicate Wallet Scope A",
-        purpose: "transfer",
-        status: "active",
-      },
-    ],
-  });
-}
-
 /** Keys are managed by a signed-in organization admin, never by a key (HOO-2099). */
 let clerkToken: string;
 
@@ -181,37 +154,48 @@ function authenticatedJsonHeaders() {
   return clerkHeaders(clerkToken, TEST_PROJECT.id);
 }
 
-async function createManagedApiKey(input: {
-  name: string;
-  grants: ["transfers.read"];
-  walletScope: "all" | "selected";
-  walletIds?: string[];
-}): Promise<string> {
-  const walletIds = input.walletIds ?? [];
-  const response = await app.request(
+function postKey(body: Record<string, unknown>) {
+  return app.request(
     "/v1/api-keys",
     {
       method: "POST",
       headers: authenticatedJsonHeaders(),
-      body: JSON.stringify({
-        name: input.name,
-        grants: ["transfers.read"],
-        walletScope: input.walletScope,
-        ...(input.walletScope === "selected"
-          ? {
-              signingWalletId: walletIds[0],
-              signingWalletIds: walletIds,
-            }
-          : {}),
-      }),
+      body: JSON.stringify({ grants: ["transfers.read"], ...body }),
     },
     env
   );
-  expect(response.status).toBe(201);
-  const body = (await response.json()) as { data: { apiKey: { id: string } } };
-  return body.data.apiKey.id;
 }
 
+function patchKey(keyId: string, body: Record<string, unknown>) {
+  return app.request(
+    `/v1/api-keys/${keyId}`,
+    { method: "PATCH", headers: authenticatedJsonHeaders(), body: JSON.stringify(body) },
+    env
+  );
+}
+
+async function readKey(keyId: string) {
+  const response = await app.request(
+    `/v1/api-keys/${keyId}`,
+    { headers: authenticatedJsonHeaders() },
+    env
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    data: { name: string; walletScope: string; walletIds: string[] };
+  };
+  return body.data;
+}
+
+async function createKey(body: Record<string, unknown>): Promise<string> {
+  const response = await postKey({ name: "Scoped key", ...body });
+  expect(response.status).toBe(201);
+  return ((await response.json()) as { data: { apiKey: { id: string } } }).data.apiKey.id;
+}
+
+// HOO-2099: a key's wallet scope is explicit, and a selected key lists exact
+// custody wallet ids (APE-390). The list decides which wallets it may sign
+// with, at the custody signer, and narrows only its wallet list and detail.
 describe("API key wallet scope routes", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -219,354 +203,167 @@ describe("API key wallet scope routes", () => {
   });
 
   afterEach(async () => {
-    await removeBindingFailureConstraint();
+    await removeListFailureConstraint();
     await clearKVStores(env);
   });
 
   it("rejects create requests without walletScope", async () => {
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          name: "Missing wallet scope",
-          projectId: TEST_PROJECT.id,
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
+    const response = await postKey({ name: "Missing wallet scope" });
+    expect(response.status).toBe(400);
   });
 
-  it("rejects wallet bindings when walletScope is all", async () => {
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          name: "Conflicting all-wallet key",
-          projectId: TEST_PROJECT.id,
-          grants: ["transfers.read"],
-          walletScope: "all",
-          signingWalletId: "wal_scope_a",
-        }),
-      },
-      env
-    );
+  it("rejects walletIds on an all-wallets key", async () => {
+    const response = await postKey({
+      name: "Conflicting all-wallet key",
+      walletScope: "all",
+      walletIds: ["cwlt_scope_a"],
+    });
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
     expect(body.error.message).toContain("walletScope 'all'");
   });
 
-  it("creates a selected-wallet key and persists wallet bindings", async () => {
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          name: "Scoped key",
-          projectId: TEST_PROJECT.id,
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          signingWalletId: "wal_scope_b",
-          signingWalletIds: ["wal_scope_a", "wal_scope_b"],
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      data: {
-        apiKey: {
-          id: string;
-        };
-      };
-    };
-
-    const created = await getDb(env)
-      .prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
-      .bind(body.data.apiKey.id)
-      .first<{ signing_wallet_id: string | null }>();
-    expect(created?.signing_wallet_id).toBe("wal_scope_b");
-
-    const bindings = await getDb(env)
-      .prepare(
-        `SELECT wallet_id
-         FROM api_key_wallet_permissions
-         WHERE api_key_id = ?
-         ORDER BY wallet_id`
-      )
-      .bind(body.data.apiKey.id)
-      .all<{ wallet_id: string }>();
-    expect(bindings.results).toEqual([{ wallet_id: "wal_scope_a" }, { wallet_id: "wal_scope_b" }]);
-  });
-
-  it("rolls back API key creation when wallet binding persistence fails", async () => {
-    await installBindingFailureConstraint();
-
-    const response = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: authenticatedJsonHeaders(),
-        body: JSON.stringify({
-          name: "Atomic create rollback",
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          signingWalletId: "wal_scope_b",
-          signingWalletIds: ["wal_scope_b"],
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(500);
-    const created = await getDb(env)
-      .prepare(
-        `SELECT id
-         FROM api_keys
-         WHERE organization_id = ? AND project_id = ? AND name = ?`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, "Atomic create rollback")
-      .first<{ id: string }>();
-    expect(created).toBeNull();
-  });
-
-  it("rejects a newly authored wallet binding when its provider wallet ID is ambiguous", async () => {
-    await seedDuplicateScopeAWallet();
-
-    const response = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: authenticatedJsonHeaders(),
-        body: JSON.stringify({
-          name: "Ambiguous wallet key",
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          signingWalletId: "wal_scope_a",
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(409);
-    const keyCount = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM api_keys WHERE name = ?")
-      .bind("Ambiguous wallet key")
-      .first<{ count: number }>();
-    expect(Number(keyCount?.count)).toBe(0);
-  });
-
-  it("lists wallet access for selected-wallet keys", async () => {
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          name: "Scoped key",
-          projectId: TEST_PROJECT.id,
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          signingWalletId: "wal_scope_b",
-          signingWalletIds: ["wal_scope_a", "wal_scope_b"],
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as {
-      data: {
-        apiKey: {
-          id: string;
-        };
-      };
-    };
-    const createdKeyId = body.data.apiKey.id;
-
-    const listRes = await app.request(
-      "/v1/api-keys",
-      {
-        headers: {
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-      },
-      env
-    );
-
-    expect(listRes.status).toBe(200);
-    const listBody = (await listRes.json()) as {
-      data: {
-        apiKeys: Array<{
-          id: string;
-          walletScope: string;
-          signingWalletId: string | null;
-          signingWalletIds: string[];
-          walletBindings: Array<{ walletId: string }>;
-        }>;
-      };
-    };
-    const listedKey = listBody.data.apiKeys.find((key) => key.id === createdKeyId);
-    expect(listedKey).toMatchObject({
+  it("rejects the retired wallet-binding fields instead of ignoring them", async () => {
+    const response = await postKey({
+      name: "Legacy fields",
       walletScope: "selected",
-      signingWalletId: "wal_scope_b",
-      signingWalletIds: ["wal_scope_a", "wal_scope_b"],
+      signingWalletIds: ["wal_scope_a"],
     });
-    expect(listedKey?.walletBindings.map((binding) => binding.walletId)).toEqual([
-      "wal_scope_a",
-      "wal_scope_b",
-    ]);
-    expect(listedKey).not.toHaveProperty("policyBindings");
+    expect(response.status).toBe(400);
+  });
 
-    const detailRes = await app.request(
-      `/v1/api-keys/${createdKeyId}`,
-      {
-        headers: {
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-      },
-      env
-    );
-
-    expect(detailRes.status).toBe(200);
-    const detailBody = (await detailRes.json()) as { data: Record<string, unknown> };
-    expect(detailBody.data).toMatchObject({
+  it("creates a selected key listing exact custody wallet ids", async () => {
+    const keyId = await createKey({
       walletScope: "selected",
-      signingWalletIds: ["wal_scope_a", "wal_scope_b"],
+      walletIds: ["cwlt_scope_b", "cwlt_scope_a"],
     });
-    expect(detailBody.data).not.toHaveProperty("policyBindings");
+
+    expect(await readKey(keyId)).toMatchObject({
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_a", "cwlt_scope_b"],
+    });
+    expect(
+      await getDb(env).queryOne("SELECT wallet_scope FROM api_keys WHERE id = ?", [keyId])
+    ).toEqual({ wallet_scope: "selected" });
   });
 
-  it("requires walletScope when updating wallet bindings", async () => {
-    const targetKeyId = await createManagedApiKey({
-      name: "Update target",
-      grants: ["transfers.read"],
-      walletScope: "all",
-    });
-    const res = await app.request(
-      `/v1/api-keys/${targetKeyId}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          signingWalletId: "wal_scope_a",
-          signingWalletIds: ["wal_scope_a"],
-        }),
-      },
-      env
-    );
+  it("keeps a selected key with no wallets selected, never widening it to all", async () => {
+    const keyId = await createKey({ walletScope: "selected" });
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("walletScope is required");
+    expect(await readKey(keyId)).toMatchObject({ walletScope: "selected", walletIds: [] });
   });
 
-  it("clears wallet bindings when walletScope is updated to all", async () => {
-    const targetKeyId = await createManagedApiKey({
-      name: "Scope clear target",
-      grants: ["transfers.read"],
+  it("refuses a provider wallet id: a key lists custody wallet rows only (APE-390)", async () => {
+    const response = await postKey({
+      name: "Provider id key",
       walletScope: "selected",
       walletIds: ["wal_scope_a"],
     });
 
-    const res = await app.request(
-      `/v1/api-keys/${targetKeyId}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...clerkHeaders(clerkToken, TEST_PROJECT.id),
-        },
-        body: JSON.stringify({
-          walletScope: "all",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-
-    const updated = await getDb(env)
-      .prepare("SELECT signing_wallet_id FROM api_keys WHERE id = ?")
-      .bind(targetKeyId)
-      .first<{ signing_wallet_id: string | null }>();
-    expect(updated?.signing_wallet_id).toBeNull();
-
-    const bindings = await getDb(env)
-      .prepare("SELECT COUNT(*) as count FROM api_key_wallet_permissions WHERE api_key_id = ?")
-      .bind(targetKeyId)
-      .first<{ count: number }>();
-    expect(bindings?.count).toBe(0);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toBe("Unknown wallet ids for this project: wal_scope_a");
   });
 
-  it("preserves API key fields and wallet bindings when binding update fails", async () => {
-    const apiKeyId = await createManagedApiKey({
-      name: "Atomic update original",
-      grants: ["transfers.read"],
+  it("rolls back API key creation when its wallet list cannot be written", async () => {
+    await installListFailureConstraint();
+
+    const response = await postKey({
+      name: "Rollback key",
       walletScope: "selected",
-      walletIds: ["wal_scope_a"],
-    });
-    await installBindingFailureConstraint();
-
-    const response = await app.request(
-      `/v1/api-keys/${apiKeyId}`,
-      {
-        method: "PATCH",
-        headers: authenticatedJsonHeaders(),
-        body: JSON.stringify({
-          name: "Atomic update changed",
-          grants: ["transfers.read"],
-          walletScope: "selected",
-          signingWalletId: "wal_scope_b",
-          signingWalletIds: ["wal_scope_b"],
-        }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(500);
-    const key = await getDb(env)
-      .prepare("SELECT name, signing_wallet_id FROM api_keys WHERE id = ?")
-      .bind(apiKeyId)
-      .first<{ name: string; signing_wallet_id: string | null }>();
-    expect(key).toEqual({
-      name: "Atomic update original",
-      signing_wallet_id: "wal_scope_a",
+      walletIds: ["cwlt_scope_a", "cwlt_scope_b"],
     });
 
-    const bindings = await getDb(env)
-      .prepare(
-        `SELECT wallet_id
-         FROM api_key_wallet_permissions
-         WHERE api_key_id = ?
-         ORDER BY wallet_id`
-      )
-      .bind(apiKeyId)
-      .all<{ wallet_id: string }>();
-    expect(bindings.results).toEqual([{ wallet_id: "wal_scope_a" }]);
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(
+      await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = ?", ["Rollback key"])
+    ).toEqual([]);
+  });
+
+  it("refuses to delete a custody wallet a key lists", async () => {
+    await createKey({ walletScope: "selected", walletIds: ["cwlt_scope_a"] });
+
+    await expect(
+      getDb(env).prepare("DELETE FROM custody_wallets WHERE id = 'cwlt_scope_a'").run()
+    ).rejects.toThrow(/api_key_signing_wallets/);
+  });
+
+  it("requires walletScope when updating walletIds", async () => {
+    const keyId = await createKey({ walletScope: "all" });
+
+    const response = await patchKey(keyId, { walletIds: ["cwlt_scope_a"] });
+
+    expect(response.status).toBe(400);
+    expect(await readKey(keyId)).toMatchObject({ walletScope: "all", walletIds: [] });
+  });
+
+  it("replaces the list, and clears it when the key goes back to all wallets", async () => {
+    const keyId = await createKey({ walletScope: "selected", walletIds: ["cwlt_scope_a"] });
+
+    expect(
+      (await patchKey(keyId, { walletScope: "selected", walletIds: ["cwlt_scope_b"] })).status
+    ).toBe(200);
+    expect(await readKey(keyId)).toMatchObject({
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_b"],
+    });
+
+    expect((await patchKey(keyId, { walletScope: "all" })).status).toBe(200);
+    expect(await readKey(keyId)).toMatchObject({ walletScope: "all", walletIds: [] });
+    expect(
+      await getDb(env).queryMany("SELECT * FROM api_key_signing_wallets WHERE api_key_id = ?", [
+        keyId,
+      ])
+    ).toEqual([]);
+  });
+
+  it("keeps the key unchanged when its new wallet list cannot be written", async () => {
+    const keyId = await createKey({ walletScope: "selected", walletIds: ["cwlt_scope_a"] });
+    await installListFailureConstraint();
+
+    const response = await patchKey(keyId, {
+      name: "Renamed",
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_b"],
+    });
+
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(await readKey(keyId)).toMatchObject({
+      name: "Scoped key",
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_a"],
+    });
+  });
+
+  it("narrows a selected key's wallet list and wallet detail, read fresh", async () => {
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    const asKey = (path: string) =>
+      app.request(path, { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } }, env);
+    const listed = async () => {
+      const response = await asKey("/v1/wallets?view=summary");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { wallets: Array<{ id: string }> } };
+      return body.data.wallets.map((wallet) => wallet.id).sort();
+    };
+
+    expect(await listed()).toEqual(["cwlt_scope_a", "cwlt_scope_b"]);
+
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_a"],
+    });
+    expect(await listed()).toEqual(["cwlt_scope_a"]);
+    expect((await asKey("/v1/wallets/wal_scope_b?includeBalance=false")).status).toBe(404);
+    expect((await asKey("/v1/wallets/wal_scope_a?includeBalance=false")).status).toBe(200);
+
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    expect(await listed()).toEqual([]);
   });
 
   it("hides API keys outside the authenticated organization", async () => {

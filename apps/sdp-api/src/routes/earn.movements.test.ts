@@ -53,15 +53,7 @@ interface MovementJson {
   settledAt?: string;
 }
 
-/**
- * `walletScope` follows from the key's stored bindings, which authentication
- * reads fresh on every request. Seeding a `selected` key is the way to
- * exercise the binding, and the ids it carries
- * are PROVIDER wallet ids (`privy_…`), not `custody_wallets` row ids (`cwlt_…`).
- */
-function cachedKey(
-  binding: { walletScope: "selected"; signingWalletIds: string[] } | null = null
-): SeededApiKey {
+function cachedKey(): SeededApiKey {
   return {
     id: API_KEY.id,
     organizationId: ORG,
@@ -70,28 +62,9 @@ function cachedKey(
     environment: "sandbox",
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
-    ...(binding ?? {}),
   };
-}
-
-/**
- * Bind the key to specific wallets, which takes BOTH halves.
- *
- * Both the scope and the allowed set come from the key's binding rows, which
- * the auth middleware loads from `api_key_wallet_permissions` on every request:
- * a key with no binding rows is `all` and hides nothing.
- */
-async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
-  const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  // seedApiKeyRow writes the binding rows authentication reads.
-  await seedApiKeyRow(
-    env,
-    keyHash,
-    cachedKey({ walletScope: "selected", signingWalletIds: providerWalletIds })
-  );
 }
 
 async function seedScope(): Promise<void> {
@@ -631,25 +604,6 @@ describe("GET /v1/earn/movements", () => {
       const ids = (await movementsJson()).movements.map((m) => m.id);
       expect(ids).toContain(mine.movement.id);
       expect(ids).not.toContain(ownerMovementId);
-    });
-
-    it("excludes vault movements when the key has no in-scope signing wallet, and still shows custodial ones", async () => {
-      const { withdrawal } = await seedProgramWithdrawal();
-      const deposit = await seedVaultDeposit({ walletId: WALLET_A });
-
-      // A selected-scope key whose binding resolves to nothing has no readable
-      // signing wallet, which is the degenerate end of the wallet-binding rule the
-      // vault reads apply. It must not silently invert into "no filter": a vault
-      // movement is one project's signed transaction and stays hidden, while
-      // custodial movements remain visible because program wallets carry no such
-      // binding. That asymmetry IS the visibility union. (A selected key with no
-      // binding rows at all is an all-wallet key; the binding must exist and
-      // resolve to nothing.)
-      await bindKeyToWallets(["wallet_unresolvable"]);
-
-      const body = await movementsJson();
-      expect(body.movements.map((m) => m.id)).toEqual([withdrawal.id]);
-      expect(body.movements.map((m) => m.id)).not.toContain(deposit.movement.id);
     });
   });
 

@@ -93,7 +93,6 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
     environment,
     rateLimitTier: "standard",
     allowedIps: null,
-    signingWalletId: null,
     status: "active",
     expiresAt: null,
   };

@@ -11,7 +11,6 @@ import {
   ALL_API_KEY_GRANTS,
   ALL_API_KEY_GRANTS_SQL,
   TEST_API_KEY,
-  TEST_CACHED_API_KEY,
   TEST_PRODUCTION_API_KEY,
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";

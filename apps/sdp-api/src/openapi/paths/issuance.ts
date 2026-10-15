@@ -208,7 +208,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "List issuance transactions",
     operationId: "listIssuanceTransactions",
     description:
-      "Lists issuance transactions across tokens for the current organization or project. Selected-wallet API keys are scoped to their token-readable wallet bindings when no wallet selector is supplied. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.",
+      "Lists issuance transactions across tokens for the current organization or project. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

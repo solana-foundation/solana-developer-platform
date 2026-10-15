@@ -77,20 +77,18 @@ describe("saveApiKeyAuthoringAction: create", () => {
     expect(client.fetch).not.toHaveBeenCalled();
   });
 
-  it("creates selected-wallet keys with their wallet bindings", async () => {
+  it("creates selected-wallet keys with their custody wallet ids", async () => {
     await saveApiKeyAuthoringAction({
       mode: "create",
       draft: draft({
         walletScope: "selected",
-        selectedWalletIds: ["wallet_a", "wallet_b"],
-        defaultWalletId: "wallet_b",
+        selectedWalletIds: ["cwlt_a", "cwlt_b"],
       }),
     });
 
     expect(lastBody()).toMatchObject({
       walletScope: "selected",
-      signingWalletId: "wallet_b",
-      signingWalletIds: ["wallet_a", "wallet_b"],
+      walletIds: ["cwlt_a", "cwlt_b"],
     });
   });
 });
@@ -140,14 +138,10 @@ describe("saveApiKeyAuthoringAction: edit", () => {
     await saveApiKeyAuthoringAction({
       mode: "edit",
       keyId: "key_1",
-      draft: draft({ walletScope: "selected", selectedWalletIds: ["wallet_a"] }),
+      draft: draft({ walletScope: "selected", selectedWalletIds: ["cwlt_a"] }),
     });
 
-    expect(lastBody()).toMatchObject({
-      walletScope: "selected",
-      signingWalletId: "wallet_a",
-      signingWalletIds: ["wallet_a"],
-    });
+    expect(lastBody()).toMatchObject({ walletScope: "selected", walletIds: ["cwlt_a"] });
   });
 
   it("reports an API failure without a flash or a revalidation", async () => {

@@ -78,7 +78,6 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const { signer, custodyWalletId } = authority;
@@ -179,7 +178,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     type: "seize",
     idempotencyKey: c.req.header("Idempotency-Key"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
     fingerprintForCustodyWalletId: (custodyWalletId) =>
       idempotencyForWallet(custodyWalletId).idempotencyFingerprint,
   });
@@ -221,7 +219,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
@@ -272,7 +269,6 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     auth,
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
-    requiredWalletPermissions: ["tokens:admin"],
   });
 
   const signer = authority.signer;

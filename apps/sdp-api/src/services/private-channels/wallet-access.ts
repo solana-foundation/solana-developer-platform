@@ -1,47 +1,12 @@
-import { expandStoredGrants, type MovementId } from "@sdp/types";
-import { z } from "zod";
+import type { MovementId } from "@sdp/types";
 import { getDb } from "@/db";
-import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
-import { AppError, conflict, forbidden, providerUnavailable, walletNotFound } from "@/lib/errors";
-import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
+import { AppError, conflict, providerUnavailable, walletNotFound } from "@/lib/errors";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-
-/**
- * Refresh the key's grants before authorizing a specific
- * operation or wallet, and its liveness from the same row, so a key revoked
- * between authentication and this read signs nothing. Authentication already
- * read all of it fresh (HOO-2099); this is the deliberate re-check right before
- * a private-channel movement signs, not a cache workaround. Wallet bindings
- * need no re-read: authentication read them fresh for this request.
- */
-// TODO(HOO-2099 PR 3): this second read of the key row in one request goes
-// when PR 3 replaces the private-channel re-check; it does not re-check the
-// organization or project status that authentication does.
-export async function refreshPrivateChannelAuth(
-  env: Env,
-  auth: ApiKeyContext,
-  projectId: string
-): Promise<ApiKeyContext> {
-  if (auth.authType !== "api_key") return auth;
-  const current = await getDb(env).queryOne<{ grants: unknown } & ApiKeyLifecycleColumns>(
-    `SELECT grants, status, expires_at, rotation_deadline
-       FROM api_keys
-      WHERE id = ? AND organization_id = ? AND project_id = ?`,
-    [auth.apiKeyId, auth.organizationId, projectId]
-  );
-  if (!current) throw forbidden("API key is not authorized for this project");
-  // The predicate request authentication applies: active, not past expiry,
-  // not past its rotation grace period.
-  if (apiKeyRowRefusal(current, Date.now()) !== null) {
-    throw forbidden("API key is no longer active");
-  }
-  return { ...auth, grants: expandStoredGrants(z.array(z.string()).parse(current.grants)) };
-}
 
 export function listPrivateChannelCustodyWallets(
   env: Env,
@@ -62,8 +27,7 @@ export async function resolvePrivateChannelCustodyWallet(
   wallets?: CustodyWallet[],
   allowAddress = false
 ): Promise<CustodyWallet> {
-  const current = await refreshPrivateChannelAuth(env, auth, projectId);
-  if (!authMayPerform(current, "private_channels.execute")) {
+  if (!authMayPerform(auth, "private_channels.execute")) {
     throw new AppError("INSUFFICIENT_PERMISSIONS", "Missing action: private_channels.execute", {
       action: "private_channels.execute",
     });
@@ -89,7 +53,8 @@ export async function resolvePrivateChannelCustodyWallet(
     publicKey: allowAddress ? selector : undefined,
   });
   if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
-  assertApiKeyCustodyWalletAccess(current, wallet.id, ["payments:write"]);
+  // Whether this caller may sign with the wallet, and whether its key is still
+  // live, is decided by the custody signer each time it signs (HOO-2099).
   return wallet;
 }
 

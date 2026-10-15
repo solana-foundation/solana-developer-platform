@@ -1440,7 +1440,6 @@ async function recoverRecurringPaymentCollection(input: {
         recurringPaymentId: input.recurringPayment.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        walletAuthorization: null,
       })) ?? input.recurringPayment;
     const currentSubscription =
       (await input.subscriptionsRepo.getSubscriptionById({

@@ -208,10 +208,11 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     }
 
     const createWalletBody = JSON.parse(createWalletPayload) as {
-      data: { wallet: { walletId: string; publicKey: string } };
+      data: { wallet: { id: string; walletId: string; publicKey: string } };
     };
 
     const walletId = createWalletBody.data.wallet.walletId;
+    const custodyWalletId = createWalletBody.data.wallet.id;
     const walletAddress = createWalletBody.data.wallet.publicKey;
 
     // Keys are managed by a signed-in organization admin, never a key (HOO-2099).
@@ -223,9 +224,9 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       },
       body: JSON.stringify({
         name: "Signer check integration key",
-        permissions: ["wallets:write"],
+        grants: ["wallets.execute"],
         walletScope: "selected",
-        signingWalletId: walletId,
+        walletIds: [custodyWalletId],
       }),
     });
 
@@ -246,7 +247,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ walletId }),
       });
 
       const signerCheckPayload = await signerCheckRes.text();

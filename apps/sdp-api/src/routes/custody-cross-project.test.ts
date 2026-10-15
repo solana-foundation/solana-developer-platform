@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { getLogger } from "@/runtime/logger";
-import {
-  resetUnresolvedBindingWarningsForTesting,
-  upsertApiKeyWalletBinding,
-} from "@/services/api-key-wallets.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -271,55 +266,24 @@ describe("custody wallets across an organization's projects", () => {
 
   it.each(OWNER_WALLETS)(
     "refuses to bind a new API key to another project's $owner wallet",
-    async ({ walletId }) => {
+    async ({ custodyWalletId }) => {
       const response = await requestAsAdmin("/v1/api-keys", {
         method: "POST",
         body: {
           name: "Cross-project key",
           grants: ["transfers.read"],
           walletScope: "selected",
-          signingWalletId: walletId,
+          walletIds: [custodyWalletId],
         },
       });
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual(
-        errorBody("BAD_REQUEST", `Unknown signing wallet IDs: ${walletId}`)
+      expect(await response.json()).toMatchObject(
+        errorBody("BAD_REQUEST", `Unknown wallet ids for this project: ${custodyWalletId}`)
       );
       expect(
         await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = ?", ["Cross-project key"])
       ).toEqual([]);
-    }
-  );
-
-  it.each(OWNER_WALLETS)(
-    "hydrates a stored binding to another project's $owner wallet as deny-only and logs it",
-    async ({ walletId }) => {
-      await upsertApiKeyWalletBinding(getDb(env), API_KEY.id, {
-        walletId,
-        permissions: ["wallets:read"],
-      });
-      resetUnresolvedBindingWarningsForTesting();
-      const warn = vi.spyOn(getLogger(), "warn");
-
-      for (const requestedWalletId of [walletId, REQUESTER_WALLET_ID]) {
-        const response = await requestAsRequester(
-          `/v1/wallets/public-key?walletId=${requestedWalletId}`,
-          { method: "GET" }
-        );
-        expect(response.status).toBe(404);
-        expect(await response.json()).toEqual(errorBody("NOT_FOUND", "Wallet not found"));
-      }
-      expect(warn).toHaveBeenCalledWith(
-        {
-          apiKeyId: API_KEY.id,
-          organizationId: ORGANIZATION_ID,
-          projectId: REQUESTER_PROJECT_ID,
-          walletId,
-          candidateCount: 0,
-        },
-        "api_key_wallet_binding_unresolved"
-      );
     }
   );
 });

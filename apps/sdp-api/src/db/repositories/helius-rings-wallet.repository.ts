@@ -122,8 +122,6 @@ export interface RekeyHeliusRingsWalletInput extends HeliusRingsProjectScope {
 
 export interface ListHeliusRingsWalletsInput extends HeliusRingsProjectScope {
   limit?: number;
-  /** Undefined is unrestricted; an explicit empty allowlist matches nothing. */
-  sdpWalletIds?: readonly string[];
 }
 
 export interface HeliusRingsWalletRepositoryContext {
@@ -144,10 +142,6 @@ export interface HeliusRingsWalletRepository {
     scope: HeliusRingsProjectScope & { sdpWalletId: string }
   ): Promise<HeliusRingsWalletRow | null>;
   listWallets(input: ListHeliusRingsWalletsInput): Promise<HeliusRingsWalletRow[]>;
-  /** Resolves provider wallet ids without applying the paginated wallet-list limit. */
-  listWalletIdsBySdpWalletIds(
-    input: HeliusRingsProjectScope & { sdpWalletIds: readonly string[] }
-  ): Promise<string[]>;
   /** Returns null when the CAS guard loses, leaving the row untouched. */
   markProvisioned(
     input: MarkHeliusRingsWalletProvisionedInput

@@ -170,7 +170,7 @@ export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const signerCheckSchema = z.object({
-  walletId: z.string().min(1).optional(),
+  walletId: z.string().trim().min(1),
 });
 
 export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;

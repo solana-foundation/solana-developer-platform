@@ -6,7 +6,7 @@
 
 import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
-import { authorize } from "@/middleware/authorize";
+import { authorize, authorizeNone } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { replayFromRecord } from "@/middleware/movement-steps";
@@ -17,7 +17,6 @@ import type { Env } from "@/types/env";
 import {
   authorizeCreateWallet,
   authorizeDeleteWallet,
-  authorizeInitializeSigning,
   authorizeSignerCheck,
   authorizeUpdateWallet,
 } from "./access";
@@ -53,7 +52,7 @@ wallets.post(
   "/initialize",
   requireAction("wallets.configure"),
   validateBody(initializeSigningSchema),
-  authorize(authorizeInitializeSigning),
+  authorizeNone("connects a provider in the caller's own project"),
   idempotent({ key: "accepted", serverErrors: "store" }),
   initializeSigning
 );

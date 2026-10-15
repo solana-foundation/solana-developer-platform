@@ -4,7 +4,6 @@
 
 import type { Action } from "./actions";
 import type { CustodyWalletOwnerTarget } from "./custody";
-import type { Permission } from "./permissions";
 
 export const SDP_ENVIRONMENTS = ["sandbox", "production"] as const;
 
@@ -16,17 +15,14 @@ export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
-export type ApiKeyWalletScope = "all" | "selected";
+export const API_KEY_WALLET_SCOPES = ["all", "selected"] as const;
 
-export interface ApiKeyWalletBinding {
-  walletId: string;
-  permissions: Permission[];
-}
-
-/** Internal authorization identity carried only in API-key auth state. */
-export interface ApiKeyWalletAuthorizationBinding extends ApiKeyWalletBinding {
-  custodyWalletId?: string;
-}
+/**
+ * Which custody wallets an API key may sign with (HOO-2099): every wallet in
+ * its project, or only the ones it lists. A selected key that lists none
+ * signs nothing.
+ */
+export type ApiKeyWalletScope = (typeof API_KEY_WALLET_SCOPES)[number];
 
 export interface ApiKey {
   id: string; // key_xxxxxxxxxxxx
@@ -46,10 +42,8 @@ export interface ApiKey {
   revokedAt: string | null;
   rotatedFrom: string | null; // Previous key ID if this was created via rotation
   rotationDeadline: string | null; // Grace period end for the rotated-from key
-  signingWalletId: string | null; // Custody wallet binding (e.g. privy_xxx)
-  walletScope?: ApiKeyWalletScope;
-  signingWalletIds?: string[]; // Optional multi-wallet bindings (wallet IDs)
-  walletBindings?: ApiKeyWalletBinding[]; // Optional wallet-level permission bindings
+  walletScope: ApiKeyWalletScope;
+  walletIds: string[]; // Custody wallet ids (`GET /v1/wallets` `id`) a selected key may sign with
   status: ApiKeyStatus;
   createdAt: string;
 }
@@ -60,14 +54,9 @@ export interface CreateApiKeyRequest {
   description?: string;
   grants: Action[];
   walletScope: ApiKeyWalletScope;
+  walletIds?: string[]; // Custody wallet ids, for walletScope "selected"
   allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
-  signingWalletId?: string;
-  signingWalletIds?: string[];
-  walletBindings?: Array<{
-    walletId: string;
-    permissions?: Permission[];
-  }>;
   provisionWallet?: CustodyWalletOwnerTarget;
   walletLabel?: string;
   walletPurpose?: string;
@@ -76,16 +65,11 @@ export interface CreateApiKeyRequest {
 export interface UpdateApiKeyRequest {
   name?: string;
   description?: string;
-  walletScope?: ApiKeyWalletScope;
+  walletScope?: ApiKeyWalletScope; // With walletIds, replaces the key's wallet scope
+  walletIds?: string[];
   grants?: Action[]; // Replaces the key's grants
   allowedIps?: string[] | null; // null to remove IP restrictions
   expiresAt?: string | null; // null to remove expiration
-  signingWalletId?: string | null; // null to unset binding
-  signingWalletIds?: string[] | null;
-  walletBindings?: Array<{
-    walletId: string;
-    permissions?: Permission[];
-  }> | null;
 }
 
 export interface RotateApiKeyRequest {
@@ -131,16 +115,22 @@ export interface ListApiKeysResponse {
     environment: ApiKeyEnvironment;
     status: ApiKeyStatus;
     walletScope: ApiKeyWalletScope;
-    signingWalletId: string | null;
-    signingWalletIds: string[];
-    walletBindings: ApiKeyWalletBinding[];
+    walletIds: string[];
     lastUsedAt: string | null;
     expiresAt: string | null;
     createdAt: string;
   }>;
 }
 
+export interface RevokeApiKeyRequest {
+  confirmation?: string; // The key's name
+  /** Also cancel the active recurring payments this key activated (the compromised-key path). */
+  cancelRecurringPayments?: boolean;
+}
+
 export interface RevokeApiKeyResponse {
   success: boolean;
   revokedAt: string;
+  /** Null unless the revoke asked to cancel the key's recurring payments. */
+  recurringPayments: { canceled: string[]; failed: string[] } | null;
 }

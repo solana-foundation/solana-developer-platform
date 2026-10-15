@@ -92,7 +92,6 @@ const TEST_CACHED_API_KEY: SeededApiKey = {
   environment: "sandbox",
   rateLimitTier: "standard",
   allowedIps: null,
-  signingWalletId: null,
   status: "active",
   expiresAt: null,
 };
@@ -2173,8 +2172,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
       ...TEST_CACHED_API_KEY,
       id: WALLET_SCOPED_KEY.id,
       walletScope: "selected",
-      signingWalletId: "privy_low_value",
-      walletBindings: [{ walletId: "privy_low_value", permissions: ["*"] }],
     });
     await getDb(env)
       .prepare(

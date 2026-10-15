@@ -38,7 +38,6 @@ import {
   getSignaturesForAddressMock,
   getSplTokenAccountAddressesMock,
   installPaymentsRouteTestHooks,
-  seedCachedKey,
   seedCounterparty,
   seedProductionPrivyWallet,
   TEST_API_KEY,
@@ -745,166 +744,6 @@ describe("Payments routes — list transfers", () => {
       expect(body.meta.total).toBe(0);
     });
 
-    it("enforces payments:read wallet grants for database-backed transfer lists", async () => {
-      const writeOnlyCustodyWalletId = "cwlt_payments_write_only";
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          writeOnlyCustodyWalletId,
-          "cust_cfg_payments_test",
-          "wal_payments_write_only",
-          TEST_SOLANA_ADDRESSES.wallet2,
-          "Write-only wallet",
-          "transfer",
-          "active"
-        )
-        .run();
-      await seedTransfer({ id: "xfr_wallet_readable", status: "confirmed" });
-      await seedTransfer({
-        id: "xfr_wallet_write_only",
-        status: "confirmed",
-        custodyWalletId: writeOnlyCustodyWalletId,
-        walletId: "wal_payments_write_only",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:read"],
-          },
-          {
-            walletId: "wal_payments_write_only",
-            custodyWalletId: writeOnlyCustodyWalletId,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const listRes = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(listRes.status).toBe(200);
-      const listBody = (await listRes.json()) as { data: Array<{ id: string }> };
-      expect(listBody.data.map((transfer) => transfer.id)).toEqual(["xfr_wallet_readable"]);
-
-      const forbiddenRes = await app.request(
-        `/v1/payments/transfers?custodyWalletId=${writeOnlyCustodyWalletId}&includeObserved=false`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(forbiddenRes.status).toBe(403);
-    });
-
-    it("keeps authorized legacy null-pin transfers visible to selected keys", async () => {
-      await seedTransfer({
-        id: "xfr_legacy_authorized",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: TEST_WALLET_ID,
-      });
-      await seedTransfer({
-        id: "xfr_legacy_unauthorized",
-        status: "confirmed",
-        custodyWalletId: null,
-        walletId: "wal_legacy_unauthorized",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:read"],
-          },
-        ],
-      });
-
-      const response = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: Array<{ id: string }> };
-      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_legacy_authorized"]);
-    });
-
-    it("returns no rows when selected wallets grant no payments:read access", async () => {
-      await seedTransfer({ id: "xfr_wallet_not_readable", status: "confirmed" });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers?includeObserved=false",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: unknown[]; meta: { total: number } };
-      expect(body.data).toEqual([]);
-      expect(body.meta.total).toBe(0);
-    });
-
-    it("enforces payments:read on exact provider-reference lookups", async () => {
-      await seedTransfer({
-        id: "xfr_provider_reference_private",
-        status: "completed",
-        type: "offramp",
-        provider: "moonpay",
-        providerReference: "private-provider-reference",
-      });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers?provider=moonpay&providerReference=private-provider-reference",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
-      expect(body.error.message).toContain("requested wallet");
-    });
-
     it("composes exact provider-reference lookups with every ledger filter and pagination", async () => {
       const counterpartyId = await seedCounterparty({ id: "cpty_exact_reference" });
       await seedTransfer({
@@ -1390,32 +1229,6 @@ describe("Payments routes — list transfers", () => {
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       });
-    });
-
-    it("enforces payments:read when getting a transfer by ID", async () => {
-      await seedTransfer({ id: "xfr_single_write_only", status: "confirmed" });
-      await seedCachedKey({
-        walletBindings: [
-          {
-            walletId: TEST_WALLET_ID,
-            custodyWalletId: TEST_CUSTODY_WALLET_ID,
-            permissions: ["payments:write"],
-          },
-        ],
-      });
-
-      const res = await app.request(
-        "/v1/payments/transfers/xfr_single_write_only",
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const body = (await res.json()) as { error: { code: string } };
-      expect(body.error.code).toBe("FORBIDDEN");
     });
 
     it("returns 404 for another project's transfer", async () => {

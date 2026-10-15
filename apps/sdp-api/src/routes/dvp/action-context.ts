@@ -2,8 +2,8 @@
  * Resolving what a DvP write acts on, in one place, because the leg handlers
  * (fund, reclaim) share the same answer.
  *
- * The wallet check runs against the bindings authentication read fresh for
- * this request, before anything is broadcast.
+ * Whether the caller may sign with the wallet is decided by the custody signer
+ * when it signs (HOO-2099).
  */
 
 import type { Context } from "hono";
@@ -11,10 +11,6 @@ import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
-import {
-  assertApiKeyCustodyWalletAccess,
-  getAllowedApiKeyCustodyWalletIdsForPermissions,
-} from "@/services/api-key-scope.service";
 import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
 import type { DvpCloseAction } from "@/services/dvp/settle";
 import {
@@ -90,16 +86,13 @@ export async function resolveLegAction(
       : await custodyWalletForParty(
           c.env,
           { organizationId: auth.organizationId, projectId },
-          partyAddress,
-          getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"])
+          partyAddress
         );
   if (custodyWalletId === null) {
     throw forbidden(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
-  assertApiKeyCustodyWalletAccess(auth, custodyWalletId, ["payments:write"]);
-
   return {
     trade,
     actor: dvpTradeAuditActor(auth),
@@ -134,7 +127,6 @@ export async function resolveCloseAction(
     {
       organizationId: auth.organizationId,
       projectId,
-      sdpWalletIds: getAllowedApiKeyCustodyWalletIdsForPermissions(auth, ["payments:write"]),
     },
     tradeId
   );
@@ -148,8 +140,6 @@ export async function resolveCloseAction(
   if (settlement === null) {
     throw notFound("DvP settlement wallet not found for this trade's project");
   }
-
-  assertApiKeyCustodyWalletAccess(auth, settlement.custodyWalletId, ["payments:write"]);
 
   return { trade, actor: dvpTradeAuditActor(auth), settlement, projectId };
 }

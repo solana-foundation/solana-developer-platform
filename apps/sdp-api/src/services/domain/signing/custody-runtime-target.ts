@@ -631,6 +631,9 @@ export class CustodyRuntimeTargets {
    * it is where money admission is enforced for every module (HOO-1955,
    * APE-564): a start's signer reads the organization's live state each time
    * it signs and refuses if the start is no longer admitted (`admittedSigner`).
+   * The same read checks the ambient principal (HOO-2099): live, holding the
+   * movement's action, and allowed to sign with this exact custody wallet.
+   * Callers never authorize the wallet themselves.
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
@@ -661,14 +664,16 @@ export class CustodyRuntimeTargets {
       custodySigningTimeoutMs(this.env)
     );
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    // A start reads the organization's live row each time it signs; an exit
-    // reads nothing.
+    // A start reads the organization's and the ambient principal's live rows
+    // each time it signs, in one statement; an exit reads nothing.
+    const subject = { custodyWalletId };
     return admittedSigner(
       signer,
       async () =>
         decideMovement(
           movement,
-          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId })
+          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }, subject),
+          subject
         ),
       {
         movement,

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
 import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { env as testEnv } from "@/test/helpers/env";
+import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -49,17 +50,12 @@ const SCOPE: SponsorshipMovementScope = {
   movement: "payments.transfer",
 };
 
-const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
-  organizationStatus: "active",
-  projectEnvironment: "sandbox",
-  rawSettings: null,
-};
+const ACTIVE_SANDBOX: MoneyAdmissionFacts = admittedMoneyFacts();
 
-const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = {
-  organizationStatus: "active",
+const ACTIVE_ENTITLED_PRODUCTION: MoneyAdmissionFacts = admittedMoneyFacts({
   projectEnvironment: "production",
   rawSettings: JSON.stringify({ enableProductionProject: true }),
-};
+});
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
   const message = pipe(
@@ -708,10 +704,12 @@ describe("BudgetedFeePayment", () => {
 
       expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
       expect(refusal).toMatchObject({ reason: "organization_inactive" });
-      expect(readAdmissionFacts).toHaveBeenCalledWith(expect.anything(), {
-        organizationId: "org_1",
-        projectId: "project_1",
-      });
+      // A sponsor signs for no custody wallet.
+      expect(readAdmissionFacts).toHaveBeenCalledWith(
+        expect.anything(),
+        { organizationId: "org_1", projectId: "project_1" },
+        { custodyWalletId: null }
+      );
       expect(repository.createReservation).not.toHaveBeenCalled();
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     });

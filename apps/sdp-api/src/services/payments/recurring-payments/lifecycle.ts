@@ -27,6 +27,7 @@ import {
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -496,6 +497,8 @@ async function runRecurringPaymentLifecycle(
       operation: input.operation,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
+      // A resume starts the mandate again; a cancel records nobody.
+      activatedBy: input.operation === "resume" ? currentMandateActivator() : null,
     });
     if (!claimed) return null;
     const attempt = await getOrCreateLifecycleAttempt({

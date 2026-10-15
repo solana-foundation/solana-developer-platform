@@ -9,10 +9,7 @@ const base = {
   organizationId: TEST_ORG.id,
   projectId: TEST_PROJECT.id,
   environment: "dashboard",
-  walletScope: null,
-  signingWalletId: null,
-  signingWalletIds: [],
-  walletBindings: [],
+  walletAccess: { scope: "all" } as const,
 };
 
 describe("canManageOrganizationCredentials", () => {
