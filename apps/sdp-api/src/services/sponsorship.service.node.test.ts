@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
@@ -302,7 +303,7 @@ describe("sponsorship identity boundary", () => {
       actor: { type: "api_key", id: "key_trusted" },
     });
   });
-  it("rejects Clerk sponsorship without a project environment", async () => {
+  it("refuses Clerk sponsorship outside a cluster scope", async () => {
     const app = new Hono<{
       Bindings: Env;
     }>();
@@ -311,8 +312,9 @@ describe("sponsorship identity boundary", () => {
       await next();
     });
     app.get("/probe", (c) => {
+      expect(() => resolveRequestSponsorshipScope(c)).toThrow(SdpRpcError);
       expect(() => resolveRequestSponsorshipScope(c)).toThrow(
-        "Request environment could not be resolved"
+        expect.objectContaining({ code: "CLUSTER_SCOPE_MISSING" })
       );
       return c.text("checked");
     });
