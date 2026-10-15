@@ -1434,6 +1434,129 @@ describe("payment transfer batches", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(sends);
   });
 
+  // Keegan (#2334): a request that died after the batch and its recipients
+  // committed, before any chunk transfer row, left the batch processing; its
+  // same-key retry replayed it forever and nothing settled it.
+  it("fails never-sent recipients of a batch whose request died, and settles it on the same-key retry", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_stranded_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const post = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "batch-stranded-key",
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+    const original = await post();
+    expect(original.status).toBe(200);
+    const batchId = ((await original.json()) as { data: { batch: { id: string } } }).data.batch.id;
+    // The state a crash right after the batch commit leaves: recipients pending
+    // and unlinked, no chunk transfer row, the batch processing, no key outcome.
+    await getDb(env)
+      .prepare(
+        `WITH unlinked AS (
+           UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL
+            WHERE batch_id = ? RETURNING id
+         )
+         UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?`
+      )
+      .bind(batchId, batchId)
+      .run();
+    await getDb(env)
+      .prepare(
+        "DELETE FROM payment_transfers WHERE type = 'transfer_batch' AND provider_data->'recipientIds' IS NOT NULL AND id NOT IN (SELECT transfer_id FROM payment_transfer_recipients WHERE transfer_id IS NOT NULL)"
+      )
+      .run();
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const sends = signAndSendMock.mock.calls.length;
+
+    const retry = await post();
+
+    expect(retry.status).toBe(200);
+    const body = (await retry.json()) as {
+      data: { batch: { id: string; status: string }; recipients: { status: string }[] };
+    };
+    expect(body.data.batch).toMatchObject({ id: batchId, status: "failed" });
+    expect(body.data.recipients.map((recipient) => recipient.status)).toEqual(["failed"]);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
+  it("settles a stranded batch with no client retry from the pending-transfers job", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    createFeePaymentAdapterMock.mockReturnValue(
+      ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+    );
+    const counterpartyId = await seedCounterparty("batch_stranded_sweep_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const original = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "batch-stranded-sweep-key",
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(original.status).toBe(200);
+    const batchId = ((await original.json()) as { data: { batch: { id: string } } }).data.batch.id;
+    // Stranded two hours ago: recipients unlinked, no chunk transfer, still processing.
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL WHERE batch_id = ?"
+      )
+      .bind(batchId)
+      .run();
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_batches SET status = 'processing', created_at = ? WHERE id = ?"
+      )
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), batchId)
+      .run();
+
+    await trackPendingTransfers(env);
+
+    const batch = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+      .bind(batchId)
+      .first<{ status: string }>();
+    expect(batch?.status).toBe("failed");
+  });
+
   // Gap analysis (HOO-1918): the row replay works from the request's own
   // identifiers, so an account archived since never refuses a request that ran.
   it("answers a retry from the batch row after a recipient's account is archived", async () => {

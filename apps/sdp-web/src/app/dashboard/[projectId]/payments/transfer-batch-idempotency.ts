@@ -1,6 +1,7 @@
 "use client";
 
-import { isIdempotencyKeyOutcomeUnknown, type PaymentTransferBatchRequest } from "@sdp/types";
+import type { PaymentTransferBatchRequest } from "@sdp/types";
+import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -102,8 +103,8 @@ export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: str
  * see `createTransferBatch`), and retired only on the dashboard-wide rule
  * (`moneyAnswerRetiresKey`): a recorded batch, a replay or a 422 retires it, and
  * anything else keeps it, since an earlier attempt may have paid every
- * recipient. A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` keeps it too and tells the
- * user to check the list.
+ * recipient. A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` or a 422
+ * `IDEMPOTENCY_KEY_REUSED` keeps it too and tells the user to check the list.
  *
  * @param request - The batch, in canonical form.
  * @param t - Translator, for the API's refusal message.
@@ -120,19 +121,12 @@ export async function sendTransferBatchUnderKey(
     result = await createTransferBatch(request, t, { value: key, persisted });
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {
-      settleMoneyIdempotencyKey(store, fingerprint, key, {
-        status: error.status,
-        replayed: error.replayed,
-        code: error.code,
-      });
-      if (isIdempotencyKeyOutcomeUnknown(error.status, error.code)) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
         // The key is kept, so the next press is answered under it: send nothing new.
-        throw new TransferBatchRequestError(
-          t("Shared.idempotency.outcomeUnknownCheckList"),
-          error.status,
-          error.replayed,
-          error.code
-        );
+        throw new TransferBatchRequestError(t(uncertain), error.status, error.replayed, error.code);
       }
     }
     throw error;

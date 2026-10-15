@@ -1,6 +1,5 @@
 import {
   type CreatePaymentRecurringPaymentRequest,
-  isIdempotencyKeyOutcomeUnknown,
   type ListPaymentRecurringPaymentsResponse,
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
@@ -16,7 +15,7 @@ import {
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
+import { IdempotencyOutcomeUnknownError, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 
@@ -193,9 +192,14 @@ async function readDashboardEnvelope<T>(
   if (!response.ok) {
     const code =
       "error" in body && typeof body.error === "object" ? (body.error.code ?? null) : null;
-    if (isIdempotencyKeyOutcomeUnknown(response.status, code)) {
+    const uncertain = uncertainMoneyAnswerMessage({
+      status: response.status,
+      replayed: false,
+      code,
+    });
+    if (uncertain !== null) {
       // The money rule keeps the key, so a retry is answered under it.
-      throw new IdempotencyOutcomeUnknownError(t("Shared.idempotency.outcomeUnknownCheckList"));
+      throw new IdempotencyOutcomeUnknownError(t(uncertain));
     }
     throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
   }
