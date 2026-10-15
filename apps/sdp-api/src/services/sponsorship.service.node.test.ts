@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectService } from "@/services/project.service";
 import {
   createSponsorshipFeePayment,
+  isKoraSponsorshipConfigured,
   resolveProjectSponsorshipScope,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
@@ -157,6 +158,37 @@ describe("sponsorship identity boundary", () => {
       "mainnet-beta"
     );
   });
+  it("refuses a production scope before signing when the mainnet paymaster is not wired", () => {
+    vi.mocked(createFeePaymentAdapter).mockRestore();
+    expect(() =>
+      createSponsorshipFeePayment(
+        { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" },
+        {
+          environment: "production",
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "wallet", id: "cwlt_1" },
+        },
+        "payments.transfer"
+      )
+    ).toThrow(expect.objectContaining({ code: "PROVIDER_NOT_AVAILABLE" }));
+  });
+  it.each([
+    { environment: "sandbox", configured: true },
+    { environment: "production", configured: false },
+  ] as const)(
+    "reports a $environment scope's paymaster as configured: $configured",
+    ({ environment, configured }) => {
+      expect(
+        isKoraSponsorshipConfigured(testEnv, {
+          environment,
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "wallet", id: "cwlt_1" },
+        })
+      ).toBe(configured);
+    }
+  );
   function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
     const provider: FeePaymentPort = {
       providerId: "kora",
@@ -260,10 +292,10 @@ describe("sponsorship identity boundary", () => {
       c.set("apiKey", {
         id: "key_trusted",
         organizationId: "org_trusted",
-        projectId: "project_trusted",
+        projectId: "project_stale",
         role: "api_admin",
         permissions: ["*"],
-        environment: "production",
+        environment: "sandbox",
         signingWalletId: null,
       });
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);

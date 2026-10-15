@@ -104,9 +104,13 @@ describe("resolveVaultSponsorship", () => {
       KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
     });
 
+    const productionScope = { ...WALLET_SCOPE, environment: "production" } as const;
+    resolveProjectSponsorshipScope.mockResolvedValue(productionScope);
+
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, productionScope, "earn.deposit");
   });
 
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
