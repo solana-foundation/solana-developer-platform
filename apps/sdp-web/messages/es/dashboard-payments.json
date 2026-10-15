@@ -32,6 +32,7 @@
       "batchEstimateMissing": "La respuesta de estimación por lote no incluye los detalles de la estimación.",
       "batchTransferRequestFailed": "La solicitud de transferencia por lote falló ({status}).",
       "batchTransferMissing": "La respuesta de transferencia por lote no incluye los detalles del lote.",
+      "rampEventRequestFailed": "La solicitud de evento de {provider} falló ({status}).",
       "rampEventMissing": "La respuesta de evento de {provider} no incluye los detalles de la transferencia.",
       "counterpartyAccountsRequestFailed": "No se pudieron cargar las cuentas ({status}).",
       "sandboxSimulationRequestFailed": "La simulación en Sandbox falló ({status}).",
@@ -218,6 +219,8 @@
       "moneygramWidgetLoadFailed": "No se pudo cargar el widget de MoneyGram.",
       "unsupportedMoneygramTransaction": "Transacción no compatible: {asset} en {chain}.",
       "sourceWalletNoUsdc": "La Wallet de origen no tiene saldo de USDC para enviar.",
+      "coinbaseEventFailed": "No se pudo registrar el evento de Coinbase.",
+      "coinbaseOnramp": "Onramp de Coinbase",
       "status": {
         "waitingForFunding": "Esperando el fondeo",
         "waitingToSend": "Esperando el envío",

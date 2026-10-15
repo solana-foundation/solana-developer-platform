@@ -385,6 +385,7 @@
     "rampLightsparkDescription": "Rails de liquidación de fiat sobre la red Lightning.",
     "rampBvnkDescription": "Pagos empresariales entre fiat y stablecoins.",
     "rampMoneygramDescription": "Transferencias en efectivo y bancarias a través de la red de MoneyGram.",
+    "rampCoinbaseDescription": "Onramp y offramp de fiat a través de cuentas de Coinbase.",
     "rampMuralDescription": "Rails de pagos salientes e invoicing con stablecoins.",
     "rampStripeDescription": "Onramp de fiat a través del checkout de Stripe.",
     "complianceRangeDescription": "Screening de transacciones y monitoreo de riesgo para Solana.",
