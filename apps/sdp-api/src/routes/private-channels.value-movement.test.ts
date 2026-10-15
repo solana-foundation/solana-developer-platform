@@ -14,7 +14,6 @@ import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
-import * as organizationAccess from "@/lib/organization-access";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {

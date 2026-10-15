@@ -40,7 +40,6 @@ import {
   badRequestQuery,
   conflict,
   type ErrorCode,
-  forbidden,
   internalError,
   isErrorCode,
   notFound,

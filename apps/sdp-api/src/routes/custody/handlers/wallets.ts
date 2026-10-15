@@ -11,7 +11,6 @@ import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import {
   AppError,
   badRequest,
-  conflict,
   internalError,
   providerUnavailable,
   serviceUnavailable,

@@ -5,7 +5,6 @@ import { notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
-import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { resolveCreateWalletScope, walletScopeAuditMetadata } from "@/routes/api-keys/wallet-scope";

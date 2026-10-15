@@ -11,7 +11,6 @@ import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireHumanActor } from "@/middleware/human-session";
-import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
