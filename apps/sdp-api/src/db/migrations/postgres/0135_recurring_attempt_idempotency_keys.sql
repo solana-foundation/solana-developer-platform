@@ -8,6 +8,12 @@
 -- idempotency step stores. The partial unique indexes leave failed attempts
 -- out, so a failed attempt re-runs under the same key and a live one is unique.
 -- Rows written before this migration have no key; the indexes ignore them.
+--
+-- sdp:migration-locks: blocking
+-- The unique indexes build without CONCURRENTLY and briefly blocks writes to
+-- the recurring attempt and collection attempt tables. That is harmless here: production has never run these tables (the
+-- platform is pre-launch), so they are near empty when the index builds, and a
+-- concurrent build would need its own non-transactional file per index.
 
 ALTER TABLE payment_recurring_payment_activation_attempts
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT;

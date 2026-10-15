@@ -5,6 +5,12 @@
 -- a unique index as well: a retry after the 24 hours, or after a 5xx on a route
 -- that re-runs, finds this row instead of creating a second schedule.
 -- Rows created before this migration have no key; the index ignores them.
+--
+-- sdp:migration-locks: blocking
+-- The unique index builds without CONCURRENTLY and briefly blocks writes to
+-- `payment_recurring_payments`. That is harmless here: production has never run these tables (the
+-- platform is pre-launch), so they are near empty when the index builds, and a
+-- concurrent build would need its own non-transactional file per index.
 
 ALTER TABLE payment_recurring_payments
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT,

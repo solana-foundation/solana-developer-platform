@@ -9,6 +9,12 @@
 -- provider wallet. The same id is sent to providers that dedupe on one.
 -- Rows created before this migration, and unkeyed creates, have none; the
 -- index ignores them.
+--
+-- sdp:migration-locks: blocking
+-- The unique index builds without CONCURRENTLY and briefly blocks writes to
+-- `custody_wallets`. That is harmless here: production has never run these tables (the
+-- platform is pre-launch), so they are near empty when the index builds, and a
+-- concurrent build would need its own non-transactional file per index.
 
 ALTER TABLE custody_wallets
     ADD COLUMN IF NOT EXISTS idempotency_request_id TEXT,
