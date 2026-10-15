@@ -1,4 +1,5 @@
 import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import * as solanaPay from "@solana/pay";
 import { FindReferenceError, ValidateTransferError } from "@solana/pay";
 import {
@@ -317,7 +318,7 @@ describe("reconcilePaymentRequest", () => {
 
   it.each([
     { amount: "2" },
-    { token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
+    { token: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address },
     { direction: "outbound" as const },
   ])("refuses mismatched recorded payment terms even on best-effort reads: %j", async (terms) => {
     const request = await createRequest();

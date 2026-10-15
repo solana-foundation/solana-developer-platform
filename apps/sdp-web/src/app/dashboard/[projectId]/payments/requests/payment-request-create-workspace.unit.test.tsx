@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import type { Counterparty, PaymentRequest, PaymentsDashboardWallet } from "@sdp/types";
+import {
+  type Counterparty,
+  type PaymentRequest,
+  type PaymentsDashboardWallet,
+  SOL_MINT,
+} from "@sdp/types";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -270,7 +275,7 @@ describe("Previous design requests", () => {
       counterpartyId: null,
       custodyWalletId: "cwlt_settlement",
       destinationAddress: wallet.publicKey,
-      token: "So11111111111111111111111111111111111111112",
+      token: SOL_MINT,
       amount: "25",
       reference: "reference",
       status: "awaiting_payment",
@@ -333,7 +338,7 @@ describe("Previous design requests", () => {
         counterpartyId: null,
         custodyWalletId,
         destinationAddress: wallet.publicKey,
-        token: "So11111111111111111111111111111111111111112",
+        token: SOL_MINT,
         amount: "5",
         reference: "reference",
         status: "awaiting_payment",

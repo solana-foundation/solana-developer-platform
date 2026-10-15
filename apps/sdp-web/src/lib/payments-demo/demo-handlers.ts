@@ -983,15 +983,13 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
 
 // ─── Requests ────────────────────────────────────────────────────────────────
 
-const requestSchema = z
-  .object({
-    custodyWalletId: z.string().min(1).regex(/^\S+$/),
-    token: z.string().min(1),
-    amount: amountSchema,
-    counterpartyId: z.string().nullish(),
-    expiresAt: z.string().nullish(),
-  })
-  .strict();
+const requestSchema = z.strictObject({
+  custodyWalletId: z.string().min(1).regex(/^\S+$/),
+  token: z.string().min(1),
+  amount: amountSchema,
+  counterpartyId: z.string().nullish(),
+  expiresAt: z.string().nullish(),
+});
 
 function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
   const input = parse(requestSchema, body);

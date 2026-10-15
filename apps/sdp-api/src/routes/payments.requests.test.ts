@@ -1,4 +1,5 @@
-import type { createRpc } from "@sdp/rpc/solana";
+import { PAYMENT_REQUEST_STATUSES } from "@sdp/types";
+import { createSolanaRpcFromTransport, type RpcTransport } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -34,7 +35,7 @@ const requestFieldsSchema = z.object({
   amount: z.string().min(1),
   counterpartyId: z.string().nullable(),
   expiresAt: z.string().nullable(),
-  status: z.string().min(1),
+  status: z.enum(PAYMENT_REQUEST_STATUSES),
 });
 const requestResponseSchema = successResponseSchema(requestFieldsSchema);
 const requestsResponseSchema = successResponseSchema(
@@ -120,9 +121,12 @@ describe("Payments routes — Payment Requests exact recipient", () => {
   installPaymentsRouteTestHooks();
 
   beforeEach(() => {
-    createRpcMock.mockReturnValue({
-      getSignaturesForAddress: () => ({ send: async () => [] }),
-    } as unknown as ReturnType<typeof createRpc>);
+    const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
+      expect(payload).toMatchObject({ method: "getSignaturesForAddress" });
+      // SAFETY: This transport only returns the JSON-RPC envelope Kit decodes for an empty signature list.
+      return { jsonrpc: "2.0", id: 1, result: [] } as TResponse;
+    };
+    createRpcMock.mockReturnValue(createSolanaRpcFromTransport(transport));
   });
 
   it("creates and lists the exact recipient without exposing its provider reference", async () => {
