@@ -2,6 +2,7 @@ import type { MovementId } from "@sdp/types";
 import { getDb } from "@/db";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import { AppError, conflict, providerUnavailable, walletNotFound } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
@@ -53,8 +54,11 @@ export async function resolvePrivateChannelCustodyWallet(
     publicKey: allowAddress ? selector : undefined,
   });
   if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
-  // Whether this caller may sign with the wallet, and whether its key is still
-  // live, is decided by the custody signer each time it signs (HOO-2099).
+  // A withdrawal is an exit to a destination the caller picks, and the custody
+  // signer admits exits without reading the principal, so the key's wallet
+  // scope is checked here for every movement (HOO-2099). Whether its key is
+  // still live is decided by the signer for each start.
+  assertCallerWalletInScope(auth.walletAccess, wallet.id);
   return wallet;
 }
 

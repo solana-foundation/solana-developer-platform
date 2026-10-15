@@ -849,7 +849,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     expect(response.status).toBe(403);
     expect(JSON.stringify(await response.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
     expect(createChannelTransferMock).not.toHaveBeenCalled();
   });

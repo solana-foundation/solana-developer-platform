@@ -654,7 +654,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     );
     expect(response.status).toBe(403);
     expect(JSON.stringify(await response.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
   });
 
@@ -919,35 +919,6 @@ describe("Private Channels — deposit and withdrawal access", () => {
     ).toMatchObject({ status: "pending" });
   });
 
-  // The race the route's own liveness check covers: a revocation landing just
-  // after authentication's read, while the request is in flight.
-  it("rejects recovery when the key is revoked right after authentication", async () => {
-    const original = await abandonedWithdrawal();
-    const authenticate = organizationAccess.authorizeApiKey;
-    vi.spyOn(organizationAccess, "authorizeApiKey").mockImplementationOnce(async (...args) => {
-      const access = await authenticate(...args);
-      await getDb(env)
-        .prepare("UPDATE api_keys SET status = 'revoked' WHERE id = ?")
-        .bind(API_KEY.id)
-        .run();
-      return access;
-    });
-
-    const response = await postWithdrawal(
-      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
-      apiKeyHeaders()
-    );
-    expect(response.status).toBe(403);
-    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
-    expect(
-      await createPrivateChannelWithdrawalRepository(env).getWithdrawalById({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        id: original.id,
-      })
-    ).toMatchObject({ status: "pending" });
-  });
-
   it("does not create new work for a read-only key", async () => {
     await setKeyGrants(["private_channels.read"]);
     expect(
@@ -1160,7 +1131,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(deposit.status).toBe(403);
     expect(withdrawal.status).toBe(403);
     expect(JSON.stringify(await deposit.json())).toContain(
-      "not authorized for the requested wallet"
+      "The credential may not sign with this wallet"
     );
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();

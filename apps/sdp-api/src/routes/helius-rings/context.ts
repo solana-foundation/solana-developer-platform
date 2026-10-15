@@ -9,6 +9,8 @@ import {
 } from "@/db/repositories";
 import { getAuth } from "@/lib/auth";
 import { AppError, type ErrorCode, notFound } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
+import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings";
 import type { Env } from "@/types/env";
 
@@ -31,32 +33,60 @@ export function getHeliusRingsOperationRepository(c: AppContext) {
 }
 
 /**
- * The project's Rings wallet a route names, or 404. Project-scoped: whether
- * the caller may sign with its custody wallet is the custody signer's decision
- * (HOO-2099).
+ * How a route uses the Rings wallet it names. A `read` is project-scoped. A
+ * `write` also needs the wallet inside the key's wallet scope (HOO-2099):
+ * Rings exits pay out to a destination the caller picks, and the custody
+ * signer admits exits without reading the principal.
  */
+export type RingsWalletUse = "read" | "write";
+
+/** The project's Rings wallet a route names, or 404; for a `write`, in the key's scope. */
 export async function requireRingsWallet(
   c: AppContext,
   tenant: HeliusRingsTenant,
-  walletId: string
+  walletId: string,
+  use: RingsWalletUse
 ): Promise<HeliusRingsWalletRow> {
   const wallet = await getHeliusRingsWalletRepository(c).getWalletById({ ...tenant, id: walletId });
   if (!wallet) throw notFound("rings wallet");
+  if (use === "write") await assertRingsWalletInScope(c, wallet);
   return wallet;
 }
 
-/** The project's Rings operation a route names, or 404. */
+/** The project's Rings operation a route names, or 404; for a `write`, its wallet in the key's scope. */
 export async function requireRingsOperation(
   c: AppContext,
   tenant: HeliusRingsTenant,
-  operationId: string
+  operationId: string,
+  use: RingsWalletUse
 ): Promise<HeliusRingsOperationRow> {
   const operation = await getHeliusRingsOperationRepository(c).getOperationById({
     ...tenant,
     id: operationId,
   });
   if (!operation) throw notFound("rings operation");
+  if (use === "write") {
+    await requireRingsWallet(c, tenant, operation.wallet_id, "write");
+  }
   return operation;
+}
+
+/**
+ * The key's scope lists exact custody wallet ids. A Rings wallet records the
+ * custody wallet that signs for it; one created before live provisioning
+ * names only the provider id, resolved to its one custody wallet (ambiguity
+ * refuses, APE-390). An all-wallets key reads nothing more.
+ */
+async function assertRingsWalletInScope(
+  c: AppContext,
+  wallet: HeliusRingsWalletRow
+): Promise<void> {
+  const { walletAccess } = getAuth(c);
+  if (walletAccess.scope === "all") return;
+  const custodyWalletId =
+    wallet.custody_wallet_id ??
+    resolveWallet((await resolveScope(c)).wallets, wallet.sdp_wallet_id).id;
+  assertCallerWalletInScope(walletAccess, custodyWalletId);
 }
 
 export function getHeliusRingsZoneRepository(c: AppContext) {

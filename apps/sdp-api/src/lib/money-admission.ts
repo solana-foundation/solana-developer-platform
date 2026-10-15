@@ -18,6 +18,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { DatabaseExecutor } from "@/db/client";
 import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
+import { type WalletAccess, walletAccessAllows } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import {
   currentMoneyPrincipal,
@@ -151,6 +152,21 @@ export class MoneyMovementRefusedError extends AppError {
     this.name = "MoneyMovementRefusedError";
     this.reason = reason;
   }
+}
+
+/**
+ * Refuses, before any work, a request that names a custody wallet outside
+ * the caller's wallet scope as read at authentication (HOO-2099). For the
+ * routes whose exits let the caller pick a destination (Private Channels and
+ * Rings): the custody waist admits every exit without reading the principal,
+ * so the request's own scope is the line there. Same 403 as the waist's.
+ */
+export function assertCallerWalletInScope(
+  walletAccess: WalletAccess,
+  custodyWalletId: string
+): void {
+  if (walletAccessAllows(walletAccess, custodyWalletId)) return;
+  throw new MoneyMovementRefusedError("wallet_out_of_scope");
 }
 
 /**
