@@ -5295,6 +5295,70 @@ describe("Payments routes — recurring", () => {
           .first<{ metadata_uri: string | null }>()
       )?.metadata_uri;
 
+    it("refuses a keyed activate that would finish another key's stale activation, unstored; the cron finishes it", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const firstKey = crypto.randomUUID();
+      expect(
+        (
+          await app.request(
+            actionPath(created.id, "activate"),
+            { method: "POST", headers: keyed(firstKey), body: "{}" },
+            env
+          )
+        ).status
+      ).toBe(200);
+      // The first activation crashed before it finalized, long enough ago to be recoverable.
+      const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'activating', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, created.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_recurring_payment_activation_attempts
+              SET status = 'processing', updated_at = ?
+            WHERE idempotency_key = ?`
+        )
+        .bind(staleAt, recordKey(firstKey))
+        .run();
+      const sendsBefore = send.mock.calls.length;
+
+      const otherKey = crypto.randomUUID();
+      const other = await app.request(
+        actionPath(created.id, "activate"),
+        { method: "POST", headers: keyed(otherKey), body: "{}" },
+        env
+      );
+
+      expect(other.status).toBe(409);
+      expect(await storedKeyCount(otherKey)).toBe(0);
+      // The claim rolled back with the refusal: the schedule is still the stale activation.
+      const schedule = await getDb(env)
+        .prepare("SELECT status, updated_at FROM payment_recurring_payments WHERE id = ?")
+        .bind(created.id)
+        .first<{ status: string; updated_at: string }>();
+      expect(schedule).toEqual({ status: "activating", updated_at: staleAt });
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+
+      const tick = await collectDueRecurringPayments(env, new Date());
+      expect(tick.recovered).toBe(1);
+      expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
+      const attempts = await getDb(env)
+        .prepare(
+          `SELECT idempotency_key, status
+             FROM payment_recurring_payment_activation_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(created.id)
+        .all<{ idempotency_key: string | null; status: string }>();
+      expect(attempts.results).toEqual([
+        { idempotency_key: recordKey(firstKey), status: "confirmed" },
+      ]);
+    });
+
     it("refuses a keyed cancel that would finish another key's stale cancel, unstored", async () => {
       const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);

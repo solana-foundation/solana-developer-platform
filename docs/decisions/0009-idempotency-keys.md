@@ -130,9 +130,10 @@ the handler, which resumes the attempt under the same key; a settled update atte
 answer. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
 so its retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
 schedule, a resume of an active one, a PATCH that changes nothing) writes a confirmed attempt that
-changes nothing. An activate needs none: a schedule never returns to `pending_activation`, so a
-retry cannot activate again. A request never finishes another key's in-flight attempt silently:
-cancel, resume and collect refuse it as in flight (409, unstored) and the cron finishes it; a
+changes nothing. An activate needs no no-op attempt: a schedule never returns to
+`pending_activation`, so a retry cannot activate again. A request never finishes another key's
+in-flight attempt silently: activate, cancel, resume and collect refuse it as in flight (409,
+unstored), the claim rolls back, and the cron finishes it; a
 PATCH, which the cron does not recover, may finish it, and writes its own confirmed attempt in the
 same transaction as the finalize, so the update never lands without the record its retry is
 answered from.
