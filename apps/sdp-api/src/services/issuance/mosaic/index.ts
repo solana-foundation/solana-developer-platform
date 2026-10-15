@@ -33,8 +33,8 @@ export function createMosaicService(
   feePayment: MosaicFeePayment,
   sponsorshipScope?: SponsorshipScope
 ): MosaicService {
-  if (feePayment === "sponsored" && !sponsorshipScope && resolveKoraEndpoint(env) !== null) {
-    throw new Error("Sponsorship scope is required for Kora-backed issuance");
+  if (feePayment === "sponsored" && !sponsorshipScope) {
+    throw new Error("Sponsorship scope is required for sponsored issuance");
   }
 
   const sponsor =
