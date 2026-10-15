@@ -1,5 +1,5 @@
 /**
- * The shared Idempotency-Key record (HOO-1918, migration 0128), written only
+ * The shared Idempotency-Key record (HOO-1918, migration 0133), written only
  * by `middleware/idempotency.ts`.
  *
  * A key is claimed before the handler runs and holds a lease that the request
