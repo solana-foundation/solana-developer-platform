@@ -126,7 +126,6 @@ export function createPaymentRequestsRepository(
       "getPaymentRequestByPublicToken",
       "claimSponsoredTransactionWindow",
       "getSponsoredTransactionClaim",
-      "persistSponsoredTransactionAccountingIdentity",
       "storeSponsoredTransactionSignature",
     ]
   );

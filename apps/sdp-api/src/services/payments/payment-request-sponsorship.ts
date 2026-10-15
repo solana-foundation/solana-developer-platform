@@ -26,19 +26,12 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import type {
-  PaymentRequestRow,
-  SponsoredTransactionClaim,
-} from "@/db/repositories/payment-requests.repository";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import { badRequest, rateLimited, serviceUnavailable } from "@/lib/errors";
-import { isSelfHostedDeployment } from "@/lib/runtime-env";
+import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
-import {
-  createProjectSponsorshipFeePayment,
-  type SponsorshipContinuity,
-} from "@/services/sponsorship.service";
+import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
@@ -90,20 +83,9 @@ export async function issuePaymentRequestTransaction(
   const rpc = solanaRpc.createRpc(c.env);
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
-  const deploymentMode = isSelfHostedDeployment(c.env) ? "self_hosted" : "managed";
-  const inspection: { claim: SponsoredTransactionClaim | null } = { claim: null };
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {
     const claim = await repository.getSponsoredTransactionClaim(request.id);
-    inspection.claim = claim;
-    if (claim === null) {
-      return null;
-    }
-    if (claim.lastValidBlockHeight < currentBlockHeight) {
-      if (claim.deploymentMode === null && deploymentMode === "self_hosted") {
-        throw serviceUnavailable(
-          "Previous sponsored window requires deployment-mode reconciliation"
-        );
-      }
+    if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
     if (claim.account !== payer) {
@@ -115,53 +97,23 @@ export async function issuePaymentRequestTransaction(
     if (claim.signedTransaction !== null) {
       return { kind: "signed", transaction: claim.signedTransaction };
     }
-    return signAndStore(claim, false);
+    return signAndStore(claim.unsignedTransaction);
   };
 
   let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
     null;
-  let continuity: SponsorshipContinuity | undefined;
-  let accountingClaim: SponsoredTransactionClaim | null = null;
-  const getFeePayment = async (claim: SponsoredTransactionClaim | null, fresh: boolean) => {
-    if (feePaymentInstance) return feePaymentInstance;
-    continuity = {
-      deploymentMode: claim?.deploymentMode ?? deploymentMode,
-      legacyActor: { type: "wallet", id: request.wallet_id },
-      exactActor: { type: "wallet", id: request.custody_wallet_id },
-      admission: fresh ? "legacy_new" : "continue_only",
-      reservationId: claim?.accountingIdentity?.reservationId,
-      persistAccountingIdentity: async (identity) => {
-        if (
-          !accountingClaim ||
-          !(await repository.persistSponsoredTransactionAccountingIdentity({
-            requestId: request.id,
-            account: accountingClaim.account,
-            unsignedTransaction: accountingClaim.unsignedTransaction,
-            lastValidBlockHeight: accountingClaim.lastValidBlockHeight,
-            identity,
-          }))
-        ) {
-          throw serviceUnavailable("Sponsored transaction accounting ownership changed");
-        }
-      },
-    };
-    feePaymentInstance = await createProjectSponsorshipFeePayment(c.env, {
+  const getFeePayment = async () => {
+    feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
       movement: "payments.pay_request",
       organizationId: request.organization_id,
       projectId: request.project_id,
       actor: { type: "wallet", id: request.wallet_id },
-      continuity,
     });
     return feePaymentInstance;
   };
 
-  const signAndStore = async (
-    claim: SponsoredTransactionClaim,
-    fresh: boolean
-  ): Promise<SponsoredPaymentTransaction> => {
-    accountingClaim = claim;
-    const unsignedBase64 = claim.unsignedTransaction;
-    const feePayment = await getFeePayment(claim, fresh);
+  const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
+    const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
     // /pay bytes are partially signed by design: the payer signs client-side.
@@ -210,16 +162,9 @@ export async function issuePaymentRequestTransaction(
     return served;
   }
 
-  const feePayment = await getFeePayment(inspection.claim, inspection.claim === null);
-  // Prove the saved message's outcome before replacing an unsigned or unlinked window.
-  const retainedFeePayer =
-    inspection.claim === null
-      ? null
-      : await feePayment.getFeePayer(
-          new Uint8Array(getBase64Encoder().encode(inspection.claim.unsignedTransaction))
-        );
+  const feePayment = await getFeePayment();
   const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
-    retainedFeePayer ?? feePayment.getFeePayer(),
+    feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(rpc, "confirmed"),
   ]);
   const unsignedBase64 = await buildPaymentTransaction(rpc, {
@@ -235,11 +180,8 @@ export async function issuePaymentRequestTransaction(
     unsignedTransaction: unsignedBase64,
     lastValidBlockHeight,
     currentBlockHeight,
-    deploymentMode,
-    expectedClaim: inspection.claim,
   });
   if (!claimed) {
-    feePaymentInstance = null;
     const winner = await serveLiveClaim();
     if (winner) {
       return winner;
@@ -247,22 +189,7 @@ export async function issuePaymentRequestTransaction(
     throw rateLimited("Another payer holds this payment request's sponsored transaction");
   }
 
-  // Reuse the proven provider; only the winning new window gets fresh admission.
-  if (continuity) {
-    continuity.admission = "legacy_new";
-    delete continuity.reservationId;
-  }
-  return signAndStore(
-    {
-      account: payer,
-      unsignedTransaction: unsignedBase64,
-      signedTransaction: null,
-      lastValidBlockHeight,
-      deploymentMode,
-      accountingIdentity: null,
-    },
-    true
-  );
+  return signAndStore(unsignedBase64);
 }
 
 /**

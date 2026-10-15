@@ -39,7 +39,7 @@ it("backfills only one retained scoped recipient without changing Request or acc
       public_token TEXT, reference TEXT, token TEXT, amount TEXT, status TEXT,
       fulfilled_by_transfer_id TEXT, lifecycle JSONB, sponsored_tx_account TEXT,
       sponsored_tx_unsigned TEXT, sponsored_tx_signed TEXT,
-      sponsored_tx_last_valid_block_height BIGINT, sponsored_tx_continuity JSONB
+      sponsored_tx_last_valid_block_height BIGINT
     )`);
     await client.query(`CREATE TEMP TABLE sponsorship_budget_reservations (
       id TEXT PRIMARY KEY, status TEXT, attempt INTEGER
@@ -63,13 +63,12 @@ it("backfills only one retained scoped recipient without changing Request or acc
       (id, organization_id, project_id, wallet_id, destination_address, custody_wallet_id,
        public_token, reference, token, amount, status, fulfilled_by_transfer_id, lifecycle,
        sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
-       sponsored_tx_last_valid_block_height, sponsored_tx_continuity)
+       sponsored_tx_last_valid_block_height)
       SELECT fixture.id, 'org_a', 'prj_a', fixture.wallet_id, fixture.address, fixture.pin,
              fixture.id || '-token', fixture.id || '-reference', 'SOL', '1.5', fixture.status,
              CASE WHEN fixture.status = 'paid' THEN 'xfr_original' END,
              '[{"status":"awaiting_payment","at":"2000-01-01"}]'::JSONB,
-             'payer', 'unsigned-original', 'signed-original', 1,
-             '{"account":"payer","accountingIdentity":{"reservationId":"sbr_original"}}'::JSONB
+             'payer', 'unsigned-original', 'signed-original', 1
       FROM (VALUES
         ('unique', 'provider_unique', 'address_unique', NULL, 'awaiting_payment'),
         ('connection', 'provider_connection', 'address_connection', NULL, 'awaiting_payment'),

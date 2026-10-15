@@ -9,25 +9,12 @@ import type {
   MarkPaymentRequestInput,
   PaymentRequestRow,
   PaymentRequestsRepository,
-  SponsoredTransactionClaim,
 } from "./payment-requests.repository";
 import {
   generatePaymentRequestId,
   generatePaymentRequestPublicToken,
   generatePaymentRequestReference,
-  sponsoredTransactionContinuitySchema,
 } from "./payment-requests.repository";
-
-function claimContinuity(claim: SponsoredTransactionClaim | null): string | null {
-  if (!claim?.deploymentMode) return null;
-  return JSON.stringify({
-    account: claim.account,
-    unsignedTransaction: claim.unsignedTransaction,
-    lastValidBlockHeight: claim.lastValidBlockHeight.toString(),
-    deploymentMode: claim.deploymentMode,
-    accountingIdentity: claim.accountingIdentity,
-  });
-}
 
 function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
   return {
@@ -184,7 +171,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                  sponsored_tx_unsigned = ?,
                  sponsored_tx_signed = NULL,
                  sponsored_tx_last_valid_block_height = ?,
-                 sponsored_tx_continuity = ?::jsonb,
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND status = 'awaiting_payment'
@@ -192,35 +178,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                sponsored_tx_last_valid_block_height IS NULL
                OR sponsored_tx_last_valid_block_height < ?
              )
-             AND (?::boolean OR (
-               sponsored_tx_account IS NOT DISTINCT FROM ?::text
-               AND sponsored_tx_unsigned IS NOT DISTINCT FROM ?::text
-               AND sponsored_tx_signed IS NOT DISTINCT FROM ?::text
-               AND sponsored_tx_last_valid_block_height IS NOT DISTINCT FROM ?::bigint
-               AND sponsored_tx_continuity IS NOT DISTINCT FROM ?::jsonb
-             ))
            RETURNING id`
         )
         .bind(
           params.account,
           params.unsignedTransaction,
           params.lastValidBlockHeight.toString(),
-          params.deploymentMode
-            ? claimContinuity({
-                ...params,
-                deploymentMode: params.deploymentMode,
-                signedTransaction: null,
-                accountingIdentity: null,
-              })
-            : null,
           params.requestId,
-          params.currentBlockHeight.toString(),
-          params.expectedClaim === undefined,
-          params.expectedClaim?.account ?? null,
-          params.expectedClaim?.unsignedTransaction ?? null,
-          params.expectedClaim?.signedTransaction ?? null,
-          params.expectedClaim?.lastValidBlockHeight.toString() ?? null,
-          claimContinuity(params.expectedClaim ?? null)
+          params.currentBlockHeight.toString()
         )
         .first<{ id: string }>();
       return row !== null;
@@ -230,8 +195,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       const row = await db
         .prepare(
           `SELECT sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
-                  sponsored_tx_last_valid_block_height::text AS sponsored_tx_last_valid_block_height,
-                  sponsored_tx_continuity
+                  sponsored_tx_last_valid_block_height
              FROM payment_requests
             WHERE id = ?`
         )
@@ -240,8 +204,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           sponsored_tx_account: string | null;
           sponsored_tx_unsigned: string | null;
           sponsored_tx_signed: string | null;
-          sponsored_tx_last_valid_block_height: string | null;
-          sponsored_tx_continuity: unknown;
+          sponsored_tx_last_valid_block_height: string | number | null;
         }>();
       if (!row || row.sponsored_tx_account === null) {
         return null;
@@ -249,78 +212,12 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       if (row.sponsored_tx_unsigned === null || row.sponsored_tx_last_valid_block_height === null) {
         throw internalError("payment_requests sponsored claim row is missing claim fields");
       }
-      const continuity =
-        row.sponsored_tx_continuity === null
-          ? null
-          : sponsoredTransactionContinuitySchema.safeParse(row.sponsored_tx_continuity);
-      if (
-        continuity &&
-        (!continuity.success ||
-          continuity.data.account !== row.sponsored_tx_account ||
-          continuity.data.unsignedTransaction !== row.sponsored_tx_unsigned ||
-          continuity.data.lastValidBlockHeight !== BigInt(row.sponsored_tx_last_valid_block_height))
-      ) {
-        throw internalError(
-          "payment_requests sponsored continuity does not match the claimed window"
-        );
-      }
-      if (continuity?.success) {
-        return { ...continuity.data, signedTransaction: row.sponsored_tx_signed };
-      }
       return {
         account: row.sponsored_tx_account,
         unsignedTransaction: row.sponsored_tx_unsigned,
         signedTransaction: row.sponsored_tx_signed,
         lastValidBlockHeight: BigInt(row.sponsored_tx_last_valid_block_height),
-        deploymentMode: null,
-        accountingIdentity: null,
       };
-    },
-
-    async persistSponsoredTransactionAccountingIdentity(params) {
-      const continuity = claimContinuity({
-        ...params,
-        signedTransaction: null,
-        deploymentMode: "managed",
-        accountingIdentity: params.identity,
-      });
-      const emptyContinuity = claimContinuity({
-        ...params,
-        signedTransaction: null,
-        deploymentMode: "managed",
-        accountingIdentity: null,
-      });
-      const changed = await db
-        .prepare(
-          `UPDATE payment_requests SET sponsored_tx_continuity = ?::jsonb, updated_at = sdp_iso_now()
-           WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?
-             AND status = 'awaiting_payment'
-             AND sponsored_tx_account = ? AND sponsored_tx_unsigned = ?
-             AND sponsored_tx_last_valid_block_height = ?
-             AND (sponsored_tx_continuity IS NULL OR sponsored_tx_continuity = ?::jsonb
-                  OR sponsored_tx_continuity = ?::jsonb
-                  OR (
-                    sponsored_tx_continuity - 'accountingIdentity' = ?::jsonb - 'accountingIdentity'
-                    AND (sponsored_tx_continuity -> 'accountingIdentity') - 'attempt' = ?::jsonb - 'attempt'
-                    AND (sponsored_tx_continuity #>> '{accountingIdentity,attempt}')::integer = ?
-                  ))`
-        )
-        .bind(
-          continuity,
-          params.requestId,
-          params.identity.organizationId,
-          params.identity.projectId,
-          params.account,
-          params.unsignedTransaction,
-          params.lastValidBlockHeight.toString(),
-          emptyContinuity,
-          continuity,
-          continuity,
-          JSON.stringify(params.identity),
-          params.identity.attempt - 1
-        )
-        .run();
-      return changed > 0;
     },
 
     async storeSponsoredTransactionSignature(params) {

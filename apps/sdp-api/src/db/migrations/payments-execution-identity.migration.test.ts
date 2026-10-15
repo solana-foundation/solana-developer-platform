@@ -13,12 +13,23 @@ const catchUpPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../scripts/backfill-payments-execution-identity.sql"
 );
+const auditPath = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../scripts/audit-payments-execution-identity.sql"
+);
 
 function catchUpTransaction(sql: string): string {
   const start = sql.indexOf("BEGIN;");
   const end = sql.indexOf("COMMIT;", start);
   if (start === -1 || end === -1) throw new Error("catch-up transaction is missing");
   return sql.slice(start + "BEGIN;".length, end);
+}
+
+function withoutPsqlCommands(sql: string): string {
+  return sql
+    .split("\n")
+    .filter((line) => !line.startsWith("\\"))
+    .join("\n");
 }
 
 it("pins only exactly-one Payments identities without mutating live work", async () => {
@@ -401,6 +412,9 @@ it("pins only exactly-one Payments identities without mutating live work", async
         )
       ).rows
     ).toEqual([{ status: "awaiting_payment", lifecycle_count: 0 }]);
+
+    const auditSql = readFileSync(auditPath, "utf8");
+    await client.query(withoutPsqlCommands(auditSql));
   } finally {
     await client.query("ROLLBACK");
     await client.end();

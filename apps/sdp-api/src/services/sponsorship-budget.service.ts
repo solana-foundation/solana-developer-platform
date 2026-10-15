@@ -260,9 +260,9 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.providerForActor = dependencies.providerForActor;
   }
 
-  async getFeePayer(transaction?: Uint8Array): Promise<Address> {
+  async getFeePayer(): Promise<Address> {
     const actor = this.scope.continuity
-      ? (await this.resolveAccountingContinuity(transaction)).actor
+      ? (await this.resolveAccountingContinuity()).actor
       : this.scope.actor;
     return this.accountingProvider(actor).getFeePayer();
   }

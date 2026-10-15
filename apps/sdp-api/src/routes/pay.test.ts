@@ -1,12 +1,17 @@
+import type { FeePaymentPort } from "@sdp/fee-payment";
 import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import {
+  createPaymentRequestsRepository,
+  createSystemPaymentRequestsRepository,
+} from "@/db/repositories/repository-factory";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { base64Schema, z } from "@/openapi/schemas/base";
 import { AuditService } from "@/services/audit.service";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
@@ -21,6 +26,7 @@ import {
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
@@ -134,7 +140,59 @@ describe("Public payment request routes", () => {
       createRpcMock.mockReturnValue({
         getSignaturesForAddress: () => ({ send: async () => [] }),
         getBlockHeight: () => ({ send: async () => 900n }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
       } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    });
+
+    it("retries a preflight failure on the same transaction and preserves existing commission accounting", async () => {
+      const provider = {
+        providerId: "mock",
+        getFeePayer: vi.fn(async () => TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi
+          .fn(async () => TEST_SPONSORSHIP_PROVIDER_CONFIG)
+          .mockRejectedValueOnce(new Error("preflight temporarily unavailable")),
+        signAsFeePayer: vi.fn(sponsorSignTestTransaction),
+        signAndSend: vi.fn(async () => {
+          throw new Error("Public pay does not send transactions");
+        }),
+      } satisfies FeePaymentPort;
+      createFeePaymentAdapterMock.mockReturnValue(provider);
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const repository = createSystemPaymentRequestsRepository(env);
+      const reservations = () =>
+        getDb(env).queryMany<{
+          actor_id: string;
+          status: string;
+          signed_transaction: string | null;
+        }>(
+          `SELECT actor_id, status, signed_transaction FROM sponsorship_budget_reservations
+           WHERE organization_id = ? AND project_id = ?`,
+          [TEST_ORG.id, TEST_PROJECT.id]
+        );
+
+      expect((await postTransaction(request.public_token)).status).toBe(503);
+      const claim = await repository.getSponsoredTransactionClaim(request.id);
+      expect(claim).toMatchObject({ signedTransaction: null });
+      expect(await reservations()).toEqual([]);
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+
+      const retried = await postTransaction(request.public_token);
+      expect(retried.status).toBe(200);
+      const responseSchema = z.object({ transaction: base64Schema });
+      const { transaction } = responseSchema.parse(await retried.json());
+      expect((await repository.getSponsoredTransactionClaim(request.id))?.unsignedTransaction).toBe(
+        claim?.unsignedTransaction
+      );
+      const recorded = await reservations();
+      expect(recorded).toEqual([
+        { actor_id: TEST_WALLET_ID, status: "signed", signed_transaction: transaction },
+      ]);
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(200);
+      expect(responseSchema.parse(await replay.json()).transaction).toBe(transaction);
+      expect(await reservations()).toEqual(recorded);
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
     });
 
     it("builds the sponsored transaction under the payment request's Project cluster scope", async () => {
@@ -286,6 +344,7 @@ describe("Public payment request routes", () => {
       expect(row.organization_id).toBe(TEST_ORG.id);
       const metadata = JSON.parse(String(row.metadata));
       expect(metadata.sponsoredAccount).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+      expect(metadata.custodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
       expect(metadata.signature).toBeTruthy();
     });
 
