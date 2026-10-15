@@ -130,7 +130,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.4",
     "tsx": "4.23.15",
     "typescript": "6.0.3"
   }
