@@ -17,6 +17,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
@@ -435,26 +436,30 @@ describe("Counterparties Routes", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
-    it("reports Stripe off-ramp as unsupported on requirements submit", async () => {
-      const created = await createCounterparty({ externalId: "stripe_offramp_requirements" });
-      const cp = (await created.json()).data.counterparty;
+    describe("Stripe off-ramp", () => {
+      installStripeTestEnv();
 
-      const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: authHeader },
-          body: JSON.stringify({ provider: "stripe", direction: "offramp" }),
-        },
-        env
-      );
+      it("reports unsupported on requirements submit", async () => {
+        const created = await createCounterparty({ externalId: "stripe_offramp_requirements" });
+        const cp = (await created.json()).data.counterparty;
 
-      expect(res.status).toBe(200);
-      expect((await res.json()).data).toMatchObject({
-        provider: "stripe",
-        direction: "offramp",
-        status: "unsupported",
-        reason: "Stripe supports on-ramp only.",
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "stripe", direction: "offramp" }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toMatchObject({
+          provider: "stripe",
+          direction: "offramp",
+          status: "unsupported",
+          reason: "Stripe supports on-ramp only.",
+        });
       });
     });
   });
