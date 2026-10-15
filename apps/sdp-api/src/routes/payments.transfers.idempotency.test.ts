@@ -3,6 +3,7 @@ import { FeePaymentError } from "@sdp/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -104,8 +105,7 @@ describe("Payments routes — transfer idempotency", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       createdBy: TEST_USER.id,
-      role: "api_admin",
-      permissions: ["*"],
+      grants: ALL_API_KEY_GRANTS,
     });
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,

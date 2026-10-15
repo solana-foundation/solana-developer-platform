@@ -6,7 +6,6 @@ import { forbidden } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { requireClerkSession, unifiedAuthMiddleware } from "@/middleware/auth";
-import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";

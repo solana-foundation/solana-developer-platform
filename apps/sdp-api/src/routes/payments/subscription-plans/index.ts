@@ -1,9 +1,8 @@
 import { Hono } from "hono";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
-import { validateBody, validateParams } from "@/middleware/validate";
 import { requireAction } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
+import { validateBody, validateParams } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { authorizeSubscriptionPlanCreate, authorizeSubscriptionPlanUpdate } from "../access";
 import {

@@ -12,6 +12,7 @@ import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
