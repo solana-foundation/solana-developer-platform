@@ -16,6 +16,7 @@ import {
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
 
@@ -194,7 +195,7 @@ async function readDashboardEnvelope<T>(
       "error" in body && typeof body.error === "object" ? (body.error.code ?? null) : null;
     if (isIdempotencyKeyOutcomeUnknown(response.status, code)) {
       // The money rule keeps the key, so a retry is answered under it.
-      throw new Error(t("Shared.idempotency.outcomeUnknownCheckList"));
+      throw new IdempotencyOutcomeUnknownError(t("Shared.idempotency.outcomeUnknownCheckList"));
     }
     throw new Error(getPaymentApiError(body, `${fallback} (${response.status}).`));
   }

@@ -1,7 +1,12 @@
 import type { PaymentRecurringPaymentResponse } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";
-import { createRecurringPayment, updateRecurringPayment } from "./recurring-payments.data";
+import {
+  createRecurringPayment,
+  runRecurringPaymentAction,
+  updateRecurringPayment,
+} from "./recurring-payments.data";
 
 const t: Parameters<typeof createRecurringPayment>[2] = (key) => key;
 
@@ -103,5 +108,32 @@ describe("recurring payment write requests", () => {
       // Each write carries the key for its own user action (HOO-1918).
       expect(sent.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     }
+  });
+});
+
+describe("recurring payment unknown outcomes", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Jina (#2333): the detail pages could not tell an unknown outcome from a
+  // refusal, so they showed the message without refreshing the schedule.
+  it("raises a 409 OUTCOME_UNKNOWN on an action as the typed error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "outcome unknown" },
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } }
+          )
+        )
+      )
+    );
+
+    await expect(runRecurringPaymentAction("prp_1", "cancel", undefined, t)).rejects.toBeInstanceOf(
+      IdempotencyOutcomeUnknownError
+    );
   });
 });

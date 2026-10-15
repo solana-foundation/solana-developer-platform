@@ -196,6 +196,51 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
 
+  // Jina (#2333): a money route went out under a key the browser would not
+  // keep, so a reload and retry could send the payment again under a new key.
+  it("does not send a transfer when the browser will not keep its retry key", async () => {
+    storeApiKeySecret({
+      value: ["sk", "test", "idempotency", "fixture"].join("_"),
+      apiKeyId: "key-test",
+    });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init: RequestInit) => new Response("{}")
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    try {
+      const transferEndpoint: ApiPlaygroundEndpointConfig = {
+        ...endpoint,
+        id: "post-transfer",
+        method: "POST",
+        path: "/v1/payments/transfers",
+      };
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell
+            apiKeyId="key-test"
+            endpoints={[transferEndpoint]}
+            productName="Test product"
+          />
+        </I18nProvider>
+      );
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+
+      expect(await view.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
   // Jina (#2333): the unsettled key lived only in module memory, so a reload
   // between a lost write and its retry sent the retry under a new key.
   it("keeps a lost POST's key across a reload, in session storage, so the retry still reuses it", async () => {
