@@ -67,24 +67,40 @@ import { TerminalRampWebhookError, type WebhookProcessor } from "./processor";
 
 type BvnkParsedWebhook = BvnkWebhook | { event: "ignore"; reason: string };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const replayJsonSchema = z.json();
+const replayRecordSchema = z.record(z.string(), replayJsonSchema);
+const replayArraySchema = z.array(replayJsonSchema);
+type ReplayJson = z.infer<typeof replayJsonSchema>;
 
-function safeBvnkReplayValue(original: unknown, scrubbed: unknown, parentKey = ""): unknown {
-  if (Array.isArray(original) && Array.isArray(scrubbed)) {
-    return original.map((item, index) => {
-      if ((parentKey === "paymentInstruments" || parentKey === "ledgers") && !isRecord(item)) {
+function safeBvnkReplayValue(
+  original: ReplayJson,
+  scrubbed: ReplayJson,
+  parentKey = ""
+): ReplayJson {
+  const originalArray = replayArraySchema.safeParse(original);
+  const scrubbedArray = replayArraySchema.safeParse(scrubbed);
+  if (originalArray.success && scrubbedArray.success) {
+    return originalArray.data.map((item, index) => {
+      if (
+        (parentKey === "paymentInstruments" || parentKey === "ledgers") &&
+        !replayRecordSchema.safeParse(item).success
+      ) {
         return null;
       }
-      return safeBvnkReplayValue(item, scrubbed[index], parentKey);
+      const scrubbedItem = scrubbedArray.data[index];
+      if (scrubbedItem === undefined) {
+        throw new Error("BVNK replay scrub lost an array entry");
+      }
+      return safeBvnkReplayValue(item, scrubbedItem, parentKey);
     });
   }
-  if (!isRecord(original) || !isRecord(scrubbed)) {
+  const originalRecord = replayRecordSchema.safeParse(original);
+  const scrubbedRecord = replayRecordSchema.safeParse(scrubbed);
+  if (!originalRecord.success || !scrubbedRecord.success) {
     return scrubbed;
   }
-  const safe: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(original)) {
+  const safe: Record<string, ReplayJson> = {};
+  for (const [key, value] of Object.entries(originalRecord.data)) {
     if (
       key === "bankDetails" ||
       (parentKey === "ledgers" && (key === "code" || key === "accountNumberFormat")) ||
@@ -94,16 +110,21 @@ function safeBvnkReplayValue(original: unknown, scrubbed: unknown, parentKey = "
       continue;
     }
     if (key === "accountNumber") {
-      if (typeof value !== "string") {
+      const accountNumber = z.string().safeParse(value);
+      if (!accountNumber.success) {
         safe[key] = null;
-      } else if (value === "") {
+      } else if (accountNumber.data === "") {
         safe[key] = "";
       } else {
         safe[key] = "[REDACTED]";
       }
       continue;
     }
-    safe[key] = safeBvnkReplayValue(value, scrubbed[key], key);
+    const scrubbedValue = scrubbedRecord.data[key];
+    if (scrubbedValue === undefined) {
+      throw new Error("BVNK replay scrub lost an object field");
+    }
+    safe[key] = safeBvnkReplayValue(value, scrubbedValue, key);
   }
   return safe;
 }
@@ -1007,8 +1028,9 @@ export const bvnkWebhook = {
   },
 
   bodyForInbox(rawBody: string): string {
-    const original: unknown = JSON.parse(rawBody);
-    return JSON.stringify(safeBvnkReplayValue(original, scrubTelemetry(original)));
+    const original = replayJsonSchema.parse(JSON.parse(rawBody));
+    const scrubbed = replayJsonSchema.parse(scrubTelemetry(original));
+    return JSON.stringify(safeBvnkReplayValue(original, scrubbed));
   },
 
   /**

@@ -213,7 +213,9 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
           `INSERT INTO ramp_webhook_events
              (id, provider, environment, raw_body, provider_event_id)
            VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT (provider, environment, provider_event_id) DO NOTHING
+           ON CONFLICT (provider, environment, provider_event_id)
+             WHERE status <> 'archived' AND provider_event_id IS NOT NULL
+           DO NOTHING
            RETURNING *`
         )
         .bind(

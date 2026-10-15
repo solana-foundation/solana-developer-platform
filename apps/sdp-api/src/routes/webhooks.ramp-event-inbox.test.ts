@@ -365,10 +365,10 @@ describe("Ramp webhook event inbox", () => {
   it("archives only discharged rows past retention", async () => {
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const discharged = await events.insertVerifiedEvent({
-      provider: "moonpay",
+      provider: "stripe",
       environment: "sandbox",
       rawBody: "{}",
-      providerEventId: null,
+      providerEventId: "evt_archive",
     });
     const pending = await events.insertVerifiedEvent({
       provider: "moonpay",
@@ -395,6 +395,14 @@ describe("Ramp webhook event inbox", () => {
         }),
       ])
     );
+    const redelivery = await events.insertVerifiedEvent({
+      provider: "stripe",
+      environment: "sandbox",
+      rawBody: "{}",
+      providerEventId: "evt_archive",
+    });
+    expect(redelivery.inserted).toBe(true);
+    expect(redelivery.row.id).not.toBe(discharged.row.id);
   });
 
   it("persists the event before acking even when the background apply never runs", async () => {
