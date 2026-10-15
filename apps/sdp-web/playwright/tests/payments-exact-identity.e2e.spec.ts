@@ -23,11 +23,11 @@ const transferSchema = z
     custodyWalletId: z.string().nullable(),
     status: z.enum(PAYMENT_TRANSFER_STATUSES),
   })
-  .passthrough();
+  .loose();
 const transferResultSchema = z.object({ transfer: transferSchema });
 const transferListSchema = z.array(transferSchema.pick({ id: true, custodyWalletId: true }));
 const batchResultSchema = z.object({
-  batch: z.object({ id: z.string(), sourceCustodyWalletId: z.string() }).passthrough(),
+  batch: z.object({ id: z.string(), sourceCustodyWalletId: z.string() }).loose(),
   transfers: z.array(transferSchema),
 });
 
@@ -107,9 +107,7 @@ test.describe
       const balanceBody = z
         .object({
           data: z.object({
-            walletBalances: z
-              .object({ custodyWalletId: z.string(), address: z.string() })
-              .passthrough(),
+            walletBalances: z.object({ custodyWalletId: z.string(), address: z.string() }).loose(),
           }),
         })
         .parse(balance.body);
