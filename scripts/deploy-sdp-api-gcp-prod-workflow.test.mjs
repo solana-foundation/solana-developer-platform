@@ -8,20 +8,24 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workflowPath = path.resolve(here, "../.github/workflows/deploy-sdp-api-gcp-prod.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
 
-test("a rolled-back deploy says so in Slack for approval, manual and merge deploys", () => {
-  assert.match(workflow, /rolled_back: \$\{\{ steps\.rollback_guard\.outputs\.rolled_back \}\}/);
+test("a held or restored deploy says so in Slack for approval, manual and merge deploys", () => {
+  assert.match(workflow, /rolled_back: \$\{\{ steps\.settle\.outputs\.rolled_back \}\}/);
+  assert.match(workflow, /canary_failed: \$\{\{ steps\.settle\.outputs\.canary_failed \}\}/);
   assert.match(
     workflow,
-    /workflow_call:[\s\S]*?outputs:\n\s+rolled_back:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.rollback\.outputs\.rolled_back \}\}\n\s+workflow_dispatch:/
+    /workflow_call:[\s\S]*?outputs:\n\s+rolled_back:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.finish\.outputs\.rolled_back \}\}\n\s+canary_failed:\n\s+description: "[^"\n]+"\n\s+value: \$\{\{ jobs\.finish\.outputs\.canary_failed \}\}\n\s+workflow_dispatch:/
   );
   assert.match(
     workflow,
-    /'web-held' \|\|\n\s+needs\.rollback\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|\n\s+'failure' \}\}/
+    /'web-held' \|\|\n\s+needs\.finish\.outputs\.canary_failed == 'true' && 'canary-failed' \|\|\n\s+needs\.finish\.outputs\.rolled_back == 'true' && 'rolled-back' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|\n\s+'failure' \}\}/
   );
-  assert.doesNotMatch(workflow, /canary-failed|tail_clean|canary_outcome/);
+  assert.doesNotMatch(workflow, /tail_clean|canary_outcome/);
   const notifier = fs.readFileSync(path.resolve(here, "notify-slack.sh"), "utf8");
-  assert.match(notifier, /\n {2}rolled-back\) MARKER="\[ROLLED BACK\] Deploy \$LABEL"/);
-  assert.doesNotMatch(notifier, /canary-failed/);
+  assert.match(
+    notifier,
+    /\n {2}canary-failed\) MARKER="\[CANARY FAILED, PROD HELD\] Deploy \$LABEL"/
+  );
+  assert.match(notifier, /\n {2}rolled-back\) MARKER="\[ROLLED BACK, PROD HELD\] Deploy \$LABEL"/);
 
   const orchestrator = fs.readFileSync(
     path.resolve(here, "../.github/workflows/deploy.yml"),
@@ -29,29 +33,48 @@ test("a rolled-back deploy says so in Slack for approval, manual and merge deplo
   );
   assert.match(
     orchestrator,
-    /OUTCOME: >-\n\s+\$\{\{ needs\.deploy-api-prod\.outputs\.rolled_back == 'true' && 'ROLLED BACK' \|\|\n/
+    /OUTCOME: >-\n\s+\$\{\{ needs\.deploy-api-prod\.outputs\.canary_failed == 'true' && 'CANARY FAILED, PROD HELD' \|\|\n\s+needs\.deploy-api-prod\.outputs\.rolled_back == 'true' && 'ROLLED BACK, PROD HELD' \|\|\n/
   );
-  assert.match(orchestrator, /\[ "\$OUTCOME" = "ROLLED BACK" \] && COLOR=/);
+  assert.match(orchestrator, /\n\s+FAILED\|"CANARY FAILED, PROD HELD"\) COLOR="#cc0000" ;;\n/);
 });
 
-test("the rollout completes only once the canary passes", () => {
+test("promotion and the canary are separate outcomes, and the canary gets three runs", () => {
   const promote = workflow.indexOf("- name: Promote service and cron with rollback");
   const canary = workflow.indexOf("- name: Run prod canary against the promoted revision");
   assert.match(
     workflow,
-    /- name: Run prod canary against the promoted revision\n\s+id: canary\n\s+if: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n\s+timeout-minutes: 5\n\s+run: \|\n\s+set -euo pipefail\n\s+gcloud run jobs execute sdp-prod-canary \\\n\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --wait\n\n/
+    /\n {6}rollout_complete: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n/
   );
+  assert.match(workflow, /\n {6}canary_passed: \$\{\{ steps\.canary\.outcome == 'success' \}\}\n/);
   assert.match(
     workflow,
-    /\n {6}rollout_complete: \$\{\{ steps\.canary\.outcome == 'success' \}\}\n/
+    /- name: Run prod canary against the promoted revision\n\s+id: canary\n\s+if: \$\{\{ steps\.promote\.outcome == 'success' \}\}\n\s+timeout-minutes: 12\n/
   );
   assert.match(
     workflow,
     /- name: Record managed monitor migration gate\n\s+if: \$\{\{ steps\.canary\.outcome == 'success' \}\}\n/
   );
   const monitorNote = workflow.indexOf("- name: Record managed monitor migration gate");
-  const rollbackJob = workflow.indexOf("\n  rollback:\n");
-  assert.ok(promote < canary && canary < monitorNote && monitorNote < rollbackJob);
+  const finishJob = workflow.indexOf("\n  finish:\n");
+  assert.ok(promote < canary && canary < monitorNote && monitorNote < finishJob);
+
+  const counter = join(mkdtempSync(join(tmpdir(), "canary-runs-")), "runs");
+  const flaky = `n=$(( $(cat '${counter}' 2>/dev/null || echo 0) + 1 )); echo "$n" > '${counter}'; [ "$n" -ge 3 ]`;
+  const recovered = runStep("Run prod canary against the promoted revision", {
+    env: deployEnv,
+    stubs: { gcloud: flaky },
+  });
+  assert.equal(recovered.code, 0, recovered.out);
+  assert.equal(recovered.calls.length, 3);
+  assert.equal(recovered.calls[0], `gcloud run jobs execute sdp-prod-canary ${scope} --wait`);
+
+  const failing = runStep("Run prod canary against the promoted revision", {
+    env: deployEnv,
+    stubs: { gcloud: "exit 1" },
+  });
+  assert.equal(failing.code, 1);
+  assert.equal(failing.calls.length, 3);
+  assert.match(failing.out, /::error::The canary failed 3 runs in a row/);
 });
 
 test("manual production deploy requires an immutable SHA-tagged image", () => {
@@ -174,7 +197,7 @@ test("cancellation-safe rollback restores resolved traffic and cron together", (
   );
   assert.match(
     workflow,
-    /- name: Roll back incomplete rollout\n\s+id: rollback_guard\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
+    /- name: Restore an incomplete rollout or hold prod\n\s+id: settle\n\s+if: \$\{\{ always\(\) \}\}\n\s+timeout-minutes: 5/
   );
   assert.match(workflow, /--to-revisions "\$\{CANDIDATE_REVISION\}=100"/);
   assert.match(workflow, /--to-revisions "\$\{PREVIOUS_TRAFFIC\}"/);
@@ -190,7 +213,7 @@ test("cancellation-safe rollback restores resolved traffic and cron together", (
     "- name: Run prod canary against the promoted revision",
     cronUpdate
   );
-  const rollback = workflow.indexOf("- name: Roll back incomplete rollout", canary);
+  const rollback = workflow.indexOf("- name: Restore an incomplete rollout or hold prod", canary);
   assert.ok(candidateStep !== -1 && candidateStep < candidateDeploy);
   assert.ok(candidateDeploy < promotion && promotion < canonicalReadiness);
   assert.ok(canonicalReadiness < cronUpdate && cronUpdate < canary && canary < rollback);
@@ -633,6 +656,7 @@ const deployEnv = {
   MIGRATE_JOB: "sdp-prod-api-public-migrate",
 };
 const deploySha = "d".repeat(40);
+const migrations = "apps/sdp-api/src/db/migrations/postgres";
 const rollbackEnv = {
   ...deployEnv,
   DEPLOY_IMAGE_SHA: deploySha,
@@ -643,76 +667,101 @@ const rollbackEnv = {
 };
 const scope = "--region us-central1 --project solana-developer-platform";
 
-test("a failed canary leaves the rollout incomplete, so the guard restores prod and holds it", () => {
-  const canary = runStep("Run prod canary against the promoted revision", {
-    env: deployEnv,
+const settleStep = "Restore an incomplete rollout or hold prod";
+const holdCall = `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=${deploySha}`;
+
+test("a failed canary holds prod on the new revision and leaves the rollback to a person", () => {
+  for (const [breaking, next] of [
+    ["", /run "Roll back sdp-api prod to the previous build" or fix forward/],
+    [
+      `${migrations}/0133_drop.sql`,
+      /fix forward, since the previous build cannot run on the schema/,
+    ],
+  ]) {
+    const settle = runStep(settleStep, {
+      env: {
+        ...rollbackEnv,
+        ROLLOUT_COMPLETE: "true",
+        CANARY_PASSED: "false",
+        BREAKING_MIGRATIONS: breaking,
+      },
+      stubs: { gcloud: "exit 0" },
+    });
+    assert.equal(settle.code, 0, settle.out);
+    assert.deepEqual(settle.calls, [holdCall]);
+    assert.equal(settle.output, "canary_failed=true\n");
+    assert.match(
+      settle.out,
+      new RegExp(`::error::The canary failed on ${deploySha}\\. Prod stays on it and is held`)
+    );
+    assert.match(settle.out, next);
+  }
+
+  const unheld = runStep(settleStep, {
+    env: { ...rollbackEnv, ROLLOUT_COMPLETE: "true", CANARY_PASSED: "false" },
     stubs: { gcloud: "exit 1" },
   });
-  assert.notEqual(canary.code, 0);
-  assert.equal(canary.env, "");
+  assert.equal(unheld.code, 1);
+  assert.match(unheld.out, /sdp_prod_hold could not be set\. Pause merges by hand/);
+  assert.equal(unheld.output, "");
+});
 
-  const guard = runStep("Roll back incomplete rollout", {
-    env: rollbackEnv,
+test("a rollout that fails before its canary is restored, as on main, and held", () => {
+  const settle = runStep(settleStep, {
+    env: { ...rollbackEnv, ROLLOUT_COMPLETE: "false", CANARY_PASSED: "false" },
     stubs: { gcloud: "exit 0" },
   });
-  assert.equal(guard.code, 0, guard.out);
-  assert.deepEqual(guard.calls, [
+  assert.equal(settle.code, 0, settle.out);
+  assert.deepEqual(settle.calls, [
     `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
-    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=${deploySha}`,
+    `${holdCall} --remove-labels sdp_prod_previous_revision`,
     `gcloud run jobs update sdp-prod-api-public-cron ${scope} --image registry.example/cron@sha256:old`,
     `gcloud run services update sdp-prod-worker ${scope} --image registry.example/worker@sha256:old`,
   ]);
-  assert.equal(guard.output, "rolled_back=true\n");
-  assert.match(guard.summary, new RegExp(`set sdp_prod_hold=${deploySha}`));
+  assert.equal(settle.output, "rolled_back=true\n");
+  assert.match(settle.summary, new RegExp(`set sdp_prod_hold=${deploySha}`));
 });
 
-test("a passed canary completes the rollout, so the guard leaves prod alone", () => {
-  const canary = runStep("Run prod canary against the promoted revision", {
-    env: deployEnv,
-    stubs: { gcloud: "exit 0" },
-  });
-  assert.equal(canary.code, 0, canary.out);
-  assert.deepEqual(canary.calls, [`gcloud run jobs execute sdp-prod-canary ${scope} --wait`]);
-  assert.equal(canary.env, "");
-
+test("a passed canary or an unstarted rollout leaves prod alone", () => {
   for (const env of [
-    { ...rollbackEnv, ROLLOUT_COMPLETE: "true" },
+    { ...rollbackEnv, ROLLOUT_COMPLETE: "true", CANARY_PASSED: "true" },
     { ...rollbackEnv, ROLLOUT_STARTED: "" },
   ]) {
-    const guard = runStep("Roll back incomplete rollout", { env, stubs: { gcloud: "exit 0" } });
-    assert.equal(guard.code, 0, guard.out);
-    assert.deepEqual(guard.calls, []);
-    assert.equal(guard.output, "");
+    const settle = runStep(settleStep, { env, stubs: { gcloud: "exit 0" } });
+    assert.equal(settle.code, 0, settle.out);
+    assert.deepEqual(settle.calls, []);
+    assert.equal(settle.output, "");
   }
 });
 
-test("a run that applied a breaking migration fails loudly instead of rolling back", () => {
-  const guard = runStep("Roll back incomplete rollout", {
+test("a run that applied a breaking migration is held but never restored", () => {
+  const settle = runStep(settleStep, {
     env: {
       ...rollbackEnv,
-      BREAKING_MIGRATIONS: "apps/sdp-api/src/db/migrations/postgres/0133_drop.sql",
+      ROLLOUT_COMPLETE: "false",
+      BREAKING_MIGRATIONS: `${migrations}/0133_drop.sql`,
     },
     stubs: { gcloud: "exit 0" },
   });
-  assert.equal(guard.code, 1);
-  assert.deepEqual(guard.calls, []);
+  assert.equal(settle.code, 1);
+  assert.deepEqual(settle.calls, [holdCall]);
   assert.match(
-    guard.out,
+    settle.out,
     /::error::This run applied breaking migrations \(apps\/sdp-api\/src\/db\/migrations\/postgres\/0133_drop\.sql\)/
   );
-  assert.equal(guard.output, "");
+  assert.equal(settle.output, "");
 });
 
-test("a failed restore still sets the hold and fails the run without reporting a rollback", () => {
-  const guard = runStep("Roll back incomplete rollout", {
-    env: rollbackEnv,
+test("a failed restore still sets the hold and fails the run without reporting a restore", () => {
+  const settle = runStep(settleStep, {
+    env: { ...rollbackEnv, ROLLOUT_COMPLETE: "false" },
     stubs: { gcloud: 'case "$*" in *update-traffic*) exit 1 ;; esac' },
   });
-  assert.equal(guard.code, 1);
-  assert.equal(guard.calls.length, 4);
-  assert.match(guard.calls[1], new RegExp(`--update-labels sdp_prod_hold=${deploySha}$`));
-  assert.match(guard.out, /Automatic rollback was incomplete; escalate immediately\./);
-  assert.equal(guard.output, "");
+  assert.equal(settle.code, 1);
+  assert.equal(settle.calls.length, 4);
+  assert.equal(settle.calls[1], `${holdCall} --remove-labels sdp_prod_previous_revision`);
+  assert.match(settle.out, /Automatic restore was incomplete; escalate immediately\./);
+  assert.equal(settle.output, "");
 });
 
 test("merge and approval deploys refuse while prod is held; a manual dispatch can lift it", () => {
@@ -731,7 +780,7 @@ test("merge and approval deploys refuse while prod is held; a manual dispatch ca
     stubs: { gcloud: `printf '%s' '${deploySha}'` },
   });
   assert.equal(held.code, 1);
-  assert.match(held.out, new RegExp(`Prod is held by the deploy of ${deploySha}, `));
+  assert.match(held.out, new RegExp(`Prod is held \\(sdp_prod_hold=${deploySha}\\)\\.`));
   assert.deepEqual(held.calls, [
     `gcloud run jobs describe sdp-prod-api-public-migrate ${scope} --format value(metadata.labels.sdp_prod_hold)`,
   ]);
@@ -852,8 +901,6 @@ function scratchRepo(prefix) {
   };
   return { dir, commit };
 }
-
-const migrations = "apps/sdp-api/src/db/migrations/postgres";
 
 // base (v0.1.0) reads `legacy`; stopReading drops the read; drop is the
 // migrations-only contraction; head is a later, unrelated merge.
@@ -1022,15 +1069,15 @@ test("an approval run deploys while prod is held only when dispatched with clear
   assert.equal(unheld.code, 0, unheld.out);
 });
 
-test("a cancel stops the forward deploy, and the rollback runs in its own job", () => {
+test("a cancel stops the forward deploy, and the restore or hold runs in its own job", () => {
   const deployJob = workflow
-    .slice(workflow.indexOf("\n  deploy:\n"), workflow.indexOf("\n  rollback:\n"))
+    .slice(workflow.indexOf("\n  deploy:\n"), workflow.indexOf("\n  finish:\n"))
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("#"))
     .join("\n");
   assert.doesNotMatch(deployJob, /always\(\)|cancelled\(\)|failure\(\)|success\(\)/);
   const rollbackJob = workflow.slice(
-    workflow.indexOf("\n  rollback:\n"),
+    workflow.indexOf("\n  finish:\n"),
     workflow.indexOf("\n  release-web:\n")
   );
   assert.match(
@@ -1042,7 +1089,7 @@ test("a cancel stops the forward deploy, and the rollback runs in its own job", 
   assert.deepEqual(steps, [
     "Authenticate to GCP",
     "Set up gcloud",
-    "Roll back incomplete rollout",
+    "Restore an incomplete rollout or hold prod",
     "Remove candidate traffic tag",
   ]);
 
@@ -1054,4 +1101,174 @@ test("a cancel stops the forward deploy, and the rollback runs in its own job", 
     approval,
     / {2}deploy:\n[^\n]*\n\s+needs: approve\n(?:\s+#[^\n]*\n)*\s+if: always\(\) && needs\.approve\.result == 'success'\n/
   );
+});
+
+test("each promotion records the build it replaced, and a breaking migration retires it", () => {
+  const promoteStep = "Promote service and cron with rollback";
+  const promoteEnv = {
+    ...deployEnv,
+    CANDIDATE_REVISION: "sdp-prod-api-public-00042-new",
+    IMAGE: "registry.example/api@sha256:new",
+  };
+  const healthy = JSON.stringify({
+    status: "ready",
+    revision: "sdp-prod-api-public-00042-new",
+    checks: { database: "ok", redis: "ok" },
+  });
+  const promote = (env) =>
+    runStep(promoteStep, {
+      env: { ...promoteEnv, ...env },
+      stubs: { node: "exit 0", gcloud: "exit 0", curl: `printf '%s' '${healthy}'` },
+    });
+  const labelCalls = (run) =>
+    run.calls.filter((call) => call.includes("sdp_prod_previous_revision"));
+
+  const recorded = promote({
+    PREVIOUS_TRAFFIC: "sdp-prod-api-public-00041-old=100",
+    BREAKING_MIGRATIONS: "",
+  });
+  assert.equal(recorded.code, 0, recorded.out);
+  assert.deepEqual(labelCalls(recorded), [
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_previous_revision=sdp-prod-api-public-00041-old`,
+  ]);
+  const switched = recorded.calls.findIndex((call) => call.includes("update-traffic"));
+  const labelled = recorded.calls.findIndex((call) => call.includes("sdp_prod_previous_revision"));
+  const cron = recorded.calls.findIndex((call) =>
+    call.includes("jobs update sdp-prod-api-public-cron")
+  );
+  assert.ok(switched < labelled && labelled < cron);
+
+  for (const env of [
+    {
+      PREVIOUS_TRAFFIC: "sdp-prod-api-public-00041-old=100",
+      BREAKING_MIGRATIONS: `${migrations}/0133_drop.sql`,
+    },
+    {
+      PREVIOUS_TRAFFIC: "sdp-prod-api-public-00040-a=50,sdp-prod-api-public-00041-old=50",
+      BREAKING_MIGRATIONS: "",
+    },
+  ]) {
+    const cleared = promote(env);
+    assert.equal(cleared.code, 0, cleared.out);
+    assert.deepEqual(labelCalls(cleared), [
+      `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
+    ]);
+  }
+
+  const migrateEnv = {
+    ...deployEnv,
+    IMAGE: "registry.example/api@sha256:new",
+    DEPLOY_IMAGE_SHA: deploySha,
+  };
+  const breakingRun = runStep("Run database migrations", {
+    env: { ...migrateEnv, BREAKING_MIGRATIONS: `${migrations}/0133_drop.sql` },
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(breakingRun.code, 0, breakingRun.out);
+  assert.equal(
+    breakingRun.calls[0],
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`
+  );
+  assert.ok(breakingRun.calls.findIndex((call) => call.includes("jobs execute")) > 0);
+  const plainRun = runStep("Run database migrations", {
+    env: { ...migrateEnv, BREAKING_MIGRATIONS: "" },
+    stubs: { gcloud: "exit 0" },
+  });
+  assert.equal(plainRun.code, 0, plainRun.out);
+  assert.deepEqual(labelCalls(plainRun), []);
+});
+
+const rollbackWorkflow = fs.readFileSync(
+  path.resolve(here, "../.github/workflows/rollback-sdp-api-gcp-prod.yml"),
+  "utf8"
+);
+const quickRollback = "Roll back to the previous build";
+const servingNew = serviceJson([{ revisionName: "sdp-prod-api-public-00042-new", percent: 100 }]);
+const readyRevision = (ready = "True") =>
+  JSON.stringify({
+    spec: { containers: [{ image: "registry.example/api@sha256:old" }] },
+    status: { conditions: [{ type: "Ready", status: ready }] },
+  });
+
+function runQuickRollback({
+  previous = "sdp-prod-api-public-00041-old",
+  hold = "",
+  service = servingNew,
+  revision = readyRevision(),
+  answeringRevision = "sdp-prod-api-public-00041-old",
+} = {}) {
+  const gcloud = `case "$*" in
+  *"sdp_prod_previous_revision)"*) printf '%s' "$PREVIOUS_LABEL" ;;
+  *"sdp_prod_hold)"*) printf '%s' "$HOLD_LABEL" ;;
+  "run services describe sdp-prod-api-public "*) printf '%s' "$SERVICE_JSON" ;;
+  "run revisions describe "*) printf '%s' "$REVISION_JSON" ;;
+esac`;
+  return runStep(quickRollback, {
+    source: rollbackWorkflow,
+    env: {
+      ...deployEnv,
+      GITHUB_RUN_ID: "4242",
+      PREVIOUS_LABEL: previous,
+      HOLD_LABEL: hold,
+      SERVICE_JSON: service,
+      REVISION_JSON: revision,
+      HEALTH_JSON: health("f".repeat(40), answeringRevision),
+    },
+    stubs: { gcloud, curl: `printf '%s' "$HEALTH_JSON"` },
+  });
+}
+
+test("the quick rollback moves traffic, cron and worker back to the previous build and holds prod", () => {
+  assert.match(rollbackWorkflow, /^on:\n {2}workflow_dispatch:\n/m);
+  assert.match(
+    rollbackWorkflow,
+    /\nconcurrency:\n {2}group: sdp-api-gcp-deploy-prod\n {2}cancel-in-progress: false\n/
+  );
+  assert.match(rollbackWorkflow, /\n {4}environment: production\n/);
+
+  const run = runQuickRollback();
+  assert.equal(run.code, 0, run.out);
+  const mutations = run.calls.filter((call) => /update|remove-labels/.test(call));
+  assert.deepEqual(mutations, [
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_hold=rollback-4242`,
+    `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
+    `gcloud run jobs update sdp-prod-api-public-cron ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
+  ]);
+  assert.equal(run.output, "revision=sdp-prod-api-public-00041-old\n");
+
+  const held = runQuickRollback({ hold: deploySha });
+  assert.equal(held.code, 0, held.out);
+  assert.ok(!held.calls.some((call) => call.includes("--update-labels sdp_prod_hold")));
+});
+
+test("the quick rollback refuses instead of guessing", () => {
+  for (const [options, reason] of [
+    [{ previous: "" }, /No previous build is recorded/],
+    [
+      { previous: "sdp-prod-api-public-00042-new" },
+      /Production already serves sdp-prod-api-public-00042-new/,
+    ],
+    [{ revision: readyRevision("False") }, /is not Ready, so it cannot take traffic back/],
+    [
+      {
+        service: serviceJson([
+          { revisionName: "sdp-prod-api-public-00041-old", percent: 50 },
+          { revisionName: "sdp-prod-api-public-00042-new", percent: 50 },
+        ]),
+      },
+      /production traffic is not on exactly one revision/,
+    ],
+  ]) {
+    const run = runQuickRollback(options);
+    assert.notEqual(run.code, 0, run.out);
+    assert.match(run.out, reason);
+    assert.ok(!run.calls.some((call) => /update|remove-labels/.test(call)), run.calls.join("\n"));
+  }
+
+  const unreached = runQuickRollback({ answeringRevision: "sdp-prod-api-public-00042-new" });
+  assert.equal(unreached.code, 1);
+  assert.match(unreached.out, /Production traffic did not reach sdp-prod-api-public-00041-old/);
+  assert.ok(!unreached.calls.some((call) => call.includes("--remove-labels")));
 });

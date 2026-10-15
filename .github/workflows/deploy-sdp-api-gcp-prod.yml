@@ -19,8 +19,11 @@ on:
         default: false
     outputs:
       rolled_back:
-        description: "'true' when the deploy restored the previous production revision and set the prod hold"
-        value: ${{ jobs.rollback.outputs.rolled_back }}
+        description: "'true' when a rollout that failed before its canary was restored and prod is held"
+        value: ${{ jobs.finish.outputs.rolled_back }}
+      canary_failed:
+        description: "'true' when the canary failed and prod is held on the new revision for a deliberate rollback"
+        value: ${{ jobs.finish.outputs.canary_failed }}
   workflow_dispatch:
     inputs:
       image_sha:
@@ -93,7 +96,8 @@ jobs:
     outputs:
       revision: ${{ steps.promote.outputs.revision }}
       rollout_started: ${{ steps.candidate.outcome == 'success' || steps.candidate.outcome == 'failure' || steps.candidate.outcome == 'cancelled' }}
-      rollout_complete: ${{ steps.canary.outcome == 'success' }}
+      rollout_complete: ${{ steps.promote.outcome == 'success' }}
+      canary_passed: ${{ steps.canary.outcome == 'success' }}
       candidate_tag: ${{ steps.candidate.outputs.tag }}
       previous_traffic: ${{ steps.capture.outputs.traffic }}
       previous_cron_image: ${{ steps.capture.outputs.cron_image }}
@@ -164,7 +168,7 @@ jobs:
             --region "${REGION}" --project "${PROJECT_ID}" \
             --format 'value(metadata.labels.sdp_prod_hold)')"
           if [[ -n "${hold}" ]]; then
-            echo "Prod is held by the deploy of ${hold}, an automatic rollback or a manual dispatch. Merge and approval deploys stay refused until a deploy dispatched with clear_hold passes its canary (docs/ops/release-operations.md, Production Rollback)." >&2
+            echo "Prod is held (sdp_prod_hold=${hold}). Merge and approval deploys stay refused until a deploy dispatched with clear_hold passes its canary (docs/ops/release-operations.md, Production Rollback)." >&2
             exit 1
           fi
 
@@ -411,7 +415,15 @@ jobs:
       - name: Run database migrations
         if: ${{ env.BUILD_IMAGE == 'true' }}
         timeout-minutes: 15
+        env:
+          BREAKING_MIGRATIONS: ${{ steps.breaking.outputs.migrations }}
         run: |
+          set -euo pipefail
+          # The previous build cannot run on the schema a breaking migration leaves.
+          if [[ -n "${BREAKING_MIGRATIONS}" ]]; then
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
+          fi
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs execute "${MIGRATE_JOB}" \
@@ -555,6 +567,9 @@ jobs:
       - name: Promote service and cron with rollback
         id: promote
         timeout-minutes: 10
+        env:
+          PREVIOUS_TRAFFIC: ${{ steps.capture.outputs.traffic }}
+          BREAKING_MIGRATIONS: ${{ steps.breaking.outputs.migrations }}
         run: |
           set -euo pipefail
 
@@ -584,6 +599,17 @@ jobs:
             sleep 10
           done
 
+          # The quick rollback returns to the build this one replaced, unless a
+          # breaking migration means that build can no longer run on the schema.
+          if [[ -z "${BREAKING_MIGRATIONS}" && "${PREVIOUS_TRAFFIC}" =~ ^([a-z0-9-]+)=100$ ]]; then
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --update-labels "sdp_prod_previous_revision=${BASH_REMATCH[1]}"
+          else
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
+          fi
+
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
 
@@ -600,16 +626,26 @@ jobs:
           fi
           echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
-      # The rollout is complete only once the canary passes; until then the
-      # rollback job restores the previous revision.
+      # Three failed runs in a row hold prod on this revision for a deliberate
+      # rollback; they also count toward the prod canary paging rule.
       - name: Run prod canary against the promoted revision
         id: canary
         if: ${{ steps.promote.outcome == 'success' }}
-        timeout-minutes: 5
+        timeout-minutes: 12
         run: |
           set -euo pipefail
-          gcloud run jobs execute sdp-prod-canary \
-            --region "${REGION}" --project "${PROJECT_ID}" --wait
+          for attempt in 1 2 3; do
+            if gcloud run jobs execute sdp-prod-canary \
+              --region "${REGION}" --project "${PROJECT_ID}" --wait; then
+              exit 0
+            fi
+            echo "::warning::Canary run ${attempt} of 3 failed."
+            if [[ "${attempt}" -lt 3 ]]; then
+              sleep 30
+            fi
+          done
+          echo "::error::The canary failed 3 runs in a row against the promoted revision."
+          exit 1
 
       - name: Record managed monitor migration gate
         if: ${{ steps.canary.outcome == 'success' }}
@@ -632,19 +668,21 @@ jobs:
 
   # Its own job, so a cancel cannot cut it short: the deploy job stays
   # cancellable, and this one starts once it ends, under always().
-  rollback:
-    name: Roll back an incomplete rollout and untag the candidate
+  finish:
+    name: Restore or hold prod, then untag the candidate
     needs: deploy
     if: ${{ always() && needs.deploy.outputs.rollout_started == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
     outputs:
-      rolled_back: ${{ steps.rollback_guard.outputs.rolled_back }}
+      rolled_back: ${{ steps.settle.outputs.rolled_back }}
+      canary_failed: ${{ steps.settle.outputs.canary_failed }}
     env:
       DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
       ROLLOUT_STARTED: ${{ needs.deploy.outputs.rollout_started }}
       ROLLOUT_COMPLETE: ${{ needs.deploy.outputs.rollout_complete }}
+      CANARY_PASSED: ${{ needs.deploy.outputs.canary_passed }}
       BREAKING_MIGRATIONS: ${{ needs.deploy.outputs.breaking_migrations }}
       PREVIOUS_TRAFFIC: ${{ needs.deploy.outputs.previous_traffic }}
       PREVIOUS_CRON_IMAGE: ${{ needs.deploy.outputs.previous_cron_image }}
@@ -660,17 +698,39 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      - name: Roll back incomplete rollout
-        id: rollback_guard
+      # A deploy that fails after it starts changing prod holds prod. It restores
+      # the previous build only when the rollout never completed and no breaking
+      # migration ran; after a promotion, rolling back is a deliberate step.
+      - name: Restore an incomplete rollout or hold prod
+        id: settle
         if: ${{ always() }}
         timeout-minutes: 5
         run: |
           set -uo pipefail
-          if [[ "${ROLLOUT_STARTED:-}" != "true" || "${ROLLOUT_COMPLETE:-}" == "true" ]]; then
+          if [[ "${ROLLOUT_STARTED:-}" != "true" || "${CANARY_PASSED:-}" == "true" ]]; then
             exit 0
           fi
+          hold=(gcloud run jobs update "${MIGRATE_JOB}" --region "${REGION}" --project "${PROJECT_ID}"
+            --update-labels "sdp_prod_hold=${DEPLOY_IMAGE_SHA}")
+
+          if [[ "${ROLLOUT_COMPLETE:-}" == "true" ]]; then
+            next="run \"Roll back sdp-api prod to the previous build\" or fix forward"
+            if [[ -n "${BREAKING_MIGRATIONS:-}" ]]; then
+              next="fix forward, since the previous build cannot run on the schema this run migrated"
+            fi
+            if ! "${hold[@]}"; then
+              echo "::error::The canary failed on ${DEPLOY_IMAGE_SHA} and sdp_prod_hold could not be set. Pause merges by hand, then ${next}."
+              exit 1
+            fi
+            echo "canary_failed=true" >> "${GITHUB_OUTPUT}"
+            echo "::error::The canary failed on ${DEPLOY_IMAGE_SHA}. Prod stays on it and is held: ${next}."
+            echo "Canary failed on ${DEPLOY_IMAGE_SHA}. Prod stays on it and is held (sdp_prod_hold): ${next}." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
           if [[ -n "${BREAKING_MIGRATIONS:-}" ]]; then
-            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not roll back. Production keeps its current traffic, cron and worker images; fix forward."
+            "${hold[@]}"
+            echo "::error::This run applied breaking migrations (${BREAKING_MIGRATIONS}) that the previous image cannot run on, so it does not restore it. Production keeps its current traffic, cron and worker images and is held; fix forward."
             exit 1
           fi
 
@@ -681,9 +741,7 @@ jobs:
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${PREVIOUS_TRAFFIC}" || rollback_failed=1
-          gcloud run jobs update "${MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" \
-            --update-labels "sdp_prod_hold=${DEPLOY_IMAGE_SHA}" || rollback_failed=1
+          "${hold[@]}" --remove-labels sdp_prod_previous_revision || rollback_failed=1
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --image "${PREVIOUS_CRON_IMAGE}" || rollback_failed=1
@@ -693,11 +751,11 @@ jobs:
               --image "${PREVIOUS_WORKER_IMAGE}" || rollback_failed=1
           fi
           if [[ "${rollback_failed}" -ne 0 ]]; then
-            echo "Automatic rollback was incomplete; escalate immediately." >&2
+            echo "Automatic restore was incomplete; escalate immediately." >&2
             exit 1
           fi
           echo "rolled_back=true" >> "${GITHUB_OUTPUT}"
-          echo "Rolled back ${DEPLOY_IMAGE_SHA} and set sdp_prod_hold=${DEPLOY_IMAGE_SHA} on ${MIGRATE_JOB}. Merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Restored the build ${DEPLOY_IMAGE_SHA} replaced and set sdp_prod_hold=${DEPLOY_IMAGE_SHA}. Merge and approval deploys refuse until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Remove candidate traffic tag
         id: remove_tag
@@ -764,7 +822,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
-    needs: [deploy, rollback, release-web]
+    needs: [deploy, finish, release-web]
     if: >-
       always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
@@ -787,9 +845,10 @@ jobs:
           SERVICE: sdp-api
           ENV: production
           STATUS: >-
-            ${{ needs.deploy.result == 'success' && (needs.rollback.result == 'success' || needs.rollback.result == 'skipped') && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
-                needs.deploy.result == 'success' && (needs.rollback.result == 'success' || needs.rollback.result == 'skipped') && 'web-held' ||
-                needs.rollback.outputs.rolled_back == 'true' && 'rolled-back' ||
+            ${{ needs.deploy.result == 'success' && (needs.finish.result == 'success' || needs.finish.result == 'skipped') && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
+                needs.deploy.result == 'success' && (needs.finish.result == 'success' || needs.finish.result == 'skipped') && 'web-held' ||
+                needs.finish.outputs.canary_failed == 'true' && 'canary-failed' ||
+                needs.finish.outputs.rolled_back == 'true' && 'rolled-back' ||
                 needs.deploy.result == 'cancelled' && 'cancelled' ||
                 'failure' }}
           VERSION: ${{ inputs.image_sha }}

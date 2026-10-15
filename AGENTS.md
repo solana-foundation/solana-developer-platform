@@ -62,11 +62,12 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
-- **A prod deploy is done only once its canary passes.** A failed rollout or canary restores the
-  previous revision and sets `sdp_prod_hold`, as does a manual dispatch; merge and approval deploys
-  refuse until a dispatch with `clear_hold` passes its canary. A `breaking` migration deploys only
-  while prod serves the commit before its last pending edit (`commit` on `/health/ready`) and is
-  never rolled back. Runbook: `docs/ops/release-operations.md`, "Production Rollback".
+- **Prod never rolls back on its own after a promotion.** A rollout that fails before its canary is
+  restored; three failed canary runs leave the new revision serving. Either way prod is held
+  (`sdp_prod_hold`), as after a manual dispatch, until a dispatch with `clear_hold` passes its canary,
+  and going back is the one-click `rollback-sdp-api-gcp-prod.yml`. A `breaking` migration deploys
+  only while prod serves the commit before its last pending edit (`commit` on `/health/ready`) and is
+  never restored. Runbook: `docs/ops/release-operations.md`, "Production Rollback".
 - **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
   `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
   wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter

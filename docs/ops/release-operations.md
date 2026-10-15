@@ -12,6 +12,7 @@
 | Push to `main` | Production web | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations. Holds merge and approval deploys afterwards unless `clear_hold` is checked |
+| Manual dispatch of `Roll back sdp-api prod to the previous build` | Production API | Moves traffic, cron and worker back to the revision that served before the last promotion, then holds production |
 | Vercel dashboard redeploy, instant rollback, or force promote | Production web | Redeploys, restores, or releases an sdp-web production deployment |
 
 Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Every push to `main` runs the stage and production pipeline, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds, on the run's first attempt only. Web therefore goes live only for a commit whose API production already serves, seconds after it. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
@@ -28,10 +29,11 @@ flowchart TD
   SC -- no --> HD{"sdp_prod_hold set?"}
   AP --> HD
   HD -- yes --> H4["Deploy refused: web X stays held"]
-  HD -- no --> PD["Prod API deploy X<br/>traffic moves to X, then canary"]
-  PD -- "rollout or canary fails" --> BR{"Run applied a breaking migration?"}
-  BR -- no --> H2["Traffic, cron and worker restored, sdp_prod_hold set<br/>web stays on its previous deployment"]
-  BR -- yes --> H3["Run fails, nothing restored: fix forward<br/>web X stays held"]
+  HD -- no --> PD["Prod API deploy X<br/>traffic moves to X, then up to 3 canary runs"]
+  PD -- "rollout fails before the canary" --> BR{"Run applied a breaking migration?"}
+  BR -- no --> H2["Traffic, cron and worker restored, prod held<br/>web stays on its previous deployment"]
+  BR -- yes --> H3["Nothing restored, prod held: fix forward<br/>web X stays held"]
+  PD -- "canary fails 3 runs in a row" --> H5["API X stays live, prod held, on-call paged<br/>a person rolls back or fixes forward"]
   PD -- succeeds --> RW["release-web posts<br/>sdp-web production gate = success for X"]
   RW --> VP["Vercel promotes web X"]
   WB -.-> VP
@@ -163,11 +165,11 @@ The production deploy workflow:
 5. Captures the current service traffic, cron image and worker image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
 7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready and the instance has working egress. A fresh instance reports `checks.egress: "pending"` (503) until it can reach Clerk, which is also its Cloud Run startup probe.
-8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-api-public-cron` and `sdp-prod-worker` to the same digest.
-9. Runs the production canary. The rollout is complete only once it passes.
+8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, records the revision it replaced for the quick rollback, and updates `sdp-prod-api-public-cron` and `sdp-prod-worker` to the same digest.
+9. Runs the production canary, up to three times. Three failures in a row hold production on the new revision (see [Production Rollback](#production-rollback)).
 10. In `release-web`, confirms `/health/ready` still reports the promoted revision and posts the `sdp-web production gate` status for the commit.
 
-If any step from the candidate deploy through the canary fails, or the run is cancelled, the workflow restores the previous traffic, cron image and worker image and holds production (see [Production Rollback](#production-rollback)). Treat any incomplete automatic rollback as an incident and reconcile all three resources immediately.
+If a step from the candidate deploy through the promotion fails, or the run is cancelled before the canary, the workflow restores the previous traffic, cron image and worker image, as it always has, and holds production. Treat an incomplete restore as an incident and reconcile all three resources immediately.
 
 ### 4. Verify production
 
@@ -190,32 +192,42 @@ Manual dispatch of the production workflow redeploys an image that already exist
 
 Before dispatch, confirm that the SHA came from a successful, trusted production release workflow and that the resolved digest matches the expected release or incident record. The presence of a tag in Artifact Registry is not sufficient provenance on its own.
 
-The workflow validates the SHA, resolves its tag to an immutable digest, verifies a no-traffic candidate, and then promotes the API service and cron job under the same rollback guard used by a normal production release. It does not check out or rebuild source, and it never updates or executes the migration job during a manual deployment. It runs while production is held, and holds production itself (`sdp_prod_hold=<sha>`) before it changes anything, so the next merge cannot replace it. With `clear_hold` checked it does not, and lifts any hold once its canary passes.
+The workflow validates the SHA, resolves its tag to an immutable digest, verifies a no-traffic candidate, and then promotes the API service and cron job under the same guard as a normal production release. It does not check out or rebuild source, and it never updates or executes the migration job during a manual deployment. It runs while production is held, and holds production itself (`sdp_prod_hold=<sha>`) before it changes anything, so the next merge cannot replace it. With `clear_hold` checked it does not, and lifts any hold once its canary passes.
 
 ## Production Rollback
 
-### Automatic rollback
+Production never rolls back on its own after a promotion: going back is a deliberate, manual step.
 
-A production deploy is complete only once the canary passes. When the canary fails, or any step from the candidate deploy on fails or is cancelled, the run restores the traffic split, cron image and worker image it captured, sets `sdp_prod_hold=<rolled-back SHA>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK`. Web stays on its previous deployment. A cancel stops the forward deploy at once. The rollback runs afterwards in its own job under `always()`, which a cancel cannot stop, so cancelling during the canary rolls back too, about 30 s after the deploy job ends.
+### When a deploy fails
+
+- **Before the canary** (candidate, readiness, the traffic switch or its health check, the cron or worker update, or a cancel): the run restores the traffic split, cron image and worker image it captured, as it always has, sets `sdp_prod_hold=<sha>` on `sdp-prod-api-public-migrate`, and Slack reports `ROLLED BACK, PROD HELD`.
+- **At the canary**: the canary runs up to three times. Three failures in a row, or a cancel during it, leave API X serving and set the hold, and Slack reports `CANARY FAILED, PROD HELD`. The workflow cannot page anyone itself; those runs count toward `sdp-smoke-consecutive-failures-prod`, which pages once production has three failed runs and no passing one in 20 minutes. Then decide: the quick rollback below, or a fix forward.
+- **After a `breaking` migration**: nothing is restored, because the previous image cannot run on the contracted schema. The run fails and holds production, and the quick rollback refuses. Fix forward through an approval run with `clear_hold` (below).
+
+The restore and the hold run in their own job under `always()` once the deploy job ends, so a cancel stops the forward deploy at once without cutting them short.
+
+### Quick rollback
+
+Dispatch `Roll back sdp-api prod to the previous build` from `main`. In a couple of minutes it moves traffic, cron and worker back to the revision that served before the last promotion, with no rebuild and no migrations, and keeps production held. It refuses when there is no previous build to return to (a breaking migration ran since, a failed rollout was restored, or a rollback already ran), when traffic is split across revisions, or when that revision is not Ready. Web has the same shape: Instant Rollback on sdp-web in Vercel. Then fix `main` and resume deploys.
+
+### Resuming deploys
 
 While the hold is set, merge and approval deploys refuse, so the next merge cannot redeploy the change. Manual dispatches still run. To resume:
 
-1. Fix `main`, or confirm the rolled-back commit is safe after all.
-2. Dispatch `Deploy sdp-api to Cloud Run (prod)` from `main` with `clear_hold` checked and `image_sha` set to the commit production should serve: the rolled-back SHA, or the one it serves now (`curl -s https://api.solana.com/health/ready | jq -r .commit`).
-3. That run lifts the hold once its canary passes. If its canary fails it rolls back too, and the hold stays.
+1. Fix `main`, or confirm the held commit is safe after all.
+2. Dispatch `Deploy sdp-api to Cloud Run (prod)` from `main` with `clear_hold` checked and `image_sha` set to the commit production should serve, for example the one it serves now (`curl -s https://api.solana.com/health/ready | jq -r .commit`).
+3. That run lifts the hold once its canary passes. If its canary fails, production stays on that build and the hold stays.
 4. Re-run the refused merge deploy, or merge again. Dispatch a fresh `Apply pending migrations to prod` run for held migrations, since an approved run cannot be re-run.
 
-A rollback restores images, not SQL. When a migration the run applied is what broke the canary, a manual dispatch cannot fix it: it never runs migrations. Merge a repair migration and dispatch `Apply pending migrations to prod` for it with `clear_hold` checked. It still needs the `release-production` approval, deploys while production is held, and lifts the hold once its canary passes. Without `clear_hold`, an approval run fails before it asks for approval while production is held.
+A restore or rollback moves images, not SQL. When a migration is what broke the canary, a manual dispatch cannot fix it: it never runs migrations. Merge a repair migration and dispatch `Apply pending migrations to prod` for it with `clear_hold` checked. It still needs the `release-production` approval, deploys while production is held, and lifts the hold once its canary passes. Without `clear_hold`, an approval run fails before it asks for approval while production is held.
 
-Every prod deploy run shares one concurrency group, and GitHub keeps one pending run per group, so a merge deploy that queues behind your dispatch cancels it. Dispatch again if that happens.
+Every prod deploy and rollback run shares one concurrency group, and GitHub keeps one pending run per group, so a merge deploy that queues behind your dispatch cancels it. Dispatch again if that happens.
 
-Lifting the hold takes a passing canary, so a broken `sdp-prod-canary` job (sdp-infra) rolls back every deploy and keeps production held. There is deliberately no bypass: removing the label by hand would only let the next deploy roll back again. When rollbacks repeat, fix the canary job first.
+Lifting the hold takes a passing canary, so a broken `sdp-prod-canary` job (sdp-infra) keeps production held. There is deliberately no bypass: fix the canary job first.
 
-**No automatic rollback after a `breaking` migration.** The previous image cannot run on the contracted schema, so a run that applied one fails without restoring anything or setting the hold, and Slack reports `FAILED`. Fix forward with a new merge.
+### Rolling back further
 
-### Manual rollback
-
-Use this for a problem the canary did not catch. The dispatch holds production, so the next merge cannot redeploy the change; resume as above once `main` is fixed.
+Use the quick rollback for the previous build. For an older one, or when no previous build is recorded, redeploy it by SHA. The dispatch holds production, so the next merge cannot redeploy the change; resume as above once `main` is fixed.
 
 1. Identify the last healthy release's full Git SHA from a successful, trusted production release workflow. Confirm its recorded digest and `sdp-api-public:<sha>` image still match in the production Artifact Registry repository.
 2. Pause web first: in Vercel, use Instant Rollback on sdp-web to the production deployment for that SHA, or the newest one older than it. Instant Rollback also stops later builds from being promoted, so nothing releases web against the API you are about to restore.
@@ -243,7 +255,7 @@ Production records the commit it last migrated with as the `sdp_schema_sha` labe
 
 Migrations reach production only through that approval flow (and through unheld merges, whose migrate step finds nothing pending). Releases and manual redeploys never run the migrate job; both refuse an image that adds migrations production has not applied, and every deploy refuses a commit behind the recorded schema. Keep `release-production` configured with required reviewers, `prevent_self_review`, and a `main` branch policy; the gate depends on it.
 
-A `breaking` migration also waits for the code that stopped using the old shape: a merge or approval run that would apply one is refused unless production already serves the commit before its last pending edit (`git merge-base --is-ancestor <newest pending commit touching the file>^ <serving commit>`), read from `commit` on `https://api.solana.com/health/ready` while all traffic is on one revision; an image that does not report `commit` fails the check. The pending range starts at `sdp_schema_sha`, or at the latest release tag while that label is unknown. When the code change never reached production on its own, for example because it merged seconds before the migration, revert the migration pull request, let the revert deploy, and land it again. A run that applied a `breaking` migration is never rolled back automatically.
+A `breaking` migration also waits for the code that stopped using the old shape: a merge or approval run that would apply one is refused unless production already serves the commit before its last pending edit (`git merge-base --is-ancestor <newest pending commit touching the file>^ <serving commit>`), read from `commit` on `https://api.solana.com/health/ready` while all traffic is on one revision; an image that does not report `commit` fails the check. The pending range starts at `sdp_schema_sha`, or at the latest release tag while that label is unknown. When the code change never reached production on its own, for example because it merged seconds before the migration, revert the migration pull request, let the revert deploy, and land it again. A run that applies a `breaking` migration is never restored, and the quick rollback cannot cross it.
 
 The approval run enforces its own integrity because GitHub sees the dispatching bot, not the migration author, as the run's actor: the commit must have a green stage deploy and smoke before the prompt appears, the approver may not have authored or committed any pending migration in the range being applied, a re-run of an approved run is refused (dispatch a fresh one), and the kill switch is re-checked when the deploy starts.
 
@@ -290,7 +302,7 @@ Inspect the Cloud Run job execution and application logs. Do not deploy the serv
 
 ### Service update fails after migrations
 
-In production, a candidate that fails readiness receives no production traffic and leaves the cron image unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion or the canary fails later, verify that the workflow restored the previous traffic split, cron image and worker image and set `sdp_prod_hold`; escalate immediately if any rollback was incomplete. In dev, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
+In production, a candidate that fails readiness receives no production traffic and leaves the cron image unchanged. Inspect startup logs, required environment and secret references, Cloud SQL/Redis connectivity, and health checks. If promotion fails later, verify that the workflow restored the previous traffic split, cron image and worker image and set `sdp_prod_hold`; escalate immediately if the restore was incomplete. A failed canary leaves the new revision serving and held for a deliberate rollback. In dev, inspect the Cloud Run rollout directly and restore the previous revision when the backward-compatible schema permits it.
 
 ### Cron job and service use different images
 

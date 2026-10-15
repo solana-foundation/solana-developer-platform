@@ -340,8 +340,8 @@ schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
 outside the migrations directory except test files. Production applies it only
-once it serves the commit before it, and never rolls that deploy back
-automatically.
+once it serves the commit before it, and never restores the previous image
+after it.
 
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and
@@ -373,8 +373,8 @@ The hosted API is built as a container and deployed to Cloud Run through GitHub 
 Stage deploys and merge deploys to production update and execute the migration
 job before deploying the API. Production then verifies a no-traffic candidate
 revision before promoting the service and reconciliation cron job to the same
-immutable image, and rolls back and holds further deploys when the production
-canary fails. Releases and manual production redeploys leave the migration
+immutable image, and holds further deploys when the production canary fails,
+leaving the rollback to a person. Releases and manual production redeploys leave the migration
 job unchanged and refuse an image that adds migrations production has not
 applied. Runtime environment variables and secret references
 are managed on the GCP resources rather than written by the image deployment.

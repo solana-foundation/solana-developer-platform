@@ -149,7 +149,8 @@ jobs:
                 needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
                 'stage' }}
           OUTCOME: >-
-            ${{ needs.deploy-api-prod.outputs.rolled_back == 'true' && 'ROLLED BACK' ||
+            ${{ needs.deploy-api-prod.outputs.canary_failed == 'true' && 'CANARY FAILED, PROD HELD' ||
+                needs.deploy-api-prod.outputs.rolled_back == 'true' && 'ROLLED BACK, PROD HELD' ||
                 (needs.deploy-api-stage.result == 'failure' || needs.schema.result == 'failure' || needs.deploy-api-prod.result == 'failure' || needs.request-schema-approval.result == 'failure') && 'FAILED' ||
                 (needs.deploy-api-stage.result == 'cancelled' || needs.schema.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled' || needs.request-schema-approval.result == 'cancelled') && 'CANCELLED' ||
                 'SUCCESS' }}
@@ -162,7 +163,12 @@ jobs:
           [ -z "$SLACK" ] && exit 0
           echo "::add-mask::$SLACK"
           MARKER="[${OUTCOME}] SDP Deploy"
-          COLOR="#36a64f"; [ "$OUTCOME" = "FAILED" ] && COLOR="#cc0000"; [ "$OUTCOME" = "CANCELLED" ] && COLOR="#808080"; [ "$OUTCOME" = "ROLLED BACK" ] && COLOR="#e36209"
+          case "$OUTCOME" in
+            FAILED|"CANARY FAILED, PROD HELD") COLOR="#cc0000" ;;
+            CANCELLED) COLOR="#808080" ;;
+            "ROLLED BACK, PROD HELD") COLOR="#e36209" ;;
+            *) COLOR="#36a64f" ;;
+          esac
           SHA=$(git rev-parse HEAD)
           COMMIT_MSG=$(git log -1 --format=%s HEAD 2>/dev/null | cut -c1-140 || echo "")
           PAYLOAD=$(jq -n \
