@@ -909,7 +909,7 @@ describe("OpenAPI spec", () => {
     for (const value of ["mint_authority", "moonpay"]) {
       expect(experimental).toContain(`"${value}"`);
     }
-    expect(classifiedValues()).toContain("earn:write");
+    expect(classifiedValues()).toContain("earn.execute");
   });
 
   it("documents only the stable modules for production", () => {

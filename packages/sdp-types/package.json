@@ -124,10 +124,10 @@
       "import": "./src/site.ts",
       "default": "./src/site.ts"
     },
-    "./permissions": {
-      "types": "./src/permissions.ts",
-      "import": "./src/permissions.ts",
-      "default": "./src/permissions.ts"
+    "./roles": {
+      "types": "./src/roles.ts",
+      "import": "./src/roles.ts",
+      "default": "./src/roles.ts"
     },
     "./policy": {
       "types": "./src/policy.ts",

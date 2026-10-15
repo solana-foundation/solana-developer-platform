@@ -5,7 +5,6 @@ import {
   type CustodyWalletPurpose,
   HIDDEN_ACTION_MODULES,
   isRampProviderInReleaseChannel,
-  type Permission,
   RAMP_PROVIDERS,
   RAMP_TRANSFER_TYPES,
   type RampProviderId,
@@ -27,49 +26,12 @@ import { z } from "zod";
  * provider). Every enum value a module owns is classified here, from the
  * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
  * document's channel does not publish. Actions carry their owner in the
- * registry; the `Record` types make a new wallet-binding permission or wallet
- * purpose fail to compile until it is classified.
+ * registry; the `Record` type makes a new wallet purpose fail to compile until
+ * it is classified.
  */
 
 /** `core` values run in every release channel. */
 type ValueOwner = SdpModule | "core";
-
-const PERMISSION_OWNERS = {
-  "tokens:read": "issuance",
-  "tokens:write": "issuance",
-  "tokens:admin": "issuance",
-  "payments:read": "payments",
-  "payments:write": "payments",
-  "earn:read": "earn",
-  "earn:write": "earn",
-  "counterparties:read": "payments",
-  "counterparties:write": "payments",
-  "wallets:read": "custody",
-  "wallets:write": "custody",
-  "compliance:read": "compliance",
-  "compliance:write": "compliance",
-  "webhooks:read": "core",
-  "webhooks:write": "core",
-  "transactions:read": "core",
-  "transactions:write": "core",
-  "audit:read": "core",
-  "org:read": "core",
-  "org:write": "core",
-  "org:admin": "core",
-  "api-keys:read": "core",
-  "api-keys:write": "core",
-  "projects:read": "core",
-  "projects:write": "core",
-  "projects:admin": "core",
-  "project-members:read": "core",
-  "project-members:write": "core",
-  "sessions:read": "core",
-  "sessions:write": "core",
-  "custody:read": "custody",
-  "custody:write": "custody",
-  "custody:admin": "custody",
-  "*": "core",
-} as const satisfies Record<Permission, ValueOwner>;
 
 const WALLET_PURPOSE_OWNERS = {
   root: "core",
@@ -95,10 +57,8 @@ function buildOwners(): ReadonlyMap<string, Owner> {
     const owner = actionOwnerOf(action);
     if (owner !== "core") own(action, { module: owner });
   }
-  for (const table of [PERMISSION_OWNERS, WALLET_PURPOSE_OWNERS]) {
-    for (const [value, owner] of Object.entries(table)) {
-      if (owner !== "core") own(value, { module: owner });
-    }
+  for (const [value, owner] of Object.entries(WALLET_PURPOSE_OWNERS)) {
+    if (owner !== "core") own(value, { module: owner });
   }
   for (const [value, module] of Object.entries(UNIFIED_TRANSACTION_SDP_MODULES)) {
     own(value, { module });

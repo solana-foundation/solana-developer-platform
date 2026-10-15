@@ -4,7 +4,7 @@
  * Projects group API keys by team or environment within an organization.
  */
 
-import type { ProjectRole } from "./permissions";
+import type { ProjectRole } from "./roles";
 
 export type ProjectEnvironment = "sandbox" | "production";
 
@@ -22,7 +22,7 @@ export function projectStatusMayAuthenticate(status: string): boolean {
 }
 
 // Re-export ProjectRole for convenience
-export type { ProjectRole } from "./permissions";
+export type { ProjectRole } from "./roles";
 
 export interface ProjectSettings {
   webhookUrl?: string;

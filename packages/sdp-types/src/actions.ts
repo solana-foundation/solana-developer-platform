@@ -26,8 +26,8 @@
  * as that list when the key is created.
  */
 
-import type { OrganizationRole } from "./permissions";
 import type { SdpModule } from "./release-channels";
+import type { OrganizationRole } from "./roles";
 
 export const ACTION_VERBS = [
   "read",

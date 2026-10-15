@@ -3,8 +3,8 @@
  */
 
 import type { CustodyProvider } from "./custody";
-import type { OrganizationRole } from "./permissions";
 import type { OrganizationProviderOverrides } from "./provider-access";
+import type { OrganizationRole } from "./roles";
 
 export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
 export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
