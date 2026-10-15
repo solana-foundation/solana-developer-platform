@@ -626,11 +626,13 @@ export interface SignatureStatusInfo {
  * @returns The same error with every bigint replaced by its number.
  */
 function numericTransactionError(err: TransactionError): TransactionError {
-  return JSON.parse(
+  const decoded: unknown = JSON.parse(
     JSON.stringify(err, (_key, value: unknown) =>
       typeof value === "bigint" ? Number(value) : value
     )
   );
+  // SAFETY: the round-trip only turns bigint indices into numbers, so the shape is still kit's TransactionError.
+  return decoded as TransactionError;
 }
 
 /**
