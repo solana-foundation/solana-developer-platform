@@ -19,7 +19,7 @@ function scope(env: Partial<Env> = {}) {
     env: {
       EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
       SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet.example",
+      KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
       ...env,
     } as Env,
     input: {
@@ -76,7 +76,10 @@ describe("resolveVaultSponsorship", () => {
    * wallet-pays, flag or no flag.
    */
   it("keeps mainnet at wallet-pays while no mainnet paymaster is configured, flag on", async () => {
-    const { env, input } = scope({ SOLANA_NETWORK: "devnet", KORA_RPC_URL: "https://kora-devnet" });
+    const { env, input } = scope({
+      SOLANA_NETWORK: "devnet",
+      KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
+    });
 
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
@@ -87,8 +90,8 @@ describe("resolveVaultSponsorship", () => {
   it("sponsors mainnet once its own paymaster is wired (PRO-1738)", async () => {
     const { env, input } = scope({
       SOLANA_NETWORK: "devnet",
-      KORA_RPC_URL: "https://kora-devnet",
-      KORA_RPC_URL_MAINNET: "https://kora-mainnet",
+      KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
+      KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
     });
 
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });

@@ -19,6 +19,7 @@ import {
 import { getTransferSolInstruction } from "@solana-program/system";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { koraEndpoint } from "./kora";
 
 const {
   app,
@@ -38,7 +39,7 @@ const {
 } = apiTestSupport;
 
 const PRIVY_CONFIGURED = !!env.PRIVY_APP_ID && !!env.PRIVY_APP_SECRET;
-const KORA_CONFIGURED = !!env.KORA_RPC_URL;
+const KORA_CONFIGURED = koraEndpoint !== null;
 const RUN_INTEGRATION_TESTS = env.RUN_INTEGRATION_TESTS === "true";
 const INTEGRATION_CUSTODY_PROVIDER = getIntegrationCustodyProvider();
 const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
@@ -453,7 +454,7 @@ async function fundAddressViaKoraFeePayer(
   lamports: bigint = BigInt(INTEGRATION_CUSTODY_FUND_LAMPORTS)
 ): Promise<boolean> {
   const rpcUrl = env.SOLANA_RPC_URL;
-  if (!rpcUrl || !env.KORA_RPC_URL) {
+  if (!rpcUrl || !KORA_CONFIGURED) {
     return false;
   }
 
