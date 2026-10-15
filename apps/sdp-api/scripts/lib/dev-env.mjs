@@ -44,7 +44,7 @@ export const localEnv = {
   ...loadLocalEnvFile(localEnvPath),
 };
 export const apiPort = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
-export const workerPort = localEnv.SDP_WORKER_PORT ?? process.env.SDP_WORKER_PORT ?? "8789";
+export const workerPort = process.env.SDP_WORKER_PORT ?? "8789";
 export const databaseUrl =
   // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback.
   localEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "postgresql://sdp:sdp@127.0.0.1:5432/sdp";
