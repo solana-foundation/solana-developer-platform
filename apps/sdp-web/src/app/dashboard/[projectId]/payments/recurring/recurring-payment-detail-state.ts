@@ -56,6 +56,6 @@ export function getRecurringPaymentDetailState({
  * After a failed recurring action: an unknown outcome (the action may have run)
  * refreshes the page, so its status and controls show what happened.
  */
-export function refreshIfOutcomeUnknown(error: unknown, refresh: () => void): void {
-  if (error instanceof IdempotencyOutcomeUnknownError) refresh();
+export function refreshIfOutcomeUnknown(cause: unknown, refresh: () => void): void {
+  if (cause instanceof IdempotencyOutcomeUnknownError) refresh();
 }

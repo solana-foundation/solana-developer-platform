@@ -21,7 +21,7 @@ import { Modal } from "@/components/ui/modal";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
-import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
@@ -1336,7 +1336,8 @@ export function EarnVaultDepositModal({
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording what the
     // server just answered.
-    const retired = settleIdempotencyKey(
+    // A money movement: an unknown outcome keeps the key (`moneyAnswerRetiresKey`).
+    const retired = settleMoneyIdempotencyKey(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
       key,

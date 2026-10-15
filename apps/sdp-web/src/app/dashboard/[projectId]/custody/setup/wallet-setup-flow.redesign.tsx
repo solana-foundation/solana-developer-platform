@@ -882,6 +882,8 @@ function useCreateWallet({
           // No answer: the call may have reached the server. The key stays and the form stays,
           // so Create wallet again resends the same request under the same key.
           setupKey.settled(input, key, { status: "error" });
+          // The wallet may exist: the inventory is refreshed so the list shows it.
+          refreshWalletInventory();
           setErrorMessage(t("DashboardCustody.walletSetupOutcomeUnknown"));
           return;
         }
@@ -889,6 +891,9 @@ function useCreateWallet({
 
         switch (result.status) {
           case "error":
+            // A refusal may follow an earlier attempt that did create the
+            // wallet, so the inventory is refreshed before the user retries.
+            refreshWalletInventory();
             setErrorMessage(result.message);
             return;
           case "provider_already_set_up":
