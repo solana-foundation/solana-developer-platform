@@ -362,7 +362,7 @@ describe("Ramp webhook event inbox", () => {
     expect(await readInboxRows()).toHaveLength(2);
   });
 
-  it("prunes only discharged rows past retention", async () => {
+  it("archives only discharged rows past retention", async () => {
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const discharged = await events.insertVerifiedEvent({
       provider: "moonpay",
@@ -381,8 +381,20 @@ describe("Ramp webhook event inbox", () => {
       .prepare("UPDATE ramp_webhook_events SET discharged_at = ? WHERE id = ?")
       .bind("2026-06-18T00:00:00.000Z", discharged.row.id)
       .run();
-    expect(await events.pruneDischarged("2026-06-19T00:00:00.000Z", 100)).toBe(1);
-    expect(await readInboxRows()).toMatchObject([{ id: pending.row.id, status: "pending" }]);
+    expect(await events.archiveDischarged("2026-06-19T00:00:00.000Z", 100)).toBe(1);
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: pending.row.id, status: "pending" }),
+        expect.objectContaining({
+          id: discharged.row.id,
+          status: "archived",
+          apply_outcome: null,
+          provider_event_id: null,
+        }),
+      ])
+    );
   });
 
   it("persists the event before acking even when the background apply never runs", async () => {

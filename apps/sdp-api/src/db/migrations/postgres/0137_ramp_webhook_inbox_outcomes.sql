@@ -10,14 +10,14 @@ ALTER TABLE ramp_webhook_events ALTER COLUMN payload DROP NOT NULL;
 
 ALTER TABLE ramp_webhook_events
   ADD CONSTRAINT ramp_webhook_events_body_check
-  CHECK (status = 'discharged' OR raw_body IS NOT NULL OR payload IS NOT NULL);
+  CHECK (status IN ('discharged', 'archived') OR raw_body IS NOT NULL OR payload IS NOT NULL);
 
 ALTER TABLE ramp_webhook_events
   DROP CONSTRAINT IF EXISTS ramp_webhook_events_status_check;
 
 ALTER TABLE ramp_webhook_events
   ADD CONSTRAINT ramp_webhook_events_status_check
-  CHECK (status IN ('pending', 'failed', 'discharged'));
+  CHECK (status IN ('pending', 'failed', 'discharged', 'archived'));
 
 ALTER TABLE ramp_webhook_events
   ADD CONSTRAINT ramp_webhook_events_apply_outcome_check

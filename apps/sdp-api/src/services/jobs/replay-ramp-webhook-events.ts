@@ -1,4 +1,4 @@
-import type { SdpRampProviderStages } from "@sdp/types";
+import type { RampWebhookFailureOutcome, SdpRampProviderStages } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
 import { getDb } from "@/db";
 import {
@@ -44,6 +44,33 @@ export const RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT = "sdp_api_ramp_webhook_event_ex
 export const RAMP_WEBHOOK_EVENT_DISCARDED_EVENT = "sdp_api_ramp_webhook_event_discarded";
 
 class InvalidRampWebhookError extends TerminalRampWebhookError {}
+
+type RampWebhookFailureKind = "invalid" | "terminal" | "retryable";
+
+function classifyFailure(error: unknown): RampWebhookFailureKind {
+  if (error instanceof InvalidRampWebhookError) {
+    return "invalid";
+  }
+  if (error instanceof TerminalRampWebhookError) {
+    return "terminal";
+  }
+  return "retryable";
+}
+
+function failureOutcome(kind: RampWebhookFailureKind): RampWebhookFailureOutcome {
+  switch (kind) {
+    case "invalid":
+      return "invalid";
+    case "terminal":
+      return "refused";
+    case "retryable":
+      return "retryable_error";
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
+  }
+}
 
 /**
  * The identity a parked row is stamped with; a later deploy changes it.
@@ -143,16 +170,9 @@ export async function applyStoredRampWebhookEvent(
     return outcome !== "ignored";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const terminal = error instanceof TerminalRampWebhookError;
+    const failureKind = classifyFailure(error);
+    const terminal = failureKind !== "retryable";
     const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
-    let failureOutcome: "invalid" | "refused" | "retryable_error";
-    if (error instanceof InvalidRampWebhookError) {
-      failureOutcome = "invalid";
-    } else if (terminal) {
-      failureOutcome = "refused";
-    } else {
-      failureOutcome = "retryable_error";
-    }
     await events.recordFailure({
       id: row.id,
       error: message,
@@ -160,7 +180,7 @@ export async function applyStoredRampWebhookEvent(
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       appRevision: currentAppRevision(env),
       terminal,
-      outcome: failureOutcome,
+      outcome: failureOutcome(failureKind),
     });
     if (spentAttempts >= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS) {
       logEvent("error", {
@@ -193,7 +213,7 @@ export async function replayRampWebhookEvents(
   rampProviderStages: SdpRampProviderStages
 ): Promise<number> {
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
-  await events.pruneDischarged(
+  await events.archiveDischarged(
     new Date(Date.now() - RAMP_WEBHOOK_EVENT_RETENTION_MS).toISOString(),
     100
   );

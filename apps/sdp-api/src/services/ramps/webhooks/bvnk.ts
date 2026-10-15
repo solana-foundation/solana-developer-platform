@@ -29,6 +29,7 @@ import {
   BVNK_FUNDING_WALLET_STATUS,
   type BvnkOfframpChannelSettlement,
   NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  type RampWebhookBusinessOutcome,
   type SdpEnvironment,
 } from "@sdp/types";
 import { z } from "zod";
@@ -65,6 +66,47 @@ import {
 import { TerminalRampWebhookError, type WebhookProcessor } from "./processor";
 
 type BvnkParsedWebhook = BvnkWebhook | { event: "ignore"; reason: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeBvnkReplayValue(original: unknown, scrubbed: unknown, parentKey = ""): unknown {
+  if (Array.isArray(original) && Array.isArray(scrubbed)) {
+    return original.map((item, index) => {
+      if ((parentKey === "paymentInstruments" || parentKey === "ledgers") && !isRecord(item)) {
+        return null;
+      }
+      return safeBvnkReplayValue(item, scrubbed[index], parentKey);
+    });
+  }
+  if (!isRecord(original) || !isRecord(scrubbed)) {
+    return scrubbed;
+  }
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(original)) {
+    if (
+      key === "bankDetails" ||
+      (parentKey === "ledgers" && (key === "code" || key === "accountNumberFormat")) ||
+      (parentKey === "paymentInstruments" && key === "remittanceInformationPrefix") ||
+      (parentKey === "customer" && key === "name")
+    ) {
+      continue;
+    }
+    if (key === "accountNumber") {
+      if (typeof value !== "string") {
+        safe[key] = null;
+      } else if (value === "") {
+        safe[key] = "";
+      } else {
+        safe[key] = "[REDACTED]";
+      }
+      continue;
+    }
+    safe[key] = safeBvnkReplayValue(value, scrubbed[key], key);
+  }
+  return safe;
+}
 
 type BvnkV1PayinData = Extract<BvnkWebhook, { event: "bvnk:payment:payin:status-change" }>["data"];
 
@@ -965,39 +1007,8 @@ export const bvnkWebhook = {
   },
 
   bodyForInbox(rawBody: string): string {
-    const scrubbed: unknown = scrubTelemetry(JSON.parse(rawBody));
-    const wallet = z
-      .looseObject({ event: z.string(), data: z.record(z.string(), z.unknown()) })
-      .safeParse(scrubbed);
-    if (!wallet.success) {
-      return JSON.stringify(scrubbed);
-    }
-    const { event, data } = wallet.data;
-    if (event === "ledger:v2:wallet:status-change") {
-      const safeData = z
-        .object({
-          id: z.string(),
-          name: z.string(),
-          status: z.string(),
-          customer: z.object({ id: z.string() }).optional(),
-          paymentInstruments: z
-            .array(z.object({ type: z.string(), accountNumber: z.string().optional() }))
-            .optional(),
-        })
-        .safeParse(data);
-      return JSON.stringify({ ...wallet.data, data: safeData.success ? safeData.data : {} });
-    }
-    if (event === "bvnk:ledger:wallet:create") {
-      const safeData = z
-        .object({
-          walletName: z.string(),
-          status: z.string().optional(),
-          ledgers: z.array(z.object({ accountNumber: z.string().optional() })).optional(),
-        })
-        .safeParse(data);
-      return JSON.stringify({ ...wallet.data, data: safeData.success ? safeData.data : {} });
-    }
-    return JSON.stringify(wallet.data);
+    const original: unknown = JSON.parse(rawBody);
+    return JSON.stringify(safeBvnkReplayValue(original, scrubTelemetry(original)));
   },
 
   /**
@@ -1092,7 +1103,7 @@ export const bvnkWebhook = {
     env: Env,
     environment: SdpEnvironment,
     webhook: BvnkParsedWebhook
-  ): Promise<"applied" | "ignored"> {
+  ): Promise<RampWebhookBusinessOutcome> {
     switch (webhook.event) {
       case "ignore":
         getLogger().info(`[bvnk webhook] ignored event: ${webhook.reason}`);

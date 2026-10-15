@@ -1273,6 +1273,29 @@ describe("BVNK ramp webhook", () => {
       provider_status: BVNK_FUNDING_WALLET_STATUS.provisioned,
     });
   });
+  it("leaves an ACTIVE funding wallet without an account number in provisioning", async () => {
+    const fundingRowId = "cpa_bvnk_funding_status_blank_account";
+    const walletId = "a:funding:wallet:status:blank";
+    await seedBvnkFundingWallet(getDb(env), {
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      counterpartyId: COUNTERPARTY_ID,
+      providerCustomerReference: CUSTOMER_REFERENCE,
+      id: fundingRowId,
+      walletId,
+      stage: "assigned",
+      metadata: {},
+    });
+    const event = fundingWalletEvent(walletId, { customerId: CUSTOMER_REFERENCE });
+    event.data.paymentInstruments = [{ type: "FIAT", accountNumber: "" }];
+
+    expect((await sendBvnkWebhook(event, { headers: {}, environment: "sandbox" })).status).toBe(
+      200
+    );
+    expect((await readFundingWalletRow(fundingRowId))?.provider_status).toBe(
+      BVNK_FUNDING_WALLET_STATUS.provisioning
+    );
+  });
   it("ignores a non-ACTIVE funding wallet status-change", async () => {
     const FUNDING_ROW_ID = "cpa_bvnk_funding_status_inactive";
     const FUNDING_WALLET_ID = "a:funding:wallet:status:3";

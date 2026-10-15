@@ -76,9 +76,10 @@ export function isRampTransferType(type: PaymentTransferType): type is RampTrans
 /**
  * Lifecycle of a persisted ramp webhook event: `pending` until the background
  * apply or the replay job settles it, `discharged` while the outcome is
- * retained, and `failed` once an operator has to look.
+ * retained, `archived` after retention, and `failed` once an operator has to
+ * look.
  */
-export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed", "discharged"] as const;
+export const RAMP_WEBHOOK_EVENT_STATUSES = ["pending", "failed", "discharged", "archived"] as const;
 
 export type RampWebhookEventStatus = (typeof RAMP_WEBHOOK_EVENT_STATUSES)[number];
 
@@ -97,6 +98,14 @@ export const RAMP_WEBHOOK_APPLY_OUTCOMES = [
   "retryable_error",
 ] as const;
 export type RampWebhookApplyOutcome = (typeof RAMP_WEBHOOK_APPLY_OUTCOMES)[number];
+export type RampWebhookDischargeOutcome = Extract<
+  RampWebhookApplyOutcome,
+  "applied" | "ignored" | "discarded"
+>;
+export type RampWebhookFailureOutcome = Exclude<
+  RampWebhookApplyOutcome,
+  RampWebhookDischargeOutcome
+>;
 
 export const PAYMENT_TRANSFER_STATUSES = [
   "pending",

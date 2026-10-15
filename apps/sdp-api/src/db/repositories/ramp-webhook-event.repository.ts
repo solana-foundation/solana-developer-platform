@@ -2,7 +2,9 @@ import {
   RAMP_WEBHOOK_APPLY_OUTCOMES,
   RAMP_WEBHOOK_EVENT_STATUSES,
   type RampWebhookApplyOutcome,
+  type RampWebhookDischargeOutcome,
   type RampWebhookEventStatus,
+  type RampWebhookFailureOutcome,
   type SdpEnvironment,
 } from "@sdp/types";
 import {
@@ -72,7 +74,7 @@ export interface RecordRampWebhookEventFailureInput {
   appRevision: string;
   /** A permanent failure: the row parks as terminal and no deploy re-arms it. */
   terminal?: boolean;
-  outcome?: "invalid" | "refused" | "retryable_error" | "unmatched";
+  outcome?: RampWebhookFailureOutcome;
 }
 
 export interface ParkExhaustedRampWebhookEventsInput {
@@ -98,13 +100,9 @@ export interface RampWebhookEventsRepository {
   insertVerifiedEvent(
     input: InsertVerifiedRampWebhookEventInput
   ): Promise<{ row: RampWebhookEventRow; inserted: boolean }>;
-  /** Retains the outcome until the retention job prunes the discharged row. */
-  dischargeEvent(
-    id: string,
-    outcome: "applied" | "ignored" | "discarded",
-    reason?: string
-  ): Promise<void>;
-  pruneDischarged(before: string, limit: number): Promise<number>;
+  /** Retains the outcome until the retention job archives the discharged row. */
+  dischargeEvent(id: string, outcome: RampWebhookDischargeOutcome, reason?: string): Promise<void>;
+  archiveDischarged(before: string, limit: number): Promise<number>;
   /** Records a failed apply. Below `maxAttempts` the row stays `pending` for
    * the replay job; at the limit it parks as `failed`. */
   recordFailure(input: RecordRampWebhookEventFailureInput): Promise<void>;
@@ -144,16 +142,39 @@ const storedEventStatusSchema = z.enum(RAMP_WEBHOOK_EVENT_STATUSES);
  */
 const KNOWN_PROVIDERS: string[] = [...PERSISTED_RAMP_PROVIDERS];
 
+function replayBody(row: Record<string, unknown>): string {
+  const status = storedEventStatusSchema.parse(row.status);
+  switch (status) {
+    case "discharged":
+    case "archived":
+      return "";
+    case "pending":
+    case "failed": {
+      const rawBody = z.string().nullable().parse(row.raw_body);
+      if (rawBody !== null) {
+        return rawBody;
+      }
+      if (typeof row.payload === "string") {
+        return row.payload;
+      }
+      if (row.payload !== null && row.payload !== undefined) {
+        return JSON.stringify(row.payload);
+      }
+      throw new Error("active ramp webhook event has no replay body");
+    }
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
-  const rawBody = z.string().nullable().parse(row.raw_body);
-  const legacyPayload = row.payload;
   return {
     id: row.id as string,
     provider: storedEventProviderSchema.parse(row.provider),
     environment: row.environment as SdpEnvironment,
-    rawBody:
-      rawBody ??
-      (typeof legacyPayload === "string" ? legacyPayload : JSON.stringify(legacyPayload)),
+    rawBody: replayBody(row),
     providerEventId: z.string().nullable().parse(row.provider_event_id),
     applyOutcome: storedEventOutcomeSchema.parse(row.apply_outcome),
     status: storedEventStatusSchema.parse(row.status),
@@ -232,10 +253,12 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
         .run();
     },
 
-    async pruneDischarged(before, limit) {
+    async archiveDischarged(before, limit) {
       const result = await db
         .prepare(
-          `DELETE FROM ramp_webhook_events
+          `UPDATE ramp_webhook_events
+           SET status = 'archived', apply_outcome = NULL, last_error = NULL,
+               provider_event_id = NULL, updated_at = sdp_iso_now()
            WHERE id IN (
              SELECT id FROM ramp_webhook_events
              WHERE status = 'discharged' AND discharged_at <= ?

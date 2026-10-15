@@ -92,6 +92,33 @@ describe("bvnkWebhook.parse", () => {
     });
   });
 
+  it("keeps empty and invalid bank account values invalid after scrubbing", () => {
+    const wallet = {
+      event: "ledger:v2:wallet:status-change",
+      data: {
+        id: "wallet_1",
+        name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
+        status: "ACTIVE",
+        customer: { id: "customer_1" },
+        paymentInstruments: [{ type: "FIAT", accountNumber: "" }],
+      },
+    };
+    const empty = bvnkWebhook.bodyForInbox(JSON.stringify(wallet));
+    expect(bvnkWebhook.parse(empty)).toMatchObject({
+      event: "ledger:v2:wallet:status-change",
+      data: { bankAccount: undefined },
+    });
+
+    const invalid = bvnkWebhook.bodyForInbox(
+      JSON.stringify({
+        ...wallet,
+        data: { ...wallet.data, paymentInstruments: [{ type: "FIAT", accountNumber: null }] },
+      })
+    );
+    expect(JSON.parse(invalid).data.paymentInstruments[0].accountNumber).toBeNull();
+    expect(() => bvnkWebhook.parse(invalid)).toThrow();
+  });
+
   it("parses the v1 fiat pay-in status-change webhook and stringifies its amount", () => {
     const processor = bvnkWebhook;
 
