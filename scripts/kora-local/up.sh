@@ -82,6 +82,12 @@ surfpool_rpc_url="$(awk -F= '$1 == "SURFPOOL_RPC_URL" { v = substr($0, index($0,
   echo "KORA_MAINNET_CLOUD_RUN_AUDIENCE="
   echo "SOLANA_MAINNET_RPC_URL=${surfpool_rpc_url}"
   echo "KORA_MAINNET_RPC_URL=${surfpool_rpc_url}"
+  # The door builds Production transactions from the managed mainnet pool: only the fork, so
+  # nothing reaches real mainnet through a provider URL inherited from Doppler.
+  for provider in TRITON HELIUS ALCHEMY QUICKNODE VALIDATIONCLOUD NODIT; do
+    echo "SOLANA_RPC_${provider}_MAINNET_API_KEY_URL="
+  done
+  echo "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL=${surfpool_rpc_url}"
 } >"${API_ENV_FILE}"
 
 echo "Local paymasters ready; API env written to ${API_ENV_FILE#"${ROOT_DIR}"/}."
