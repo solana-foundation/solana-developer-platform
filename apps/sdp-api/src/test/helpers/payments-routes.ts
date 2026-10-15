@@ -34,10 +34,6 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
-vi.spyOn(solanaRpc, "createClusterRpc").mockImplementation((rpcEnv, _cluster, options) =>
-  solanaRpc.createRpc(rpcEnv, options)
-);
-
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
 export const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
