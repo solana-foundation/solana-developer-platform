@@ -225,7 +225,7 @@ export function OnrampRail({
           />
         ) : undefined
       }
-      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading || wizard.quoteInFlight}
       // Once the quote exists there is nothing to go back to; the footer's Cancel deposit
       // (confirmed) is the way out while the transfer can still be canceled.
       hideSecondary={wizard.onTransactionStage}

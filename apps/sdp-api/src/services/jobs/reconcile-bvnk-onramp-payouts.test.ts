@@ -1,3 +1,4 @@
+import { SdpPaymentsError } from "@sdp/payments";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { BvnkPayRequestError } from "@sdp/payments/ramps/providers/bvnk/client";
 import {
@@ -464,14 +465,21 @@ describe("reconcileBvnkOnrampPayouts", () => {
       }
     });
 
-    it("a_throwing_dry_run_rotates_the_candidate_to_the_back_of_the_queue", async () => {
+    it("a_throwing_dry_run_rotates_the_candidate_and_logs_its_diagnostics", async () => {
       await seedUnclaimedCandidate({ id: "xfr_dry_run_throws" });
       const before = await getDb(env)
         .prepare("SELECT updated_at FROM payment_transfers WHERE id = ?")
         .bind("xfr_dry_run_throws")
         .first<{ updated_at: string }>();
       assert(before);
-      dryRunSpy.mockRejectedValueOnce(new Error("BVNK dry-run unavailable"));
+      dryRunSpy.mockRejectedValueOnce(
+        new SdpPaymentsError(
+          "PROVIDER_UNAVAILABLE",
+          "BVNK request failed with status 503.",
+          { provider: "bvnk" },
+          { providerMessage: "Ledger maintenance window" }
+        )
+      );
 
       await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
@@ -484,6 +492,14 @@ describe("reconcileBvnkOnrampPayouts", () => {
       expect(after.updated_at > before.updated_at).toBe(true);
       expect(bvnkData(after).payout).toBeUndefined();
       expect(createSpy).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transfer_id: "xfr_dry_run_throws",
+          error: "BVNK request failed with status 503.",
+          error_diagnostics: { providerMessage: "Ledger maintenance window" },
+        }),
+        "[bvnk onramp] unclaimed payout reconcile failed"
+      );
     });
 
     it("claim_lost sends no provider create", async () => {

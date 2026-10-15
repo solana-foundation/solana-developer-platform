@@ -4,7 +4,6 @@ import { queryBooleanSchema } from "@/openapi/schemas/base";
 import {
   offrampCryptoRailSchema,
   onrampCryptoRailSchema,
-  rampDestinationCountrySchema,
   rampDirectionSchema,
   rampFiatCurrencySchema,
 } from "@/routes/payments/ramps/schemas";
@@ -20,12 +19,9 @@ export const counterpartyIdParamsSchema = z.object({
 export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("direction", [
   z
     .object({
-      provider: z.enum(
-        ["moonpay", "lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
-        {
-          error: "provider does not support onramp requirements",
-        }
-      ),
+      provider: z.enum(["moonpay", "bvnk", "coinbase", "stripe"], {
+        error: "provider does not support onramp requirements",
+      }),
       direction: z.literal("onramp"),
       assetRail: onrampCryptoRailSchema,
       fiatCurrency: rampFiatCurrencySchema,
@@ -34,27 +30,16 @@ export const counterpartyRequirementsQuerySchema = z.discriminatedUnion("directi
         .min(1, { error: "destinationCustodyWalletId is required for onramp requirements" }),
     })
     .strict(),
-  z.discriminatedUnion("provider", [
-    z
-      .object({
-        provider: z.literal("lightspark"),
-        direction: z.literal("offramp"),
-        assetRail: offrampCryptoRailSchema,
-        fiatCurrency: rampFiatCurrencySchema,
-        destinationCountry: rampDestinationCountrySchema.optional(),
-      })
-      .strict(),
-    z
-      .object({
-        provider: z.enum(["moonpay", "bvnk", "moneygram", "mural"], {
-          error: "provider does not support offramp requirements",
-        }),
-        direction: z.literal("offramp"),
-        assetRail: offrampCryptoRailSchema,
-        fiatCurrency: rampFiatCurrencySchema,
-      })
-      .strict(),
-  ]),
+  z
+    .object({
+      provider: z.enum(["moonpay", "bvnk"], {
+        error: "provider does not support offramp requirements",
+      }),
+      direction: z.literal("offramp"),
+      assetRail: offrampCryptoRailSchema,
+      fiatCurrency: rampFiatCurrencySchema,
+    })
+    .strict(),
 ]);
 
 export const createCounterpartySchema = z.object({
@@ -89,97 +74,47 @@ export const listCounterpartyAccountsQuerySchema = z.object({
 });
 
 const collectedDataSchema = z.record(z.string(), z.string()).optional();
+const retiredCustodySelectorSchema = z
+  .never({
+    error: "Provider wallet selectors are no longer supported; use destinationCustodyWalletId.",
+  })
+  .optional();
 
-export const submitCounterpartyRequirementsSchema = z.preprocess(
-  (input, context) => {
-    if (
-      typeof input === "object" &&
-      input !== null &&
-      "provider" in input &&
-      (input.provider === "bvnk" || input.provider === "mural") &&
-      "direction" in input &&
-      input.direction === "onramp"
-    ) {
-      for (const selector of [
-        "wallet",
-        "walletId",
-        "providerWalletId",
-        "source",
-        "sourceWallet",
-        "sourceWalletId",
-        "sourceProviderWalletId",
-        "destination",
-        "destinationWallet",
-        "destinationWalletId",
-        "destinationProviderWalletId",
-      ]) {
-        if (Object.hasOwn(input, selector)) {
-          context.addIssue({
-            code: "custom",
-            path: [selector],
-            message: `${selector} is no longer supported; use destinationCustodyWalletId.`,
-          });
-        }
-      }
-    }
-    return input;
-  },
-  z.discriminatedUnion("provider", [
-    z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
-    z.object({ provider: z.literal("moneygram"), direction: rampDirectionSchema }),
-    z.discriminatedUnion("direction", [
-      z.object({
-        provider: z.literal("bvnk"),
-        direction: z.literal("onramp"),
-        assetRail: onrampCryptoRailSchema,
-        destinationCustodyWalletId: z.string().min(1),
-        fiatCurrency: rampFiatCurrencySchema,
-        collectedData: collectedDataSchema,
-        agreementConsent: z.literal(true).optional(),
-      }),
-      z.object({
-        provider: z.literal("bvnk"),
-        direction: z.literal("offramp"),
-        assetRail: offrampCryptoRailSchema,
-        fiatCurrency: rampFiatCurrencySchema,
-        collectedData: collectedDataSchema,
-        agreementConsent: z.literal(true).optional(),
-      }),
-    ]),
-    z.discriminatedUnion("direction", [
-      z.object({
-        provider: z.literal("lightspark"),
-        direction: z.literal("onramp"),
-        collectedData: collectedDataSchema,
-      }),
-      z.object({
-        provider: z.literal("lightspark"),
-        direction: z.literal("offramp"),
-        assetRail: offrampCryptoRailSchema,
-        fiatCurrency: rampFiatCurrencySchema,
-        collectedData: collectedDataSchema,
-        providerAccountId: z.string().min(1).optional(),
-      }),
-    ]),
-    z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
-    z.discriminatedUnion("direction", [
-      z.object({
-        provider: z.literal("mural"),
-        direction: z.literal("onramp"),
-        assetRail: onrampCryptoRailSchema,
-        destinationCustodyWalletId: z.string().min(1),
-        fiatCurrency: rampFiatCurrencySchema,
-      }),
-      z.object({
-        provider: z.literal("mural"),
-        direction: z.literal("offramp"),
-        assetRail: offrampCryptoRailSchema,
-        fiatCurrency: rampFiatCurrencySchema,
-      }),
-    ]),
-    z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
-  ])
-);
+export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
+  z.discriminatedUnion("direction", [
+    z.object({
+      provider: z.literal("bvnk"),
+      direction: z.literal("onramp"),
+      assetRail: onrampCryptoRailSchema,
+      destinationCustodyWalletId: z.string().min(1),
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
+      wallet: retiredCustodySelectorSchema,
+      walletId: retiredCustodySelectorSchema,
+      providerWalletId: retiredCustodySelectorSchema,
+      source: retiredCustodySelectorSchema,
+      sourceWallet: retiredCustodySelectorSchema,
+      sourceWalletId: retiredCustodySelectorSchema,
+      sourceProviderWalletId: retiredCustodySelectorSchema,
+      destination: retiredCustodySelectorSchema,
+      destinationWallet: retiredCustodySelectorSchema,
+      destinationWalletId: retiredCustodySelectorSchema,
+      destinationProviderWalletId: retiredCustodySelectorSchema,
+    }),
+    z.object({
+      provider: z.literal("bvnk"),
+      direction: z.literal("offramp"),
+      assetRail: offrampCryptoRailSchema,
+      fiatCurrency: rampFiatCurrencySchema,
+      collectedData: collectedDataSchema,
+      agreementConsent: z.literal(true).optional(),
+    }),
+  ]),
+  z.object({ provider: z.literal("coinbase"), direction: rampDirectionSchema }),
+  z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
+]);
 
 export type SubmitCounterpartyRequirementsInput = z.infer<
   typeof submitCounterpartyRequirementsSchema

@@ -204,16 +204,8 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
     },
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    {
-      family: "ramps",
-      provider: "lightspark",
-      available: false,
-      reason: "provider_not_configured",
-    },
     { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
     ...EARN_AVAILABILITY,
   ],
@@ -284,16 +276,8 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     },
     ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    {
-      family: "ramps",
-      provider: "lightspark",
-      available: false,
-      reason: "provider_not_configured",
-    },
     { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_offered" },
     { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
-    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
     ...EARN_AVAILABILITY,
   ],
@@ -478,13 +462,13 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     );
   });
 
-  it("reports providers the release channel leaves out as unavailable", async () => {
+  it("reports custody and compliance providers the release channel leaves out as unavailable", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
     providerStages.moduleStageOverride = { module: "compliance", stage: "experimental" };
 
     const availability = await readAvailability(
       "sandbox",
-      deploymentEnv({ SDP_RELEASE_CHANNEL: "beta" })
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
     );
 
     expect(availability.providers).toContainEqual({
@@ -499,18 +483,10 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       available: false,
       reason: "provider_not_in_release_channel",
     });
-    expect(availability.providers).toContainEqual({
-      family: "ramps",
-      provider: "moonpay",
-      available: false,
-      reason: "provider_not_in_release_channel",
-    });
-    expect(availability.providers).toContainEqual({
-      family: "earn",
-      provider: "veda",
-      available: false,
-      reason: "provider_not_in_release_channel",
-    });
+    // The public document for this channel names no ramp or Earn provider it
+    // leaves out (openapi/release-channel-values.ts), so the response omits them.
+    expect(availability.providers.filter((entry) => entry.family === "ramps")).toEqual([]);
+    expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
 
   it.for(EARN_FLAG_OFF_CASES)(

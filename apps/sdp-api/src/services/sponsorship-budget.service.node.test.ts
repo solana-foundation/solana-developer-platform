@@ -1,5 +1,9 @@
-import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import { FeePaymentError, type FeePaymentPort } from "@sdp/fee-payment";
 import { assertValidAddress } from "@sdp/solana/address";
+import {
+  SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES,
+  SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
+} from "@sdp/types";
 import {
   type Blockhash,
   compileTransaction,
@@ -17,16 +21,24 @@ import type {
   SponsorshipBudgetPolicy,
   SponsorshipReservationEvidence,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
 } from "@/test/helpers/sponsor-signing";
 import type { Env } from "@/types/env";
-import type { SponsorshipScope } from "./sponsorship.service";
+import type { SponsorshipContinuity, SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 const logEvent = vi.hoisted(() => vi.fn());
+// The real reader queries Postgres; the admission decision itself stays real.
+const readMoneyAdmissionFacts = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  readMoneyAdmissionFacts,
+}));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
@@ -40,6 +52,13 @@ const SCOPE: SponsorshipScope = {
   organizationId: "org_1",
   projectId: "project_1",
   actor: { type: "api_key", id: "key_1" },
+  movement: "payments.transfer",
+};
+
+const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
+  organizationStatus: "active",
+  projectEnvironment: "sandbox",
+  rawSettings: null,
 };
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
@@ -118,6 +137,7 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
   const providerForActor = vi.fn().mockReturnValue(provider);
+  const readAdmissionFacts = readMoneyAdmissionFacts.mockReset().mockResolvedValue(ACTIVE_SANDBOX);
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
     repository,
     budgetRedis,
@@ -125,10 +145,12 @@ function harness(scope: SponsorshipScope = SCOPE) {
     now: () => new Date("2026-08-03T10:15:00.000Z"),
     providerForActor,
   });
-  return { feePayment, provider, repository, budgetRedis, providerForActor };
+  return { feePayment, provider, repository, budgetRedis, providerForActor, readAdmissionFacts };
 }
 
-function continuationScope(persistAccountingIdentity = vi.fn()): SponsorshipScope {
+function continuationScope(
+  persistAccountingIdentity = vi.fn()
+): SponsorshipScope & { continuity: SponsorshipContinuity } {
   return {
     ...SCOPE,
     actor: { type: "wallet", id: "cwlt_recipient" },
@@ -176,22 +198,45 @@ describe("BudgetedFeePayment", () => {
         },
       });
 
-      const result =
-        operation === "sign"
-          ? feePayment.signAsFeePayer(buildTransaction())
-          : operation === "send"
-            ? feePayment.signAndSend(buildTransaction())
-            : feePayment.prepareOwnedSubmission(buildTransaction(), {
-                persistSigned: vi.fn(),
-                markStarted: vi.fn(),
-                hasStarted: vi.fn(),
-              });
+      const result = (() => {
+        switch (operation) {
+          case "sign":
+            return feePayment.signAsFeePayer(buildTransaction());
+          case "send":
+            return feePayment.signAndSend(buildTransaction());
+          case "owned":
+            return feePayment.prepareOwnedSubmission(buildTransaction(), {
+              persistSigned: vi.fn(),
+              markStarted: vi.fn(),
+              hasStarted: vi.fn(),
+            });
+          default: {
+            const exhaustive: never = operation;
+            throw new Error(`Unsupported operation: ${exhaustive}`);
+          }
+        }
+      })();
       await expect(result).rejects.toThrow("Claim CAS lost");
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();
       expect(provider.signAndSend).not.toHaveBeenCalled();
       expect(repository.markReleased).toHaveBeenCalledOnce();
     }
   );
+
+  it("refuses a new continuity-backed signature when the organization became inactive", async () => {
+    const scope = continuationScope();
+    scope.continuity.admission = "after_writer_retirement";
+    const { feePayment, provider, repository, readAdmissionFacts } = harness(scope);
+    readAdmissionFacts.mockResolvedValue({ ...ACTIVE_SANDBOX, organizationStatus: "deleted" });
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "organization_inactive",
+    });
+    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(scope.continuity.persistAccountingIdentity).not.toHaveBeenCalled();
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+  });
 
   it("keeps a legacy unknown outcome fenced when the same message adopts an exact wallet actor", async () => {
     const legacy = harness({ ...SCOPE, actor: { type: "wallet", id: "provider_recipient" } });
@@ -269,7 +314,6 @@ describe("BudgetedFeePayment", () => {
 
   it("does not interpret an unavailable accounting lookup as permission for fresh admission", async () => {
     const scope = continuationScope();
-    if (!scope.continuity) throw new Error("continuity fixture missing");
     scope.continuity.admission = "after_writer_retirement";
     const { feePayment, repository, provider } = harness(scope);
     repository.findReservationEvidence.mockRejectedValueOnce(new Error("Database unavailable"));
@@ -305,7 +349,7 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markReleased).not.toHaveBeenCalled();
   });
 
-  it.each(["reserved", "charged_unknown"] as const)(
+  it.each(SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES)(
     "keeps %s accounting evidence fenced",
     async (status) => {
       const recorded = await recordedLegacyEvidence();
@@ -320,14 +364,15 @@ describe("BudgetedFeePayment", () => {
     }
   );
 
-  it.each(["signed", "submitted", "committed"] as const)(
-    "replays the original %s response and accounting identity",
+  it.each(SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES)(
+    "replays the original %s response and accounting identity after organization revocation",
     async (status) => {
       const recorded = await recordedLegacyEvidence();
       const persistAccountingIdentity = vi.fn();
-      const { feePayment, repository, provider } = harness(
+      const { feePayment, repository, provider, readAdmissionFacts } = harness(
         continuationScope(persistAccountingIdentity)
       );
+      readAdmissionFacts.mockResolvedValue({ ...ACTIVE_SANDBOX, organizationStatus: "deleted" });
       repository.findReservationEvidence.mockResolvedValueOnce([{ ...recorded, status }]);
       const replay = await feePayment.signAsFeePayer(buildTransaction());
       expect(getBase64Decoder().decode(replay)).toBe(recorded.signedTransaction);
@@ -353,7 +398,6 @@ describe("BudgetedFeePayment", () => {
 
   it("refuses a stale persisted reservation link even after writer retirement", async () => {
     const scope = continuationScope();
-    if (!scope.continuity) throw new Error("continuity fixture missing");
     scope.continuity.admission = "after_writer_retirement";
     scope.continuity.reservationId = "sbr_missing";
     const { feePayment, repository, provider } = harness(scope);
@@ -367,7 +411,6 @@ describe("BudgetedFeePayment", () => {
     async (admission) => {
       const persistAccountingIdentity = vi.fn();
       const scope = continuationScope(persistAccountingIdentity);
-      if (!scope.continuity) throw new Error("continuity fixture missing");
       scope.continuity.admission = admission;
       scope.continuity.reservationId = "";
       if (admission === "legacy_new") scope.actor = scope.continuity.legacyActor;
@@ -386,7 +429,6 @@ describe("BudgetedFeePayment", () => {
   it("links separate Request and recurring messages before their respective provider effects", async () => {
     const persistAccountingIdentity = vi.fn().mockResolvedValue(undefined);
     const scope = continuationScope(persistAccountingIdentity);
-    if (!scope.continuity) throw new Error("continuity fixture missing");
     scope.continuity.admission = "after_writer_retirement";
     const { feePayment, provider, repository } = harness(scope);
     await feePayment.signAsFeePayer(buildTransaction());
@@ -413,7 +455,6 @@ describe("BudgetedFeePayment", () => {
 
   it("keeps legacy new admission on its original actor until retirement is explicitly permitted", async () => {
     const scope = continuationScope();
-    if (!scope.continuity) throw new Error("continuity fixture missing");
     scope.continuity.admission = "legacy_new";
     const refused = harness(scope);
     await expect(refused.feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
@@ -515,7 +556,6 @@ describe("BudgetedFeePayment", () => {
     "refuses an unproven initial getter under %s without provider reads",
     async (admission) => {
       const scope = continuationScope();
-      if (!scope.continuity) throw new Error("continuity fixture missing");
       scope.continuity.admission = admission;
       const { feePayment, provider, providerForActor, repository } = harness(scope);
       await expect(feePayment.getFeePayer()).rejects.toMatchObject({
@@ -530,7 +570,6 @@ describe("BudgetedFeePayment", () => {
   it("validates a retained getter's scope before constructing its original actor provider", async () => {
     const recorded = await recordedLegacyEvidence();
     const scope = continuationScope();
-    if (!scope.continuity) throw new Error("continuity fixture missing");
     scope.continuity.reservationId = recorded.id;
     const { feePayment, provider, providerForActor, repository } = harness(scope);
     repository.findReservationEvidence.mockResolvedValueOnce([
@@ -1082,6 +1121,53 @@ describe("BudgetedFeePayment", () => {
 
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  describe("money admission (HOO-1955)", () => {
+    const DELETED = { ...ACTIVE_SANDBOX, organizationStatus: "deleted" };
+
+    it("refuses a new sponsor signature for a start before reserving any budget", async () => {
+      const { feePayment, provider, repository, readAdmissionFacts } = harness();
+      readAdmissionFacts.mockResolvedValue(DELETED);
+
+      const refusal = await feePayment.signAsFeePayer(buildTransaction()).catch((e: unknown) => e);
+
+      expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+      expect(refusal).toMatchObject({ reason: "organization_inactive" });
+      expect(readAdmissionFacts).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org_1",
+        projectId: "project_1",
+      });
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    });
+
+    it("returns a sponsorship already signed as it was, whatever the organization's state", async () => {
+      const { feePayment, provider, repository, readAdmissionFacts } = harness();
+      readAdmissionFacts.mockResolvedValue(DELETED);
+      const requested = buildTransaction();
+      const stored = await sponsorSignTestTransaction(requested);
+      repository.getReservation.mockResolvedValueOnce({
+        status: "signed",
+        attempt: 1,
+        signedTransaction: Buffer.from(stored).toString("base64"),
+      });
+
+      await expect(feePayment.signAsFeePayer(requested)).resolves.toEqual(stored);
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    });
+
+    it("sponsors an exit for a deleted organization", async () => {
+      const { feePayment, provider, readAdmissionFacts } = harness({
+        ...SCOPE,
+        movement: "recurring.cancel",
+      });
+      readAdmissionFacts.mockResolvedValue(DELETED);
+
+      await feePayment.signAsFeePayer(buildTransaction());
+
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    });
   });
 
   it("replays stored bytes untouched when they carry the requested message", async () => {

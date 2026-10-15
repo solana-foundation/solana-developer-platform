@@ -114,15 +114,13 @@ function OfframpFooterActionButton({
           action={{
             loading: wizard.onchainSendLoading,
             succeeded: wizard.onchainSendResult !== null,
-            disabled: !wizard.canSendOnchain || wizard.quoteExpired,
+            disabled: !wizard.canSendOnchain,
             onClick: () => void wizard.sendCryptoToDeposit(),
             icon: <SendIcon />,
-            idleLabel: wizard.quoteExpired
-              ? t("DashboardPayments.ramps.quoteExpired")
-              : t("DashboardPayments.ramps.sendCrypto", {
-                  amount: action.depositTarget.amount,
-                  token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
-                }),
+            idleLabel: t("DashboardPayments.ramps.sendCrypto", {
+              amount: action.depositTarget.amount,
+              token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
+            }),
             busyLabel: t("DashboardPayments.ramps.sending"),
             doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
           }}
@@ -225,7 +223,7 @@ export function OfframpRail({
       }
       secondaryLabel={cancelable ? t("DashboardPayments.counterparty.cancel") : undefined}
       confirmSecondary={cancelable}
-      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading}
+      secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading || wizard.quoteInFlight}
       hideSecondary={liveTransferState !== null && !liveTransferState.cancelable}
       footerActions={
         footerAction === null ? undefined : (

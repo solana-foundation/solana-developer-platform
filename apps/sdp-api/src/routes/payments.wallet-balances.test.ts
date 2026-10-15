@@ -58,8 +58,14 @@ describe("Payments wallet balance identity", () => {
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
-  it("uses the exact selected-key binding and rejects a wallet without read permission", async () => {
-    await seedConnectionOwnedDuplicateProviderWallet();
+  it("uses an unambiguous selected-key binding and rejects a wallet without read permission", async () => {
+    const unboundCustodyWalletId = "cwlt_balance_unbound";
+    await seedCustodyWalletFixture({
+      id: unboundCustodyWalletId,
+      walletId: "wal_balance_unbound",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+      label: "Unbound balance wallet",
+    });
     await seedCachedKey({
       walletScope: "selected",
       walletBindings: [
@@ -75,7 +81,7 @@ describe("Payments wallet balance identity", () => {
     expect(await exact.json()).toMatchObject({
       data: { walletBalances: { custodyWalletId: TEST_CUSTODY_WALLET_ID } },
     });
-    const forbidden = await readBalances("cwlt_payments_duplicate_test");
+    const forbidden = await readBalances(unboundCustodyWalletId);
     expect(forbidden.status).toBe(403);
     expect(await forbidden.json()).toMatchObject({
       error: { code: "FORBIDDEN", details: { reason: "api_key_wallet_access_denied" } },
@@ -93,6 +99,19 @@ describe("Payments wallet balance identity", () => {
     expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(403);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects selected-key reads when the provider binding matches multiple wallets", async () => {
+    await seedConnectionOwnedDuplicateProviderWallet();
+    await seedCachedKey({
+      walletScope: "selected",
+      walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["wallets:read"] }],
+    });
+    for (const custodyWalletId of [TEST_CUSTODY_WALLET_ID, "cwlt_payments_duplicate_test"]) {
+      expect((await readBalances(custodyWalletId)).status).toBe(403);
+    }
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
   it("reads distinct Config and Connection exact IDs while rejecting their ambiguous Provider ID", async () => {

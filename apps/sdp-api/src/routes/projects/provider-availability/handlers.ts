@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { success } from "@/lib/response";
+import { isModuleInChannel, isRampProviderInChannel } from "@/middleware/require-module";
 import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/openapi/spec";
 import { getProjectProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
@@ -10,23 +11,28 @@ import type { Env } from "@/types/env";
 type AppContext = Context<{ Bindings: Env }>;
 
 /**
- * Narrows a project's provider availability to the families the public API
- * document publishes: Earn entries are left out while
- * `EARN_PUBLIC_SURFACE_PUBLISHED` is false, so a client validating against the
- * published spec accepts the response.
+ * Narrows a project's provider availability to the entries the deployment's
+ * public API document publishes, so a client validating against it accepts the
+ * response: Earn entries only when `EARN_PUBLIC_SURFACE_PUBLISHED` is true and
+ * the release channel runs Earn, ramp entries only for providers the release
+ * channel runs (the document prunes the others; openapi/release-channel-values.ts).
  *
+ * @param c - Request context, for the deployment's release channel.
  * @param availability - The project's availability across every family.
- * @returns The availability restricted to the published families.
+ * @returns The availability restricted to the published entries.
  */
 function publishedProviderAvailability(
+  c: AppContext,
   availability: ProjectProviderAvailability
 ): ProjectProviderAvailability {
-  if (EARN_PUBLIC_SURFACE_PUBLISHED) {
-    return availability;
-  }
+  const earnPublished = EARN_PUBLIC_SURFACE_PUBLISHED && isModuleInChannel(c, "earn");
   return {
     ...availability,
-    providers: availability.providers.filter((entry) => entry.family !== "earn"),
+    providers: availability.providers.filter((entry) => {
+      if (entry.family === "earn") return earnPublished;
+      if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
+      return true;
+    }),
   };
 }
 
@@ -44,5 +50,5 @@ export const getProjectProviderAvailabilityHandler = async (c: AppContext) => {
     organizationId: getAuth(c).organizationId,
     projectId,
   });
-  return success(c, publishedProviderAvailability(availability));
+  return success(c, publishedProviderAvailability(c, availability));
 };

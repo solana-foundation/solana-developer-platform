@@ -1,7 +1,6 @@
 "use client";
 
 import { isTerminalRampTransferStatus } from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { useThemeScope } from "@/components/theme-scope";
 import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
@@ -16,7 +15,6 @@ import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { DepositTimeline } from "./deposit-timeline";
 import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
-import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
@@ -38,7 +36,6 @@ interface StepContentProps {
 type OnrampQuote = NonNullable<OnrampWizard["quote"]>;
 type ManualInstructionsQuoteRecord = Extract<OnrampQuote, { deliveryMode: "manual_instructions" }>;
 type HostedQuoteRecord = Extract<OnrampQuote, { deliveryMode: "hosted" }>;
-type MoneygramQuoteRecord = Extract<OnrampQuote, { provider: "moneygram" }>;
 
 /** The details step: the contact, then the amount, wallet, currency pair and provider. */
 function DepositStep({ wizard, contact }: StepContentProps) {
@@ -105,7 +102,6 @@ function DepositStep({ wizard, contact }: StepContentProps) {
 /** What the provider needs: agreements to accept, an onboarding in progress, or its fields. */
 function RequirementsStep({ wizard }: { wizard: OnrampWizard }) {
   const {
-    fields,
     onboarding,
     isAdvancing,
     retryOnboarding,
@@ -141,7 +137,6 @@ function RequirementsStep({ wizard }: { wizard: OnrampWizard }) {
   return (
     <fieldset disabled={isAdvancing} className="min-w-0">
       <RequirementsFields
-        provider={fields.provider}
         fields={requirementFields}
         values={collectedData}
         onChange={setCollectedField}
@@ -161,17 +156,8 @@ function ManualInstructionsStep({
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
   const { fields, selectedRampPair, transferStatus } = wizard;
-  // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
   if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
     return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
-  }
-
-  if (!quote.paymentInstructions) {
-    return (
-      <div className="rounded-2xl border border-error-border bg-error-bg px-5 py-5 text-sm text-error">
-        {t("DashboardPayments.ramps.quoteMissingInstructions")}
-      </div>
-    );
   }
 
   // The sandbox's Simulate deposit is the footer's primary action, not part of the instructions.
@@ -180,7 +166,6 @@ function ManualInstructionsStep({
       amount={fields.amount.trim()}
       quote={quote}
       fiatCurrency={selectedRampPair.fiatCurrency}
-      cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
       instructions={quote.paymentInstructions}
     />
   );
@@ -194,29 +179,6 @@ function ManualInstructionsStep({
     </div>
   ) : (
     instructionsQuote
-  );
-}
-
-/** MoneyGram's widget, once the wallet it pays into and the transfer the quote records are known. */
-function MoneygramStep({ wizard, quote }: { wizard: OnrampWizard; quote: MoneygramQuoteRecord }) {
-  const { fields, selectedWallet, selectedRampPair, refreshQuote, quoteTransferId } = wizard;
-  if (!selectedWallet || quoteTransferId === null) {
-    return <RampQuoteSkeleton />;
-  }
-  return (
-    <MoneygramRampWidget
-      direction="onramp"
-      quote={quote}
-      transferId={quoteTransferId}
-      sourceWalletId={selectedWallet.id}
-      sourceWalletName={selectedWallet.label ?? selectedWallet.id}
-      sourceWalletAddress={selectedWallet.publicKey}
-      sourceTokenMint={null}
-      cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-      cryptoAmount={fields.amount.trim()}
-      fiatCurrency={selectedRampPair.fiatCurrency}
-      onSessionExpiring={refreshQuote}
-    />
   );
 }
 
@@ -273,10 +235,6 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
     return (
       <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
     );
-  }
-
-  if (quote.provider === "moneygram") {
-    return <MoneygramStep wizard={wizard} quote={quote} />;
   }
 
   if (quote.deliveryMode === "hosted") {

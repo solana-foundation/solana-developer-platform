@@ -22,6 +22,19 @@ function resolveProcessEnv(): Record<string, string> {
   );
 }
 
+const localApiServerEnv = {
+  ...resolveProcessEnv(),
+  SDP_API_PORT: localApiPort,
+  SDP_API_RESET_LOCAL_STATE: "1",
+};
+// Hosted MoonPay quotes sign a URL locally; browser tests never open the provider.
+if (["127.0.0.1", "localhost"].includes(new URL(localApiUrl).hostname)) {
+  Object.assign(localApiServerEnv, {
+    MOONPAY_SANDBOX_API_KEY: "pk_test_playwright",
+    MOONPAY_SANDBOX_SECRET_KEY: "playwright-moonpay-fixture-secret",
+  });
+}
+
 export default defineConfig({
   testDir: "./playwright/tests",
   fullyParallel: false,
@@ -46,11 +59,7 @@ export default defineConfig({
             cwd: path.join(__dirname, "../sdp-api"),
             url: `${localApiUrl}/health`,
             reuseExistingServer: false,
-            env: {
-              ...resolveProcessEnv(),
-              SDP_API_PORT: localApiPort,
-              SDP_API_RESET_LOCAL_STATE: "1",
-            },
+            env: localApiServerEnv,
             stdout: "pipe" as const,
             stderr: "pipe" as const,
             timeout: 180_000,

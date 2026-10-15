@@ -1,21 +1,50 @@
-// biome-ignore lint/style/noRestrictedImports: sizes anonymous placeholder cards only; it still draws hidden families, tracked in HOO-1978
-import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
+import type { DashboardFlags } from "@/flags/dashboard";
+import {
+  type IntegrationsSkeletonLayout,
+  integrationsSkeletonLayout,
+} from "./integration-feature-gates";
+import type { IntegrationFamily } from "./integrations-filter";
 
 /**
  * How many cards each family settles at, read from the same catalogues the page
  * maps over. A flat four per section left the placeholder 22% shorter than the
  * page it stood in for, because custody alone renders ten.
  */
-const FAMILY_CARD_COUNTS: Record<IntegrationFamily, number> = {
-  custody: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
-  ramps: RAMP_PROVIDERS.length,
-  compliance: COMPLIANCE_PROVIDERS.length,
-  privacy: 1,
-};
+function familyCardCount(family: IntegrationFamily, layout: IntegrationsSkeletonLayout): number {
+  switch (family) {
+    case "custody":
+      return CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length;
+    case "ramps":
+      return layout.rampCards;
+    case "compliance":
+      return COMPLIANCE_PROVIDERS.length;
+    case "privacy":
+      return 1;
+    default: {
+      const unhandledFamily: never = family;
+      throw new Error(`Unhandled integration family: ${unhandledFamily}`);
+    }
+  }
+}
 
-export function IntegrationsSkeleton() {
+/** Custody runs in every release channel, so it is the one family safe to draw unflagged. */
+const CUSTODY_ONLY_LAYOUT: IntegrationsSkeletonLayout = { families: ["custody"], rampCards: 0 };
+
+/**
+ * The client loading path: the shell already holds the flag snapshot. Without one yet,
+ * draws custody only rather than families the page may hide.
+ */
+export function IntegrationsFlagsSkeleton({ flags }: { flags?: DashboardFlags }) {
+  return (
+    <IntegrationsSkeleton
+      layout={flags ? integrationsSkeletonLayout(flags) : CUSTODY_ONLY_LAYOUT}
+    />
+  );
+}
+
+export function IntegrationsSkeleton({ layout }: { layout: IntegrationsSkeletonLayout }) {
   return (
     <div className="w-full animate-pulse space-y-6 px-4 py-5 md:px-6">
       {/* Matches the loaded toolbar: one segmented status control leading,
@@ -24,21 +53,23 @@ export function IntegrationsSkeleton() {
         <div className="h-9 w-full max-w-[560px] rounded-full bg-fill-subtle" />
         <div className="h-10 w-full max-w-xs rounded-[10px] bg-fill-subtle xl:w-64 xl:shrink-0" />
       </div>
-      {/* One block per family the catalog actually renders, read from the same
-          constant it maps over: a fixed count here drifted to half the page. */}
-      {INTEGRATION_FAMILIES.map((family) => (
+      {/* One block per family the catalog renders for these flags: drawing every
+          family showed sections the release channel hides, which then vanished. */}
+      {layout.families.map((family) => (
         <div key={family} className="space-y-4">
           <div className="space-y-2">
             <div className="h-5 w-28 rounded bg-fill-subtle" />
             <div className="h-4 w-64 rounded bg-fill-subtle" />
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: FAMILY_CARD_COUNTS[family] }, (_, index) => index).map((card) => (
-              <div
-                key={card}
-                className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised"
-              />
-            ))}
+            {Array.from({ length: familyCardCount(family, layout) }, (_, index) => index).map(
+              (card) => (
+                <div
+                  key={card}
+                  className="h-[120px] rounded-2xl border border-border-subtle bg-surface-raised"
+                />
+              )
+            )}
           </div>
         </div>
       ))}

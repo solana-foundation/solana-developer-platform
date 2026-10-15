@@ -89,8 +89,8 @@ export const createCustodyWalletRequestSchema = z
       "Create wallet request body. Names exactly one owner: provider (Managed config) or connectionId (Custody Connection); a body naming both, or neither, is rejected with 400.",
     example: {
       provider: "privy",
-      label: "Mint authority wallet",
-      purpose: "mint_authority",
+      label: "Treasury wallet",
+      purpose: "transfer",
     },
   });
 

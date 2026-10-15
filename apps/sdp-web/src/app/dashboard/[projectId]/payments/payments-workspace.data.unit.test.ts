@@ -1,5 +1,6 @@
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { setWindowPathname } from "@/test/window-location";
 import {
   createTransfer,
@@ -7,6 +8,7 @@ import {
   estimateTransferBatch,
   fetchTransferById,
   fetchTransfers,
+  fetchWalletBalances,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -325,4 +327,63 @@ describe("Payments write requests", () => {
       ).rejects.toThrow("DashboardPayments.workspace.batchTransferMissing");
     }
   );
+});
+
+describe("Payments exact wallet balance reads", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/pay"));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("preserves a successful exact zero response without requiring provider identity", async () => {
+    const walletBalances = { custodyWalletId: "cwlt_1", address: "address", balances: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ data: { walletBalances } }))
+    );
+
+    await expect(fetchWalletBalances("cwlt_1", t)).resolves.toEqual(walletBalances);
+  });
+
+  it("rejects a successful response identifying a different exact wallet", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            walletBalances: { custodyWalletId: "cwlt_other", address: "address", balances: [] },
+          },
+        })
+      )
+    );
+
+    await expect(fetchWalletBalances("cwlt_1", t)).rejects.toThrow(
+      "Wallet balance response did not identify the requested wallet."
+    );
+  });
+
+  it("preserves a validated API refusal message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { message: "RPC unavailable" } }, 503))
+    );
+
+    await expect(fetchWalletBalances("cwlt_1", t)).rejects.toThrow("RPC unavailable");
+  });
+
+  it("rejects a malformed nested API error instead of substituting a message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { message: 42 } }, 503))
+    );
+
+    await expect(fetchWalletBalances("cwlt_1", t)).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("rejects malformed JSON instead of replacing the response with an empty envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{", { headers: { "Content-Type": "application/json" } }))
+    );
+
+    await expect(fetchWalletBalances("cwlt_1", t)).rejects.toBeInstanceOf(SyntaxError);
+  });
 });

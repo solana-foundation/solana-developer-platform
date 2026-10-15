@@ -129,19 +129,6 @@ export function defineDashboardFlags({
     ],
   });
 
-  const custody = flag<boolean, DashboardFlagEntities>({
-    key: "custody",
-    adapter: moduleAdapter("custody"),
-    identify,
-    defaultValue: flagDefault("CUSTODY_ENABLED", false),
-    description:
-      "Show the Custody module and Wallets workspace. Off hides every Custody and Wallets surface at once.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
   const issuance = flag<boolean, DashboardFlagEntities>({
     key: "issuance",
     adapter: moduleAdapter("issuance"),
@@ -188,19 +175,6 @@ export function defineDashboardFlags({
     defaultValue: flagDefault("HELIUS_RINGS_ENABLED", false),
     description:
       "Show the Helius Rings devnet workspace (shielded wallets, private transfers, zones, timelocks).",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
-  const payments = flag<boolean, DashboardFlagEntities>({
-    key: "payments",
-    adapter: moduleAdapter("payments"),
-    identify,
-    defaultValue: flagDefault("PAYMENTS_ENABLED", true),
-    description:
-      "Show the Payments module (transactions, counterparties, pay, deposit, requests, recurring). Off hides every Payments surface at once.",
     options: [
       { value: false, label: "Hidden" },
       { value: true, label: "Enabled" },
@@ -275,6 +249,11 @@ export function defineDashboardFlags({
     ],
   });
 
+  const newDesignWallets = newDesignModuleFlag(
+    "wallets",
+    "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"
+  );
+
   const newDesignContacts = newDesignModuleFlag(
     "contacts",
     "Payments' Contacts (the list, a new contact, one contact's page)"
@@ -287,35 +266,28 @@ export function defineDashboardFlags({
   );
 
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
-  const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
-  const rampProviderMoneygram = rampProviderFlag("moneygram", "MoneyGram");
   const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
-  const rampProviderMural = rampProviderFlag("mural", "Mural Pay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
   return {
     homepageOpenSignup,
-    custody,
     issuance,
     assetProfiles,
     privateChannels,
     heliusRings,
-    payments,
     markets,
     dvp,
     earn,
     newDesign,
     paymentsDemoMode,
+    newDesignWallets,
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
     rampProviderMoonpay,
-    rampProviderLightspark,
     rampProviderBvnk,
-    rampProviderMoneygram,
     rampProviderCoinbase,
-    rampProviderMural,
     rampProviderStripe,
   };
 }

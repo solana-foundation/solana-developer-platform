@@ -359,6 +359,29 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
+    // The cached check applies the live row's predicate, so a malformed expiry
+    // fails closed here too instead of reading as "not expired".
+    it("rejects a cached key whose expiry does not parse", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        expiresAt: "not-a-timestamp",
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
     it("rejects rotated API keys after their cached grace period ends", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
@@ -539,6 +562,98 @@ describe("Auth Middleware", () => {
       );
       expect(unresolved.status).toBe(200);
       expect(await createKVStoreSet(env).apiKeys.get(`key:${validKeyHash}`, "json")).toBeNull();
+    });
+  });
+
+  // HOO-2048: authentication reads the key's wallet bindings in its uncached
+  // statement, so a change to them applies on the next request whatever the
+  // warm cache entry still says.
+  describe("fresh wallet bindings", () => {
+    const walletRequest = (walletId: string) =>
+      app.request(
+        `/v1/wallets/${walletId}?includeBalance=false`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email)
+        .run();
+      await seedDefaultProjects(getDb(env), {
+        organizationId: TEST_ORG.id,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+      });
+      await seedTestCustodyRows(env, {
+        configs: [
+          {
+            id: "cust_fresh_bindings",
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            provider: "local",
+            configEncrypted: "test-config",
+            status: "active",
+          },
+        ],
+        wallets: ["a", "b"].map((suffix) => ({
+          id: `cwlt_fresh_${suffix}`,
+          owner: { kind: "config" as const, custodyConfigId: "cust_fresh_bindings" },
+          walletId: `wallet_fresh_${suffix}`,
+          publicKey: `wallet_fresh_${suffix}_public_key`,
+          label: null,
+          purpose: null,
+          status: "active" as const,
+        })),
+      });
+    });
+
+    it("refuses a key narrowed from all wallets to selected ones on its next request", async () => {
+      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_fresh_narrowed', ?, 'wallet_fresh_a', '["*"]')`
+        )
+        .bind(TEST_API_KEY.id)
+        .run();
+      // The cache entry is still warm and still says all wallets.
+      expect(
+        await createKVStoreSet(env).apiKeys.get<{ walletScope: string }>(
+          `key:${validKeyHash}`,
+          "json"
+        )
+      ).toMatchObject({ walletScope: "all" });
+
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
+      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
+    });
+
+    it("refuses a wallet whose binding was revoked, with the cache still warm", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        signingWalletId: "wallet_fresh_a",
+        walletBindings: [
+          { walletId: "wallet_fresh_a", custodyWalletId: "cwlt_fresh_a", permissions: ["*"] },
+          { walletId: "wallet_fresh_b", custodyWalletId: "cwlt_fresh_b", permissions: ["*"] },
+        ],
+      });
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+
+      await getDb(env)
+        .prepare(
+          "DELETE FROM api_key_wallet_permissions WHERE api_key_id = ? AND wallet_id = 'wallet_fresh_b'"
+        )
+        .bind(TEST_API_KEY.id)
+        .run();
+
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
+      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
     });
   });
 

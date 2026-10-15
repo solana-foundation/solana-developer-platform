@@ -64,18 +64,21 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     throw badRequest("Provided delegate authority does not match the on-chain authority");
   }
 
-  const { signer, custodyWalletId } = await resolveAuthoritySigner({
+  const authority = await resolveAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+
+  const { signer, custodyWalletId } = authority;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.forceBurn.source, "source");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const prepared = await mosaic.prepareForceBurn({
     mint: mintAddress,
     source,
@@ -250,7 +253,8 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
   }
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId,
@@ -258,7 +262,9 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     requiredWalletPermissions: ["tokens:admin"],
   });
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const signer = authority.signer;
+
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "force_burn",
     resourceType: "token_transaction",

@@ -130,15 +130,30 @@ async function revalidateWalletPaths() {
   revalidatePath(await requestProjectHref("/dashboard/wallets"));
 }
 
+/** The purposes the create endpoint accepts; anything else is left for the API to default. */
+const CREATABLE_WALLET_PURPOSES = new Set<string>([
+  "root",
+  "transfer",
+  "mint_authority",
+  "freeze_authority",
+  "fee_payer",
+]);
+
+function parseWalletPurpose(value: string | undefined): string | undefined {
+  return value && CREATABLE_WALLET_PURPOSES.has(value) ? value : undefined;
+}
+
 /**
  * Creates a wallet in the provider account the form names: the connection
  * when one is chosen (BYOK), otherwise the provider's Managed config. The
  * request always names exactly one of them; there is no default to fall to.
  *
- * @param formData - The submitted wallet form: `provider`, optional `connectionId`, optional `label`.
+ * @param formData - The submitted wallet form: `provider`, optional `connectionId`, optional
+ *   `label`, optional `purpose`.
  */
 async function createCustodyWalletForProvider(formData: FormData) {
   const label = getOptionalString(formData, "label");
+  const purpose = parseWalletPurpose(getOptionalString(formData, "purpose"));
   // A Connection pins the wallet to one specific stored credential, which
   // `provider` alone cannot do once a project holds several connections of the
   // same provider. Sending both would leave the API to guess, so the explicit
@@ -149,7 +164,7 @@ async function createCustodyWalletForProvider(formData: FormData) {
   const client = await createSdpApiClient();
   await client.fetch("/v1/wallets", {
     method: "POST",
-    body: JSON.stringify({ ...target, label }),
+    body: JSON.stringify({ ...target, label, purpose }),
   });
 }
 

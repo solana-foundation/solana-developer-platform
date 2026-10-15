@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
@@ -28,6 +28,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { transferBatchListResponse } from "@/openapi/paths/responses";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
@@ -526,7 +527,7 @@ describe("payment transfer batches", () => {
                 Authorization: `Bearer ${TEST_API_KEY.raw}`,
               },
               body: JSON.stringify({
-                ...(includeExact ? { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
+                sourceCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
                 [selector]: TEST_WALLET_ID,
                 token: "SOL",
                 recipients: [{ counterpartyAccountId: "cpa_retired_selector", amount: "0.1" }],
@@ -572,8 +573,8 @@ describe("payment transfer batches", () => {
     for (const includeExact of [false, true]) {
       const query = new URLSearchParams({
         wallet: TEST_WALLET_ID,
-        ...(includeExact ? { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
       });
+      if (includeExact) query.set("sourceCustodyWalletId", TEST_CUSTODY_WALLET_ID);
       const response = await app.request(
         `/v1/payments/transfer-batches?${query}`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
@@ -1003,7 +1004,8 @@ describe("payment transfer batches", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "payments.transfer_batch"
     );
   });
 
@@ -1121,10 +1123,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: Array<{ id: string }>;
-      meta: { total: number };
-    };
+    const body = transferBatchListResponse.parse(await response.json());
     expect(body.data.map((batch) => batch.id).sort()).toEqual([
       "xbatch_exact_authorized",
       "xbatch_legacy_authorized",
@@ -1155,7 +1154,11 @@ describe("payment transfer batches", () => {
       env
     );
     expect(unauthorizedDetail.status).toBe(403);
-    await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "all",
+      walletBindings: [],
+    });
     const tenantDetail = await app.request(
       "/v1/payments/transfer-batches/xbatch_legacy_authorized",
       { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
@@ -1202,7 +1205,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(res.status).toBe(200);
-    const response = (await res.json()) as { data: Array<{ id: string }> };
+    const response = transferBatchListResponse.parse(await res.json());
     expect(response.data.map((batch) => batch.id)).toEqual(["xbatch_inactive_wallet_history"]);
   });
 

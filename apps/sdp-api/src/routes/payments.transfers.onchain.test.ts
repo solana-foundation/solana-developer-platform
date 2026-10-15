@@ -1,4 +1,4 @@
-import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import type * as feePaymentAdapters from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -42,7 +42,7 @@ describe("Payments routes — on-chain transfers", () => {
       for (const includeExact of [false, true]) {
         const response = await postRawTransfer(
           {
-            ...(includeExact ? { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID } : {}),
+            sourceCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
             [selector]: TEST_WALLET_ID,
             destination: TEST_SOLANA_ADDRESSES.wallet2,
             token: "SOL",

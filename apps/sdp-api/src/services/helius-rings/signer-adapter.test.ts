@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import {
   type Address,
@@ -87,6 +88,7 @@ function signInput(overrides: Partial<Parameters<typeof signRingsOuterTransactio
     projectId: "prj_1",
     owner: FEE_PAYER as string,
     unsignedTxBase64: unsignedTxBase64(),
+    movement: "helius_rings.operation_start" as const,
     ...overrides,
   };
 }
@@ -155,7 +157,8 @@ describe("signRingsOuterTransaction", () => {
         env,
         "org_1",
         "prj_1",
-        "cw_owner"
+        "cw_owner",
+        "helius_rings.operation_start"
       );
       expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
         signature
@@ -340,6 +343,34 @@ describe("signRingsMessage", () => {
     const error = await rejection(signRingsMessage(messageInput({ signer: signer as never })));
 
     expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+  });
+
+  // Only the derivation signature is an exit (HOO-1955): every exit re-derives
+  // the shielded keys from it. Bring-up's attestation and challenge are starts.
+  it.each([
+    [
+      "the derivation message",
+      () => derivationMessageBase64(FEE_PAYER),
+      "helius_rings.key_derivation",
+    ],
+    ["any other message", () => base64.decode(new Uint8Array([1, 2, 3])), "helius_rings.bring_up"],
+  ])("signs %s under its own movement", async (_label, message, movement) => {
+    findActiveWalletByPublicKey.mockResolvedValue({
+      id: "cw_owner",
+      publicKey: FEE_PAYER,
+      provider: "turnkey",
+    });
+    createOrgSignerForCustodyWallet.mockResolvedValue(messageSigner());
+
+    await signRingsMessage(messageInput({ messageBase64: message() }));
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      "org_1",
+      "prj_1",
+      "cw_owner",
+      movement
+    );
   });
 
   // The gate on the path that actually roots the keys: this is the call whose

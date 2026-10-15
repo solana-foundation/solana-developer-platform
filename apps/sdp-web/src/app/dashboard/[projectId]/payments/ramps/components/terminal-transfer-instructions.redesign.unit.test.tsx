@@ -1,9 +1,4 @@
-import type {
-  PaymentRampQuote,
-  PaymentRampQuoteCurrency,
-  PaymentTransferStatus,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { PaymentRampQuote, PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -24,7 +19,6 @@ vi.mock("./manual-instructions-quote.redesign", () => ({
 vi.mock("./coinbase/quote-summary.redesign", () => ({ CoinbaseQuoteSummary: () => null }));
 vi.mock("./coinbase/ramp-frame", () => ({ CoinbaseRampFrame: () => null }));
 vi.mock("./memo-step-content.redesign", () => ({ MemoStepContent: () => null }));
-vi.mock("./moneygram-ramp-widget", () => ({ MoneygramRampWidget: () => null }));
 vi.mock("./moonpay-ramp-frame", () => ({ MoonpayRampFrame: () => null }));
 vi.mock("./ramp-complete-screen.redesign", () => ({ RampCompleteScreen: () => null }));
 vi.mock("./ramp-onboarding-panel", () => ({ RampOnboardingPanel: () => null }));
@@ -46,24 +40,16 @@ const FUNDABLE = [
 
 type ManualQuote = Extract<
   PaymentRampQuote,
-  { provider: "lightspark"; deliveryMode: "manual_instructions" }
+  { provider: "bvnk"; deliveryMode: "manual_instructions" }
 >;
 
-const USD: PaymentRampQuoteCurrency = { code: "USD", decimals: 2 };
-const USDC: PaymentRampQuoteCurrency = { code: "USDC", decimals: 6 };
-
-function manualQuote(paymentInstructions: ManualQuote["paymentInstructions"]): ManualQuote {
-  return {
-    id: "quote_manual",
-    provider: "lightspark",
-    status: "pending",
-    deliveryMode: "manual_instructions",
-    paymentInstructions,
-    sendingCurrency: USD,
-    receivingCurrency: USDC,
-    feeCurrency: USD,
-  };
-}
+const MANUAL_QUOTE: ManualQuote = {
+  id: "quote_manual",
+  provider: "bvnk",
+  status: "pending",
+  deliveryMode: "manual_instructions",
+  paymentInstructions: [],
+};
 
 function transferSummary(
   direction: RampDirection,
@@ -76,7 +62,7 @@ function transferSummary(
     signature: null,
     rampsMemo: {},
     type: direction,
-    provider: "lightspark",
+    provider: "bvnk",
   };
 }
 
@@ -88,7 +74,7 @@ function sharedWizard<TId extends string>(
   quote: ManualQuote
 ): ReturnType<typeof useRampWizard<TId>> {
   return {
-    enabledRampProviders: ["lightspark"],
+    enabledRampProviders: ["bvnk"],
     rampProviderAccess: null,
     selectedCounterparty: null,
     stepIndex: 0,
@@ -101,25 +87,22 @@ function sharedWizard<TId extends string>(
     collectedData: {},
     setCollectedField: noop,
     requirementFields: [],
-    selectedProviderAccountId: null,
-    payoutAccounts: [],
-    selectPayoutAccount: noop,
     requirementsBlocker: null,
     liveWallets: [],
     walletsLoading: false,
     liveWalletsError: null,
     selectedWallet: null,
     selectedRampPair: DEFAULT_RAMP_PAIR,
-    fields: { amount: "100", provider: "lightspark", walletId: "", counterpartyId: "" },
+    fields: { amount: "100", provider: "bvnk", walletId: "", counterpartyId: "" },
     setField: noop,
     selectProvider: noop,
     quote,
     quoteTransferId: "xfr_manual",
     memoRows: [],
     setMemoRows: noop,
-    refreshQuote: asyncNoop,
     quoteCreationError: null,
     quoteCreationRetrying: false,
+    quoteInFlight: false,
     retryQuoteCreation: noop,
     onboarding: null,
     isAdvancing: false,
@@ -179,16 +162,14 @@ function offrampWizard(
     onchainSendLoading: false,
     onchainSendResult: null,
     sendCryptoToDeposit: asyncNoop,
-    quoteExpired: false,
   };
 }
 
 function renderManualStep(
   direction: RampDirection,
-  status: PaymentTransferStatus | undefined,
-  paymentInstructions: ManualQuote["paymentInstructions"]
+  status: PaymentTransferStatus | undefined
 ): string {
-  const quote = manualQuote(paymentInstructions);
+  const quote = MANUAL_QUOTE;
   const transferStatus = status === undefined ? undefined : transferSummary(direction, status);
 
   return renderToStaticMarkup(
@@ -206,31 +187,19 @@ describe.each(["onramp", "offramp"] satisfies RampDirection[])(
   "%s manual-instructions step",
   (direction) => {
     it.each(TERMINAL)("withdraws the funding instructions once the transfer is %s", (status) => {
-      const markup = renderManualStep(direction, status, []);
+      expect(renderManualStep(direction, status)).not.toContain(MANUAL_INSTRUCTIONS_STUB);
+    });
 
-      expect(markup).not.toContain(MANUAL_INSTRUCTIONS_STUB);
-      expect(markup).not.toContain("missing payment instructions");
+    it("reports a canceled transfer in place of the instructions", () => {
+      expect(renderManualStep(direction, "canceled")).toContain("Transfer canceled");
     });
 
     it.each(FUNDABLE)("keeps the funding instructions while %s", (status) => {
-      expect(renderManualStep(direction, status, [])).toContain(MANUAL_INSTRUCTIONS_STUB);
+      expect(renderManualStep(direction, status)).toContain(MANUAL_INSTRUCTIONS_STUB);
     });
 
     it("keeps the funding instructions before the first status arrives", () => {
-      expect(renderManualStep(direction, undefined, [])).toContain(MANUAL_INSTRUCTIONS_STUB);
-    });
-
-    it("reports a canceled transfer, not a quote defect, when instructions are absent", () => {
-      const markup = renderManualStep(direction, "canceled", undefined);
-
-      expect(markup).toContain("Transfer canceled");
-      expect(markup).not.toContain("missing payment instructions");
-    });
-
-    it("still reports the quote defect while the transfer can settle", () => {
-      expect(renderManualStep(direction, "awaiting_payment", undefined)).toContain(
-        "missing payment instructions"
-      );
+      expect(renderManualStep(direction, undefined)).toContain(MANUAL_INSTRUCTIONS_STUB);
     });
   }
 );

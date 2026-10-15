@@ -24,14 +24,14 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
-import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
+import { resolveAuthenticatedSponsoredFeePayer } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -77,7 +77,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     if (!wallet) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+    assertApiKeyCustodyWalletAccess(auth, wallet.id, ["wallets:write"]);
     // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
     const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
       kind: "wallet",
@@ -102,10 +102,15 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // a signer check is diagnostics, and diagnostics must not be able to spend
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
-    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, projectId, wallet.id),
-      feePayment.getFeePayer(),
+      createOrgSignerForCustodyWallet(
+        c.env,
+        auth.organizationId,
+        projectId,
+        wallet.id,
+        "custody.signer_check"
+      ),
+      resolveAuthenticatedSponsoredFeePayer(c),
     ]);
 
     const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);

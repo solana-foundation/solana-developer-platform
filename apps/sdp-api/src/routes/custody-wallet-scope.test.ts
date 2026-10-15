@@ -46,7 +46,7 @@ vi.mock("@/services/solana", async (importOriginal) => ({
 
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createAuthenticatedSponsorshipFeePayment: signerCheckMocks.createSponsorship,
+  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
 }));
 
 const SEEDED_PUBLIC_KEYS = {
@@ -319,12 +319,8 @@ describe("Custody wallet scope routes", () => {
     const signer = await generateKeyPairSigner();
     signerCheckMocks.createExactSigner.mockResolvedValue(signer);
     signerCheckMocks.signAndSend.mockResolvedValue(TEST_SIGNATURE);
-    signerCheckMocks.createSponsorship.mockReturnValue({
-      providerId: "test",
-      getFeePayer: vi.fn().mockResolvedValue(address(TEST_SOLANA_ADDRESSES.wallet3)),
-      signAsFeePayer: vi.fn(),
-      signAndSend: signerCheckMocks.signAndSend,
-    });
+    // The signer check only names the sponsor; it never gets a way to sponsor-sign.
+    signerCheckMocks.createSponsorship.mockResolvedValue(address(TEST_SOLANA_ADDRESSES.wallet3));
     createSigningServiceMock.mockImplementation((envArg, scope) => {
       const service = actualCreateSigningService(envArg, scope);
       service.getPublicKey = vi.fn(async (_organizationId, _projectId, walletId) => {
@@ -408,7 +404,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_signer_check"
+      "cwlt_scope_signer_check",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
     expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "devnet");
@@ -592,7 +589,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
   });
 
@@ -626,7 +624,9 @@ describe("Custody wallet scope routes", () => {
 
       const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "api_key");
 
-      expect(response.status).toBe(403);
+      // Authentication reads the key's row fresh, so a revoked or expired key is
+      // refused there (401); a narrowed binding reaches the route's check (403).
+      expect(response.status).toBe(state === "read-only" ? 403 : 401);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
       expect(createClusterRpcMock).not.toHaveBeenCalled();
@@ -687,7 +687,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
 
     expect(simulateTransactionMock).toHaveBeenCalledOnce();
@@ -754,7 +755,8 @@ describe("Custody wallet scope routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          recordId
+          recordId,
+          "custody.signer_check"
         );
       } else {
         expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
@@ -818,7 +820,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
   });
@@ -1068,16 +1071,13 @@ describe("Custody wallet scope routes", () => {
       uiAmount: "3",
     });
 
+    // A binding names a Provider wallet ID, which two Connections share here, so
+    // authentication's fresh read cannot tell which wallet it means: the key
+    // stays wallet-scoped and reaches neither (deny-only, fail closed).
     await seedCachedKey({
       walletScope: "selected",
       signingWalletId: sharedWalletId,
-      walletBindings: [
-        {
-          walletId: sharedWalletId,
-          custodyWalletId: "cwlt_scope_shared_a",
-          permissions: ["*"],
-        },
-      ],
+      walletBindings: [{ walletId: sharedWalletId, permissions: ["*"] }],
     });
 
     const selectedList = await app.request(
@@ -1091,9 +1091,7 @@ describe("Custody wallet scope routes", () => {
     const selectedListBody = (await selectedList.json()) as {
       data: { wallets: Array<{ id: string }> };
     };
-    expect(selectedListBody.data.wallets.map((wallet) => wallet.id)).toEqual([
-      "cwlt_scope_shared_a",
-    ]);
+    expect(selectedListBody.data.wallets).toEqual([]);
 
     const selectedDetail = await app.request(
       `/v1/wallets/${sharedWalletId}?includeBalance=false`,
@@ -1102,44 +1100,7 @@ describe("Custody wallet scope routes", () => {
       },
       env
     );
-    expect(selectedDetail.status).toBe(200);
-    expect(await selectedDetail.json()).toMatchObject({
-      data: { wallet: { id: "cwlt_scope_shared_a", publicKey: TEST_SOLANA_ADDRESSES.wallet2 } },
-    });
-
-    const selectedPublicKey = await app.request(
-      `/v1/wallets/public-key?walletId=${sharedWalletId}`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedPublicKey.status).toBe(200);
-    expect(await selectedPublicKey.json()).toMatchObject({
-      data: { publicKey: TEST_SOLANA_ADDRESSES.wallet2 },
-    });
-
-    const selectedBalances = await app.request(
-      `/v1/payments/wallets/cwlt_scope_shared_a/balances`,
-      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-      env
-    );
-    expect(selectedBalances.status).toBe(200);
-
-    const selectedDelete = await app.request(
-      "/v1/wallets",
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ walletId: sharedWalletId, provider: "privy" }),
-      },
-      env
-    );
-    expect(selectedDelete.status).toBe(400);
-    expect(await selectedDelete.json()).toMatchObject({
-      error: { message: "Wallet deletion not supported for provider: privy" },
-    });
+    expect(selectedDetail.status).toBe(404);
   });
 
   it("returns the requested public key when the wallet is authorized", async () => {

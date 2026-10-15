@@ -10,7 +10,6 @@ import type {
   ListCounterpartyAccountsResponse,
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
-  MoneygramRampEvent,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -37,7 +36,10 @@ import {
 } from "@/lib/compliance";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
+import {
+  getWalletBalanceApiError,
+  parseWalletBalanceResponse,
+} from "@/lib/wallet-balance-response";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -244,20 +246,6 @@ interface TransferListEnvelope {
   };
 }
 
-interface WalletBalancesEnvelope {
-  data?:
-    | {
-        walletBalances?: PaymentWalletBalancesSnapshot;
-      }
-    | {
-        address?: string;
-        balances?: PaymentWalletBalance[];
-      };
-  error?: {
-    message?: string;
-  };
-}
-
 export async function fetchTransfers(
   options: {
     pageSize: number;
@@ -415,10 +403,10 @@ export async function fetchWalletBalances(
       signal,
     }
   );
-  const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
+  const body: unknown = await response.json();
   if (!response.ok) {
     throw new Error(
-      getApiError(
+      getWalletBalanceApiError(
         body,
         t("DashboardPayments.workspace.walletBalancesRequestFailed", { status: response.status })
       )
@@ -634,7 +622,7 @@ export async function createTransferBatch(
 
 async function postRampEvent(
   provider: RampEventProvider,
-  event: MoneygramRampEvent | CoinbaseRampEvent,
+  event: CoinbaseRampEvent,
   t: Translate
 ): Promise<void> {
   const response = await dashboardRequest(`/api/dashboard/payments/ramps/events/${provider}`, {
@@ -656,10 +644,6 @@ async function postRampEvent(
       )
     );
   }
-}
-
-export function postMoneygramRampEvent(event: MoneygramRampEvent, t: Translate): Promise<void> {
-  return postRampEvent("moneygram", event, t);
 }
 
 export function postCoinbaseRampEvent(event: CoinbaseRampEvent, t: Translate): Promise<void> {

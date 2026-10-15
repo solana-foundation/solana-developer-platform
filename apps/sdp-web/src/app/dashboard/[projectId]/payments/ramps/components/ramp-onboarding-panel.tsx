@@ -29,16 +29,13 @@ export function RampOnboardingPanel({
   // verification stands in for it.
   const demoVerification =
     demo && provider === "bvnk" && status === "customer_verification_required";
-  const hostedAction = demoVerification
-    ? null
-    : status === "terms_of_service_required"
-      ? { label: t("DashboardPayments.ramps.acceptTerms"), url: onboarding.termsOfServiceUrl }
-      : status === "customer_verification_required"
-        ? {
-            label: t("DashboardPayments.ramps.completeVerification"),
-            url: onboarding.verificationUrl,
-          }
-        : null;
+  const hostedAction =
+    !demoVerification && status === "customer_verification_required"
+      ? {
+          label: t("DashboardPayments.ramps.completeVerification"),
+          url: onboarding.verificationUrl,
+        }
+      : null;
   return (
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <Icon className={`size-10 ${copy.iconClassName}`} />
@@ -60,8 +57,7 @@ export function RampOnboardingPanel({
           {hostedAction.label}
         </Button>
       ) : null}
-      {(status === "customer_funding_account_provisioning" ||
-        status === "funding_account_provisioning") && (
+      {status === "customer_funding_account_provisioning" && (
         <div className="flex items-center gap-2 rounded-full bg-fill-subtle px-3 py-1.5">
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-secondary" />
           <span className="text-xs text-tertiary">

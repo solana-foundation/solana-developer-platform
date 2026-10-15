@@ -311,8 +311,8 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       role: "api_developer",
       walletScope: "selected",
       provisionWallet: { connectionId: "cconn_123" },
-      walletLabel: "Mint authority wallet",
-      walletPurpose: "mint_authority",
+      walletLabel: "Treasury wallet",
+      walletPurpose: "transfer",
     },
   });
 

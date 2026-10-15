@@ -7,7 +7,7 @@ import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
-import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
 import { formatRelativeTime } from "../../../activity-format-utils";
 import { formatPaymentTransferType, resolveTransferFlow } from "../../payments-overview.utils";
 import { fetchTransfers } from "../../payments-workspace.data";
@@ -88,18 +88,21 @@ export function CounterpartyRecentTransfers({ counterpartyId }: { counterpartyId
       <div>
         {data.map((transfer) => {
           const flow = resolveTransferFlow(transfer);
+          const logo = transfer.provider ? getRampProviderLogo(transfer.provider) : undefined;
 
           return (
             <div key={transfer.id} className="flex items-center gap-3 py-3">
               {transfer.provider ? (
                 <>
-                  <Image
-                    src={RAMP_PROVIDER_LOGOS[transfer.provider]}
-                    alt=""
-                    width={24}
-                    height={24}
-                    className="size-6 rounded-md object-contain"
-                  />
+                  {logo === undefined ? null : (
+                    <Image
+                      src={logo}
+                      alt=""
+                      width={24}
+                      height={24}
+                      className="size-6 rounded-md object-contain"
+                    />
+                  )}
                   <span className="text-sm font-medium text-primary">
                     {getRampProviderLabel(transfer.provider)}
                   </span>

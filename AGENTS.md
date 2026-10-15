@@ -31,8 +31,11 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 Public docs and AI artifacts should mirror the supported public surface only.
 
-- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `compliance`
-- `earn` is held out of every public surface until launch (PRO-2038): `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document.
+- Public API families are the ones the deployment's release channel runs (`SDP_RELEASE_CHANNEL`; prod runs `stable`, stage `beta`, dev `experimental`), so no deployment documents a route it refuses with 403. Every surface derives from the module stages in `packages/sdp-types/src/release-channels.ts` and the route inventory in `apps/sdp-api/src/routes/route-modules.ts`; never hand-maintain another list or move content to hide a module.
+  - Public OpenAPI: `createPublicOpenApiDocument({ releaseChannel })` in `apps/sdp-api/src/openapi/spec.ts` drops other modules' routes, and `openapi/release-channel-values.ts` drops their enum values, examples and `oneOf` branches from shared schemas (classify a new permission, operation or wallet purpose there). The API serves `/openapi.json` and `/llms.txt` for its own channel at runtime.
+  - Docs site, API reference, Postman and `llms*.txt`: the docs build reads `SDP_RELEASE_CHANNEL` (required on Vercel, set per environment like sdp-web; the Dockerfile build arg defaults to `experimental`). The API writes what the channel publishes (modules and ramp providers, Earn's hold included) to a manifest the docs build reads. Gates follow module declarations: a page about one module takes `module: <module>` frontmatter (or `rampProvider: <provider>`), shared pages never name a module, and lists of modules, providers or operations are generated blocks (see `apps/sdp-docs/CLAUDE.md`, "Release Channels"). Committed generated artifacts are built at `experimental` (an unset channel), so CI drift checks see every module; CI also checks links on `stable`.
+  - API playground: the committed catalog holds every channel's operations with their module; the dashboard filters it, and the hand-authored forms, by its own channel.
+- `earn` is held out of every public surface until launch (PRO-2038), independently of its release-channel stage: `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document.
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
 - Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, withdrawal-route discovery, and unsigned instant deposit/direct-withdrawal builds may be keyless. Queued request and cancellation builds, submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.
 - Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
@@ -49,6 +52,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 ## Implementation guidance
 
+- Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
 - Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys, plus Clerk tokens without organization context, return 401.
@@ -58,6 +62,11 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
+  `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
+  wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter
+  or fee payer yourself (`pnpm check:value-movement` enforces it). Marking a movement `exit` is a
+  security-reviewed change.
 - **RPC is a budget (hard rule).** Every provider read, quote and build makes the fewest RPC calls
   that still read every value-bearing input live: no per-call client construction or re-validation,
   no account fetched twice in one operation, static facts cached with a TTL that never stores a

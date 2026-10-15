@@ -116,3 +116,68 @@ The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE
 Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
+
+## Ramps: one transition table
+
+`RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
+status change that goes through it, with its source statuses, target and ramp
+types (HOO-2033).
+
+- **Sources come from the table, never the caller.**
+  `PaymentsRepository.transitionRampTransfer` applies the named entry as a
+  compare-and-swap on status and type, so an illegal source matches zero rows,
+  the same answer a lost race gives. The settlement core logs that as
+  `sdp_api_ramp_settlement_refused`.
+- **No terminal status is a source except `expired`**, which a provider
+  observation revives.
+- **Only the settlement core writes through it so far.** Cancel, MoonPay quote
+  fill and failure, and the off-ramp deposit claim and outcome still set the
+  status themselves; BVNK's writers go with BVNK (HOO-2037). The inventory is
+  in `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
+  guarded writes per file, so a new `updateTransferStatusGuarded` call fails it
+  even in a listed file.
+- **Add a transition to the table, not a source set to a call site.** Mirror
+  what the writer allows today, and let `transitionRampTransfer` read it.
+
+## Ramps: retired provider ids
+
+A removed ramp provider's id moves from `RAMP_PROVIDERS` to
+`RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
+
+- **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
+  schema and the `ramp_webhook_events` row parse `provider` against
+  `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id
+  this deployment does not know throws instead of being cast. Write inputs keep
+  `RampProviderId`, so nothing creates a row for a retired provider.
+- **Dispatch goes through `resolveRampProviderClient`** (`@sdp/payments/ramps`):
+  a retired or unknown id answers 503 `PROVIDER_NOT_CONFIGURED`. Retired rows
+  list as stored, without enrichment; actions on them answer 503.
+- **Replay only claims rows it can parse.** The claim, park and re-arm
+  statements filter on `PERSISTED_RAMP_PROVIDERS`, so an unknown provider's row
+  waits for the deployment that knows it. A retired provider's row parks, not
+  terminally, for want of a processor.
+- **Retiring a provider:** move the id, delete its code, leave its migrations
+  and SQL predicates alone. The fixtures in
+  `../../routes/payments.retired-ramp-providers.test.ts` run over every
+  retired id.
+- **Delete its `.ramp-support/<id>.currency.json`, then run
+  `ramp-support:generate` only** (not `currencies:discover`, which needs
+  Doppler and re-pulls live provider snapshots). Fiat currencies only it
+  offered leave `RAMP_FIAT_CURRENCIES`, so request validation narrows with it.
+- **Re-key tests that used it as the stand-in provider** (demo mode,
+  release-channel and integration gates) to a live provider that runs the same
+  pair in the regenerated support table. Tests that pick "a currency provider X
+  doesn't list" from `RAMP_FIAT_CURRENCIES` can run out of candidates.
+- **Drain check only once real money has moved.** Ramp traffic so far ran on
+  devnet and provider sandboxes (as of 2026-10-13), so removals need no count.
+  After a provider has carried real-money transfers, merge its removal only
+  once an operator count shows none open in stage and prod: a merge to main
+  deploys to prod in the same run.
+- **A refresh that drops rows needs a second live read.** The weekday
+  `ramp-rails-refresh.yml` run can catch a transient provider answer: on
+  2026-10-14 it got no PYUSD from MoonPay, which still offered it. Re-pull
+  one provider with `DOPPLER_PROJECT=solana-developer-platform
+  DOPPLER_CONFIG=dev pnpm --filter @sdp/api currencies:discover <provider>`,
+  then `ramp-support:generate`. Never build on `automation/ramp-support-refresh`:
+  the job force-pushes it, and opens its PR only if the repo lets Actions
+  create PRs.

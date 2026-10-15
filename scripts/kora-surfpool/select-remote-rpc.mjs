@@ -6,9 +6,9 @@ try {
 
   if (!selected) {
     console.error(
-      "No managed Solana RPC URL is configured for Surfpool remote mode; embedded Surfpool will run offline."
+      "No SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL is configured; Surfpool must fork devnet."
     );
-    process.exit(0);
+    process.exit(1);
   }
 
   console.error(

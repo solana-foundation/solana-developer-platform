@@ -8,10 +8,7 @@ import { QuoteSummaryField } from "../manual-instructions-quote.redesign";
 
 type CoinbaseQuote = Extract<PaymentRampQuote, { provider: "coinbase" }>;
 
-/**
- * Locked order economics shown above the Apple Pay button, mirroring the
- * Lightspark quote-summary grid.
- */
+/** Locked order economics shown above the Apple Pay button. */
 export function CoinbaseQuoteSummary({ quote }: { quote: CoinbaseQuote }) {
   const t = useTranslations();
   const feesIncluded = quote.fees

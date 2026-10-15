@@ -683,7 +683,7 @@ describe("fetchPaymentTransfers", () => {
                 status: "confirmed",
                 signature: "signature-1",
                 type: "onramp",
-                provider: "mural",
+                provider: "moonpay",
                 counterpartyId: "counterparty-1",
                 counterpartyDisplayName: "Northstar Labs",
                 providerReference: "provider-reference-1",
@@ -702,7 +702,7 @@ describe("fetchPaymentTransfers", () => {
 
     expect(result.data?.[0]).toMatchObject({
       custodyWalletId: null,
-      provider: "mural",
+      provider: "moonpay",
       counterpartyId: "counterparty-1",
       counterpartyDisplayName: "Northstar Labs",
       providerReference: "provider-reference-1",

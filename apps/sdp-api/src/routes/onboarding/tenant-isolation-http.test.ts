@@ -12,20 +12,12 @@
  * treasury vault "Access unavailable").
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { ensureTestClerkIssuer, signTestClerkClaims } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-
-const { verifyClerkJwtForRequest } = vi.hoisted(() => ({
-  verifyClerkJwtForRequest: vi.fn(),
-}));
-
-vi.mock("@/lib/clerk-token", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/clerk-token")>()),
-  verifyClerkJwtForRequest,
-}));
 
 const ORGANIZATION_ID = "org_onboarding_isolation";
 const CLERK_ORG_ID = "org_clerk_onboarding_isolation";
@@ -40,12 +32,15 @@ function clerkPayload(clerkOrgId: string) {
   };
 }
 
-const getStatus = () =>
-  app.request(
+async function getStatus(clerkOrgId: string) {
+  await ensureTestClerkIssuer(env);
+  const token = await signTestClerkClaims(clerkPayload(clerkOrgId), 300);
+  return app.request(
     "/v1/onboarding/status",
-    { headers: { Authorization: "Bearer clerk-session-token" } },
+    { headers: { Authorization: `Bearer ${token}` } },
     env
   );
+}
 
 type StatusBody = {
   data: { linked: boolean; organization: { id: string } | null; setup: unknown };
@@ -53,7 +48,6 @@ type StatusBody = {
 
 describe("onboarding status under database tenant isolation", () => {
   beforeEach(async () => {
-    verifyClerkJwtForRequest.mockReset();
     await seedTestDatabase(env);
 
     const db = getDb(env);
@@ -75,9 +69,7 @@ describe("onboarding status under database tenant isolation", () => {
   });
 
   it("resolves a linked organization through row-level security", async () => {
-    verifyClerkJwtForRequest.mockResolvedValue(clerkPayload(CLERK_ORG_ID));
-
-    const res = await getStatus();
+    const res = await getStatus(CLERK_ORG_ID);
     expect(res.status).toBe(200);
     const body = (await res.json()) as StatusBody;
     expect(body.data.linked).toBe(true);
@@ -86,9 +78,7 @@ describe("onboarding status under database tenant isolation", () => {
   });
 
   it("reports unlinked for a Clerk organization with no mapping", async () => {
-    verifyClerkJwtForRequest.mockResolvedValue(clerkPayload("org_clerk_never_linked"));
-
-    const res = await getStatus();
+    const res = await getStatus("org_clerk_never_linked");
     expect(res.status).toBe(200);
     const body = (await res.json()) as StatusBody;
     expect(body.data.linked).toBe(false);
