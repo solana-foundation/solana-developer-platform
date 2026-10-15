@@ -5,6 +5,7 @@
  * fee-payment adapter and AppError mapping into that service.
  */
 
+import { resolveKoraEndpoint } from "@sdp/fee-payment";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
@@ -22,7 +23,7 @@ export type MosaicFeePayment = "sponsored" | "wallet";
  * @param env - Environment bindings
  * @param signer - Transaction signer (from SigningService.getTransactionSigner)
  * @param feePayment - "sponsored" routes fees through the Kora relay when
- * KORA_RPC_URL is configured (gasless for the custody wallet) and degrades to
+ * a Kora is configured for the scope's cluster (gasless for the custody wallet) and degrades to
  * signer-paid fees when it is not; "wallet" always makes the signer pay
  * transaction fees from its own SOL.
  */
@@ -32,12 +33,14 @@ export function createMosaicService(
   feePayment: MosaicFeePayment,
   sponsorshipScope?: SponsorshipScope
 ): MosaicService {
-  if (feePayment === "sponsored" && env.KORA_RPC_URL && !sponsorshipScope) {
-    throw new Error("Sponsorship scope is required for Kora-backed issuance");
+  if (feePayment === "sponsored" && !sponsorshipScope) {
+    throw new Error("Sponsorship scope is required for sponsored issuance");
   }
 
   const sponsor =
-    feePayment === "sponsored" && env.KORA_RPC_URL && sponsorshipScope
+    feePayment === "sponsored" &&
+    sponsorshipScope &&
+    resolveKoraEndpoint(env, sponsorshipScope.cluster) !== null
       ? createSponsorshipFeePayment(env, sponsorshipScope)
       : undefined;
   return new MosaicService(env, signer, sponsor, {

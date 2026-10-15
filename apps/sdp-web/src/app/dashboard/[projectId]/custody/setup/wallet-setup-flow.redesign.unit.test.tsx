@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   projectId: "prj_test_sandbox",
   createWallet: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
   initialize: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
+  refreshWalletInventory: vi.fn(),
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
   recheckPrivyCredentialAction: vi.fn(),
 }));
 vi.mock("@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
-  useWalletInventoryRefresh: () => () => undefined,
+  useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
 }));
 
 const { WalletSetupFlow } = await import("./wallet-setup-flow.redesign");
@@ -218,6 +219,29 @@ describe("details step", () => {
       fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
     });
     expect(screen.getByRole("alert").textContent).toBe("Provider rejected the request");
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
+  // Jina (#2333): an uncertain or refused setup left the wallet inventory as it
+  // was, so a wallet an earlier attempt created did not show up before a retry.
+  it("refreshes the wallet inventory after an uncertain or refused setup and points to the list", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Unsure" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toMatch(/Check your wallet list first/);
+
+    mocks.initialize.mockResolvedValueOnce({
+      status: "error",
+      message: "Provider rejected the request",
+    } as never);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(2);
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 

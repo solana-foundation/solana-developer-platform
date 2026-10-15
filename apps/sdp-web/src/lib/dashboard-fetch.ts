@@ -18,7 +18,17 @@ import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
-  | { ok: true; data: T; status: number }
+  | {
+      ok: true;
+      data: T;
+      status: number;
+      /**
+       * A success whose body is not the backend's readable answer (empty, not
+       * JSON, or a followed redirect): the key's store keeps the key
+       * ({@link answerOf}), so anything frozen with it is kept too.
+       */
+      unreadable?: boolean;
+    }
   | {
       ok: false;
       error: string;
@@ -430,7 +440,10 @@ export async function dashboardFetch<T = unknown>(
 
   try {
     const data = (text ? JSON.parse(text) : null) as T;
-    return { ok: true, data, status: response.status };
+    // The same decision the key's store made ({@link answerOf}).
+    return answerOf(response, text) === null
+      ? { ok: true, data, status: response.status, unreadable: true }
+      : { ok: true, data, status: response.status };
   } catch {
     return { ok: false, error: "Invalid response", status: response.status, body: text };
   }

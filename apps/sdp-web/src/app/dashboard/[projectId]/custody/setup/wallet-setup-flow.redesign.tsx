@@ -42,7 +42,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
+import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
 import type {
   AvailableCustodyModes,
   ProjectCustodyAvailability,
@@ -844,7 +844,7 @@ function useCreateWallet({
   const router = useRouter();
   const href = useProjectHref();
   const refreshWalletInventory = useWalletInventoryRefresh();
-  const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
+  const { dashboardCacheScope, flags, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const submissionInFlightRef = useRef(false);
   const setupKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
@@ -882,6 +882,8 @@ function useCreateWallet({
           // No answer: the call may have reached the server. The key stays and the form stays,
           // so Create wallet again resends the same request under the same key.
           setupKey.settled(input, key, { status: "error" });
+          // The wallet may exist: the inventory is refreshed so the list shows it.
+          refreshWalletInventory();
           setErrorMessage(t("DashboardCustody.walletSetupOutcomeUnknown"));
           return;
         }
@@ -889,6 +891,9 @@ function useCreateWallet({
 
         switch (result.status) {
           case "error":
+            // A refusal may follow an earlier attempt that did create the
+            // wallet, so the inventory is refreshed before the user retries.
+            refreshWalletInventory();
             setErrorMessage(result.message);
             return;
           case "provider_already_set_up":
@@ -904,7 +909,7 @@ function useCreateWallet({
         }
 
         if (selectedProjectId) {
-          completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
+          recordQuickStartStep(flags, dashboardCacheScope, "wallet");
         }
         refreshWalletInventory();
         router.refresh();

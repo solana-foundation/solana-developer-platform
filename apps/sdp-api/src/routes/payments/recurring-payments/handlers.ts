@@ -27,6 +27,7 @@ import {
   getIdempotencyClaim,
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -101,7 +102,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
 
 /**
  * The Idempotency-Key and fingerprint the key step claimed for this request,
- * recorded on the domain row (migrations 0133, 0134) so a retry past the key's
+ * recorded on the domain row (migrations 0134, 0135) so a retry past the key's
  * 24 hours is matched by the same request identity. Every recurring mutation
  * requires the key, so a handler reached without a claim is a wiring bug.
  */
@@ -160,6 +161,9 @@ function answerFromAttempt(
   // Activation, lifecycle and collection attempts record no fingerprint: the
   // schedule they name is the request (the path's id, an empty body).
   if (attempt.recurring_payment_id !== recurringPayment.id) {
+    // Another request's row: refused unstored, so that request's own retry
+    // is still answered from it.
+    markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   const response: PaymentRecurringPaymentResponse = {
@@ -272,6 +276,9 @@ export async function findRecurringPaymentCollectReplay(
   if (attempt === null) return null;
   const { recurringPayment } = input.authorized;
   if (attempt.metadata.recurringPaymentId !== recurringPayment.id) {
+    // Another request's row: refused unstored, so that request's own retry
+    // is still answered from it.
+    markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   const transfer =

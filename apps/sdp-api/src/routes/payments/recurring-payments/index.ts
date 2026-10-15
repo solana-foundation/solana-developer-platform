@@ -49,7 +49,7 @@ recurringPayments.post(
   requireAllowedOperation("recurring_payment_create"),
   validateBody(createRecurringPaymentSchema),
   authorize(authorizeRecurringPaymentCreate),
-  // The schedule row carries its key (0133), so a 5xx re-runs and the row answers.
+  // The schedule row carries its key (0134), so a 5xx re-runs and the row answers.
   idempotent({
     key: "required",
     serverErrors: "rerun",
@@ -69,7 +69,7 @@ recurringPayments.patch(
   authorize(authorizeRecurringPaymentUpdate),
   // Editing an active schedule signs and broadcasts a replacement subscription,
   // so a retry without the key could broadcast twice: the key is required.
-  // Each lifecycle attempt carries its key (0134), so a takeover or a 5xx re-run
+  // Each lifecycle attempt carries its key (0135), so a takeover or a 5xx re-run
   // is answered from the attempt instead of a 409 for the schedule mid-change.
   idempotent({
     key: "required",

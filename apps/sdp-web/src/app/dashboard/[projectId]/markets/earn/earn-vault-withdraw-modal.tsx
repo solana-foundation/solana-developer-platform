@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
-import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
@@ -900,7 +900,8 @@ export function EarnVaultWithdrawModal({
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording the answer.
-    const retired = settleIdempotencyKey(
+    // A money movement: an unknown outcome keeps the key (`moneyAnswerRetiresKey`).
+    const retired = settleMoneyIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
       key,

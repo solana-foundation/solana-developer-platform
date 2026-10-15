@@ -18,7 +18,7 @@ import {
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { getIdempotencyClaim } from "@/middleware/idempotency";
+import { getIdempotencyClaim, markIdempotencyRecordMismatch } from "@/middleware/idempotency";
 import type { RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -244,7 +244,7 @@ export function deriveCustodyWalletCreateRequestId(
 }
 
 /**
- * A keyed create's recovery point (migration 0135): only when the shared step
+ * A keyed create's recovery point (migration 0136): only when the shared step
  * claimed a key for this request; null without one.
  */
 function custodyWalletIdempotency(c: AppContext): CustodyWalletIdempotency | null {
@@ -388,6 +388,9 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
       const replay = await findCustodyWalletCreateReplay(c);
       if (replay !== null) {
         if (replay.fingerprint !== idempotency.fingerprint) {
+          // Another request's row: refused unstored, so that request's own retry
+          // is still answered from it.
+          markIdempotencyRecordMismatch(c);
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }
         return replay.respond();

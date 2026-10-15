@@ -53,6 +53,7 @@ export const {
   earn,
   newDesign,
   paymentsDemoMode,
+  newDesignOverview,
   newDesignWallets,
   newDesignContacts,
   newDesignPayDeposit,

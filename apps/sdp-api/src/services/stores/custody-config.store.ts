@@ -45,7 +45,7 @@ import type { CustodyWalletPurpose } from "@sdp/types";
 export type WalletPurpose = CustodyWalletPurpose;
 
 /**
- * A keyed wallet create's recovery point (HOO-1918, migration 0135): the
+ * A keyed wallet create's recovery point (HOO-1918, migration 0136): the
  * request id derived from its Idempotency-Key and the request's fingerprint.
  */
 export interface CustodyWalletIdempotency {

@@ -125,7 +125,7 @@ export function fetchResultAnswer(result: {
   unreadable?: boolean;
 }): ApiAnswer {
   const answered =
-    result.ok || (result.unreadable !== true && result.status !== null && result.status >= 400);
+    result.unreadable !== true && (result.ok || (result.status !== null && result.status >= 400));
   return {
     status: answered ? result.status : null,
     replayed: result.replayed === true,

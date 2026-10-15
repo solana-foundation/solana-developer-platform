@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useSWRConfig } from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchResultAnswer } from "@/lib/idempotency";
-import { settleIdempotencyKey } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer, isOutcomeUnknownAnswer } from "@/lib/idempotency";
+import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
@@ -38,6 +39,7 @@ import {
   fetchEarnVaultQueuedWithdrawalPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
@@ -218,6 +220,7 @@ function useQueuedWithdrawalSubmission(options: {
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();
+  const { mutate } = useSWRConfig();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -246,15 +249,16 @@ function useQueuedWithdrawalSubmission(options: {
         return;
       }
       const result = await createEarnVaultWithdrawalRequest(previewInput, key);
-      settleIdempotencyKey(
-        vaultAsyncWithdrawalIdempotencyKeyStore,
-        fingerprint,
-        key,
-        fetchResultAnswer(result)
-      );
+      // A withdrawal request moves money: an unknown outcome keeps the key, so
+      // the next press is answered under it rather than requesting again.
+      const answer = fetchResultAnswer(result);
+      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
       if (result.ok) {
         setOutcome(result.data);
         options.onRequested?.(result.data.withdrawalRequest);
+      } else if (isOutcomeUnknownAnswer(answer)) {
+        options.setError(t("Shared.idempotency.outcomeUnknownCheckList"));
+        void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
       } else {
         options.setError(result.error);
       }

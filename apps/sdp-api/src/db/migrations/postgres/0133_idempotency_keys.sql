@@ -22,6 +22,11 @@
 --
 -- The lease and expiry are TIMESTAMPTZ rather than the usual ISO text because
 -- every read compares them with now().
+--
+-- sdp:migration-locks: blocking
+-- This file creates `idempotency_keys`. IF NOT EXISTS is only there so the file
+-- re-runs where an earlier name already applied it; the table is new and empty
+-- when its index is built, so the build blocks no traffic.
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     id TEXT PRIMARY KEY,

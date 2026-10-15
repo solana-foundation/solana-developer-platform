@@ -21,7 +21,7 @@ SDP launches on mainnet on Nov 2 with keys required on the routes that move mone
 ## Decision
 
 One route step, `idempotent({ key })` in `apps/sdp-api/src/middleware/idempotency.ts`, backed by
-one table, `idempotency_keys` (migration 0128). It follows three sources:
+one table, `idempotency_keys` (migration 0133). It follows three sources:
 
 - [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)
   for the header and the 400/422/409 codes.
@@ -130,9 +130,10 @@ the handler, which resumes the attempt under the same key; a settled update atte
 answer. Every keyed cancel, resume and PATCH that is answered leaves an attempt under its own key,
 so its retry past 24 hours never runs again over a later change: a no-op (a cancel of a canceled
 schedule, a resume of an active one, a PATCH that changes nothing) writes a confirmed attempt that
-changes nothing. An activate needs none: a schedule never returns to `pending_activation`, so a
-retry cannot activate again. A request never finishes another key's in-flight attempt silently:
-cancel, resume and collect refuse it as in flight (409, unstored) and the cron finishes it; a
+changes nothing. An activate needs no no-op attempt: a schedule never returns to
+`pending_activation`, so a retry cannot activate again. A request never finishes another key's
+in-flight attempt silently: activate, cancel, resume and collect refuse it as in flight (409,
+unstored), the claim rolls back, and the cron finishes it; a
 PATCH, which the cron does not recover, may finish it, and writes its own confirmed attempt in the
 same transaction as the finalize, so the update never lands without the record its retry is
 answered from.
@@ -140,7 +141,7 @@ answered from.
 Custody wallet creation (`POST /v1/wallets`) moves no money but creates a provider wallet before its
 row, so it has no row to write first and stays `serverErrors: "store"`. A keyed create derives a
 request id from the key, scoped by organization, project and credential (the raw key never reaches
-a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0135). A
+a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0136). A
 retry the key cannot answer (a takeover, or past 24 hours) is answered from that row by
 `replayFromRecord` without calling the provider; another request on the same key is 422. That
 replay returns the wallet as it is now (its current label and status), not as the first response

@@ -306,7 +306,11 @@ async function createClaimedActivationAttempt(input: {
   idempotencyKey: string | null;
 }): Promise<PaymentRecurringPaymentActivationAttemptRow> {
   // A stale claim resumes the in-flight attempt under its original key, or
-  // records this request's key on it when it has none.
+  // records this request's key on it when it has none. An attempt another key
+  // answers for is that request's: finishing it here would leave this key with
+  // no attempt, so a retry once its record expires could not find it. It is
+  // refused as in flight, unstored, and the transaction rolls the claim back;
+  // the cron finishes the attempt (as cancel and resume do).
   if (input.recoveringStaleActivation) {
     let existing: PaymentRecurringPaymentActivationAttemptRow | null = null;
     try {
@@ -327,6 +331,14 @@ async function createClaimedActivationAttempt(input: {
       throw error;
     }
 
+    if (
+      existing &&
+      input.idempotencyKey !== null &&
+      existing.idempotency_key !== null &&
+      existing.idempotency_key !== input.idempotencyKey
+    ) {
+      throw conflict("Recurring payment activation is already processing");
+    }
     if (existing) {
       try {
         const resumed = await input.recurringRepo.updateActivationAttempt({

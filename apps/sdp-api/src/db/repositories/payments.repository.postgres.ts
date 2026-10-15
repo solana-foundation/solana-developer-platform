@@ -589,6 +589,8 @@ export function createPostgresPaymentsRepository(
            UPDATE payment_transfers
            SET destination_address = ?,
                initiated_by_key_id = ?,
+               idempotency_key = COALESCE(?, idempotency_key),
+               idempotency_fingerprint = COALESCE(?, idempotency_fingerprint),
                status = 'processing',
                error = NULL,
                updated_at = ?
@@ -597,7 +599,14 @@ export function createPostgresPaymentsRepository(
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
-        .bind(input.destinationAddress, input.initiatedByKeyId, input.updatedAt, ...scope.values)
+        .bind(
+          input.destinationAddress,
+          input.initiatedByKeyId,
+          input.idempotency?.key ?? null,
+          input.idempotency?.fingerprint ?? null,
+          input.updatedAt,
+          ...scope.values
+        )
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;

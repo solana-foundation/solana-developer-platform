@@ -16,7 +16,7 @@ describe("bvnkRequestFailure", () => {
 
     assert.equal(error.code, "BAD_REQUEST");
     assert.equal(error.message, "BVNK request failed with status 400.");
-    assert.deepEqual(error.details, { provider: "bvnk", providerStatus: 400 });
+    assert.deepEqual(error.details, { provider: "bvnk", providerStatus: 400, outcome: "rejected" });
     assert.deepEqual(error.diagnostics, {
       providerCode: "BAD_REQUEST",
       providerMessage: body.message,

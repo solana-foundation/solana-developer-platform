@@ -2179,6 +2179,7 @@ describe("Payments routes — ramps", () => {
         error: badRequest("BVNK rejected the sandbox pay-in", {
           provider: "bvnk",
           providerStatus: 400,
+          outcome: "rejected",
         }),
         firstStatus: 400,
         claimAfterFailure: false,
@@ -2190,6 +2191,7 @@ describe("Payments routes — ramps", () => {
         transferId: "xfr_123e4567-e89b-12d3-a456-426614174abe",
         error: providerUnavailable("Failed to reach the bvnk API", {
           provider: "bvnk",
+          outcome: "unknown",
         }),
         firstStatus: 503,
         claimAfterFailure: true,
