@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { SigningService } from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -61,6 +62,7 @@ async function seedExactIdProviderAliasWallet(): Promise<void> {
 
 describe("Payments routes — transfer wallet access", () => {
   installPaymentsRouteTestHooks();
+  installClusterRpcStub();
   it("describes an unknown exact source without rejecting SDP Wallet IDs", async () => {
     const response = await postTransfer(
       {

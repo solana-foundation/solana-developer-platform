@@ -26,7 +26,6 @@ import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories"
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
@@ -40,10 +39,6 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import {
-  seedTestPrivyConnection,
-  writeTestPrivyCredentialSecret,
-} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
@@ -51,6 +46,7 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
+  enableMainnetSponsorship,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
@@ -61,12 +57,14 @@ import {
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
+  seedProductionPrivyWallet,
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
@@ -3440,60 +3438,17 @@ describe("Payments routes — recurring", () => {
     });
 
     it("skips a production project's due period once its organization loses production access", async () => {
-      // Production custody is BYOK only (HOO-1970), so the payment runs from a
-      // Privy wallet in the organization's production project, under a key
-      // re-homed there. The wallet carries the address the source signer signs as.
-      const productionProjectId = `${TEST_PROJECT.id}_production`;
       const productionWalletId = "cwlt_recurring_production";
-      const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-      env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
-      onTestFinished(() => {
-        env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+      await seedProductionPrivyWallet({
+        custodyWalletId: productionWalletId,
+        publicKey: recurringExecution.sourceSigner().address,
       });
-      await seedTestPrivyConnection(getDb(env), {
-        organizationId: TEST_ORG.id,
-        projectId: productionProjectId,
-        connectionId: "cconn_recurring_production",
-        credentialId: "pcred_recurring_production",
-        createdBy: TEST_USER.id,
-        stored: await writeTestPrivyCredentialSecret(env, {
-          organizationId: TEST_ORG.id,
-          credentialId: "pcred_recurring_production",
-          appId: "recurring-production-app",
-          appSecret: "recurring-production-secret",
-        }),
-        providerAccountFingerprint: "sha256:recurring-production",
-        wallets: [
-          {
-            id: productionWalletId,
-            walletId: "privy_recurring_production",
-            publicKey: recurringExecution.sourceSigner().address,
-            label: "Production Recurring Wallet",
-            purpose: "transfer",
-            status: "active",
-          },
-        ],
-        lastCheckStatus: "success",
-        defaultCustodyWalletId: productionWalletId,
-      });
-      await getDb(env)
-        .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
-        .bind(productionProjectId, TEST_API_KEY.id)
-        .run();
-      await seedCachedKey({ projectId: productionProjectId, environment: "production" });
-      await new SponsorshipBudgetRepository(getDb(env)).setPolicyEnabled({
-        network: "mainnet",
-        scopeType: "global",
-        scopeId: null,
-        enabled: true,
-        operator: "operator:recurring-production-test",
-        reason: "Approve mainnet sponsorship for the production project",
-      });
+      await enableMainnetSponsorship();
 
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await activateRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,
-        projectId: productionProjectId,
+        projectId: TEST_PRODUCTION_PROJECT_ID,
         sourceCustodyWalletId: productionWalletId,
       });
       const signaturesBefore = signAndSendMock.mock.calls.length;

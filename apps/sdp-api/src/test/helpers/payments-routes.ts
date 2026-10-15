@@ -16,8 +16,9 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -26,6 +27,10 @@ import {
   restoreBvnkSandboxEnv,
   stubBvnkSandboxEnv,
 } from "@/test/helpers/bvnk";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
@@ -164,6 +169,8 @@ export { TEST_BVNK_HAWK_AUTH_ID, TEST_BVNK_HAWK_SECRET_KEY, TEST_BVNK_WALLET_ID 
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
+export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -273,6 +280,74 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
   await seedCachedApiKey(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
+  });
+}
+
+/**
+ * Re-home the seeded API key onto the organization's Production project and give that project a
+ * BYOK Privy wallet, the only custody Production allows (HOO-1970).
+ *
+ * @param wallet - The Production wallet to seed.
+ * @param wallet.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
+ * @param wallet.publicKey - The address the wallet's signer signs as.
+ * @returns Resolves once the wallet, its connection and the re-homed key are seeded.
+ */
+export async function seedProductionPrivyWallet(wallet: {
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+  onTestFinished(() => {
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  });
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    connectionId: "cconn_payments_production",
+    credentialId: "pcred_payments_production",
+    createdBy: TEST_USER.id,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: TEST_ORG.id,
+      credentialId: "pcred_payments_production",
+      appId: "payments-production-app",
+      appSecret: "payments-production-secret",
+    }),
+    providerAccountFingerprint: "sha256:payments-production",
+    wallets: [
+      {
+        id: wallet.custodyWalletId,
+        walletId: "privy_payments_production",
+        publicKey: wallet.publicKey,
+        label: "Production Payments Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: wallet.custodyWalletId,
+  });
+  await getDb(env)
+    .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+    .bind(TEST_PRODUCTION_PROJECT_ID, TEST_API_KEY.id)
+    .run();
+  await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+}
+
+/**
+ * Enable the mainnet global sponsorship policy as an operator would; the seed ships it disabled
+ * pending approval, so a Production project's sponsored movement needs this first.
+ *
+ * @returns Resolves once the policy is enabled at a new version.
+ */
+export async function enableMainnetSponsorship(): Promise<void> {
+  await new SponsorshipBudgetRepository(getDb(env)).setPolicyEnabled({
+    network: "mainnet",
+    scopeType: "global",
+    scopeId: null,
+    enabled: true,
+    operator: "operator:payments-test",
+    reason: "Approve mainnet sponsorship for the Production project",
   });
 }
 
