@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { setWindowPathname } from "@/test/window-location";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 
 const HOUR_MS = 60 * 60 * 1_000;
@@ -49,5 +51,31 @@ describe("expiresAtForAction", () => {
 
     vi.setSystemTime(new Date("2026-10-13T12:30:00.000Z"));
     expect(expiresAtForAction("unreadable", inAnHour)).toBe(first);
+  });
+
+  // Greptile (#2333): a success whose body could not be read kept the key in
+  // dashboard-fetch's store but dropped the expiry, so the retry was a new body.
+  it("keeps the expiry when a success cannot be read, as the key is kept", async () => {
+    vi.useRealTimers();
+    setWindowPathname("/dashboard/prj_test_sandbox/payments/requests");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("", { status: 200, headers: { "content-type": "application/json" } })
+      )
+    );
+    try {
+      const first = expiresAtForAction("unreadable-success", inAnHour);
+      const res = await dashboardFetch("/api/dashboard/payments/requests", {
+        method: "POST",
+        body: { amount: "1", expiresAt: first },
+      });
+      settleExpiresAt("unreadable-success", first ?? null, res);
+
+      expect(expiresAtForAction("unreadable-success", inAnHour)).toBe(first);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
