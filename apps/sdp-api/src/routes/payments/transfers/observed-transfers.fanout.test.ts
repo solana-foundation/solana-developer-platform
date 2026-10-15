@@ -35,7 +35,7 @@ describe("buildObservedTransfersForSignatures", () => {
 
     const rows = await buildObservedTransfersForSignatures(env, signatures, {
       organizationId: "org_fanout_test",
-      projectId: null,
+      projectId: "prj_fanout_test",
       walletIdsByAddress: new Map([["wallet_address", "wal_fanout_test"]]),
     });
 

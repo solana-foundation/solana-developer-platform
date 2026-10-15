@@ -654,7 +654,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       scoped.getTransferById({
         transferId: "xfr_org_admin",
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       })
     ).resolves.toMatchObject({ id: "xfr_org_admin", project_id: TEST_PROJECT_ID });
     await expect(
@@ -1042,7 +1042,12 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     return repo;
   }
 
-  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+  const listArgs = {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    limit: 50,
+    offset: 0,
+  };
 
   it("returns the mint rows and the symbol rows for one filter", async () => {
     const repo = await seedMixedForms();
@@ -1156,7 +1161,12 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     return repo;
   }
 
-  const listArgs = { organizationId: TEST_ORG.id, projectId: null, limit: 50, offset: 0 };
+  const listArgs = {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    limit: 50,
+    offset: 0,
+  };
 
   it("matches nothing for an empty allowlist instead of dropping the filter", async () => {
     const repo = await seedTwoWallets();

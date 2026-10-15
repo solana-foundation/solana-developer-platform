@@ -13,7 +13,7 @@ const WALLET_ADDRESS = "wallet_address";
 
 const context = {
   organizationId: "org_cache_test",
-  projectId: null,
+  projectId: "prj_cache_test",
   walletIdsByAddress: new Map([[WALLET_ADDRESS, "wal_cache_test"]]),
 };
 
