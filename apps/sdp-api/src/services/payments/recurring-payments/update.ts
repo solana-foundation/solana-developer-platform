@@ -27,6 +27,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
+import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db";
 import {
   createPaymentRecurringPaymentsRepository,
@@ -84,17 +85,26 @@ export interface RecurringPaymentUpdateIdempotency {
   fingerprint: string;
 }
 
-type RecurringPaymentUpdateSnapshot = {
-  sourceCustodyWalletId: string | null;
-  counterpartyId: string;
-  counterpartyAccountId: string;
-  token: string;
-  amount: string;
-  periodHours: number;
-  firstCollectionAt: string | null;
-  nextCollectionDueAt: string | null;
-  metadataUri: string | null;
-};
+const recurringPaymentUpdateSnapshotSchema = z.object({
+  sourceCustodyWalletId: z.string().nullable(),
+  counterpartyId: z.string(),
+  counterpartyAccountId: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  periodHours: z.number(),
+  firstCollectionAt: z.string().nullable(),
+  nextCollectionDueAt: z.string().nullable(),
+  metadataUri: z.string().nullable(),
+});
+
+type RecurringPaymentUpdateSnapshot = z.infer<typeof recurringPaymentUpdateSnapshotSchema>;
+
+/**
+ * The values an update attempt saved (`before_values`, `after_values`): any
+ * subset of the snapshot's fields, and nothing else.
+ */
+const savedUpdateValuesSchema = recurringPaymentUpdateSnapshotSchema.partial().strict();
+type SavedUpdateValues = z.infer<typeof savedUpdateValuesSchema>;
 
 const RECURRING_PAYMENT_UPDATE_FIELDS = [
   "sourceCustodyWalletId",
@@ -121,8 +131,8 @@ type ResolvedRecurringPaymentUpdate = {
   nextCollectionDueAt: string | null;
   metadataUri: string | null;
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>;
-  beforeValues: Record<string, unknown>;
-  afterValues: Record<string, unknown>;
+  beforeValues: SavedUpdateValues;
+  afterValues: SavedUpdateValues;
 };
 
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
@@ -186,18 +196,21 @@ function sameStringSet(left: string[], right: string[]): boolean {
 }
 
 /** One snapshot field: an amount by value ("30" and "30.0" are one amount), the rest as stored. */
-function sameSnapshotValue(key: string, left: unknown, right: unknown): boolean {
-  if (key === "amount" && typeof left === "string" && typeof right === "string") {
-    return normalizeDecimalString(left) === normalizeDecimalString(right);
+function sameSnapshotValue(
+  field: RecurringPaymentUpdateField,
+  left: SavedUpdateValues,
+  right: SavedUpdateValues
+): boolean {
+  if (field === "amount" && left.amount !== undefined && right.amount !== undefined) {
+    return normalizeDecimalString(left.amount) === normalizeDecimalString(right.amount);
   }
-  return left === right;
+  return left[field] === right[field];
 }
 
-function sameFlatRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  const keys = Object.keys(left);
-  return (
-    sameStringSet(keys, Object.keys(right)) &&
-    keys.every((key) => sameSnapshotValue(key, left[key], right[key]))
+/** The same fields, each the same value (`sameSnapshotValue`). */
+function sameSavedValues(left: SavedUpdateValues, right: SavedUpdateValues): boolean {
+  return RECURRING_PAYMENT_UPDATE_FIELDS.every(
+    (field) => field in left === field in right && sameSnapshotValue(field, left, right)
   );
 }
 
@@ -205,14 +218,20 @@ function updateAttemptMatchesRequest(
   attempt: PaymentRecurringPaymentUpdateAttemptRow,
   input: {
     changedFields: string[];
-    beforeValues: Record<string, unknown>;
-    afterValues: Record<string, unknown>;
+    beforeValues: SavedUpdateValues;
+    afterValues: SavedUpdateValues;
   }
 ): boolean {
+  // Parsed where they are read: a row whose saved values are not a snapshot
+  // subset is not this request's attempt.
+  const before = savedUpdateValuesSchema.safeParse(attempt.before_values);
+  const after = savedUpdateValuesSchema.safeParse(attempt.after_values);
   return (
+    before.success &&
+    after.success &&
     sameStringSet(attempt.changed_fields, input.changedFields) &&
-    sameFlatRecord(attempt.before_values, input.beforeValues) &&
-    sameFlatRecord(attempt.after_values, input.afterValues)
+    sameSavedValues(before.data, input.beforeValues) &&
+    sameSavedValues(after.data, input.afterValues)
   );
 }
 
