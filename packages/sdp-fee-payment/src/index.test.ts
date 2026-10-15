@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   createFeePaymentAdapter,
   createKoraAdapter,
-  defaultFeePaymentCluster,
   isFeePaymentConfiguredForCluster,
   resolveKoraEndpoint,
 } from "./index";
@@ -30,11 +29,6 @@ describe("resolveKoraEndpoint", () => {
       apiKey: "mainnet-key",
       identityTokenAudience: undefined,
     });
-  });
-
-  it("takes the process cluster from SOLANA_NETWORK", () => {
-    const mainnetProcess: FeePaymentEnv = { ...bothClusters, SOLANA_NETWORK: "mainnet-beta" };
-    assert.equal(defaultFeePaymentCluster(mainnetProcess), "mainnet-beta");
   });
 
   it("answers null for a cluster without its URL, whatever else that cluster has", () => {

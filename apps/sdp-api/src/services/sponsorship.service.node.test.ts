@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as feePayment from "@sdp/fee-payment";
 import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
-import { SdpRpcError } from "@sdp/rpc/errors";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   type Blockhash,
@@ -18,7 +17,6 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectService } from "@/services/project.service";
 import {
-  buildKoraUserId,
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
   resolveRequestSponsorshipScope,
@@ -91,24 +89,37 @@ describe("sponsorship identity boundary", () => {
   });
   afterEach(() => vi.restoreAllMocks());
   it("builds a versioned tenant and actor scoped Kora user_id", () => {
-    expect(
-      buildKoraUserId({
+    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
+    createSponsorshipFeePayment(
+      env,
+      {
         environment: "production",
         organizationId: "org:alpha",
         projectId: "project/one",
         actor: { type: "api_key", id: "key:primary" },
-      })
-    ).toBe("sdp:v1:production:org%3Aalpha:project:project%2Fone:api_key:key%3Aprimary");
+      },
+      "payments.transfer"
+    );
+    expect(createFeePaymentAdapter).toHaveBeenCalledWith(
+      env,
+      "sdp:v1:production:org%3Aalpha:project:project%2Fone:api_key:key%3Aprimary",
+      "mainnet-beta"
+    );
   });
   it("rejects an incomplete scope instead of emitting an unscoped identity", () => {
     expect(() =>
-      buildKoraUserId({
-        environment: "sandbox",
-        organizationId: "org_test_sponsorship",
-        projectId: "project_1",
-        actor: { type: "user", id: " " },
-      })
+      createSponsorshipFeePayment(
+        { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" },
+        {
+          environment: "sandbox",
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "user", id: " " },
+        },
+        "payments.transfer"
+      )
     ).toThrow("Sponsorship actor id is required");
+    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
   });
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
@@ -155,7 +166,7 @@ describe("sponsorship identity boundary", () => {
     };
     vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
     return createSponsorshipFeePayment(
-      { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env,
+      { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
       {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
@@ -221,7 +232,7 @@ describe("sponsorship identity boundary", () => {
       hasStarted: vi.fn(),
     };
     const feePayment = createSponsorshipFeePayment(
-      { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env,
+      { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
       {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
@@ -255,19 +266,20 @@ describe("sponsorship identity boundary", () => {
         environment: "production",
         signingWalletId: null,
       });
-      c.set("projectId", "project_trusted");
-      c.set("projectEnvironment", "production");
       await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
     });
-    app.get("/probe", (c) => c.text(buildKoraUserId(resolveRequestSponsorshipScope(c))));
+    app.get("/probe", (c) => c.json(resolveRequestSponsorshipScope(c)));
     const response = await app.request(
       "/probe?user_id=attacker",
       { headers: { "x-project-id": "project_attacker" } },
-      {} as Env
+      testEnv
     );
-    expect(await response.text()).toBe(
-      "sdp:v1:production:org_trusted:project:project_trusted:api_key:key_trusted"
-    );
+    expect(await response.json()).toEqual({
+      environment: "production",
+      organizationId: "org_trusted",
+      projectId: "project_trusted",
+      actor: { type: "api_key", id: "key_trusted" },
+    });
   });
   it("derives a user-scoped identity for authenticated Clerk users", async () => {
     const app = new Hono<{
@@ -279,35 +291,13 @@ describe("sponsorship identity boundary", () => {
       c.set("projectEnvironment", "sandbox");
       await runInClusterScope({ projectId: "project_trusted", environment: "sandbox" }, next);
     });
-    app.get("/probe", (c) => c.text(buildKoraUserId(resolveRequestSponsorshipScope(c))));
-    const response = await app.request("/probe");
-    expect(await response.text()).toBe(
-      `sdp:v1:sandbox:${TEST_ORG.id}:project:project_trusted:user:${TEST_USER.id}`
-    );
-  });
-  it("takes a production request's sponsorship project and environment from the open cluster scope", async () => {
-    const app = new Hono<{
-      Bindings: Env;
-    }>();
-    app.use("*", async (c, next) => {
-      c.set("apiKey", {
-        id: "key_trusted",
-        organizationId: "org_trusted",
-        projectId: "project_trusted",
-        role: "api_admin",
-        permissions: ["*"],
-        environment: "production",
-        signingWalletId: null,
-      });
-      await runInClusterScope({ projectId: "project_trusted", environment: "production" }, next);
-    });
     app.get("/probe", (c) => c.json(resolveRequestSponsorshipScope(c)));
     const response = await app.request("/probe", {}, testEnv);
     expect(await response.json()).toEqual({
-      environment: "production",
-      organizationId: "org_trusted",
+      environment: "sandbox",
+      organizationId: TEST_ORG.id,
       projectId: "project_trusted",
-      actor: { type: "api_key", id: "key_trusted" },
+      actor: { type: "user", id: TEST_USER.id },
     });
   });
   it("refuses Clerk sponsorship outside a cluster scope", async () => {
@@ -319,7 +309,6 @@ describe("sponsorship identity boundary", () => {
       await next();
     });
     app.get("/probe", (c) => {
-      expect(() => resolveRequestSponsorshipScope(c)).toThrow(SdpRpcError);
       expect(() => resolveRequestSponsorshipScope(c)).toThrow(
         expect.objectContaining({ code: "CLUSTER_SCOPE_MISSING" })
       );

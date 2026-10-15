@@ -144,7 +144,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
         custodyWallet.id,
         "issuance.authority"
       );
-      const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
+      const mosaic = createMosaicService(env as ApiTestEnv, signer, {
+        mode: "sponsored",
         scope: {
           environment: TEST_PROJECT.environment,
           organizationId: TEST_ORG.id,

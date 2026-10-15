@@ -427,7 +427,7 @@ describe("KoraAdapter user_id forwarding", () => {
           KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
           KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
         },
-        "sdp:v1:production:org:organization:api_key:key",
+        "sdp:v1:production:org:project:prj:api_key:key",
         "devnet"
       )
     ).toThrow(
@@ -441,7 +441,7 @@ describe("KoraAdapter user_id forwarding", () => {
         new KoraAdapter({
           rpcUrl: "http://private-kora.example",
           identityTokenAudience: "http://private-kora.example",
-          userId: "sdp:v1:production:org:organization:api_key:key",
+          userId: "sdp:v1:production:org:project:prj:api_key:key",
         })
     ).toThrow(
       "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"
