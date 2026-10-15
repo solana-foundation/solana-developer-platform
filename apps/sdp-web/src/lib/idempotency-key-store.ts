@@ -65,19 +65,6 @@ function scopedKey(storeKey: string): string {
   return keyScope ? `${storeKey}:${keyScope}` : storeKey;
 }
 
-/**
- * The name an earlier build kept this store's entries under, before entries
- * were scoped by user and org, or `null` while no scope is set (the scoped
- * name is then that name). A key that build left unanswered is adopted by the
- * first claim of its fingerprint, so an upgrade between a lost answer and the
- * retry still resends the first attempt's key. Those entries name no owner: if
- * the adopter is another user, the API refuses the key (422), which retires
- * it, so the worst case is the fresh key the retry would otherwise have sent.
- */
-function legacyKey(storeKey: string): string | null {
-  return keyScope ? storeKey : null;
-}
-
 function storage(): Storage | null {
   try {
     // Both the property access and the availability check can throw: some
@@ -208,40 +195,21 @@ export interface IdempotencyKeyStore {
 export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
   /** The scoped storage name each claim was made under, by `[fingerprint, key]`. */
   const claimedIn = new Map<string, string>();
-  const legacyEntries = (): StoredEntry[] => {
-    const legacy = legacyKey(storeKey);
-    return legacy === null ? [] : readEntries(legacy);
-  };
 
   return {
     has(fingerprint) {
-      return [...readEntries(scopedKey(storeKey)), ...legacyEntries()].some(
-        (entry) => entry.id === fingerprint
-      );
+      return readEntries(scopedKey(storeKey)).some((entry) => entry.id === fingerprint);
     },
 
     claim(fingerprint, mint = () => crypto.randomUUID()) {
       const name = scopedKey(storeKey);
       const entries = readEntries(name);
-      const legacy = legacyEntries();
-      const existing =
-        entries.find((entry) => entry.id === fingerprint) ??
-        legacy.find((entry) => entry.id === fingerprint);
-      const key = existing?.value ?? mint();
+      const key = entries.find((entry) => entry.id === fingerprint)?.value ?? mint();
       // Written again for a kept key too, so `persisted` describes this claim.
       const persisted = writeEntries(name, [
         ...entries.filter((entry) => entry.id !== fingerprint),
         { id: fingerprint, value: key },
       ]);
-      // Adopted from an earlier build: removed there only once storage keeps it
-      // here. A refused write leaves the old entry for the next page to adopt.
-      const legacyName = legacyKey(storeKey);
-      if (persisted && legacyName !== null && legacy.some((entry) => entry.id === fingerprint)) {
-        writeEntries(
-          legacyName,
-          legacy.filter((entry) => entry.id !== fingerprint)
-        );
-      }
       claimedIn.set(JSON.stringify([fingerprint, key]), name);
       return { key, persisted };
     },
@@ -382,22 +350,14 @@ export function createFloorMemo(unscopedKey: string): FloorMemo {
     },
     recall(fingerprint) {
       const entries = read(scopedKey(unscopedKey));
-      if (fingerprint in entries) return entries[fingerprint];
-      // The floor an earlier, unscoped build kept beside a key the key store
-      // adopts (`legacyKey`).
-      const legacy = legacyKey(unscopedKey);
-      if (legacy === null) return undefined;
-      const legacyEntries = read(legacy);
-      return fingerprint in legacyEntries ? legacyEntries[fingerprint] : undefined;
+      return fingerprint in entries ? entries[fingerprint] : undefined;
     },
     forget(fingerprint) {
-      for (const storageKey of [scopedKey(unscopedKey), legacyKey(unscopedKey)]) {
-        if (storageKey === null) continue;
-        const entries = read(storageKey);
-        if (!(fingerprint in entries)) continue;
-        delete entries[fingerprint];
-        write(storageKey, entries);
-      }
+      const storageKey = scopedKey(unscopedKey);
+      const entries = read(storageKey);
+      if (!(fingerprint in entries)) return;
+      delete entries[fingerprint];
+      write(storageKey, entries);
     },
     resetForTests() {
       const storageKey = scopedKey(unscopedKey);
