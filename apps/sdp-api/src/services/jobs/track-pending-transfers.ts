@@ -14,13 +14,19 @@
  *
  * 3. Upgrade "confirmed" transfers to "finalized" once the cluster reports
  *    finality — confirmed is transitional, not terminal.
+ *
+ * Chain reads run per project environment, each in that environment's cluster
+ * scope: a Production project's transfer is checked on mainnet-beta, a Sandbox
+ * project's on devnet.
  */
 
 import { withTransientRpcRetry } from "@sdp/rpc";
-import type { SignatureStatusInfo } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
-import type { TransferChainVerdictStatus } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { getSignatureStatuses, type SignatureStatusInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import type { ProjectEnvironment, TransferChainVerdictStatus } from "@sdp/types";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
+import { getDb } from "@/db";
 import {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
@@ -35,6 +41,7 @@ import type {
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -72,6 +79,47 @@ function hasValidStoredSignature(
     );
     return false;
   }
+}
+
+/**
+ * Group transfers by their project's environment, so each group's chain reads run in that
+ * environment's cluster scope.
+ *
+ * @param env - Runtime environment for the project lookup.
+ * @param transfers - The transfers to group.
+ * @returns The transfers per environment.
+ * @throws AppError `INTERNAL_ERROR` when a transfer has no project or its project does not exist.
+ */
+async function groupByProjectEnvironment<TTransfer extends PaymentTransferRow>(
+  env: Env,
+  transfers: TTransfer[]
+): Promise<Map<ProjectEnvironment, TTransfer[]>> {
+  const projects = new ProjectService(getDb(env));
+  const environmentByProject = new Map<string, ProjectEnvironment>();
+  const byEnvironment = new Map<ProjectEnvironment, TTransfer[]>();
+  for (const transfer of transfers) {
+    if (transfer.project_id === null) {
+      throw internalError(`Transfer ${transfer.id} is missing a project`);
+    }
+    let environment = environmentByProject.get(transfer.project_id);
+    if (environment === undefined) {
+      const project = await projects.getProject(transfer.project_id);
+      if (!project) {
+        throw internalError(
+          `Transfer ${transfer.id} belongs to missing project ${transfer.project_id}`
+        );
+      }
+      environment = project.environment;
+      environmentByProject.set(transfer.project_id, environment);
+    }
+    const group = byEnvironment.get(environment);
+    if (group) {
+      group.push(transfer);
+    } else {
+      byEnvironment.set(environment, [transfer]);
+    }
+  }
+  return byEnvironment;
 }
 
 function partitionByValidStoredSignature(transfers: PaymentTransferRow[]) {
@@ -297,16 +345,32 @@ async function finalizeConfirmedTransfers(
     });
   }
 
-  if (confirmedTransfers.length === 0) {
-    return;
+  for (const [environment, transfers] of await groupByProjectEnvironment(env, confirmedTransfers)) {
+    await runInClusterScope({ projectId: null, environment }, () =>
+      pollConfirmedTransfersForFinality(repo, transfers, nowIso)
+    );
   }
+}
 
+/**
+ * One finalization poll over confirmed transfers that share the open cluster scope's cluster.
+ *
+ * @param repo - System payments repository.
+ * @param confirmedTransfers - Confirmed transfers of one environment, with valid signatures.
+ * @param nowIso - Timestamp applied to every polled row.
+ * @returns Resolves when the poll has been recorded.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+async function pollConfirmedTransfersForFinality(
+  repo: PaymentsRepository,
+  confirmedTransfers: PaymentTransferWithSignature[],
+  nowIso: string
+): Promise<void> {
   const signatures = confirmedTransfers.map((transfer) => transfer.signature);
 
   let statuses: Array<SignatureStatusInfo | null>;
   try {
-    const rpc = solanaRpc.createRpc(env);
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
+    statuses = await getSignatureStatuses(createClusterRpc(), signatures, {
       searchTransactionHistory: true,
     });
   } catch (err) {
@@ -452,18 +516,37 @@ async function syncProcessingTransfersOnChain(
     }
   }
 
-  if (processingWithSig.length === 0) {
-    return;
+  for (const [environment, transfers] of await groupByProjectEnvironment(env, processingWithSig)) {
+    await runInClusterScope({ projectId: null, environment }, () =>
+      syncProcessingTransfersOnCluster(env, repo, transfers, nowIso)
+    );
   }
+}
 
+/**
+ * Sync processing transfers that share the open cluster scope's cluster against that cluster.
+ *
+ * @param env - Runtime environment for repository construction.
+ * @param repo - System payments repository.
+ * @param processingWithSig - Processing transfers of one environment, with valid signatures.
+ * @param nowIso - Timestamp applied to every updated row.
+ * @returns Resolves when every verdict the cluster gave has been applied.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+async function syncProcessingTransfersOnCluster(
+  env: Env,
+  repo: PaymentsRepository,
+  processingWithSig: PaymentTransferWithSignature[],
+  nowIso: string
+): Promise<void> {
   const signatures = processingWithSig.map((transfer) => transfer.signature);
 
   let statuses: Array<SignatureStatusInfo | null>;
 
-  let rpc: ReturnType<typeof solanaRpc.createRpc>;
+  let rpc: SolanaRpc;
   try {
-    rpc = solanaRpc.createRpc(env);
-    statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
+    rpc = createClusterRpc();
+    statuses = await getSignatureStatuses(rpc, signatures);
   } catch (err) {
     getLogger().error(
       {
@@ -512,7 +595,7 @@ async function syncProcessingTransfersOnChain(
 async function reconcileExpiredLegacyCacheMisses(
   env: Env,
   repo: PaymentsRepository,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   transfers: PaymentTransferWithSignature[],
   nowIso: string
 ): Promise<void> {
@@ -539,7 +622,7 @@ async function reconcileExpiredLegacyCacheMisses(
 async function reconcileSignedSubmissionCacheMisses(
   env: Env,
   repo: PaymentsRepository,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   signedSubmissions: PaymentTransferWithSignedSubmission[],
   nowIso: string
 ): Promise<void> {
@@ -665,7 +748,7 @@ async function keepStartedSubmissionForReconciliation(
 }
 
 async function getArchivedStatuses(
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   transfers: PaymentTransferWithSignature[]
 ): Promise<Array<SignatureStatusInfo | null> | null> {
   if (transfers.length === 0) {
@@ -673,7 +756,7 @@ async function getArchivedStatuses(
   }
 
   try {
-    const statuses = await solanaRpc.getSignatureStatuses(
+    const statuses = await getSignatureStatuses(
       rpc,
       transfers.map((transfer) => transfer.signature),
       { searchTransactionHistory: true }

@@ -1,4 +1,4 @@
-import { getSolanaConfig } from "@sdp/rpc";
+import { getSolanaConfig, resolveDefaultCluster } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -76,7 +76,10 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const mint = assertValidAddress(normalizePaymentToken(token, env), "token");
+  const mint = assertValidAddress(
+    normalizePaymentToken(token, resolveDefaultCluster(env)),
+    "token"
+  );
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
     const cluster = getSolanaConfig(env).network;

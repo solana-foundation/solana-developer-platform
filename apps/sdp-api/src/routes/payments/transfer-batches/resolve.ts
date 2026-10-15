@@ -1,4 +1,5 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
+import { resolveDefaultCluster } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
@@ -205,7 +206,7 @@ export async function resolveBatchMovement(
   input: CreateTransferBatchInput,
   authorized: AuthorizedBatchRequest
 ): Promise<ResolvedBatchRequest> {
-  const token = normalizePaymentToken(input.token, c.env);
+  const token = normalizePaymentToken(input.token, resolveDefaultCluster(c.env));
   const rpc = solanaRpc.createRpc(c.env);
   const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
   const recipients = resolveRecipients({
