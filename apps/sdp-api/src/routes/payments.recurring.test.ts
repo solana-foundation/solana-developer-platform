@@ -26,6 +26,7 @@ import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories"
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
@@ -3480,6 +3481,14 @@ describe("Payments routes — recurring", () => {
         .bind(productionProjectId, TEST_API_KEY.id)
         .run();
       await seedCachedKey({ projectId: productionProjectId, environment: "production" });
+      await new SponsorshipBudgetRepository(getDb(env)).setPolicyEnabled({
+        network: "mainnet",
+        scopeType: "global",
+        scopeId: null,
+        enabled: true,
+        operator: "operator:recurring-production-test",
+        reason: "Approve mainnet sponsorship for the production project",
+      });
 
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await activateRecurringPaymentFixture({
