@@ -1,57 +1,63 @@
 import { type Browser, expect } from "@playwright/test";
-import type { PaymentsDashboardWallet } from "@sdp/types";
 import { Client } from "pg";
+import { paymentsWalletsResponseSchema } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getE2EEnv } from "../env";
 import { getPlaywrightAdminSession } from "./auth-session";
 import { createLocalApiClient } from "./local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
+  getPlaywrightDatabaseUrl,
   resolvePlaywrightProjects,
 } from "./local-dashboard-bootstrap";
 
-/** This fixture mutates only an explicitly configured isolated local database. */
-export function walletIdentityDatabaseUrl(
-  profile: "foundation" | "recurring" = "foundation"
-): string {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl)
-    throw new Error("Wallet identity E2E requires an explicit isolated DATABASE_URL");
+export function walletIdentityDatabaseUrl(): string {
+  const databaseUrl = getPlaywrightDatabaseUrl();
   const database = new URL(databaseUrl);
   const apiUrl = new URL(getBootstrapApiBaseUrl());
   if (
     getE2EEnv().useExternalApi ||
+    !["http:", "https:"].includes(apiUrl.protocol) ||
+    !["postgres:", "postgresql:"].includes(database.protocol) ||
     !["127.0.0.1", "localhost"].includes(apiUrl.hostname) ||
-    !["127.0.0.1", "localhost"].includes(database.hostname) ||
-    !database.port ||
-    database.port === "5432" ||
-    (profile === "recurring"
-      ? database.port !== "15454" ||
-        database.pathname !== "/sdp_payments_pr4_8996" ||
-        apiUrl.port !== "8914"
-      : database.pathname !== "/sdp_wallet_foundation_e2e")
+    !["127.0.0.1", "localhost"].includes(database.hostname)
   ) {
-    throw new Error(
-      "Wallet identity E2E requires loopback API and its explicitly assigned isolated database"
-    );
+    throw new Error("Wallet identity E2E requires loopback API and Postgres");
   }
 
   return databaseUrl;
 }
 
-export async function cleanupWalletIdentityFixtures(
-  profile: "foundation" | "recurring" = "foundation"
+async function cleanupWalletIdentityFixtures(
+  databaseUrl: string,
+  organizationId: string,
+  records: Array<{ credentialId: string; connectionId: string; walletId: string }>
 ) {
-  const db = new Client({ connectionString: walletIdentityDatabaseUrl(profile) });
+  const db = new Client({ connectionString: databaseUrl });
   await db.connect();
+  const connectionIds = records.map((record) => record.connectionId);
   try {
     await db.query("BEGIN");
     await db.query(
-      "UPDATE custody_connections SET default_custody_wallet_id = NULL WHERE id LIKE 'cconn_identity_%'"
+      `UPDATE custody_connections SET default_custody_wallet_id = NULL
+       WHERE organization_id = $1 AND id = ANY($2::text[])`,
+      [organizationId, connectionIds]
     );
-    await db.query("DELETE FROM custody_wallets WHERE id LIKE 'cwlt_identity_%'");
-    await db.query("DELETE FROM custody_connections WHERE id LIKE 'cconn_identity_%'");
-    await db.query("DELETE FROM provider_credentials WHERE id LIKE 'pcred_identity_%'");
+    await db.query(
+      `DELETE FROM custody_wallets
+       WHERE id = ANY($1::text[]) AND custody_connection_id IN (
+         SELECT id FROM custody_connections WHERE organization_id = $2 AND id = ANY($3::text[])
+       )`,
+      [records.map((record) => record.walletId), organizationId, connectionIds]
+    );
+    await db.query(
+      `DELETE FROM custody_connections WHERE organization_id = $1 AND id = ANY($2::text[])`,
+      [organizationId, connectionIds]
+    );
+    await db.query(
+      `DELETE FROM provider_credentials WHERE organization_id = $1 AND id = ANY($2::text[])`,
+      [organizationId, records.map((record) => record.credentialId)]
+    );
     await db.query("COMMIT");
   } catch (error) {
     await db.query("ROLLBACK");
@@ -63,11 +69,10 @@ export async function cleanupWalletIdentityFixtures(
 
 export async function bootstrapWalletIdentityFixtures(
   browser: Browser,
-  profile: "foundation" | "recurring" = "foundation"
+  options?: { preserveExistingFixtures?: boolean }
 ) {
-  const databaseUrl = walletIdentityDatabaseUrl(profile);
-  if (profile === "foundation") await cleanupWalletIdentityFixtures(profile);
-  const runLabel = profile === "recurring" ? ` ${crypto.randomUUID().slice(0, 8)}` : "";
+  const databaseUrl = walletIdentityDatabaseUrl();
+  const runLabel = options?.preserveExistingFixtures ? ` ${crypto.randomUUID().slice(0, 8)}` : "";
   const admin = await getPlaywrightAdminSession(browser);
   const fixture = await bootstrapLocalWalletFixtures({
     identity: admin.identity,
@@ -77,7 +82,7 @@ export async function bootstrapWalletIdentityFixtures(
     walletCount: 1,
     fundSourceWallet: false,
     tier: "enterprise",
-    preserveExistingFixtures: profile === "recurring",
+    preserveExistingFixtures: options?.preserveExistingFixtures,
   });
   const walletA = fixture.wallets[0];
   if (!walletA) throw new Error("Local wallet identity fixture was not created");
@@ -93,7 +98,14 @@ export async function bootstrapWalletIdentityFixtures(
   );
   const db = new Client({ connectionString: databaseUrl });
   await db.connect();
-  const walletIds: string[] = [];
+  const records: Array<{ credentialId: string; connectionId: string; walletId: string }> = [];
+  const cleanup = async () => {
+    try {
+      await cleanupWalletIdentityFixtures(databaseUrl, fixture.organization.localOrgId, records);
+    } finally {
+      await admin.page.close();
+    }
+  };
   try {
     await db.query("BEGIN");
     for (const [ownerProject, label] of [
@@ -132,26 +144,49 @@ export async function bootstrapWalletIdentityFixtures(
          WHERE id = $1`,
         [connectionId, walletId, `sha256:wallet-identity-${suffix}`]
       );
-      walletIds.push(walletId);
+      records.push({ credentialId, connectionId, walletId });
     }
     await db.query("COMMIT");
   } catch (error) {
     await db.query("ROLLBACK");
-    await admin.page.close();
+    await cleanup();
     throw error;
   } finally {
     await db.end();
   }
-  const [wallets, otherWallets] = await Promise.all([
-    api.get<{ wallets: PaymentsDashboardWallet[] }>("/v1/wallets"),
-    otherApi.get<{ wallets: PaymentsDashboardWallet[] }>("/v1/wallets"),
-  ]);
-  const walletB = wallets.wallets.find((wallet) => wallet.id === walletIds[0]);
-  const otherWallet = otherWallets.wallets.find((wallet) => wallet.id === walletIds[1]);
-  if (!walletB || !otherWallet) throw new Error("Project-owned alias fixtures were not listed");
-  expect(walletB.isRuntimeExecutionAllowed).toBe(true);
-  expect(otherWallet.isRuntimeExecutionAllowed).toBe(true);
-  expect(walletB.walletId).toBe(walletA.walletId);
-  expect(walletB.publicKey).toBe(walletA.publicKey);
-  return { admin, api, otherApi, projectId, otherProjectId, walletA, walletB, otherWallet };
+  try {
+    const [walletBRecord, otherWalletRecord] = records;
+    if (!walletBRecord || !otherWalletRecord) {
+      throw new Error("Project-owned alias fixtures were not created");
+    }
+    const [wallets, otherWallets] = await Promise.all([
+      api.get("/v1/wallets"),
+      otherApi.get("/v1/wallets"),
+    ]);
+    const walletB = paymentsWalletsResponseSchema.shape.data
+      .parse(wallets)
+      .wallets.find((wallet) => wallet.id === walletBRecord.walletId);
+    const otherWallet = paymentsWalletsResponseSchema.shape.data
+      .parse(otherWallets)
+      .wallets.find((wallet) => wallet.id === otherWalletRecord.walletId);
+    if (!walletB || !otherWallet) throw new Error("Project-owned alias fixtures were not listed");
+    expect(walletB.isRuntimeExecutionAllowed).toBe(true);
+    expect(otherWallet.isRuntimeExecutionAllowed).toBe(true);
+    expect(walletB.walletId).toBe(walletA.walletId);
+    expect(walletB.publicKey).toBe(walletA.publicKey);
+    return {
+      admin,
+      api,
+      otherApi,
+      projectId,
+      otherProjectId,
+      walletA,
+      walletB,
+      otherWallet,
+      cleanup,
+    };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
 }

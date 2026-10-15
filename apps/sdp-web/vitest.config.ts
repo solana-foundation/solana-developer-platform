@@ -1,7 +1,7 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Unit tests for pure modules only (*.unit.test.ts) — e2e stays on Playwright.
+// Unit tests (*.unit.test.ts) — browser E2E stays on Playwright.
 export default defineConfig({
   test: {
     include: ["src/**/*.unit.test.{ts,tsx}"],

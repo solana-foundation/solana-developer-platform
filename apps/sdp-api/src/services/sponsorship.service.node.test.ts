@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import * as feePayment from "@sdp/payments/fee-payment";
-import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import * as feePayment from "@sdp/fee-payment";
+import { createFeePaymentAdapter, type FeePaymentPort } from "@sdp/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Blockhash,
@@ -31,6 +31,7 @@ import {
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
 import { env as testEnv } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -40,6 +41,13 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 const projectMocks = { getProject: vi.fn() };
+
+const readMoneyAdmissionFacts = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  readMoneyAdmissionFacts,
+}));
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 
@@ -71,8 +79,41 @@ function otherTransaction(): Uint8Array {
   return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
 }
 
+async function seedSponsorshipProject(): Promise<void> {
+  await seedTestDatabase(testEnv);
+  const db = getDb(testEnv);
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        "org_test_sponsorship",
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        TEST_ORG.tier,
+        TEST_ORG.status,
+        TEST_ORG.settings
+      ),
+    db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
+  ]);
+  await seedDefaultProjects(db, {
+    organizationId: "org_test_sponsorship",
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id],
+    ids: { sandbox: "project_1", production: "project_1_production" },
+  });
+}
+
 describe("sponsorship identity boundary", () => {
   beforeEach(() => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "active",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
     vi.spyOn(feePayment, "createFeePaymentAdapter").mockReturnValue({
       providerId: "kora",
       getFeePayer: vi.fn(),
@@ -107,6 +148,7 @@ describe("sponsorship identity boundary", () => {
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -121,6 +163,7 @@ describe("sponsorship identity boundary", () => {
   it("selects the paymaster by the scope's cluster when a flow names one", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
+      movement: "payments.transfer",
       environment: "production",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -134,7 +177,7 @@ describe("sponsorship identity boundary", () => {
     );
   });
   it("continues a real legacy reservation and its Kora identity without admitting the exact actor again", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     const getNetworkFee = vi.spyOn(solanaRpc, "getTransactionNetworkFee").mockResolvedValue(5_000n);
     const provider: FeePaymentPort = {
       providerId: "kora",
@@ -161,6 +204,7 @@ describe("sponsorship identity boundary", () => {
       environment: "sandbox" as const,
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
+      movement: "payments.transfer" as const,
       actor: { type: "wallet" as const, id: "provider_recipient" },
     };
     const legacy = createSponsorshipFeePayment(testEnv, scope);
@@ -211,7 +255,7 @@ describe("sponsorship identity boundary", () => {
   });
 
   it("refuses a historical managed reservation on self-hosted continuation instead of ignoring its charge", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     await new SponsorshipBudgetRepository(getDb(testEnv)).createReservation({
       id: "sbr_historic_managed",
       network: "devnet",
@@ -242,6 +286,7 @@ describe("sponsorship identity boundary", () => {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
         projectId: "project_1",
+        movement: "payments.transfer",
         actor: { type: "wallet", id: "cwlt_recipient" },
         continuity: {
           deploymentMode: "self_hosted",
@@ -259,6 +304,59 @@ describe("sponsorship identity boundary", () => {
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 
+  it.each(["sign", "send", "owned"] as const)(
+    "refuses self-hosted continuity %s after organization revocation",
+    async (operation) => {
+      await seedTestDatabase(testEnv);
+      readMoneyAdmissionFacts.mockResolvedValue({
+        organizationStatus: "deleted",
+        projectEnvironment: "sandbox",
+        rawSettings: null,
+      });
+      const provider: FeePaymentPort = {
+        providerId: "kora",
+        getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
+        signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
+        signAndSend: vi.fn(),
+      };
+      vi.mocked(createFeePaymentAdapter).mockReturnValue(provider);
+      const feePayment = createSponsorshipFeePayment(
+        { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
+        {
+          movement: "payments.transfer",
+          environment: "sandbox",
+          organizationId: "org_test_sponsorship",
+          projectId: "project_1",
+          actor: { type: "wallet", id: "cwlt_recipient" },
+          continuity: {
+            deploymentMode: "self_hosted",
+            legacyActor: { type: "wallet", id: "provider_recipient" },
+            exactActor: { type: "wallet", id: "cwlt_recipient" },
+            admission: "continue_only",
+            persistAccountingIdentity: vi.fn(),
+          },
+        }
+      );
+
+      const result = {
+        sign: () => feePayment.signAsFeePayer(buildTransaction()),
+        send: () => feePayment.signAndSend(buildTransaction()),
+        owned: () =>
+          feePayment.prepareOwnedSubmission(buildTransaction(), {
+            persistSigned: vi.fn(),
+            markStarted: vi.fn(),
+            hasStarted: vi.fn(),
+          }),
+      }[operation]();
+      await expect(result).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        reason: "organization_inactive",
+      });
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(provider.signAndSend).not.toHaveBeenCalled();
+    }
+  );
+
   it("preserves self-hosted quota identity without fabricating managed accounting", async () => {
     await seedTestDatabase(testEnv);
     const provider: FeePaymentPort = {
@@ -275,6 +373,7 @@ describe("sponsorship identity boundary", () => {
         environment: "sandbox",
         organizationId: "org_test_sponsorship",
         projectId: "project_1",
+        movement: "payments.transfer",
         actor: { type: "wallet", id: "cwlt_recipient" },
         continuity: {
           deploymentMode: "self_hosted",
@@ -318,6 +417,7 @@ describe("sponsorship identity boundary", () => {
             environment: "sandbox",
             organizationId: "org_test_sponsorship",
             projectId: "project_1",
+            movement: "payments.transfer",
             actor: { type: "wallet", id: "cwlt_recipient" },
             continuity: {
               deploymentMode,
@@ -334,7 +434,7 @@ describe("sponsorship identity boundary", () => {
   );
 
   it("fences concurrent compatible writers while the real reservation waits for domain linkage", async () => {
-    await seedTestDatabase(testEnv);
+    await seedSponsorshipProject();
     vi.spyOn(solanaRpc, "getTransactionNetworkFee").mockResolvedValue(5_000n);
     const provider: FeePaymentPort = {
       providerId: "kora",
@@ -361,6 +461,7 @@ describe("sponsorship identity boundary", () => {
       environment: "sandbox" as const,
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
+      movement: "payments.transfer" as const,
       actor: { type: "wallet" as const, id: "cwlt_recipient" },
       continuity: {
         deploymentMode: "managed" as const,
@@ -404,6 +505,7 @@ describe("sponsorship identity boundary", () => {
           environment: "sandbox",
           organizationId: "org_test_sponsorship",
           projectId: "project_1",
+          movement: "payments.transfer",
           actor: { type: "wallet", id: "foreign_wallet" },
           continuity: {
             deploymentMode: "self_hosted",
@@ -427,12 +529,28 @@ describe("sponsorship identity boundary", () => {
     };
     vi.mocked(createFeePaymentAdapter).mockReturnValueOnce(provider);
     return createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
       actor: { type: "user", id: "usr_test_sponsorship" },
     });
   }
+  it("refuses a self-hosted sponsor signature for a start the organization may not make", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue({
+      organizationStatus: "deleted",
+      projectEnvironment: "sandbox",
+      rawSettings: null,
+    });
+    const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
+    const feePayment = selfHostedFeePayment(signAsFeePayer);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "organization_inactive",
+    });
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
     const feePayment = selfHostedFeePayment(async (transaction) => transaction);
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
@@ -474,6 +592,7 @@ describe("sponsorship identity boundary", () => {
       hasStarted: vi.fn(),
     };
     const feePayment = createSponsorshipFeePayment({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env, {
+      movement: "payments.transfer",
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
       projectId: "project_1",
@@ -560,6 +679,7 @@ describe("sponsorship identity boundary", () => {
     });
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     await createProjectSponsorshipFeePayment(env, {
+      movement: "recurring.collect",
       organizationId: "org_stored",
       projectId: "project_stored",
       actor: { type: "wallet", id: "wallet_stored" },
@@ -579,6 +699,7 @@ describe("sponsorship identity boundary", () => {
     });
     await expect(
       createProjectSponsorshipFeePayment(testEnv, {
+        movement: "recurring.collect",
         organizationId: "org_claimed",
         projectId: "project_stored",
         actor: { type: "wallet", id: "wallet_stored" },
@@ -593,7 +714,7 @@ describe("sponsorship construction guard", () => {
     "createKoraAdapter",
     "KoraAdapter",
   ]);
-  const FEE_PAYMENT_SPECIFIER = `@sdp/payments/fee-payment(?:/[^"']*)?`;
+  const FEE_PAYMENT_SPECIFIER = `@sdp/fee-payment(?:/[^"']*)?`;
   const OPAQUE_IMPORT_PATTERNS = [
     new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
     new RegExp(String.raw`import\s+(?!type\b)[\w$]+\s+from\s+["']${FEE_PAYMENT_SPECIFIER}["']`),
@@ -607,7 +728,7 @@ describe("sponsorship construction guard", () => {
     new RegExp(String.raw`import\(\s*["']${FEE_PAYMENT_SPECIFIER}["']\s*\)`),
   ];
   const NAMED_IMPORT_PATTERN =
-    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/payments\/fee-payment(?:\/[^"']*)?["']/g;
+    /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/fee-payment(?:\/[^"']*)?["']/g;
   function sourceFiles(directory: string): string[] {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const entryPath = path.join(directory, entry.name);

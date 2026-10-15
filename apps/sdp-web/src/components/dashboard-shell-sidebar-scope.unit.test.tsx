@@ -56,6 +56,7 @@ function shell(newDesign: boolean) {
         markets: false,
         payments: true,
         privateChannels: false,
+        releaseChannel: "experimental",
         ramps: false,
         newDesign,
       }}

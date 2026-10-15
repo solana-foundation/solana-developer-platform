@@ -49,8 +49,7 @@ const demoOpSchema = z.discriminatedUnion("k", [
     k: z.literal("ramp"),
     id,
     at,
-    /** The ramp provider; sessions recorded before providers were named ran Lightspark. */
-    provider: z.enum(RAMP_PROVIDERS).default("lightspark"),
+    provider: z.enum(RAMP_PROVIDERS),
     dir: z.enum(["onramp", "offramp"]),
     cp: id,
     wallet: id,
@@ -67,17 +66,6 @@ const demoOpSchema = z.discriminatedUnion("k", [
   z.object({ k: z.literal("consent"), id, at, provider: z.enum(RAMP_PROVIDERS) }),
   /** A ramp provider approved a contact's identity check (demo mode's Simulate verification). */
   z.object({ k: z.literal("verified"), id, at, provider: z.enum(RAMP_PROVIDERS) }),
-  z.object({
-    k: z.literal("payout-account"),
-    id,
-    at,
-    cp: id,
-    country: text,
-    rail: text,
-    fiat: text,
-    bank: text.nullable(),
-    last4: text.nullable(),
-  }),
   z.object({
     k: z.literal("request"),
     id,

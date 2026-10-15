@@ -19,6 +19,8 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
+  createFeePaymentAdapterMock,
+  createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   getAccountInfoMock,
   getRecentBlockhashMock,
@@ -26,6 +28,7 @@ import {
   mockTokenSupplyDecimalsOnce,
   seedCachedKey,
   seedCounterparty,
+  sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -254,11 +257,6 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(response.status).toBe(201);
     const planId = (await response.json()).data.subscriptionPlan.id;
-    await getDb(env)
-      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-      VALUES ('akw_subscription_owner', ?, ?, '["payments:write"]')`)
-      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
-      .run();
     await seedCachedKey({
       walletScope: "selected",
       walletBindings: [
@@ -282,7 +280,10 @@ describe("Payments routes — subscriptions", () => {
     mockTokenSupplyDecimalsOnce();
     expect((await prepare()).status).toBe(200);
     await getDb(env)
-      .prepare("DELETE FROM api_key_wallet_permissions WHERE id = 'akw_subscription_owner'")
+      .prepare(
+        "UPDATE api_key_wallet_permissions SET permissions = '[]' WHERE api_key_id = ? AND wallet_id = ?"
+      )
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
       .run();
     getRecentBlockhashMock.mockClear();
     expect((await prepare()).status).toBe(403);
@@ -1032,5 +1033,13 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet1,
       TEST_MOCK_FEE_PAYER,
     ]);
+    expect(getRecentBlockhashMock).toHaveBeenCalledTimes(5);
+    expect(createFeePaymentAdapterMock).toHaveBeenCalledTimes(5);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    for (const { value: provider } of createFeePaymentAdapterMock.mock.results) {
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(provider.signAndSend).not.toHaveBeenCalled();
+    }
   });
 });

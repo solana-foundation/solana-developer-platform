@@ -2,10 +2,10 @@
  * Kora Fee Payment Integration Tests
  *
  * Tests the Kora adapter against a running Kora instance.
- * Requires Kora to be running locally (docker compose up) or CI environment.
+ * Requires Kora to be running locally (pnpm kora:local:up) or CI environment.
  *
  * Run locally:
- *   pnpm kora:up && pnpm --filter @sdp/api-integration test
+ *   pnpm kora:local:up && KORA_RPC_URL=http://127.0.0.1:18081 pnpm --filter @sdp/api-integration test
  *
  * Override URL for CI:
  *   KORA_RPC_URL=http://kora:8080 pnpm --filter @sdp/api-integration test

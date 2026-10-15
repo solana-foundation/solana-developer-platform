@@ -33,6 +33,7 @@ import {
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -515,7 +516,13 @@ export async function createChannelTransfer(
       // duplicate under a fresh key; fall through and ask SPC instead.
       signature = recordedSignature;
     } else {
-      return fail(describeTxError(error, "Transfer submission failed."));
+      const failed = await fail(describeTxError(error, "Transfer submission failed."));
+      // Refused before anything was signed: the row records it, and the caller
+      // gets the 403 rather than a failed transfer that looks accepted.
+      if (error instanceof MoneyMovementRefusedError) {
+        throw error;
+      }
+      return failed;
     }
   }
 

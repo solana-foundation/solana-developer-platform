@@ -202,8 +202,8 @@ export type BvnkPayErrorCode = "MER-PAY-2010" | "MER-PAY-2012" | "MER-PAY-2001" 
 export class BvnkPayRequestError extends SdpPaymentsError {
   readonly bvnkCode: BvnkPayErrorCode;
 
-  constructor(bvnkCode: BvnkPayErrorCode, message: string) {
-    super("BAD_REQUEST", message);
+  constructor(bvnkCode: BvnkPayErrorCode, message: string, diagnostics?: Record<string, unknown>) {
+    super("BAD_REQUEST", message, undefined, diagnostics);
     this.name = this.constructor.name;
     this.bvnkCode = bvnkCode;
   }
@@ -270,16 +270,15 @@ function bvnkPayRequestError(status: number, raw: string, parsed: unknown): SdpP
   if (fields === undefined) {
     return bvnkRequestFailure(status, raw, parsed);
   }
-  const detail =
-    fields.message === undefined
-      ? `BVNK request failed with status ${status}: ${fields.code}`
-      : `BVNK request failed with status ${status}: ${fields.code} ${fields.message}`;
   switch (fields.code) {
     case "MER-PAY-2010":
     case "MER-PAY-2012":
     case "MER-PAY-2001":
     case "MER-PAY-2009":
-      return new BvnkPayRequestError(fields.code, detail);
+      return new BvnkPayRequestError(fields.code, `BVNK request failed with status ${status}`, {
+        providerCode: fields.code,
+        providerMessage: fields.message,
+      });
     default:
       return bvnkRequestFailure(status, raw, parsed);
   }

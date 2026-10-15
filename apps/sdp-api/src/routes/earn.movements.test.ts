@@ -90,20 +90,12 @@ function cachedKey(
  */
 async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
+  // seedCachedApiKey writes the binding rows authentication reads.
   await seedCachedApiKey(
     env,
     keyHash,
     cachedKey({ walletScope: "selected", signingWalletIds: providerWalletIds })
   );
-  for (const providerWalletId of providerWalletIds) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, '["*"]')`
-      )
-      .bind(`akwp_${crypto.randomUUID()}`, API_KEY.id, providerWalletId)
-      .run();
-  }
 }
 
 async function seedScope(): Promise<void> {
@@ -646,8 +638,10 @@ describe("GET /v1/earn/movements", () => {
       // vault reads apply. It must not silently invert into "no filter": a vault
       // movement is one project's signed transaction and stays hidden, while
       // custodial movements remain visible because program wallets carry no such
-      // binding. That asymmetry IS the visibility union.
-      await bindKeyToWallets([]);
+      // binding. That asymmetry IS the visibility union. (A selected key with no
+      // binding rows at all is an all-wallet key; the binding must exist and
+      // resolve to nothing.)
+      await bindKeyToWallets(["wallet_unresolvable"]);
 
       const body = await movementsJson();
       expect(body.movements.map((m) => m.id)).toEqual([withdrawal.id]);

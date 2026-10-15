@@ -35,7 +35,12 @@ function loadLocalEnvFile(filePath) {
 }
 
 const localEnvPath = path.resolve(appDir, ".env.local");
-const localEnv = loadLocalEnvFile(localEnvPath);
+// Written by scripts/kora-local/up.sh (pnpm dev:kora); .env.local still wins.
+const koraLocalEnvPath = path.resolve(
+  process.env.KORA_LOCAL_STATE_DIR ?? path.resolve(appDir, "../../.secrets/kora-local"),
+  "api.env"
+);
+const localEnv = { ...loadLocalEnvFile(koraLocalEnvPath), ...loadLocalEnvFile(localEnvPath) };
 const port = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
 const databaseUrl =
   // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback.

@@ -1,8 +1,9 @@
-import { SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import { type RampProviderId, SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { transferListResponse } from "@/openapi/paths/responses";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -52,7 +53,7 @@ describe("Payments routes — list transfers", () => {
     memo?: string | null;
     type?: "transfer" | "transfer_batch" | "onramp" | "offramp";
     direction?: "inbound" | "outbound";
-    provider?: "moonpay" | "lightspark" | "bvnk" | "moneygram" | "coinbase" | "mural" | "stripe";
+    provider?: RampProviderId;
     providerReference?: string | null;
     createdAt?: string;
   }): Promise<void> {
@@ -852,10 +853,7 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as {
-        data: Array<{ id: string }>;
-        meta: { total: number };
-      };
+      const body = transferListResponse.parse(await response.json());
       expect(body.data.map((transfer) => transfer.id).sort()).toEqual([
         "xfr_exact_authorized",
         "xfr_legacy_authorized",

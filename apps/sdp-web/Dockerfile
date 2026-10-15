@@ -45,9 +45,9 @@ COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 # The Sentry scrubbing hooks in all three sentry.*.config.ts files.
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
-# package and its workspace deps (@sdp/payments) into the frozen-install closure.
+# package and its workspace deps (@sdp/fee-payment) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
-COPY packages/sdp-payments/package.json ./packages/sdp-payments/
+COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
 
@@ -68,7 +68,7 @@ COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-issuance ./packages/sdp-issuance
-COPY packages/sdp-payments ./packages/sdp-payments
+COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).

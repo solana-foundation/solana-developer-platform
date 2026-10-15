@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
 
@@ -23,6 +25,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     return new Response("Not Found", { status: 404 });
   }
 
+  // A page outside the deployment's release channel is not in `source`.
+  if (!source.getPage(slug) && !source.getPage([...slug, "index"])) {
+    return new Response("Not Found", { status: 404 });
+  }
+
   const contentDir = path.resolve(process.cwd(), "content/docs");
   const contentDirPrefix = contentDir + path.sep;
 
@@ -35,7 +42,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     if (!filePath.startsWith(contentDirPrefix)) continue;
     try {
       const raw = await readFile(filePath, "utf8");
-      const body = stripMdxShell(raw);
+      const body = stripMdxShell(expandDocsBlocks(raw, filePath));
       const pageUrl = `/docs/${slug.join("/")}`;
       const mdUrl = `${pageUrl}.md`;
 

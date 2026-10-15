@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: Solana JSON-RPC method names, not credentials.
-import type { RpcTransport } from "@solana/kit";
+import { isJsonRpcPayload, type RpcTransport } from "@solana/kit";
 
 /**
  * Solana JSON-RPC methods that only read, so sending one twice is harmless.
@@ -59,9 +59,7 @@ const READ_METHODS: ReadonlySet<string> = new Set([
 
 /** One JSON-RPC request (never a batch) whose method only reads. */
 function isJsonRpcRead(payload: unknown): boolean {
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return false;
-  const method = (payload as { method?: unknown }).method;
-  return typeof method === "string" && READ_METHODS.has(method);
+  return isJsonRpcPayload(payload) && READ_METHODS.has(payload.method);
 }
 
 /**

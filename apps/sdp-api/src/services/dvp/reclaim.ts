@@ -117,7 +117,8 @@ export async function reclaimDvpTradeLeg(
     env,
     params.organizationId,
     params.projectId,
-    params.custodyWalletId
+    params.custodyWalletId,
+    "dvp.reclaim"
   );
   // The handler matched this wallet to the party address from the database.
   // The program only accepts the party itself, so a signer that resolves to
@@ -133,6 +134,7 @@ export async function reclaimDvpTradeLeg(
 
   // Sponsorship only after every refusal above, as in fund and settle.
   const feePayment = await createProjectSponsorshipFeePayment(env, {
+    movement: "dvp.reclaim",
     organizationId: params.organizationId,
     projectId: params.projectId,
     actor: { type: "wallet", id: params.custodyWalletId },

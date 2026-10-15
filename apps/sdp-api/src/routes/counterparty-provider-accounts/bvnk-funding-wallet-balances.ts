@@ -4,6 +4,7 @@ import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { ProviderWalletBalance } from "@sdp/types";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { getLogger } from "@/runtime/logger";
+import { paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 
 type ReferencedFundingWalletRow = CounterpartyProviderAccountRow & {
   external_account_reference: string;
@@ -58,6 +59,7 @@ export async function readBvnkFundingWalletBalances(
             provider_account_id: row.id,
             wallet_id: row.external_account_reference,
             error_message: reason instanceof Error ? reason.message : String(reason),
+            error_diagnostics: paymentsErrorDiagnostics(reason),
           },
           "[bvnk] funding-wallet balance read failed"
         );

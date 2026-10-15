@@ -197,20 +197,28 @@ test("the breaking directive allows a migrations-only PR", () => {
   assert.equal(check(sql, [SQL, "apps/sdp-api/src/routes/a.ts"]).length, 1);
 });
 
-test("the breaking directive ignores changed test files outside the migrations directory", () => {
+test("the breaking directive ignores changed test files and test helpers outside the migrations directory", () => {
   const sql = "-- sdp:migration-compat: breaking\nALTER TABLE a DROP COLUMN b;";
   assert.deepEqual(
     check(sql, [
       SQL,
       "apps/sdp-api/src/routes/foo.test.ts",
       "apps/sdp-web/playwright/tests/bar.e2e.spec.ts",
+      "apps/sdp-api/src/test/helpers/custody.ts",
+      "packages/sdp-api-integration/src/helpers/integration.ts",
     ]),
     []
   );
+});
 
-  assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/test/helpers/custody.ts"]), [
-    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files; found apps/sdp-api/src/test/helpers/custody.ts.`,
-  ]);
+test("the breaking directive flags source files whose paths only resemble a test helper root", () => {
+  const sql = "-- sdp:migration-compat: breaking\nALTER TABLE a DROP COLUMN b;";
+  assert.deepEqual(
+    check(sql, [SQL, "apps/sdp-api/src/testing-utils.ts", "packages/sdp-api-integration-x/foo.ts"]),
+    [
+      `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files and test helpers; found apps/sdp-api/src/testing-utils.ts, packages/sdp-api-integration-x/foo.ts.`,
+    ]
+  );
 });
 
 test("the breaking directive still flags a source file renamed to a test file", () => {
@@ -221,7 +229,7 @@ test("the breaking directive still flags a source file renamed to a test file", 
     "apps/sdp-api/src/routes/foo.ts",
   ]);
   assert.deepEqual(renamedToTestFile, [
-    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files; found apps/sdp-api/src/routes/foo.ts.`,
+    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files and test helpers; found apps/sdp-api/src/routes/foo.ts.`,
   ]);
   assert.doesNotMatch(renamedToTestFile[0], /foo\.test\.ts/);
 });

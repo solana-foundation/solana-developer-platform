@@ -4,16 +4,18 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type {
   AllowedOperation,
   ApiKeyEnvironment,
+  EgressReadiness,
   OrganizationEntitlements,
   OrganizationRpcProvider,
   Permission,
   SdpRampProviderStages,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
@@ -227,7 +229,7 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
-  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
+  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/fee-payment `resolveKoraEndpoint`). */
   KORA_RPC_URL_DEVNET?: string;
   KORA_API_KEY_DEVNET?: string;
   KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
@@ -282,15 +284,6 @@ export interface Env {
   MOONPAY_WEBHOOK_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
-  // Lightspark Grid ramps configuration
-  LIGHTSPARK_GRID_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_API_BASE_URL?: string;
-  LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
-
   // BVNK ramps configuration
   BVNK_HAWK_AUTH_ID?: string;
   BVNK_HAWK_SECRET_KEY?: string;
@@ -300,18 +293,6 @@ export interface Env {
   BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
-
-  // Mural Pay ramps configuration
-  MURAL_PAY_API_KEY?: string;
-  MURAL_PAY_TRANSFER_API_KEY?: string;
-  MURAL_PAY_WEBHOOK_PUBLIC_KEY?: string;
-  MURAL_PAY_SANDBOX_API_KEY?: string;
-  MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
-  MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
-
-  // MoneyGram ramps configuration
-  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
-  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
 
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
@@ -358,6 +339,8 @@ declare module "hono" {
     observability?: Observability;
     // Set by createApp on every request; see AppDeps.rampProviderStages
     rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.egressReadiness
+    egressReadiness?: () => EgressReadiness;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

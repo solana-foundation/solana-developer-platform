@@ -11,7 +11,7 @@ import {
   isWebhookRampProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
 } from "@/routes/webhooks/ramps/registry";
-import { logEvent } from "@/runtime/money-path-events";
+import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 /**
@@ -99,6 +99,7 @@ export async function applyStoredRampWebhookEvent(
         environment: row.environment,
         attempts,
         error: message,
+        error_diagnostics: paymentsErrorDiagnostics(error),
       });
       return false;
     }
@@ -120,6 +121,7 @@ export async function applyStoredRampWebhookEvent(
         environment: row.environment,
         attempts: spentAttempts,
         error: message,
+        error_diagnostics: paymentsErrorDiagnostics(error),
       });
     }
     return false;

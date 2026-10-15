@@ -29,6 +29,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
+import * as organizationAccess from "@/lib/organization-access";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
 import { rootLogger } from "@/runtime/logger";
@@ -211,6 +212,23 @@ async function deleteTestOrganization() {
     .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
     .bind(TEST_ORG.id)
     .run();
+}
+
+/**
+ * Authentication refuses a deleted organization outright (it reads the status
+ * fresh on every request), so an HTTP handler only meets a deleted organization
+ * when the deletion lands while the request is in flight. This deletes it just
+ * after the next request's authentication read, which is that race.
+ */
+function deleteTestOrganizationAfterAuth() {
+  const authenticate = organizationAccess.enforceApiKeyOrganizationAccess;
+  vi.spyOn(organizationAccess, "enforceApiKeyOrganizationAccess").mockImplementationOnce(
+    async (...args) => {
+      const settings = await authenticate(...args);
+      await deleteTestOrganization();
+      return settings;
+    }
+  );
 }
 
 async function collectionAttempts(subscriptionId: string) {
@@ -1083,7 +1101,7 @@ describe("Payments routes — recurring", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("keeps the saved fee actor after the exact source wallet provider reference changes", async () => {
+  it("keeps the saved fee actor through activation, collection, cancel and resume after provider alias drift", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await getDb(env)
       .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id = ?")
@@ -1118,6 +1136,24 @@ describe("Payments routes — recurring", () => {
     expect((await parseCollectionResponse(collect)).data.collectionAttempt.status).toBe(
       "confirmed"
     );
+    for (const operation of ["cancel", "resume"] as const) {
+      recurringExecution
+        .signAndSendMock()
+        .mockResolvedValueOnce(testSignature(operation === "cancel" ? 3 : 4));
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/${operation}`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
+        `recurring.${operation}`
+      );
+    }
     expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
       new Set([
         "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
@@ -1228,7 +1264,7 @@ describe("Payments routes — recurring", () => {
       plan_creation_signature: testSignature(1),
       authorization_signature: null,
     });
-    await deleteTestOrganization();
+    deleteTestOrganizationAfterAuth();
 
     expect((await activate()).status).toBe(403);
     expect(sponsor).toHaveBeenCalledTimes(2);
@@ -1515,6 +1551,15 @@ describe("Payments routes — recurring", () => {
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
     });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id IN (?, ?)")
+      .bind(
+        "provider_alias_after_identity_migration",
+        TEST_CUSTODY_WALLET_ID,
+        replacementCustodyWalletId
+      )
+      .run();
+    const feePaymentCallsBeforeReplacement = createFeePaymentAdapterMock.mock.calls.length;
     const firstCollectionAt = "2026-07-02T00:00:00.000Z";
     await getDb(env)
       .prepare("UPDATE payment_recurring_payments SET first_collection_at = ? WHERE id = ?")
@@ -1550,6 +1595,31 @@ describe("Payments routes — recurring", () => {
     expect(updateBody.data.recurringPayment.planId).not.toBe(activated.planId);
     expect(updateBody.data.recurringPayment.subscriptionId).not.toBe(activated.subscriptionId);
     expect(signAndSendMock).toHaveBeenCalledTimes(5);
+    const replacementActors = createFeePaymentAdapterMock.mock.calls
+      .slice(feePaymentCallsBeforeReplacement)
+      .map(([, userId]) => userId);
+    expect(new Set(replacementActors.slice(0, -1))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:provider_alias_after_identity_migration",
+      ])
+    );
+    expect(replacementActors.at(-1)).toBe(
+      "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test"
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      replacementCustodyWalletId,
+      "recurring.update"
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.update_cancel_old"
+    );
 
     const oldSubscription = await getDb(env)
       .prepare("SELECT status FROM payment_subscriptions WHERE id = ?")
@@ -2519,7 +2589,8 @@ describe("Payments routes — recurring", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.collect"
     );
     expect(
       new Set(
@@ -3924,7 +3995,7 @@ describe("Payments routes — recurring", () => {
         subscriptionId: recurringPayment.subscriptionId,
         dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
       });
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const response = await app.request(
         `/v1/payments/recurring-payments/${recurringPayment.id}/collect`,
@@ -3943,7 +4014,7 @@ describe("Payments routes — recurring", () => {
         ...DEFAULT_RECURRING_FIXTURE,
         headers: RECURRING_HEADERS,
       });
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const response = await app.request(
         `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -3978,7 +4049,7 @@ describe("Payments routes — recurring", () => {
       );
       expect(cancelRes.status).toBe(200);
       const signaturesBefore = signAndSendMock.mock.calls.length;
-      await deleteTestOrganization();
+      deleteTestOrganizationAfterAuth();
 
       const resumeRes = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/resume`,

@@ -2,6 +2,82 @@ import { describe, expect, it } from "vitest";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 describe("dashboard workspace tab URL state", () => {
+  it("preserves the redesigned wallet Settings tab when a provider bookmark resolves to its SDP ID", () => {
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname: "/dashboard/wallets/provider-wallet",
+        pathname: "/dashboard/wallets/cwlt_1",
+        tab: "settings",
+        newDesign: true,
+      })
+    ).toBe(false);
+  });
+
+  it.each([
+    { pathname: "/dashboard/wallets/cwlt_1", tab: "overview" },
+    { pathname: "/dashboard/wallets/cwlt_1", tab: "activity" },
+    { pathname: "/dashboard/custody/cwlt_1", tab: "overview" },
+    { pathname: "/dashboard/custody/cwlt_1", tab: "activity" },
+    { pathname: "/dashboard/custody/cwlt_1/", tab: "settings" },
+  ])("preserves the redesigned $tab destination on $pathname", ({ pathname, tab }) => {
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname: "/dashboard/wallets/provider-wallet",
+        pathname,
+        tab,
+        newDesign: true,
+      })
+    ).toBe(false);
+  });
+
+  it.each(["overview", "activity", "settings"])(
+    "clears the unsupported %s wallet tab in the legacy design",
+    (tab) => {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/wallets/provider-wallet",
+          pathname: "/dashboard/wallets/cwlt_1",
+          tab,
+          newDesign: false,
+        })
+      ).toBe(true);
+    }
+  );
+
+  it.each(["playground", "unknown", "Settings"])(
+    "clears the unsupported %s tab on a redesigned wallet detail",
+    (tab) => {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/wallets/provider-wallet",
+          pathname: "/dashboard/wallets/cwlt_1",
+          tab,
+          newDesign: true,
+        })
+      ).toBe(true);
+    }
+  );
+
+  it.each([
+    "/dashboard/wallets",
+    "/dashboard/wallets/setup",
+    "/dashboard/wallets/connections",
+    "/dashboard/wallets/switch",
+    "/dashboard/wallets/cwlt_1/policies",
+    "/dashboard/custody/connections",
+    "/dashboard/custody/cwlt_1/audit",
+    "/dashboard/payments/cwlt_1",
+  ])("clears a Settings tab on the non-wallet-detail route %s", (pathname) => {
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname: "/dashboard/wallets/cwlt_1",
+        pathname,
+        tab: "settings",
+        newDesign: true,
+      })
+    ).toBe(true);
+  });
+
   it("preserves an explicit Payments playground destination", () => {
     expect(
       shouldClearDashboardTabAfterPathnameChange({

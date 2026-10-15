@@ -718,7 +718,8 @@ async function runMetadataScheduleUpdate(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.update"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -765,6 +766,7 @@ async function runMetadataScheduleUpdate(input: {
         status: parsePlanStatus(onChainPlan.data.status),
       });
       planUpdateSignature = await sendSubscriptionInstructions({
+        movement: "recurring.update",
         sponsorshipActorWalletId: input.claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
@@ -848,6 +850,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
+    movement: "recurring.update",
     sponsorshipActorWalletId: input.sponsorshipActorWalletId,
     env: input.env,
     organizationId: input.organizationId,
@@ -1200,7 +1203,8 @@ async function runReplacementUpdate(input: {
     input.env,
     input.organizationId,
     input.projectId,
-    input.resolved.sourceWallet.id
+    input.resolved.sourceWallet.id,
+    "recurring.update"
   );
   if (sourceSigner.address !== input.resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1273,6 +1277,7 @@ async function runReplacementUpdate(input: {
       tokenProgram,
     });
     planCreationSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update",
       sponsorshipActorWalletId: plan.owner_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
@@ -1362,6 +1367,7 @@ async function runReplacementUpdate(input: {
       { commitment: "confirmed" }
     );
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      movement: "recurring.update",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: plan.owner_wallet_id },
@@ -1402,6 +1408,7 @@ async function runReplacementUpdate(input: {
       tokenMint: mint,
     });
     authorizationSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update",
       sponsorshipActorWalletId: plan.owner_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
@@ -1442,7 +1449,8 @@ async function runReplacementUpdate(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.oldSourceWallet.id
+      input.oldSourceWallet.id,
+      "recurring.update_cancel_old"
     );
     if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1454,6 +1462,7 @@ async function runReplacementUpdate(input: {
         subscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
       });
     oldCancelSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update_cancel_old",
       sponsorshipActorWalletId: input.claimed.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
@@ -1670,8 +1679,6 @@ export async function updateRecurringPayment(input: {
     recurringPayment: settled.recurringPayment,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
-  if (sourceChanged) {
-  }
 
   const mode = requestedActiveUpdateMode(resolved.changedFields);
   const requiresRuntimeExecution =

@@ -110,6 +110,7 @@ vi.mock(
 );
 // Deployment availability follows the demo's all-on flags, independent of the host's channel.
 vi.mock("@/flags/release-channel", () => ({
+  deploymentReleaseChannel: () => "experimental",
   isModuleInDeploymentReleaseChannel: () => true,
 }));
 
@@ -665,13 +666,8 @@ describe("Contacts", () => {
         data: ListCounterpartyProviderAccountsResponse;
       }>(`/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`);
       expect(providerAccounts.ok).toBe(true);
-      const rows = providerAccounts.ok ? providerAccounts.data.data.accounts : [];
-      // Every demo contact has a payout account, so the page's tables all have rows.
-      expect(rows).toHaveLength(1);
-      for (const row of rows) {
-        expect(row).toMatchObject({ kind: "payout_account", status: "active" });
-        expect(row.accountNumberLast4).toMatch(/^\d{4}$/);
-      }
+      // No provider holds an account for a demo contact.
+      expect(providerAccounts.ok && providerAccounts.data.data.accounts).toEqual([]);
     }
   );
 });

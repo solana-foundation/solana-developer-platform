@@ -1,4 +1,4 @@
-import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
+import { EGRESS_READINESS_STATES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
 import { isoDateTimeSchema, z } from "./base";
 
 export const healthResponseSchema = z
@@ -38,6 +38,11 @@ export const healthReadyResponseSchema = z
         }),
         redis: z.enum(["ok", "error"]).openapi({
           description: "Redis connectivity status.",
+          example: "ok",
+        }),
+        egress: z.enum(EGRESS_READINESS_STATES).optional().openapi({
+          description:
+            "Outbound internet connectivity of this instance. `pending` (not ready) while a fresh instance waits for working egress, `ok` once an outbound call succeeded, `unverified` when it stopped waiting and serves anyway. Absent where the deployment does not wait for egress.",
           example: "ok",
         }),
       })

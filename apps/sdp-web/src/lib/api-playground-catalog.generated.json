@@ -17,6 +17,7 @@
         "title": "Initialize wallet signing",
         "method": "POST",
         "path": "/v1/wallets/initialize",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -41,6 +42,7 @@
         "title": "Create wallet",
         "method": "POST",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -49,7 +51,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Treasury wallet\",\n  \"purpose\": \"transfer\"\n}",
             "required": true
           }
         ],
@@ -80,6 +82,7 @@
         "title": "Delete wallet",
         "method": "DELETE",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -109,6 +112,7 @@
         "title": "List wallets",
         "method": "GET",
         "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "provider",
@@ -220,6 +224,7 @@
         "title": "List wallet signing configs",
         "method": "GET",
         "path": "/v1/wallets/configs",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -247,6 +252,7 @@
         "title": "Aggregate wallet balances",
         "method": "GET",
         "path": "/v1/wallets/aggregate?provider={provider}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "provider",
@@ -329,6 +335,7 @@
         "title": "Get wallet public key",
         "method": "GET",
         "path": "/v1/wallets/public-key?walletId={walletId}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -349,6 +356,7 @@
         "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -383,6 +391,7 @@
         "title": "Get wallet by ID",
         "method": "GET",
         "path": "/v1/wallets/{walletId}?includeBalance={includeBalance}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -438,6 +447,7 @@
         "title": "Update wallet",
         "method": "PATCH",
         "path": "/v1/wallets/{walletId}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -487,6 +497,7 @@
         "title": "Get wallet balances",
         "method": "GET",
         "path": "/v1/payments/wallets/{walletId}/balances?minimumSlot={minimumSlot}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "walletId",
@@ -537,6 +548,7 @@
         "title": "Execute transfer (custody)",
         "method": "POST",
         "path": "/v1/payments/transfers",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -604,17 +616,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -631,6 +632,7 @@
         "title": "List transfers",
         "method": "GET",
         "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -714,7 +716,7 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter ramp transfers by provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "moonpay",
             "required": false,
             "kind": "select",
             "options": [
@@ -723,24 +725,12 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
               },
               {
-                "label": "moneygram",
-                "value": "moneygram"
-              },
-              {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",
@@ -904,17 +894,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -934,6 +913,7 @@
         "title": "Get transfer",
         "method": "GET",
         "path": "/v1/payments/transfers/{transferId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "transferId",
@@ -999,17 +979,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -1026,6 +995,7 @@
         "title": "Estimate transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/estimate",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1063,6 +1033,7 @@
         "title": "Create transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1163,17 +1134,6 @@
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 },
-                "moneygram": {
-                  "customerId": "mg_profile_example",
-                  "transactionId": "mgi_tx_example",
-                  "mgiTransactionId": "mgi_correlation_example",
-                  "referenceNumber": "12345678",
-                  "payoutAmount": 25,
-                  "payoutStatus": "completed",
-                  "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                  "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                  "lastWidgetError": "Transaction cancelled by user"
-                },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-02T00:00:00.000Z"
               }
@@ -1191,6 +1151,7 @@
         "title": "List transfer batches",
         "method": "GET",
         "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "sourceCustodyWalletId",
@@ -1299,6 +1260,7 @@
         "title": "Get transfer batch",
         "method": "GET",
         "path": "/v1/payments/transfer-batches/{batchId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "batchId",
@@ -1397,17 +1359,6 @@
                   "level": "low",
                   "evaluatedAt": "2025-01-01T00:00:00.000Z"
                 },
-                "moneygram": {
-                  "customerId": "mg_profile_example",
-                  "transactionId": "mgi_tx_example",
-                  "mgiTransactionId": "mgi_correlation_example",
-                  "referenceNumber": "12345678",
-                  "payoutAmount": 25,
-                  "payoutStatus": "completed",
-                  "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                  "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                  "lastWidgetError": "Transaction cancelled by user"
-                },
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "updatedAt": "2025-01-02T00:00:00.000Z"
               }
@@ -1425,6 +1376,7 @@
         "title": "Create recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1481,6 +1433,7 @@
         "title": "List recurring payments",
         "method": "GET",
         "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -1600,6 +1553,7 @@
         "title": "Update recurring payment",
         "method": "PATCH",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1664,6 +1618,7 @@
         "title": "Get recurring payment",
         "method": "GET",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1718,6 +1673,7 @@
         "title": "Activate recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/activate",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1772,6 +1728,7 @@
         "title": "Cancel recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/cancel",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1826,6 +1783,7 @@
         "title": "Collect recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/collect",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1941,17 +1899,6 @@
                 "level": "low",
                 "evaluatedAt": "2025-01-01T00:00:00.000Z"
               },
-              "moneygram": {
-                "customerId": "mg_profile_example",
-                "transactionId": "mgi_tx_example",
-                "mgiTransactionId": "mgi_correlation_example",
-                "referenceNumber": "12345678",
-                "payoutAmount": 25,
-                "payoutStatus": "completed",
-                "cryptoTransferId": "xfr_moneygram_crypto_leg_example",
-                "solanaTxSignature": "sig_moneygram_usdc_transfer_example",
-                "lastWidgetError": "Transaction cancelled by user"
-              },
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
             }
@@ -1968,6 +1915,7 @@
         "title": "Resume recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/resume",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -2022,6 +1970,7 @@
         "title": "Create subscription plan",
         "method": "POST",
         "path": "/v1/payments/subscription-plans",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -2069,6 +2018,7 @@
         "title": "List subscription plans",
         "method": "GET",
         "path": "/v1/payments/subscription-plans?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "status",
@@ -2148,6 +2098,7 @@
         "title": "Prepare subscription plan creation",
         "method": "POST",
         "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2210,6 +2161,7 @@
         "title": "Get subscription plan",
         "method": "GET",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2255,6 +2207,7 @@
         "title": "Update subscription plan",
         "method": "PATCH",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2310,6 +2263,7 @@
         "title": "Create subscription",
         "method": "POST",
         "path": "/v1/payments/subscriptions",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -2357,6 +2311,7 @@
         "title": "List subscriptions",
         "method": "GET",
         "path": "/v1/payments/subscriptions?planId={planId}&counterpartyId={counterpartyId}&status={status}&dueBefore={dueBefore}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2463,6 +2418,7 @@
         "title": "Prepare subscription authorization",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2526,6 +2482,7 @@
         "title": "Prepare subscription cancellation",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2587,6 +2544,7 @@
         "title": "Prepare subscription resume",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2648,6 +2606,7 @@
         "title": "Prepare subscription collection",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2730,6 +2689,7 @@
         "title": "Get subscription",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2775,6 +2735,7 @@
         "title": "List subscription collection attempts",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2870,6 +2831,7 @@
         "title": "List on-ramp currency support",
         "method": "GET",
         "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
         "pathFields": [
           {
             "key": "source",
@@ -2880,132 +2842,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -3016,80 +2874,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -3100,168 +2898,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -3272,200 +2934,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -3512,24 +3018,12 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
               },
               {
-                "label": "moneygram",
-                "value": "moneygram"
-              },
-              {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",
@@ -3549,7 +3043,7 @@
               {
                 "source": "USD",
                 "dest": "usdc.solana",
-                "providers": ["moonpay", "lightspark"]
+                "providers": ["moonpay", "stripe"]
               }
             ],
             "providerDetails": {
@@ -3581,6 +3075,7 @@
         "title": "List off-ramp currency support",
         "method": "GET",
         "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
         "pathFields": [
           {
             "key": "source",
@@ -3621,132 +3116,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -3757,80 +3148,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -3841,168 +3172,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -4013,200 +3208,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -4223,24 +3262,12 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
               },
               {
-                "label": "moneygram",
-                "value": "moneygram"
-              },
-              {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",
@@ -4292,6 +3319,7 @@
         "title": "Create on-ramp quote",
         "method": "POST",
         "path": "/v1/payments/ramps/onramp/quote",
+        "releaseModule": "ramps",
         "pathFields": [],
         "bodyFields": [
           {
@@ -4313,36 +3341,20 @@
               "deliveryMode": "hosted",
               "paymentInstructions": [
                 {
-                  "provider": "lightspark",
-                  "kind": "crypto_deposit",
-                  "destinationAddress": "So11111111111111111111111111111111111111112",
-                  "cryptoCurrency": "USDC",
+                  "provider": "bvnk",
+                  "kind": "fiat_funding",
+                  "onboardingStatus": "ready",
+                  "fiatCurrency": "USD",
+                  "beneficiaryAddress": "11111111111111111111111111111111",
                   "network": "SOLANA",
-                  "accountOrWalletInfo": {
-                    "accountType": "USD_ACCOUNT",
-                    "accountNumber": "0000000000000000",
-                    "routingNumber": "000000000",
-                    "paymentRails": ["ACH", "WIRE"],
-                    "reference": "quote-reference-example",
-                    "bankName": "Example Bank",
-                    "address": "ExampleSolanaWalletAddress11111111111111111",
-                    "assetType": "USDC"
-                  }
+                  "paymentReference": "SDP-ONRAMP xfr_9f3b1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
+                  "remittanceInformationPrefix": "LCA-ONRAMP",
+                  "bankAccount": {
+                    "routingNumber": "021000021"
+                  },
+                  "instructionsNotes": "example"
                 }
-              ],
-              "sendingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "receivingCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "feeCurrency": {
-                "code": "USDC",
-                "decimals": 2
-              },
-              "expiresAt": "2025-01-01T00:00:00.000Z"
+              ]
             },
             "transferId": "transfer_example"
           },
@@ -4358,6 +3370,7 @@
         "title": "Simulate sandbox transfer",
         "method": "POST",
         "path": "/v1/payments/ramps/sandbox/simulate",
+        "releaseModule": "ramps",
         "pathFields": [],
         "bodyFields": [
           {
@@ -4378,6 +3391,7 @@
         "title": "List transactions",
         "method": "GET",
         "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "module",
@@ -4388,10 +3402,6 @@
               {
                 "label": "payments",
                 "value": "payments"
-              },
-              {
-                "label": "earn",
-                "value": "earn"
               },
               {
                 "label": "dvp",
@@ -4518,6 +3528,7 @@
         "title": "Get counterparty field options",
         "method": "GET",
         "path": "/v1/counterparties/metadata",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -4544,6 +3555,7 @@
         "title": "List counterparties",
         "method": "GET",
         "path": "/v1/counterparties?page={page}&pageSize={pageSize}&includeArchived={includeArchived}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "page",
@@ -4614,6 +3626,7 @@
         "title": "Create counterparty",
         "method": "POST",
         "path": "/v1/counterparties",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -4653,6 +3666,7 @@
         "title": "Get counterparty",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4690,6 +3704,7 @@
         "title": "Update counterparty",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4737,6 +3752,7 @@
         "title": "Archive counterparty",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4754,7 +3770,8 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
+        "releaseModule": "ramps",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4827,132 +3844,28 @@
             "kind": "select",
             "options": [
               {
-                "label": "AED",
-                "value": "AED"
-              },
-              {
-                "label": "AFN",
-                "value": "AFN"
-              },
-              {
-                "label": "ALL",
-                "value": "ALL"
-              },
-              {
-                "label": "AMD",
-                "value": "AMD"
-              },
-              {
-                "label": "AOA",
-                "value": "AOA"
-              },
-              {
-                "label": "ARS",
-                "value": "ARS"
-              },
-              {
                 "label": "AUD",
                 "value": "AUD"
-              },
-              {
-                "label": "AWG",
-                "value": "AWG"
-              },
-              {
-                "label": "BAM",
-                "value": "BAM"
-              },
-              {
-                "label": "BBD",
-                "value": "BBD"
-              },
-              {
-                "label": "BDT",
-                "value": "BDT"
-              },
-              {
-                "label": "BHD",
-                "value": "BHD"
-              },
-              {
-                "label": "BIF",
-                "value": "BIF"
-              },
-              {
-                "label": "BMD",
-                "value": "BMD"
-              },
-              {
-                "label": "BND",
-                "value": "BND"
-              },
-              {
-                "label": "BOB",
-                "value": "BOB"
               },
               {
                 "label": "BRL",
                 "value": "BRL"
               },
               {
-                "label": "BSD",
-                "value": "BSD"
-              },
-              {
-                "label": "BTN",
-                "value": "BTN"
-              },
-              {
-                "label": "BWP",
-                "value": "BWP"
-              },
-              {
-                "label": "BZD",
-                "value": "BZD"
-              },
-              {
                 "label": "CAD",
                 "value": "CAD"
-              },
-              {
-                "label": "CDF",
-                "value": "CDF"
               },
               {
                 "label": "CHF",
                 "value": "CHF"
               },
               {
-                "label": "CLP",
-                "value": "CLP"
-              },
-              {
-                "label": "CNY",
-                "value": "CNY"
-              },
-              {
                 "label": "COP",
                 "value": "COP"
               },
               {
-                "label": "CRC",
-                "value": "CRC"
-              },
-              {
-                "label": "CUP",
-                "value": "CUP"
-              },
-              {
-                "label": "CVE",
-                "value": "CVE"
-              },
-              {
                 "label": "CZK",
                 "value": "CZK"
-              },
-              {
-                "label": "DJF",
-                "value": "DJF"
               },
               {
                 "label": "DKK",
@@ -4963,80 +3876,20 @@
                 "value": "DOP"
               },
               {
-                "label": "DZD",
-                "value": "DZD"
-              },
-              {
                 "label": "EGP",
                 "value": "EGP"
-              },
-              {
-                "label": "ERN",
-                "value": "ERN"
-              },
-              {
-                "label": "ETB",
-                "value": "ETB"
               },
               {
                 "label": "EUR",
                 "value": "EUR"
               },
               {
-                "label": "FJD",
-                "value": "FJD"
-              },
-              {
-                "label": "FKP",
-                "value": "FKP"
-              },
-              {
                 "label": "GBP",
                 "value": "GBP"
               },
               {
-                "label": "GEL",
-                "value": "GEL"
-              },
-              {
-                "label": "GHS",
-                "value": "GHS"
-              },
-              {
-                "label": "GIP",
-                "value": "GIP"
-              },
-              {
-                "label": "GMD",
-                "value": "GMD"
-              },
-              {
-                "label": "GNF",
-                "value": "GNF"
-              },
-              {
-                "label": "GTQ",
-                "value": "GTQ"
-              },
-              {
-                "label": "GYD",
-                "value": "GYD"
-              },
-              {
                 "label": "HKD",
                 "value": "HKD"
-              },
-              {
-                "label": "HNL",
-                "value": "HNL"
-              },
-              {
-                "label": "HTG",
-                "value": "HTG"
-              },
-              {
-                "label": "HUF",
-                "value": "HUF"
               },
               {
                 "label": "IDR",
@@ -5047,168 +3900,32 @@
                 "value": "ILS"
               },
               {
-                "label": "INR",
-                "value": "INR"
-              },
-              {
-                "label": "IQD",
-                "value": "IQD"
-              },
-              {
-                "label": "IRR",
-                "value": "IRR"
-              },
-              {
-                "label": "ISK",
-                "value": "ISK"
-              },
-              {
-                "label": "JMD",
-                "value": "JMD"
-              },
-              {
                 "label": "JOD",
                 "value": "JOD"
-              },
-              {
-                "label": "JPY",
-                "value": "JPY"
               },
               {
                 "label": "KES",
                 "value": "KES"
               },
               {
-                "label": "KGS",
-                "value": "KGS"
-              },
-              {
-                "label": "KHR",
-                "value": "KHR"
-              },
-              {
-                "label": "KMF",
-                "value": "KMF"
-              },
-              {
-                "label": "KPW",
-                "value": "KPW"
-              },
-              {
-                "label": "KRW",
-                "value": "KRW"
-              },
-              {
                 "label": "KWD",
                 "value": "KWD"
-              },
-              {
-                "label": "KYD",
-                "value": "KYD"
-              },
-              {
-                "label": "KZT",
-                "value": "KZT"
-              },
-              {
-                "label": "LAK",
-                "value": "LAK"
-              },
-              {
-                "label": "LBP",
-                "value": "LBP"
               },
               {
                 "label": "LKR",
                 "value": "LKR"
               },
               {
-                "label": "LRD",
-                "value": "LRD"
-              },
-              {
-                "label": "LSL",
-                "value": "LSL"
-              },
-              {
-                "label": "LYD",
-                "value": "LYD"
-              },
-              {
-                "label": "MAD",
-                "value": "MAD"
-              },
-              {
-                "label": "MDL",
-                "value": "MDL"
-              },
-              {
-                "label": "MGA",
-                "value": "MGA"
-              },
-              {
-                "label": "MKD",
-                "value": "MKD"
-              },
-              {
-                "label": "MMK",
-                "value": "MMK"
-              },
-              {
-                "label": "MNT",
-                "value": "MNT"
-              },
-              {
-                "label": "MOP",
-                "value": "MOP"
-              },
-              {
-                "label": "MRU",
-                "value": "MRU"
-              },
-              {
-                "label": "MUR",
-                "value": "MUR"
-              },
-              {
-                "label": "MVR",
-                "value": "MVR"
-              },
-              {
-                "label": "MWK",
-                "value": "MWK"
-              },
-              {
                 "label": "MXN",
                 "value": "MXN"
-              },
-              {
-                "label": "MYR",
-                "value": "MYR"
-              },
-              {
-                "label": "MZN",
-                "value": "MZN"
-              },
-              {
-                "label": "NAD",
-                "value": "NAD"
               },
               {
                 "label": "NGN",
                 "value": "NGN"
               },
               {
-                "label": "NIO",
-                "value": "NIO"
-              },
-              {
                 "label": "NOK",
                 "value": "NOK"
-              },
-              {
-                "label": "NPR",
-                "value": "NPR"
               },
               {
                 "label": "NZD",
@@ -5219,200 +3936,44 @@
                 "value": "OMR"
               },
               {
-                "label": "PAB",
-                "value": "PAB"
-              },
-              {
                 "label": "PEN",
                 "value": "PEN"
-              },
-              {
-                "label": "PGK",
-                "value": "PGK"
-              },
-              {
-                "label": "PHP",
-                "value": "PHP"
-              },
-              {
-                "label": "PKR",
-                "value": "PKR"
               },
               {
                 "label": "PLN",
                 "value": "PLN"
               },
               {
-                "label": "PYG",
-                "value": "PYG"
-              },
-              {
-                "label": "QAR",
-                "value": "QAR"
-              },
-              {
                 "label": "RON",
                 "value": "RON"
-              },
-              {
-                "label": "RSD",
-                "value": "RSD"
-              },
-              {
-                "label": "RUB",
-                "value": "RUB"
-              },
-              {
-                "label": "RWF",
-                "value": "RWF"
-              },
-              {
-                "label": "SAR",
-                "value": "SAR"
-              },
-              {
-                "label": "SBD",
-                "value": "SBD"
-              },
-              {
-                "label": "SCR",
-                "value": "SCR"
-              },
-              {
-                "label": "SDG",
-                "value": "SDG"
               },
               {
                 "label": "SEK",
                 "value": "SEK"
               },
               {
-                "label": "SGD",
-                "value": "SGD"
-              },
-              {
-                "label": "SHP",
-                "value": "SHP"
-              },
-              {
-                "label": "SLE",
-                "value": "SLE"
-              },
-              {
-                "label": "SOS",
-                "value": "SOS"
-              },
-              {
-                "label": "SRD",
-                "value": "SRD"
-              },
-              {
-                "label": "SSP",
-                "value": "SSP"
-              },
-              {
-                "label": "STN",
-                "value": "STN"
-              },
-              {
-                "label": "SYP",
-                "value": "SYP"
-              },
-              {
-                "label": "SZL",
-                "value": "SZL"
-              },
-              {
                 "label": "THB",
                 "value": "THB"
-              },
-              {
-                "label": "TJS",
-                "value": "TJS"
-              },
-              {
-                "label": "TND",
-                "value": "TND"
-              },
-              {
-                "label": "TOP",
-                "value": "TOP"
               },
               {
                 "label": "TRY",
                 "value": "TRY"
               },
               {
-                "label": "TTD",
-                "value": "TTD"
-              },
-              {
                 "label": "TWD",
                 "value": "TWD"
-              },
-              {
-                "label": "TZS",
-                "value": "TZS"
-              },
-              {
-                "label": "UAH",
-                "value": "UAH"
-              },
-              {
-                "label": "UGX",
-                "value": "UGX"
               },
               {
                 "label": "USD",
                 "value": "USD"
               },
               {
-                "label": "UYU",
-                "value": "UYU"
-              },
-              {
-                "label": "UZS",
-                "value": "UZS"
-              },
-              {
                 "label": "VND",
                 "value": "VND"
               },
               {
-                "label": "VUV",
-                "value": "VUV"
-              },
-              {
-                "label": "WST",
-                "value": "WST"
-              },
-              {
-                "label": "XAF",
-                "value": "XAF"
-              },
-              {
-                "label": "XCD",
-                "value": "XCD"
-              },
-              {
-                "label": "XOF",
-                "value": "XOF"
-              },
-              {
-                "label": "XPF",
-                "value": "XPF"
-              },
-              {
-                "label": "YER",
-                "value": "YER"
-              },
-              {
                 "label": "ZAR",
                 "value": "ZAR"
-              },
-              {
-                "label": "ZMW",
-                "value": "ZMW"
               }
             ]
           },
@@ -5421,13 +3982,6 @@
             "label": "destinationCustodyWalletId",
             "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
-            "required": false
-          },
-          {
-            "key": "destinationCountry",
-            "label": "destinationCountry",
-            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
-            "defaultValue": "US",
             "required": false
           }
         ],
@@ -5450,6 +4004,7 @@
         "title": "List counterparty accounts",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts?page={page}&pageSize={pageSize}&includeArchived={includeArchived}&accountKind={accountKind}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5545,6 +4100,7 @@
         "title": "Create counterparty account",
         "method": "POST",
         "path": "/v1/counterparties/{counterpartyId}/accounts",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5596,6 +4152,7 @@
         "title": "List counterparty provider accounts",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/provider-accounts?provider={provider}&fiatCurrency={fiatCurrency}&destinationCountry={destinationCountry}",
+        "releaseModule": "ramps",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5608,7 +4165,7 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter by ramp provider.",
-            "defaultValue": "lightspark",
+            "defaultValue": "bvnk",
             "required": false,
             "kind": "select",
             "options": [
@@ -5617,24 +4174,12 @@
                 "value": "moonpay"
               },
               {
-                "label": "lightspark",
-                "value": "lightspark"
-              },
-              {
                 "label": "bvnk",
                 "value": "bvnk"
               },
               {
-                "label": "moneygram",
-                "value": "moneygram"
-              },
-              {
                 "label": "coinbase",
                 "value": "coinbase"
-              },
-              {
-                "label": "mural",
-                "value": "mural"
               },
               {
                 "label": "stripe",
@@ -6662,17 +5207,14 @@
             "accounts": [
               {
                 "id": "counterparty_provider_account_example",
-                "provider": "lightspark",
-                "kind": "payout_account",
+                "provider": "bvnk",
+                "kind": "funding_wallet",
                 "fiatCurrency": "USD",
                 "destinationCountry": "US",
                 "paymentRail": "ACH",
                 "status": "active",
                 "providerStatus": "ACTIVE",
                 "createdAt": "2025-01-01T00:00:00.000Z",
-                "bankName": "Example Bank",
-                "accountNumberLast4": "6789",
-                "paymentRails": ["ACH", "WIRE"],
                 "customerLink": {
                   "provider": "bvnk",
                   "id": "counterparty_provider_account_customer",
@@ -6712,6 +5254,7 @@
         "title": "Get counterparty account",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -6760,6 +5303,7 @@
         "title": "Update counterparty account",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -6818,6 +5362,7 @@
         "title": "Archive counterparty account",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -6845,6 +5390,7 @@
         "title": "List token templates",
         "method": "GET",
         "path": "/v1/issuance/templates",
+        "releaseModule": "issuance",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -6878,6 +5424,7 @@
         "title": "Get token template",
         "method": "GET",
         "path": "/v1/issuance/templates/{templateId}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "templateId",
@@ -6917,6 +5464,7 @@
         "title": "Create token",
         "method": "POST",
         "path": "/v1/issuance/tokens",
+        "releaseModule": "issuance",
         "pathFields": [],
         "bodyFields": [
           {
@@ -7004,6 +5552,7 @@
         "title": "List tokens",
         "method": "GET",
         "path": "/v1/issuance/tokens?page={page}&pageSize={pageSize}&search={search}&status={status}&deploymentStatus={deploymentStatus}&template={template}&createdAfter={createdAfter}&createdBefore={createdBefore}&sortBy={sortBy}&sortDirection={sortDirection}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "page",
@@ -7209,6 +5758,7 @@
         "title": "List token filter facets",
         "method": "GET",
         "path": "/v1/issuance/tokens/facets",
+        "releaseModule": "issuance",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -7238,6 +5788,7 @@
         "title": "List issuance transactions",
         "method": "GET",
         "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -7354,6 +5905,7 @@
         "title": "Get token",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7511,6 +6063,7 @@
         "title": "Update token",
         "method": "PATCH",
         "path": "/v1/issuance/tokens/{tokenId}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7606,6 +6159,7 @@
         "title": "Get public token metadata JSON",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/metadata.json",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7627,6 +6181,7 @@
         "title": "Refresh cached token supply",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/supply/refresh",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7712,6 +6267,7 @@
         "title": "List token transactions",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/transactions?type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7855,6 +6411,7 @@
         "title": "Get asset audit history",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/audit?action={action}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7916,6 +6473,7 @@
         "title": "Deploy token",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8011,6 +6569,7 @@
         "title": "Prepare token deploy transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8053,6 +6612,7 @@
         "title": "Confirm non-custodial deploy",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8148,6 +6708,7 @@
         "title": "Prepare metadata-URI follow-up transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8185,6 +6746,7 @@
         "title": "Prepare mint transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8251,6 +6813,7 @@
         "title": "Execute mint",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/mint",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8306,6 +6869,7 @@
         "title": "Prepare burn transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8371,6 +6935,7 @@
         "title": "Execute burn",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/burn",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8425,6 +6990,7 @@
         "title": "Prepare seize transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8490,6 +7056,7 @@
         "title": "Execute seize",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/seize",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8544,6 +7111,7 @@
         "title": "Prepare force burn transaction",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8609,6 +7177,7 @@
         "title": "Execute force burn",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/force-burn",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8663,6 +7232,7 @@
         "title": "Prepare authority update",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8728,6 +7298,7 @@
         "title": "Execute authority update",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/authority",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8782,6 +7353,7 @@
         "title": "Pause token transfers",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/pause",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8836,6 +7408,7 @@
         "title": "Unpause token transfers",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unpause",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8890,6 +7463,7 @@
         "title": "Freeze account",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8936,6 +7510,7 @@
         "title": "Unfreeze account",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8982,6 +7557,7 @@
         "title": "List frozen accounts",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9037,6 +7613,7 @@
         "title": "List token allowlist",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9105,6 +7682,7 @@
         "title": "Add token allowlist entry",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9150,6 +7728,7 @@
         "title": "List token allowlist labels",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9177,6 +7756,7 @@
         "title": "Remove token allowlist entry",
         "method": "DELETE",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9209,6 +7789,7 @@
         "title": "List verified holders",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9232,6 +7813,7 @@
         "title": "Enroll a verified holder",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
         "pathFields": [
           {
             "key": "tokenId",
@@ -9260,5 +7842,327 @@
         }
       }
     ]
+  },
+  "routeOwners": [
+    {
+      "pattern": "^\\/v1\\/payments\\/ramps(\\/|$)",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/webhooks\\/payments\\/ramps\\/",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/v1\\/counterparties\\/:counterpartyId\\/(requirements|provider-accounts)(\\/|$)",
+      "owner": "ramps"
+    },
+    {
+      "pattern": "^\\/v1\\/issuance(\\/|$)",
+      "owner": "issuance"
+    },
+    {
+      "pattern": "^\\/v1\\/earn(\\/|$)",
+      "owner": "earn"
+    },
+    {
+      "pattern": "^\\/v1\\/dvp(\\/|$)",
+      "owner": "dvp"
+    },
+    {
+      "pattern": "^\\/v1\\/private-channels(\\/|$)",
+      "owner": "private_channels"
+    },
+    {
+      "pattern": "^\\/(v1|internal\\/dashboard)\\/helius-rings(\\/|$)",
+      "owner": "helius_rings"
+    },
+    {
+      "pattern": "^\\/v1\\/payments\\/(recurring-payments|subscription-plans|subscriptions)(\\/|$)",
+      "owner": "recurring_payments"
+    },
+    {
+      "pattern": "^\\/(v1\\/payments|v1\\/counterparties|v1\\/transactions|pay)(\\/|$)",
+      "owner": "payments"
+    },
+    {
+      "pattern": "^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)",
+      "owner": "custody"
+    },
+    {
+      "pattern": "^\\/v1\\/compliance(\\/|$)",
+      "owner": "compliance"
+    },
+    {
+      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
+      "owner": "core"
+    },
+    {
+      "pattern": "^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)",
+      "owner": "core"
+    },
+    {
+      "pattern": "^\\/$",
+      "owner": "core"
+    }
+  ],
+  "valueGates": {
+    "tokens:read": {
+      "module": "issuance"
+    },
+    "tokens:write": {
+      "module": "issuance"
+    },
+    "tokens:admin": {
+      "module": "issuance"
+    },
+    "payments:read": {
+      "module": "payments"
+    },
+    "payments:write": {
+      "module": "payments"
+    },
+    "earn:read": {
+      "module": "earn"
+    },
+    "earn:write": {
+      "module": "earn"
+    },
+    "counterparties:read": {
+      "module": "payments"
+    },
+    "counterparties:write": {
+      "module": "payments"
+    },
+    "wallets:read": {
+      "module": "custody"
+    },
+    "wallets:write": {
+      "module": "custody"
+    },
+    "compliance:read": {
+      "module": "compliance"
+    },
+    "compliance:write": {
+      "module": "compliance"
+    },
+    "custody:read": {
+      "module": "custody"
+    },
+    "custody:write": {
+      "module": "custody"
+    },
+    "custody:admin": {
+      "module": "custody"
+    },
+    "privacy": {
+      "module": "helius_rings"
+    },
+    "payment": {
+      "module": "payments"
+    },
+    "ramp": {
+      "module": "ramps"
+    },
+    "issuance": {
+      "module": "issuance"
+    },
+    "program": {
+      "module": "markets"
+    },
+    "payment_transfer_execute": {
+      "module": "payments"
+    },
+    "payment_transfer_batch_execute": {
+      "module": "payments"
+    },
+    "recurring_payment_create": {
+      "module": "recurring_payments"
+    },
+    "recurring_payment_update": {
+      "module": "recurring_payments"
+    },
+    "recurring_payment_collection": {
+      "module": "recurring_payments"
+    },
+    "ramp_onramp_quote": {
+      "module": "ramps"
+    },
+    "ramp_offramp_quote": {
+      "module": "ramps"
+    },
+    "issuance_allowlist_add_execute": {
+      "module": "issuance"
+    },
+    "issuance_allowlist_remove_execute": {
+      "module": "issuance"
+    },
+    "issuance_burn_execute": {
+      "module": "issuance"
+    },
+    "issuance_deploy_execute": {
+      "module": "issuance"
+    },
+    "issuance_force_burn_execute": {
+      "module": "issuance"
+    },
+    "issuance_freeze_execute": {
+      "module": "issuance"
+    },
+    "issuance_metadata_update_execute": {
+      "module": "issuance"
+    },
+    "issuance_mint_execute": {
+      "module": "issuance"
+    },
+    "issuance_pause_execute": {
+      "module": "issuance"
+    },
+    "issuance_seize_execute": {
+      "module": "issuance"
+    },
+    "issuance_unfreeze_execute": {
+      "module": "issuance"
+    },
+    "issuance_unpause_execute": {
+      "module": "issuance"
+    },
+    "issuance_update_authority_execute": {
+      "module": "issuance"
+    },
+    "dvp_fund": {
+      "module": "dvp"
+    },
+    "dvp_settle": {
+      "module": "dvp"
+    },
+    "earn_vault_deposit": {
+      "module": "earn"
+    },
+    "earn_vault_withdrawal": {
+      "module": "earn"
+    },
+    "earn_program_withdrawal": {
+      "module": "earn"
+    },
+    "rings_shield": {
+      "module": "helius_rings"
+    },
+    "rings_transfer_registered": {
+      "module": "helius_rings"
+    },
+    "rings_transfer_anonymous": {
+      "module": "helius_rings"
+    },
+    "rings_withdraw": {
+      "module": "helius_rings"
+    },
+    "rings_merge": {
+      "module": "helius_rings"
+    },
+    "rings_timelock_create": {
+      "module": "helius_rings"
+    },
+    "rings_timelock_settle": {
+      "module": "helius_rings"
+    },
+    "rings_zone_create": {
+      "module": "helius_rings"
+    },
+    "rings_ring_exit": {
+      "module": "helius_rings"
+    },
+    "rings_ring_entry": {
+      "module": "helius_rings"
+    },
+    "mint_authority": {
+      "module": "issuance"
+    },
+    "freeze_authority": {
+      "module": "issuance"
+    },
+    "dvp_settlement_authority": {
+      "module": "dvp"
+    },
+    "payments": {
+      "module": "payments"
+    },
+    "earn": {
+      "module": "earn"
+    },
+    "dvp": {
+      "module": "dvp"
+    },
+    "private_channels": {
+      "module": "private_channels"
+    },
+    "rings": {
+      "module": "helius_rings"
+    },
+    "mint": {
+      "module": "issuance"
+    },
+    "burn": {
+      "module": "issuance"
+    },
+    "freeze": {
+      "module": "issuance"
+    },
+    "unfreeze": {
+      "module": "issuance"
+    },
+    "seize": {
+      "module": "issuance"
+    },
+    "force_burn": {
+      "module": "issuance"
+    },
+    "update_authority": {
+      "module": "issuance"
+    },
+    "pause": {
+      "module": "issuance"
+    },
+    "unpause": {
+      "module": "issuance"
+    },
+    "deploy": {
+      "module": "issuance"
+    },
+    "onramp": {
+      "module": "ramps"
+    },
+    "offramp": {
+      "module": "ramps"
+    },
+    "offramp_channel": {
+      "module": "ramps"
+    },
+    "ramps": {
+      "module": "ramps"
+    },
+    "moonpay": {
+      "rampProvider": "moonpay"
+    },
+    "bvnk": {
+      "rampProvider": "bvnk"
+    },
+    "coinbase": {
+      "rampProvider": "coinbase"
+    },
+    "stripe": {
+      "rampProvider": "stripe"
+    },
+    "hercle": {
+      "module": "ramps"
+    },
+    "mural": {
+      "module": "ramps"
+    },
+    "moneygram": {
+      "module": "ramps"
+    },
+    "lightspark": {
+      "module": "ramps"
+    }
   }
 }

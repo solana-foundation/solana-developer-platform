@@ -268,40 +268,6 @@ export function formatTimestamp(value: string | undefined, t: Translate, locale?
   }).format(date);
 }
 
-export function formatMinorCurrencyAmount(
-  amount: number | undefined,
-  currency: string,
-  decimals: number
-): string | null {
-  if (amount === undefined || !Number.isFinite(amount)) {
-    return null;
-  }
-
-  const value = amount / 10 ** decimals;
-  return `${value.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: decimals,
-  })} ${currency.toUpperCase()}`;
-}
-
-export function formatRampQuoteExpiry(expiresAt: string | undefined): string | null {
-  if (!expiresAt) {
-    return null;
-  }
-
-  const date = new Date(expiresAt);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 export function formatRampQuoteTimeRemaining(
   expiresAt: string | undefined,
   nowMs = Date.now(),
@@ -416,14 +382,9 @@ export function resolveTransferFlow(transfer: TransferRecord): {
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
-  const moneygramPayoutLabel =
-    transfer.moneygram?.payoutAmount !== undefined && transfer.fiatCurrency
-      ? formatDisplayAmount(String(transfer.moneygram.payoutAmount), transfer.fiatCurrency)
-      : null;
-  const receiveLabel = fiatLabel ?? moneygramPayoutLabel;
   return isInbound
     ? { send: fiatLabel, receive: cryptoLabel }
-    : { send: cryptoLabel, receive: receiveLabel };
+    : { send: cryptoLabel, receive: fiatLabel };
 }
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {

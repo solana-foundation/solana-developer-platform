@@ -20,6 +20,7 @@ COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
+COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
@@ -39,6 +40,7 @@ COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-payments ./packages/sdp-payments
+COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
@@ -54,6 +56,11 @@ ENV NEXT_PUBLIC_SDP_WEB_URL=$NEXT_PUBLIC_SDP_WEB_URL \
     NEXT_PUBLIC_SDP_DOCS_URL=$NEXT_PUBLIC_SDP_DOCS_URL \
     NEXT_PUBLIC_SDP_API_URL=$NEXT_PUBLIC_SDP_API_URL \
     NEXT_BUILD_STANDALONE=1
+
+# The docs document only the modules this release channel runs; match the API
+# deployment's SDP_RELEASE_CHANNEL. The default documents every module.
+ARG SDP_RELEASE_CHANNEL=experimental
+ENV SDP_RELEASE_CHANNEL=$SDP_RELEASE_CHANNEL
 
 RUN pnpm --filter sdp-docs build
 

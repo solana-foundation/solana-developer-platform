@@ -48,7 +48,7 @@ export function DashboardLoadingScreen({
       hideTitle={config.hideTitle}
       newDesign={flags?.newDesign ?? false}
     >
-      <PageLoading assetProfilesEnabled={flags?.assetProfiles} />
+      <PageLoading assetProfilesEnabled={flags?.assetProfiles} flags={flags} />
     </FullscreenLoadingIndicator>
   );
 }

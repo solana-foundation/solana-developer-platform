@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { CounterpartyRequirements, PayoutRequirementTree } from "@sdp/types/ramp-requirements";
+import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
@@ -66,71 +66,24 @@ async function release(method: string, data: CounterpartyRequirements): Promise<
   return request;
 }
 
-/**
- * Releases the oldest held request matching the method with an error response.
- *
- * @param method - HTTP method of the expected request.
- * @param message - Error message the API responds with.
- * @returns The released request.
- */
-async function releaseFailure(method: string, message: string): Promise<HeldRequest> {
-  const index = held.findIndex((request) => request.method === method);
-  expect(index).toBeGreaterThanOrEqual(0);
-  const request = held[index];
-  held.splice(index, 1);
-  await act(async () => {
-    request.respondRaw(
-      new Response(JSON.stringify({ error: { message } }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
-  });
-  return request;
-}
-
-const PAYOUT_TREE: PayoutRequirementTree = {
-  countryRails: {
-    US: [{ value: "ACH", label: "ACH" }],
-    MX: [{ value: "SPEI", label: "SPEI" }],
-  },
-  railFields: {
-    ACH: [
-      { kind: "text", key: "bankAccount.accountNumber", label: "Account number", required: true },
-    ],
-    SPEI: [{ kind: "text", key: "bankAccount.clabe", label: "CLABE", required: true }],
-  },
-  accounts: [
-    {
-      id: "cpa_us_primary",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      status: "ACTIVE",
-      bankName: "First US",
-      accountNumberLast4: "1111",
-    },
-  ],
+const COLLECT_RESIDENCE: CounterpartyRequirements = {
+  provider: "bvnk",
+  direction: "offramp",
+  status: "collect_counterparty_residence",
+  fields: [{ kind: "text", key: "taxResidence", label: "Tax residence", required: true }],
 };
 
 const COLLECT_COUNTERPARTY: CounterpartyRequirements = {
-  provider: "lightspark",
+  provider: "bvnk",
   direction: "offramp",
   status: "collect_counterparty",
   fields: [{ kind: "text", key: "fullName", label: "Full name", required: true }],
 };
 
-const COLLECT_ACCOUNT: CounterpartyRequirements = {
-  provider: "lightspark",
-  direction: "offramp",
-  status: "collect_account",
-  payout: PAYOUT_TREE,
-};
-
-const READY_US_ADVANCE: CounterpartyRequirements = {
-  provider: "lightspark",
+const READY_OFFRAMP: CounterpartyRequirements = {
+  provider: "bvnk",
   direction: "offramp",
   status: "ready",
-  providerAccountId: "cpa_us_primary",
 };
 
 const COLLECT_AGREEMENTS: CounterpartyRequirements = {
@@ -157,7 +110,7 @@ const COLLECT_AGREEMENTS: CounterpartyRequirements = {
 
 const OFFRAMP_PARAMS: CounterpartyRequirementsParams = {
   counterpartyId: "cpty_behavior",
-  provider: "lightspark",
+  provider: "bvnk",
   direction: "offramp",
   assetRail: "usdc.solana",
   destinationCustodyWalletId: "",
@@ -182,233 +135,73 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     vi.unstubAllGlobals();
   });
 
-  async function renderResolvedOfframp(params: CounterpartyRequirementsParams = OFFRAMP_PARAMS) {
-    const rendered = renderHook(
-      (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
-      {
-        wrapper,
-        initialProps: params,
-      }
-    );
-    await release("GET", COLLECT_ACCOUNT);
-    await waitFor(() => expect(rendered.result.current.isResolved).toBe(true));
-    return rendered;
-  }
+  const OFFRAMP_ADVANCE = {
+    assetRail: "usdc.solana",
+    destinationCustodyWalletId: "",
+    fiatCurrency: "USD",
+  } as const;
 
-  it("walks collect_counterparty → collect_account, deriving corridor fields locally with no preselection", async () => {
+  async function renderResolvedOfframp() {
     const rendered = renderHook(
       (props: CounterpartyRequirementsParams) => useCounterpartyRequirements(props),
       { wrapper, initialProps: OFFRAMP_PARAMS }
     );
-    await release("GET", COLLECT_COUNTERPARTY);
+    await release("GET", COLLECT_RESIDENCE);
     await waitFor(() => expect(rendered.result.current.isResolved).toBe(true));
-    expect(rendered.result.current.fields.map((field) => field.key)).toEqual(["fullName"]);
+    return rendered;
+  }
 
-    act(() => rendered.result.current.setField("fullName", "Ada Lovelace"));
-    let submitPromise: Promise<CounterpartyRequirements> | null = null;
-    act(() => {
-      submitPromise = rendered.result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
-    });
-    await release("POST", COLLECT_ACCOUNT);
-    await submitPromise;
-    await release("GET", COLLECT_ACCOUNT);
-    expect(rendered.result.current.fields.map((field) => field.key)).toEqual([
-      "destinationCountry",
-    ]);
-
-    act(() => rendered.result.current.setField("destinationCountry", "MX"));
-    expect(held.filter((request) => request.method === "GET")).toEqual([]);
-    expect(rendered.result.current.fields.map((field) => field.key)).toEqual([
-      "destinationCountry",
-      "paymentRails",
-    ]);
-
-    act(() => rendered.result.current.setField("destinationCountry", "US"));
-    expect(held.filter((request) => request.method === "GET")).toEqual([]);
-    expect(rendered.result.current.fields.map((field) => field.key)).toEqual([
-      "destinationCountry",
-      "paymentRails",
-    ]);
-    expect(rendered.result.current.payoutAccounts.map((account) => account.id)).toEqual([
-      "cpa_us_primary",
-    ]);
-    expect(rendered.result.current.selectedProviderAccountId).toBeNull();
-    expect(rendered.result.current.isComplete).toBe(false);
-  });
-
-  it("an explicit pick completes the step without touching the form, and clears on unpick", async () => {
+  it("walks the provider's collect stages, sending each stage's answers", async () => {
     const { result } = await renderResolvedOfframp();
-    act(() => result.current.setField("destinationCountry", "MX"));
-
-    const account = result.current.payoutAccounts[0];
-    act(() => result.current.selectPayoutAccount(account));
-    expect(result.current.selectedProviderAccountId).toBe("cpa_us_primary");
-    expect(result.current.collectedData).toEqual({ destinationCountry: "MX" });
-    expect(result.current.isComplete).toBe(true);
-
-    act(() => {
-      void result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
-    });
-    const reuseRequest = await release("POST", READY_US_ADVANCE);
-    expect(reuseRequest.body).toMatchObject({
-      providerAccountId: "cpa_us_primary",
-      collectedData: { destinationCountry: "US" },
-    });
-
-    act(() => result.current.selectPayoutAccount(null));
-    expect(result.current.selectedProviderAccountId).toBeNull();
+    expect(result.current.fields.map((field) => field.key)).toEqual(["taxResidence"]);
     expect(result.current.isComplete).toBe(false);
-    expect(result.current.collectedData).toEqual({ destinationCountry: "MX" });
-  });
 
-  it("a failed post-advance refresh never blocks a usable collect answer", async () => {
-    const { result } = await renderResolvedOfframp();
-
+    act(() => result.current.setField("taxResidence", "US"));
+    expect(result.current.isComplete).toBe(true);
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
+      submitPromise = result.current.submitRequirements(OFFRAMP_ADVANCE, "collected");
     });
-    await release("POST", COLLECT_ACCOUNT);
+    const advanceRequest = await release("POST", COLLECT_COUNTERPARTY);
     await submitPromise;
-    await releaseFailure("GET", "requirements refresh failed");
 
-    expect(result.current.blockReason).toBeNull();
-    expect(result.current.isResolved).toBe(true);
-    expect(result.current.fields.map((field) => field.key)).toEqual(["destinationCountry"]);
+    expect(advanceRequest.body).toEqual({
+      provider: "bvnk",
+      direction: "offramp",
+      ...OFFRAMP_ADVANCE,
+      collectedData: { taxResidence: "US" },
+    });
+    // The next stage comes from the advance itself; nothing is refetched.
+    expect(held).toEqual([]);
+    expect(result.current.fields.map((field) => field.key)).toEqual(["fullName"]);
   });
 
-  it("a successful offramp advance clears and refetches the requirements answer", async () => {
-    const { result } = await renderResolvedOfframp();
-    act(() => result.current.setField("destinationCountry", "MX"));
-    act(() => result.current.setField("paymentRails", "SPEI"));
-    act(() => result.current.setField("bankAccount.clabe", "002010077777777771"));
-
+  it("discards an advance ready response that lands after the corridor changed", async () => {
+    const rendered = await renderResolvedOfframp();
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
+      submitPromise = rendered.result.current.submitRequirements(OFFRAMP_ADVANCE, "collected");
     });
-    await release("POST", READY_US_ADVANCE);
+    expect(rendered.result.current.isAdvancing).toBe(true);
+
+    rendered.rerender({ ...OFFRAMP_PARAMS, fiatCurrency: "EUR" });
+    await release("POST", READY_OFFRAMP);
     await submitPromise;
 
-    const refreshedTree: PayoutRequirementTree = {
-      ...PAYOUT_TREE,
-      accounts: [
-        ...PAYOUT_TREE.accounts,
-        { id: "cpa_mx_new", destinationCountry: "MX", paymentRail: "SPEI", status: "ACTIVE" },
-      ],
-    };
-    await release("GET", { ...COLLECT_ACCOUNT, payout: refreshedTree });
-    await waitFor(() =>
-      expect(result.current.payoutAccounts.map((account) => account.id)).toEqual([
-        "cpa_us_primary",
-        "cpa_mx_new",
-      ])
-    );
-  });
-
-  it("discards an advance ready response that lands after the destination country changed", async () => {
-    const { result } = await renderResolvedOfframp();
-
-    act(() => result.current.setField("destinationCountry", "US"));
-    let submitPromise: Promise<CounterpartyRequirements> | null = null;
-    act(() => {
-      submitPromise = result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
-    });
-    expect(result.current.isAdvancing).toBe(true);
-
-    act(() => result.current.setField("destinationCountry", "MX"));
-
-    await release("POST", READY_US_ADVANCE);
-    await submitPromise;
-
-    expect(result.current.onboarding).toBeNull();
-    expect(result.current.resolvedProviderAccountId).toBeNull();
-    expect(result.current.isAdvancing).toBe(false);
+    expect(rendered.result.current.onboarding).toBeNull();
+    expect(rendered.result.current.isAdvancing).toBe(false);
   });
 
   it("applies an advance ready response for the corridor that is still current", async () => {
     const { result } = await renderResolvedOfframp();
-
-    act(() => result.current.setField("destinationCountry", "US"));
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
+      submitPromise = result.current.submitRequirements(OFFRAMP_ADVANCE, "collected");
     });
-    await release("POST", READY_US_ADVANCE);
+    await release("POST", READY_OFFRAMP);
     await submitPromise;
 
-    expect(result.current.onboarding).toEqual(READY_US_ADVANCE);
-    expect(result.current.resolvedProviderAccountId).toBe("cpa_us_primary");
-    expect(result.current.selectedProviderAccountId).toBeNull();
-  });
-
-  it("sends no account id when collecting a new account", async () => {
-    const { result } = await renderResolvedOfframp();
-
-    act(() => result.current.setField("destinationCountry", "MX"));
-    act(() => result.current.setField("paymentRails", "SPEI"));
-    act(() => result.current.setField("bankAccount.clabe", "002010077777777771"));
-    act(() => {
-      void result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
-    });
-    const newAccountRequest = await release("POST", READY_US_ADVANCE);
-    expect(newAccountRequest.body).not.toHaveProperty("providerAccountId");
-    expect(newAccountRequest.body).toMatchObject({
-      collectedData: {
-        destinationCountry: "MX",
-        paymentRails: "SPEI",
-        "bankAccount.clabe": "002010077777777771",
-      },
-    });
+    expect(result.current.onboarding).toEqual(READY_OFFRAMP);
   });
 
   it("never surfaces a poll result issued for an abandoned corridor", async () => {
@@ -469,31 +262,19 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
     expect(rendered.result.current.onboarding).toBeNull();
   });
 
-  it("never promotes an advance collect answer that lands after the destination country changed", async () => {
-    const { result } = await renderResolvedOfframp();
-
-    act(() => result.current.setField("destinationCountry", "US"));
+  it("never promotes an advance collect answer that lands after the corridor changed", async () => {
+    const rendered = await renderResolvedOfframp();
     let submitPromise: Promise<CounterpartyRequirements> | null = null;
     act(() => {
-      submitPromise = result.current.submitRequirements(
-        {
-          assetRail: "usdc.solana",
-          destinationCustodyWalletId: "",
-          fiatCurrency: "USD",
-        },
-        "collected"
-      );
+      submitPromise = rendered.result.current.submitRequirements(OFFRAMP_ADVANCE, "collected");
     });
 
-    act(() => result.current.setField("destinationCountry", "MX"));
-
+    rendered.rerender({ ...OFFRAMP_PARAMS, fiatCurrency: "EUR" });
     await release("POST", COLLECT_COUNTERPARTY);
     await submitPromise;
+    await release("GET", COLLECT_RESIDENCE);
 
-    expect(result.current.fields.map((field) => field.key)).toEqual([
-      "destinationCountry",
-      "paymentRails",
-    ]);
+    expect(rendered.result.current.fields.map((field) => field.key)).toEqual(["taxResidence"]);
   });
 
   it("never lets an earlier advance's poll verdict answer for a later same-corridor advance", async () => {
@@ -625,35 +406,38 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
       rendered.result.current.purgeRequirements();
     });
     await waitFor(() => expect(held).toHaveLength(1));
-    await release("GET", READY_US_ADVANCE);
+    await release("GET", READY_OFFRAMP);
 
     await waitFor(() => expect(rendered.result.current.requirements.needsCollection).toBe(false));
     expect(rendered.result.current.requirements.isResolved).toBe(true);
   });
 
   it("returning to a previously answered provider refetches after the purge", async () => {
-    const bvnkParams: CounterpartyRequirementsParams = { ...OFFRAMP_PARAMS, provider: "bvnk" };
+    const moonpayParams: CounterpartyRequirementsParams = {
+      ...OFFRAMP_PARAMS,
+      provider: "moonpay",
+    };
     const rendered = renderHook((props: CounterpartyRequirementsParams) => usePurgeHarness(props), {
       wrapper,
       initialProps: OFFRAMP_PARAMS,
     });
     await release("GET", COLLECT_COUNTERPARTY);
 
-    rendered.rerender(bvnkParams);
-    const bvnkRequest = await release("GET", COLLECT_COUNTERPARTY);
-    expect(bvnkRequest.url).toContain("provider=bvnk");
+    rendered.rerender(moonpayParams);
+    const moonpayRequest = await release("GET", COLLECT_COUNTERPARTY);
+    expect(moonpayRequest.url).toContain("provider=moonpay");
 
     act(() => {
       rendered.result.current.purgeRequirements();
     });
     rendered.rerender(OFFRAMP_PARAMS);
-    // The purge revalidates the still-mounted bvnk key, then the switch back to
-    // lightspark finds an empty cache and must fetch — two requests, in order.
+    // The purge revalidates the still-mounted moonpay key, then the switch back to
+    // bvnk finds an empty cache and must fetch: two requests, in order.
     await waitFor(() => expect(held).toHaveLength(2));
-    const revalidatedBvnk = await release("GET", COLLECT_COUNTERPARTY);
-    expect(revalidatedBvnk.url).toContain("provider=bvnk");
-    const lightsparkRequest = await release("GET", READY_US_ADVANCE);
-    expect(lightsparkRequest.url).toContain("provider=lightspark");
+    const revalidatedMoonpay = await release("GET", COLLECT_COUNTERPARTY);
+    expect(revalidatedMoonpay.url).toContain("provider=moonpay");
+    const bvnkRequest = await release("GET", READY_OFFRAMP);
+    expect(bvnkRequest.url).toContain("provider=bvnk");
 
     await waitFor(() => expect(rendered.result.current.requirements.needsCollection).toBe(false));
   });

@@ -2,7 +2,6 @@ import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subsc
 import { AppError } from "@/lib/errors";
 import type { AppContext } from "../context";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -15,7 +14,6 @@ export async function resolveSubscriptionPlanWalletSelector(
   const scope = await resolveScope(c);
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
   return wallet;
 }
 

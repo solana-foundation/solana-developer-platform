@@ -182,7 +182,7 @@ export function getPlaywrightCustodyProvider(): PlaywrightCustodyProvider {
   );
 }
 
-function getPlaywrightDatabaseUrl(): string {
+export function getPlaywrightDatabaseUrl(): string {
   const databaseUrl = getLocalDevVar("DATABASE_URL");
   if (databaseUrl) {
     return databaseUrl;

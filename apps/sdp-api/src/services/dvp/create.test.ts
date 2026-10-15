@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { FeePaymentError } from "@sdp/payments/fee-payment";
+import { FeePaymentError } from "@sdp/fee-payment";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import {
@@ -774,6 +774,7 @@ describe("createDvpTrade", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       actor: { type: "wallet", id: "cwlt_settlement" },
+      movement: "dvp.create",
     });
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {

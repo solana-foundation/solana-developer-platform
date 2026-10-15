@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { type Page, expect as playwrightExpect, test } from "@playwright/test";
-import type { PaymentRecurringPayment, PaymentRecurringPaymentResponse } from "@sdp/types";
+import {
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentResponse,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import {
@@ -14,15 +18,14 @@ import {
 
 const expect = playwrightExpect.configure({ timeout: 120_000 });
 
-// This journey only saves pending instructions; its read-only RPC cannot sign or send.
+// Keep pending schedules and their exact wallet links as retained local evidence.
 test.describe
   .serial("Managed recurring exact source identity", () => {
-    test.skip(process.env.PLAYWRIGHT_RECURRING_IDENTITY !== "1", "Requires isolated PR4 services");
     let fixture: Awaited<ReturnType<typeof bootstrapWalletIdentityFixtures>>;
     let counterparty: Awaited<ReturnType<typeof seedCounterpartyWithSolanaAccount>>;
 
     async function withDatabase(fn: (db: Client) => Promise<void>) {
-      const db = new Client({ connectionString: walletIdentityDatabaseUrl("recurring") });
+      const db = new Client({ connectionString: walletIdentityDatabaseUrl() });
       await db.connect();
       try {
         await fn(db);
@@ -32,7 +35,32 @@ test.describe
     }
 
     test.beforeAll(async ({ browser }) => {
-      fixture = await bootstrapWalletIdentityFixtures(browser, "recurring");
+      const rpcUrl = new URL(process.env.SOLANA_RPC_URL ?? "");
+      if (
+        !["http:", "https:"].includes(rpcUrl.protocol) ||
+        !["127.0.0.1", "localhost"].includes(rpcUrl.hostname)
+      ) {
+        throw new Error("Recurring identity fixtures require local Surfpool RPC");
+      }
+      fixture = await bootstrapWalletIdentityFixtures(browser, { preserveExistingFixtures: true });
+      // The token picker needs a real local token account; no transaction is signed or sent.
+      const seeded = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "recurring-identity-token-fixture",
+          method: "surfnet_setTokenAccount",
+          params: [
+            fixture.walletA.publicKey,
+            WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+            { amount: 100_000_000 },
+          ],
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      expect(seeded.ok).toBe(true);
+      expect(await seeded.json()).not.toHaveProperty("error");
       counterparty = await seedCounterpartyWithSolanaAccount(fixture.api, {
         displayName: `Recurring Identity ${randomUUID().slice(0, 8)}`,
         accountLabel: "Unfunded recurring identity destination",

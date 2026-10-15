@@ -12,10 +12,17 @@ import { type ServerType, serve } from "@hono/node-server";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 
 import { createApp } from "@/app";
-import { startCron, startEarnCatalogueBootSync } from "@/cron/runner";
+import {
+  assertCronConfig,
+  type CronHandle,
+  startCron,
+  startEarnCatalogueBootSync,
+} from "@/cron/runner";
+import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
+import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
 import { noopObservability } from "@/runtime/observability";
@@ -27,6 +34,11 @@ import type { Env } from "@/types/env";
 
 const DEFAULT_PORT = 8787;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 25_000;
+// Cloud Run restarts an instance whose startup probe (/health/ready) has not
+// passed within 60 s of container start (sdp-infra: 20 probes, 3 s apart), so
+// the egress wait ends this long after process start.
+const EGRESS_WAIT_BUDGET_MS = 45_000;
+const EGRESS_PROBE_INTERVAL_MS = 1_000;
 const TRUTHY_ENV: ReadonlySet<string> = new Set(["true", "1"]);
 const FALSY_ENV: ReadonlySet<string> = new Set(["false", "0"]);
 
@@ -116,13 +128,27 @@ async function main(): Promise<void> {
   // typo fails immediately instead of after a partial startup.
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
+  assertCronConfig(env);
+
+  // Clerk's signing keys are the probe: the auth path needs them first, and
+  // fetching them proves this instance can reach the internet.
+  const egress = env.CLERK_ISSUER?.trim()
+    ? startEgressGate({
+        probe: () => warmClerkSigningKeys(env),
+        deadlineMs: Math.max(0, EGRESS_WAIT_BUDGET_MS - Math.round(process.uptime() * 1000)),
+        intervalMs: EGRESS_PROBE_INTERVAL_MS,
+      })
+    : undefined;
 
   const app = createNodeHttpApp(
-    createApp({ observability: noopObservability, rampProviderStages: SDP_RAMP_PROVIDER_STAGES })
+    createApp({
+      observability: noopObservability,
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      egressReadiness: egress?.state,
+    })
   );
   const bg = new NodeBackgroundRunner();
-  const cron = startCron({ env, bg });
-  startEarnCatalogueBootSync({ env, bg });
+  let cron: CronHandle | null = null;
 
   const port = resolvePort();
   const server: ServerType = serve({
@@ -194,6 +220,14 @@ async function main(): Promise<void> {
     getLogger().error({ error: err }, "Uncaught exception — exiting");
     process.exit(1);
   });
+
+  // Scheduled work calls out from its first tick, so it waits for the same
+  // egress readiness does. A shutdown that began meanwhile cancels it.
+  await egress?.settled;
+  if (shuttingDown === null) {
+    cron = startCron({ env, bg });
+    startEarnCatalogueBootSync({ env, bg });
+  }
 }
 
 const invokedPath = process.argv[1];

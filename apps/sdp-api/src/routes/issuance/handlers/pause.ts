@@ -147,15 +147,17 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
   let onChainEffectCompleted = false;
 
   try {
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
+      movement: "issuance.control",
       env: c.env,
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
       requiredWalletPermissions: ["tokens:admin"],
     });
+    const signer = authority.signer;
 
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
     const result = await mosaic.pauseToken({
       mint: mintAddress,
@@ -326,15 +328,17 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
   let onChainEffectCompleted = false;
 
   try {
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
       requiredWalletPermissions: ["tokens:admin"],
     });
+    const signer = authority.signer;
 
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
     const result = await mosaic.unpauseToken({
       mint: mintAddress,

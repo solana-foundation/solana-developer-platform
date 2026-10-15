@@ -8,6 +8,10 @@
  * flags/new-design.ts. The first matching route wins, so a catch-all module goes last.
  */
 const DESIGN_MODULE_ROUTES = {
+  // The Wallets list, its create flow and one wallet's page, under both the current and the
+  // legacy custody prefix. A wallet's policy editor and audit pages keep the base design.
+  // `connections` and `switch` are pages of their own, not wallets.
+  wallets: /^\/dashboard\/(?:wallets|custody)(?:\/(?!connections\/?$|switch\/?$)[^/]+)?\/?$/,
   // Payments' Contacts: the list, a new contact, one contact's page.
   contacts: /^\/dashboard\/payments\/counterparty(?:\/[^/]+)?\/?$/,
   // Payments' two flows, Pay and Deposit.

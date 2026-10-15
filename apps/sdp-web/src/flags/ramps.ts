@@ -1,27 +1,24 @@
 import type { RampProviderId } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
 import {
-  payments,
   rampProviderBvnk,
   rampProviderCoinbase,
-  rampProviderLightspark,
-  rampProviderMoneygram,
   rampProviderMoonpay,
-  rampProviderMural,
   rampProviderStripe,
 } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "./release-channel";
 
 type FlagRead = () => Promise<boolean>;
 
 export type RampProviderFlagReads = Record<RampProviderId, FlagRead>;
 
+/** Payments has no flag of its own: the release channel alone decides (HOO-1956). */
+const paymentsInChannel: FlagRead = async () => isModuleInDeploymentReleaseChannel("payments");
+
 const RAMP_PROVIDER_FLAGS = {
   moonpay: rampProviderMoonpay,
-  lightspark: rampProviderLightspark,
   bvnk: rampProviderBvnk,
-  moneygram: rampProviderMoneygram,
   coinbase: rampProviderCoinbase,
-  mural: rampProviderMural,
   stripe: rampProviderStripe,
 } as const satisfies RampProviderFlagReads;
 
@@ -71,10 +68,13 @@ export function getEnabledRampProviders(): Promise<RampProviderId[]> {
 
 /** The ramp providers the integrations catalog and its detail pages offer for the current request. */
 export function getOfferedRampProviders(): Promise<RampProviderId[]> {
-  return resolveOfferedRampProviders({ payments, providers: RAMP_PROVIDER_FLAGS });
+  return resolveOfferedRampProviders({
+    payments: paymentsInChannel,
+    providers: RAMP_PROVIDER_FLAGS,
+  });
 }
 
 /** Whether the ramps surfaces (payments wizards, integrations) show for the current request. */
 export function isRampsEnabled(): Promise<boolean> {
-  return resolveRampsEnabled({ payments, providers: RAMP_PROVIDER_FLAGS });
+  return resolveRampsEnabled({ payments: paymentsInChannel, providers: RAMP_PROVIDER_FLAGS });
 }

@@ -1,13 +1,13 @@
 import type {
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
-  RampProviderId,
+  PersistedRampProviderId,
 } from "@sdp/types";
 
 export type FundingWalletAccount = CounterpartyProviderAccount & { fiatCurrency: string };
 
 export interface ProviderCustomerGroup {
-  provider: RampProviderId;
+  provider: PersistedRampProviderId;
   customerLink: CounterpartyProviderCustomerLink | undefined;
   payoutAccounts: CounterpartyProviderAccount[];
   fundingWallets: FundingWalletAccount[];
@@ -29,7 +29,7 @@ function toFundingWalletAccount(account: CounterpartyProviderAccount): FundingWa
 export function groupProviderAccounts(
   accounts: CounterpartyProviderAccount[]
 ): ProviderCustomerGroup[] {
-  const groups = new Map<RampProviderId, ProviderCustomerGroup>();
+  const groups = new Map<PersistedRampProviderId, ProviderCustomerGroup>();
   for (const account of accounts) {
     let group = groups.get(account.provider);
     if (group === undefined) {

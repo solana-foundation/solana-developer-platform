@@ -1,4 +1,3 @@
-import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -8,6 +7,7 @@ import { createToken2022Service } from "@/services/solana";
 import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import type { IssuanceAuthority } from "./handlers/authority-resolution";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
@@ -32,17 +32,24 @@ export const getTenantTokenService = (
   db: DatabaseClient = getDb(c.env)
 ): TokenService => new TokenService(db, getRequestTenantScope(c));
 
+/** The Mosaic service for one authority; its sponsor serves the signer's movement. */
 export const createIssuanceMosaicService = (
   c: AppContext,
-  signer: TransactionSigner,
+  authority: IssuanceAuthority,
   feePayment: MosaicFeePayment
 ) =>
   createMosaicService(
     c.env,
-    signer,
+    authority.signer,
     feePayment,
-    feePayment === "sponsored" ? resolveRequestSponsorshipScope(c) : undefined
+    feePayment === "sponsored"
+      ? { ...resolveRequestSponsorshipScope(c), movement: authority.movement }
+      : undefined
   );
 
-export const createIssuanceToken2022Service = (c: AppContext, signer: TransactionSigner) =>
-  createToken2022Service(c.env, signer, resolveRequestSponsorshipScope(c));
+/** The Token-2022 service for one authority; its sponsor serves the signer's movement. */
+export const createIssuanceToken2022Service = (c: AppContext, authority: IssuanceAuthority) =>
+  createToken2022Service(c.env, authority.signer, {
+    ...resolveRequestSponsorshipScope(c),
+    movement: authority.movement,
+  });

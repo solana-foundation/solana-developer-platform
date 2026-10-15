@@ -19,7 +19,7 @@ vi.mock("../wallets", async (importOriginal) => ({
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
-import { estimateNotAvailable } from "@sdp/payments";
+import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments";
 import {
   COMPLIANCE_PROVIDERS,
   CUSTODY_PROVIDERS,
@@ -107,6 +107,29 @@ describe("estimateAcrossProviders", () => {
         organization_id: "org_fanout_test",
         error_name: "Error",
         error_message: "provider exploded",
+      })
+    );
+  });
+
+  it("logs a provider's wording from diagnostics and keeps it out of the result", async () => {
+    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], async () => {
+      throw new SdpPaymentsError(
+        "BAD_REQUEST",
+        "moonpay request failed with status 400",
+        { provider: "moonpay", providerStatus: 400 },
+        { providerMessage: "amount too low for jane.doe@example.com" }
+      );
+    });
+
+    expect(results).toEqual([
+      { provider: "moonpay", status: "error", error: "moonpay request failed with status 400" },
+    ]);
+    expect(logEvent).toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_ramp_provider_error",
+        error_message: "moonpay request failed with status 400",
+        error_diagnostics: { providerMessage: "amount too low for [REDACTED_EMAIL]" },
       })
     );
   });

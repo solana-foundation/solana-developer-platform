@@ -1647,7 +1647,8 @@ export async function collectRecurringPayment(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.collect"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1691,6 +1692,7 @@ export async function collectRecurringPayment(input: {
       tokenProgram,
     });
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      movement: "recurring.collect",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: input.recurringPayment.source_wallet_id },
@@ -1730,6 +1732,7 @@ export async function collectRecurringPayment(input: {
     }
 
     const signature = await sendSubscriptionInstructions({
+      movement: "recurring.collect",
       sponsorshipActorWalletId: input.recurringPayment.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,

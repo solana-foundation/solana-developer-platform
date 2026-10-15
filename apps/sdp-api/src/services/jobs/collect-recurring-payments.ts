@@ -57,11 +57,11 @@ function emptyResult(): CollectDueRecurringPaymentsResult {
 
 function admissionFor(
   row: PaymentRecurringPaymentRow,
-  operation: MoneyStartContext["operation"]
+  movement: MoneyStartContext["movement"]
 ): { scope: MoneyAdmissionScope; context: MoneyStartContext } {
   return {
     scope: { organizationId: row.organization_id, projectId: row.project_id },
-    context: { surface: "job", operation, subjectId: row.id },
+    context: { surface: "job", movement, subjectId: row.id },
   };
 }
 
@@ -159,7 +159,7 @@ async function collectRow(
   env: Env,
   row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow
 ): Promise<CollectionRowOutcome> {
-  const { scope, context } = admissionFor(row, "recurring_payment.collect");
+  const { scope, context } = admissionFor(row, "recurring.collect");
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
@@ -224,7 +224,7 @@ async function recoverLifecycleRow(
       recurringPayment: row,
     };
     if (isActivatingRecurringPaymentStatus(row.status)) {
-      const { scope, context } = admissionFor(row, "recurring_payment.activate");
+      const { scope, context } = admissionFor(row, "recurring.activate");
       await activateRecurringPayment({
         ...input,
         createdBy: row.created_by,
@@ -239,7 +239,7 @@ async function recoverLifecycleRow(
       return "ok";
     }
     if (operation === "resume") {
-      const { scope, context } = admissionFor(row, "recurring_payment.resume");
+      const { scope, context } = admissionFor(row, "recurring.resume");
       await resumeRecurringPayment({
         ...input,
         admitStart: () => assertMoneyStartAdmitted(env, scope, context),

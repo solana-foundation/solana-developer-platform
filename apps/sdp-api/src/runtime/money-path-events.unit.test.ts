@@ -1,5 +1,6 @@
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import { describe, expect, it, vi } from "vitest";
-import { describeError, logEvent } from "./money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "./money-path-events";
 
 const logger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 
@@ -37,5 +38,25 @@ describe("describeError", () => {
 
   it("describes a thrown non-error without stringifying it", () => {
     expect(describeError("postgres password=secret")).toEqual({ error_name: "string" });
+  });
+});
+
+describe("paymentsErrorDiagnostics", () => {
+  it("returns a payments error's diagnostics, scrubbed", () => {
+    const failure = new SdpPaymentsError(
+      "BAD_REQUEST",
+      "stripe request failed with status 400",
+      { provider: "stripe", providerStatus: 400 },
+      { providerMessage: "email jane.doe@example.com is already registered" }
+    );
+
+    expect(paymentsErrorDiagnostics(failure)).toEqual({
+      providerMessage: "email [REDACTED_EMAIL] is already registered",
+    });
+  });
+
+  it("returns nothing for errors that carry no diagnostics", () => {
+    expect(paymentsErrorDiagnostics(new SdpPaymentsError("BAD_REQUEST"))).toBeUndefined();
+    expect(paymentsErrorDiagnostics(new Error("provider said no"))).toBeUndefined();
   });
 });

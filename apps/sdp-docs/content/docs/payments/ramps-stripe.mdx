@@ -1,0 +1,18 @@
+---
+rampProvider: stripe
+title: Stripe
+description: Configure Stripe as an SDP ramp provider — credentials, capabilities, and limits.
+---
+
+Stripe is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "stripe"`.
+
+Stripe has no separate sandbox credentials — supply a Stripe test-mode secret key.
+
+## Configuration
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | conditional | Secret key, sent as the username on HTTP Basic auth. A single key serves both modes — use a `sk_test_…` key to sandbox it, `sk_live_…` for production. |
+| `STRIPE_PUBLISHABLE_KEY` | conditional | Publishable key, echoed back on the quote for the client to mount the onramp session. |
+
+Stripe is onramp-only — both `estimateOfframp` and `createOfframpQuote` reject as unsupported. Onramp is also limited to `usdc.solana` and `sol.solana` as destination assets. Quotes always return `deliveryMode: "session_widget"`: a `clientSecret` and `publishableKey` to mount Stripe's crypto onramp session, plus an optional `redirectUrl`.

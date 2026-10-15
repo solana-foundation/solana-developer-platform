@@ -1,8 +1,10 @@
 import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
+  PERSISTED_RAMP_PROVIDERS,
   tokenFilterAliases,
 } from "@sdp/types";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
@@ -15,9 +17,11 @@ import type {
   ListTransfersResult,
   PaymentsRepository,
   PaymentTransferRow,
+  RampTransferType,
+  TransferStatusChangeFields,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { WALLET_TRANSFER_TYPES } from "./payments.repository";
+import { RAMP_TRANSFER_TRANSITIONS, WALLET_TRANSFER_TYPES } from "./payments.repository";
 
 function paymentTransferSearchExpression(alias: string): string {
   return `(
@@ -152,6 +156,9 @@ export type PaymentTransferProjectionRow = Record<string, unknown> & {
   kind: PaymentTransactionKind;
 };
 
+// A retired provider's id still parses; an id this deployment does not know throws.
+const storedTransferProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS).nullable();
+
 /** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
 export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
@@ -171,7 +178,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     kind: row.kind,
     direction: row.direction as PaymentTransferRow["direction"],
     status: row.status as PaymentTransferRow["status"],
-    provider: row.provider as PaymentTransferRow["provider"],
+    provider: storedTransferProviderSchema.parse(row.provider),
     provider_reference: row.provider_reference as string | null,
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,
@@ -238,6 +245,79 @@ export function createPostgresPaymentsRepository(
     if (tenantScope) {
       assertTenantClaim(tenantScope, claim, "PaymentsRepository");
     }
+  };
+  const updateTransferStatusIf = async (
+    input: TransferStatusChangeFields & {
+      transferId: string;
+      organizationId: string;
+      projectId: string | null;
+      updatedAt: string;
+    },
+    guard: {
+      fromStatuses: readonly PaymentTransferStatus[];
+      toStatus: PaymentTransferStatus;
+      types?: readonly RampTransferType[];
+    }
+  ): Promise<PaymentTransferRow | null> => {
+    assertScope(input);
+    const extraClauses = ["id = ?", "status = ANY(?)"];
+    const extraValues: unknown[] = [input.transferId, [...guard.fromStatuses]];
+    if (guard.types !== undefined) {
+      extraClauses.push("type = ANY(?)");
+      extraValues.push([...guard.types]);
+    }
+    const scope = buildTransferScopeWhere({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+      extraClauses,
+      extraValues,
+    });
+
+    const assignments = ["status = ?", "updated_at = ?"];
+    const assignmentValues: unknown[] = [guard.toStatus, input.updatedAt];
+    if (input.sourceAddress !== undefined) {
+      assignments.push("source_address = ?");
+      assignmentValues.push(input.sourceAddress);
+    }
+    if (input.destinationAddress !== undefined) {
+      assignments.push("destination_address = ?");
+      assignmentValues.push(input.destinationAddress);
+    }
+    if (input.signature !== undefined) {
+      assignments.push("signature = ?");
+      assignmentValues.push(input.signature);
+    }
+    if (input.amount !== undefined) {
+      assignments.push("amount = ?");
+      assignmentValues.push(input.amount);
+    }
+    if (input.fiatAmount !== undefined) {
+      assignments.push("fiat_amount = ?");
+      assignmentValues.push(input.fiatAmount);
+    }
+    if (input.providerData !== undefined) {
+      assignments.push("provider_data = provider_data || ?::jsonb");
+      assignmentValues.push(JSON.stringify(input.providerData));
+    }
+    if (input.error !== undefined) {
+      assignments.push("error = ?");
+      assignmentValues.push(input.error);
+    }
+    const row = await db
+      .prepare(
+        `WITH pt AS (
+         UPDATE payment_transfers
+         SET ${assignments.join(", ")}
+         WHERE ${scope.where}
+         RETURNING *
+         )
+         SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+      )
+      .bind(...assignmentValues, ...scope.values)
+      .first<PaymentTransferProjectionRow>();
+
+    return row ? mapTransferRow(row) : null;
   };
   return {
     async createTransfer(input: CreatePaymentTransferInput) {
@@ -556,84 +636,19 @@ export function createPostgresPaymentsRepository(
     },
 
     async updateTransferStatusGuarded(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ANY(?)"],
-        extraValues: [input.transferId, [...input.fromStatuses]],
+      return updateTransferStatusIf(input, {
+        fromStatuses: input.fromStatuses,
+        toStatus: input.toStatus,
       });
-
-      const assignments = ["status = ?", "updated_at = ?"];
-      const assignmentValues: unknown[] = [input.toStatus, input.updatedAt];
-      if (input.sourceAddress !== undefined) {
-        assignments.push("source_address = ?");
-        assignmentValues.push(input.sourceAddress);
-      }
-      if (input.destinationAddress !== undefined) {
-        assignments.push("destination_address = ?");
-        assignmentValues.push(input.destinationAddress);
-      }
-      if (input.signature !== undefined) {
-        assignments.push("signature = ?");
-        assignmentValues.push(input.signature);
-      }
-      if (input.amount !== undefined) {
-        assignments.push("amount = ?");
-        assignmentValues.push(input.amount);
-      }
-      if (input.fiatAmount !== undefined) {
-        assignments.push("fiat_amount = ?");
-        assignmentValues.push(input.fiatAmount);
-      }
-      if (input.providerData !== undefined) {
-        assignments.push("provider_data = provider_data || ?::jsonb");
-        assignmentValues.push(JSON.stringify(input.providerData));
-      }
-      if (input.error !== undefined) {
-        assignments.push("error = ?");
-        assignmentValues.push(input.error);
-      }
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET ${assignments.join(", ")}
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind(...assignmentValues, ...scope.values)
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
     },
 
-    async claimTransferDestination(input) {
-      assertScope(input);
-      const scope = buildTransferScopeWhere({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: ["id = ?", "status = ?", "destination_address IS NULL"],
-        extraValues: [input.transferId, input.expectedStatus],
+    async transitionRampTransfer(input) {
+      const transition = RAMP_TRANSFER_TRANSITIONS[input.transition];
+      return updateTransferStatusIf(input, {
+        fromStatuses: transition.from,
+        toStatus: transition.to,
+        types: transition.types,
       });
-      const row = await db
-        .prepare(
-          `WITH pt AS (
-           UPDATE payment_transfers
-           SET destination_address = ?, memo = ?, updated_at = ?
-           WHERE ${scope.where}
-           RETURNING *
-           )
-           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
-        )
-        .bind(input.destinationAddress, input.memo, input.updatedAt, ...scope.values)
-        .first<PaymentTransferProjectionRow>();
-
-      return row ? mapTransferRow(row) : null;
     },
 
     async claimTransferProviderData(input) {

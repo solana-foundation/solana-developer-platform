@@ -86,7 +86,7 @@ function transferInput(overrides: {
   return {
     id: `xfr_${suffix}`,
     organizationId: TEST_ORG.id,
-    projectId: null,
+    projectId: TEST_PROJECT_ID,
     custodyWalletId,
     walletId,
     counterpartyId: null,
@@ -161,11 +161,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     ).toBe(true);
   });
 
-  async function seedTransfer(input: {
-    id: string;
-    status: string;
-    projectId?: string | null;
-  }): Promise<void> {
+  async function seedTransfer(input: { id: string; status: string }): Promise<void> {
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
@@ -176,7 +172,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       .bind(
         input.id,
         TEST_ORG.id,
-        input.projectId === undefined ? TEST_PROJECT_ID : input.projectId,
+        TEST_PROJECT_ID,
         TEST_WALLET_ID,
         "USDC",
         "offramp",
@@ -230,7 +226,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.updateOnchainTransferForRamp({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         custodyWalletId: "cwlt_other",
         walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-onchain",
@@ -245,7 +241,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const updated = await repo.updateOnchainTransferForRamp({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       sourceAddress: "Sourceramp-onchain",
@@ -283,7 +279,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.updateOnchainTransferForRamp({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
         walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-occupied",
@@ -296,146 +292,6 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     ).resolves.toBeNull();
   });
 
-  describe("claimTransferDestination", () => {
-    const pending = "pending" satisfies PaymentTransferStatus;
-    const settling = "settling" satisfies PaymentTransferStatus;
-    const depositWallet = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
-    const otherWallet = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
-    const sourceWallet = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
-    const updatedAt = "2026-08-31T12:00:00.000Z";
-
-    async function createRamp(destinationAddress: string | null, memo: string | null) {
-      const transfer = await repo.createTransfer({
-        ...transferInput({ suffix: "destination-claim" }),
-        type: "offramp",
-        status: pending,
-        sourceAddress: sourceWallet,
-        destinationAddress,
-        token: "USDC",
-        amount: "25",
-        memo,
-        provider: "moneygram",
-        providerReference: "mg_session_destination_claim",
-        deliveryMode: "session_widget",
-        fiatCurrency: "USD",
-        fiatAmount: "25",
-        providerData: { moneygram: { transactionId: "mg_tx_destination_claim" } },
-      });
-      if (transfer === null) {
-        throw new Error("Expected transfer creation to succeed");
-      }
-      return transfer;
-    }
-
-    it("sets destination, memo and updated_at when the destination is null", async () => {
-      const transfer = await createRamp(null, null);
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: null,
-      };
-      const expected = {
-        ...transfer,
-        destination_address: depositWallet,
-        memo: "mg_memo_destination_claim",
-        updated_at: updatedAt,
-      };
-
-      await expect(
-        repo.claimTransferDestination({
-          ...scope,
-          expectedStatus: pending,
-          destinationAddress: depositWallet,
-          memo: "mg_memo_destination_claim",
-          updatedAt,
-        })
-      ).resolves.toEqual(expected);
-      expect(transfer.updated_at).not.toBe(updatedAt);
-      await expect(repo.getTransferById(scope)).resolves.toEqual(expected);
-    });
-
-    it.each([
-      {
-        name: "destination already set",
-        destinationAddress: otherWallet,
-        memo: "mg_existing_memo",
-        expectedStatus: pending,
-        organizationId: TEST_ORG.id,
-      },
-      {
-        name: "status differs",
-        destinationAddress: null,
-        memo: null,
-        expectedStatus: settling,
-        organizationId: TEST_ORG.id,
-      },
-      {
-        name: "foreign organization",
-        destinationAddress: null,
-        memo: null,
-        expectedStatus: pending,
-        organizationId: "org_mg_foreign",
-      },
-    ] satisfies {
-      name: string;
-      destinationAddress: string | null;
-      memo: string | null;
-      expectedStatus: PaymentTransferStatus;
-      organizationId: string;
-    }[])("returns null and leaves the row unchanged for $name", async (input) => {
-      const transfer = await createRamp(input.destinationAddress, input.memo);
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: null,
-      };
-
-      await expect(
-        repo.claimTransferDestination({
-          ...scope,
-          organizationId: input.organizationId,
-          expectedStatus: input.expectedStatus,
-          destinationAddress: depositWallet,
-          memo: "mg_memo_destination_claim",
-          updatedAt,
-        })
-      ).resolves.toBeNull();
-      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
-    });
-
-    it("stores a null memo as SQL NULL", async () => {
-      const transfer = await createRamp(null, null);
-      const scope = {
-        transferId: transfer.id,
-        organizationId: TEST_ORG.id,
-        projectId: null,
-      };
-      const expected = {
-        ...transfer,
-        destination_address: depositWallet,
-        memo: null,
-        updated_at: updatedAt,
-      };
-
-      await expect(
-        repo.claimTransferDestination({
-          ...scope,
-          expectedStatus: pending,
-          destinationAddress: depositWallet,
-          memo: null,
-          updatedAt,
-        })
-      ).resolves.toEqual(expected);
-      await expect(repo.getTransferById(scope)).resolves.toEqual(expected);
-      await expect(
-        getDb(env)
-          .prepare("SELECT memo IS NULL AS memo_is_null FROM payment_transfers WHERE id = ?")
-          .bind(transfer.id)
-          .first<{ memo_is_null: boolean }>()
-      ).resolves.toEqual({ memo_is_null: true });
-    });
-  });
-
   describe("claimTransferProviderData", () => {
     const pending: PaymentTransferStatus = "pending";
     const processing: PaymentTransferStatus = "processing";
@@ -444,22 +300,22 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const transfer = await repo.createTransfer({
         ...transferInput({ suffix: "provider-data-claim-unset" }),
         status: pending,
-        provider: "moneygram",
-        providerData: { moneygram: { a: "1" } },
+        provider: "moonpay",
+        providerData: { moonpay: { a: "1" } },
       });
       if (!transfer) throw new Error("Expected transfer creation to succeed");
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
-      const providerData = { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } };
+      const providerData = { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } };
       const updatedAt = "2026-08-31T12:00:00.000Z";
 
       const updated = await repo.claimTransferProviderData({
         ...scope,
         expectedStatus: pending,
-        claimPath: ["moneygram", "transactionId"],
+        claimPath: ["moonpay", "transactionId"],
         providerData,
         updatedAt,
       });
@@ -481,22 +337,22 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const transfer = await repo.createTransfer({
         ...transferInput({ suffix: "provider-data-claim-occupied" }),
         status: pending,
-        provider: "moneygram",
-        providerData: { moneygram: { a: "1", transactionId: "mg_tx_existing" } },
+        provider: "moonpay",
+        providerData: { moonpay: { a: "1", transactionId: "mp_tx_existing" } },
       });
       if (!transfer) throw new Error("Expected transfer creation to succeed");
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
         repo.claimTransferProviderData({
           ...scope,
           expectedStatus: pending,
-          claimPath: ["moneygram", "transactionId"],
-          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          claimPath: ["moonpay", "transactionId"],
+          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
           updatedAt: "2026-08-31T12:00:00.000Z",
         })
       ).resolves.toBeNull();
@@ -507,22 +363,22 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const transfer = await repo.createTransfer({
         ...transferInput({ suffix: "provider-data-claim-status" }),
         status: processing,
-        provider: "moneygram",
-        providerData: { moneygram: { a: "1" } },
+        provider: "moonpay",
+        providerData: { moonpay: { a: "1" } },
       });
       if (!transfer) throw new Error("Expected transfer creation to succeed");
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
         repo.claimTransferProviderData({
           ...scope,
           expectedStatus: pending,
-          claimPath: ["moneygram", "transactionId"],
-          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          claimPath: ["moonpay", "transactionId"],
+          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
           updatedAt: "2026-08-31T12:00:00.000Z",
         })
       ).resolves.toBeNull();
@@ -533,14 +389,14 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       const transfer = await repo.createTransfer({
         ...transferInput({ suffix: "provider-data-claim-organization" }),
         status: pending,
-        provider: "moneygram",
-        providerData: { moneygram: { a: "1" } },
+        provider: "moonpay",
+        providerData: { moonpay: { a: "1" } },
       });
       if (!transfer) throw new Error("Expected transfer creation to succeed");
       const scope = {
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       };
 
       await expect(
@@ -548,8 +404,8 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
           ...scope,
           organizationId: "org_someone_else",
           expectedStatus: pending,
-          claimPath: ["moneygram", "transactionId"],
-          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          claimPath: ["moonpay", "transactionId"],
+          providerData: { moonpay: { a: "1", transactionId: "mp_tx_claim_1" } },
           updatedAt: "2026-08-31T12:00:00.000Z",
         })
       ).resolves.toBeNull();
@@ -830,7 +686,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const created = await repo.createTransfer({
       id: "xfr_idempotency_metadata",
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,
@@ -860,7 +716,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
 
     const found = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       idempotencyKey: "key-abc",
     });
     expect(found?.id).toBe(created?.id);
@@ -874,7 +730,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const signed = await repo.persistSignedTransfer({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "signed-outbox-signature",
       signedTransaction: "AQID",
       lastValidBlockHeight: "18446744073709551615",
@@ -902,7 +758,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.persistSignedTransfer({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         signature: `height-${suffix}-signature`,
         signedTransaction: "AQID",
         lastValidBlockHeight: height,
@@ -917,7 +773,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.getTransferById({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
       })
     ).resolves.toMatchObject({
       signature: null,
@@ -935,7 +791,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.markTransferSubmissionStarted({
         transferId: transfer.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         startedAt: "2026-08-21T10:01:00.000Z",
       })
     ).resolves.toBeNull();
@@ -943,7 +799,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await repo.persistSignedTransfer({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "submission-start-signature",
       signedTransaction: "BAUG",
       lastValidBlockHeight: "1000",
@@ -952,7 +808,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const started = await repo.markTransferSubmissionStarted({
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       startedAt: "2026-08-21T10:01:00.000Z",
     });
 
@@ -971,7 +827,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     const scope = {
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
     };
 
     await repo.persistSignedTransfer({
@@ -1013,7 +869,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.persistSignedTransfer({
         transferId: unsigned.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         signature: "too-late-signature",
         signedTransaction: "DQ4P",
         lastValidBlockHeight: "4000",
@@ -1024,7 +880,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
     await repo.persistSignedTransfer({
       transferId: signed.id,
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       signature: "signed-before-terminal",
       signedTransaction: "EBES",
       lastValidBlockHeight: "5000",
@@ -1039,7 +895,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       repo.markTransferSubmissionStarted({
         transferId: signed.id,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT_ID,
         startedAt: "2026-08-21T10:08:00.000Z",
       })
     ).resolves.toBeNull();
@@ -1097,33 +953,37 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       idempotencyFingerprint: "fp-1",
       idempotencyKey: "shared-key",
     };
-    const orgLevel = await repo.createTransfer({ ...base, id: "xfr_org_level", projectId: null });
-    const projectScoped = await repo.createTransfer({
+    const productionScoped = await repo.createTransfer({
       ...base,
-      id: "xfr_project_scoped",
-      projectId: TEST_PROJECT_ID,
+      id: "xfr_production_scoped",
+      projectId: projects.production.id,
     });
-    expect(orgLevel?.id).not.toBe(projectScoped?.id);
+    const sandboxScoped = await repo.createTransfer({
+      ...base,
+      id: "xfr_sandbox_scoped",
+      projectId: projects.sandbox.id,
+    });
+    expect(productionScoped?.id).not.toBe(sandboxScoped?.id);
 
-    const foundOrg = await repo.findTransferByIdempotency({
+    const foundProduction = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: projects.production.id,
       idempotencyKey: "shared-key",
     });
-    const foundProject = await repo.findTransferByIdempotency({
+    const foundSandbox = await repo.findTransferByIdempotency({
       organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
+      projectId: projects.sandbox.id,
       idempotencyKey: "shared-key",
     });
-    expect(foundOrg?.id).toBe(orgLevel?.id);
-    expect(foundProject?.id).toBe(projectScoped?.id);
+    expect(foundProduction?.id).toBe(productionScoped?.id);
+    expect(foundSandbox?.id).toBe(sandboxScoped?.id);
   });
 
   it("rejects a second transfer with the same (org, idempotency_key)", async () => {
     const repo = createPostgresPaymentsRepository(getDb(env));
     const base = {
       organizationId: TEST_ORG.id,
-      projectId: null,
+      projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
       counterpartyId: null,

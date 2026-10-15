@@ -1,4 +1,4 @@
-import type { SdpRampProviderStages } from "@sdp/types";
+import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -63,7 +63,7 @@ import rpc from "@/routes/rpc";
 import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -82,6 +82,12 @@ export interface AppDeps {
    * leave another out, which today's all-`experimental` stages cannot show.
    */
   rampProviderStages: SdpRampProviderStages;
+  /**
+   * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
+   * out of rotation until it can reach the internet. Absent where nothing gates
+   * on egress (the Workers entrypoint, tests).
+   */
+  egressReadiness?: () => EgressReadiness;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -308,6 +314,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
     c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 
@@ -478,6 +485,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     ) {
       if (err instanceof SdpRpcError) {
         logVendorError("rpc", err.code, err.statusCode);
+      }
+      // The provider's own wording never reaches the body below; operators read
+      // it here. Its own event, so it stays out of the vendor-error alert, which
+      // leaves ramps to sdp_api_ramp_provider_error.
+      if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
+        logEvent(err.statusCode >= 500 ? "error" : "warn", {
+          event: "sdp_api_payments_provider_error",
+          code: err.code,
+          status: err.statusCode,
+          method: c.req.method,
+          path: c.req.path,
+          request_id: requestId,
+          ...describeError(err),
+          error_diagnostics: paymentsErrorDiagnostics(err),
+        });
       }
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);
