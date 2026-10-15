@@ -616,9 +616,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     async resetRecurringPaymentActivationIfNotActive(params) {
       const row = await db
         .prepare(
+          // A row back in pending_activation was never activated, so it has
+          // no activator: a refused or failed claim leaves none behind.
           `UPDATE payment_recurring_payments
               SET status = 'pending_activation',
-                  updated_at = ?
+                  updated_at = ?,
+                  activated_by_api_key_id = NULL,
+                  activated_by_user_id = NULL
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
