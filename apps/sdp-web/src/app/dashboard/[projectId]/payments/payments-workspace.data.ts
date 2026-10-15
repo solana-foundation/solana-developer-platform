@@ -500,6 +500,28 @@ function isReplayed(response: Response): boolean {
 }
 
 /**
+ * A refusal's body, read once. A body that fails to download is no answer at
+ * all, like a lost response (`unreadable` in `dashboard-fetch`): it throws a
+ * plain error, never a request error with a status, so the caller keeps the
+ * money key for the retry instead of retiring it on a refusal it never read.
+ */
+async function readRefusalText(response: Response, failedMessage: string): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw new Error(failedMessage, { cause: error });
+  }
+}
+
+function parseRefusalBody(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Creates one transfer.
  *
  * The idempotency key is transport metadata, sent as a header and never in the
@@ -530,13 +552,12 @@ export async function createTransfer(
       ? await dashboardRequest(path, init)
       : await dashboardRequestUnderOwnKey(path, init, idempotencyKey);
   if (!response.ok) {
-    const code = apiErrorCode(
-      await response
-        .clone()
-        .text()
-        .catch(() => "")
+    const text = await readRefusalText(
+      response,
+      t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
     );
-    const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
+    const code = apiErrorCode(text);
+    const body = parseRefusalBody(text) as TransferEnvelope;
     throw new TransferRequestError(
       getApiError(
         body,
@@ -670,13 +691,12 @@ export async function createTransferBatch(
     idempotencyKey
   );
   if (!response.ok) {
-    const code = apiErrorCode(
-      await response
-        .clone()
-        .text()
-        .catch(() => "")
+    const text = await readRefusalText(
+      response,
+      t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
     );
-    const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+    const code = apiErrorCode(text);
+    const body = parseRefusalBody(text) as PaymentTransferBatchEnvelope;
     throw new TransferBatchRequestError(
       getApiError(
         body,
