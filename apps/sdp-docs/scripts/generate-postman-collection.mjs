@@ -216,14 +216,34 @@ const SAVED_KEY_VARIABLE = [
 ];
 
 /**
+ * Statuses that mean the movement a money route answered with is still under
+ * way: a transfer or batch (`PaymentTransferStatus`, `PaymentTransferBatchStatus`),
+ * a recurring schedule mid-transition (`PaymentRecurringPaymentStatus`), or a
+ * collection attempt. While a response shows one, the saved key is kept.
+ */
+const NON_FINAL_STATUSES = [
+  "pending",
+  "processing",
+  "settling",
+  "awaiting_payment",
+  "activating",
+  "updating",
+  "canceling",
+  "resuming",
+];
+
+/**
  * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
  * its own `idempotencyKey.<operationId>` variable, minted only when none is
  * saved. Every saved key is a money route's, so it follows the dashboard's
  * money-route rule (`moneyAnswerRetiresKey`, apps/sdp-web/src/lib/idempotency.ts):
- * the key is retired only by a 2xx, an `Idempotent-Replayed: true` answer, or a
- * 422 other than `IDEMPOTENCY_KEY_REUSED` (the request itself was rejected).
- * Everything else keeps it: a 400, 401, 403 or 429 refusal is not stored and
- * the original may still have run, a 409 (in flight, or outcome unknown) is
+ * the key is retired by a 2xx whose movement is final, a replayed refusal, or
+ * a 422 other than `IDEMPOTENCY_KEY_REUSED` (the request itself was rejected).
+ * A 2xx that still shows the transfer, batch, schedule or collection under way
+ * (`NON_FINAL_STATUSES`) keeps it: pressing Send again with a new key would pay
+ * again, so the user polls with GET until it is final, then clears the variable.
+ * Everything else keeps it too: a 400, 401, 403 or 429 refusal is not stored
+ * and the original may still have run, a 409 (in flight, or outcome unknown) is
  * answered under the same key, a 5xx is retried under it, and a 422
  * `IDEMPOTENCY_KEY_REUSED` says only that this send differed from the key's
  * original, so the user restores the original request or clears the variable
@@ -258,10 +278,16 @@ function idempotencyKeyEvents() {
           "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
           "  const status = pm.response.code;",
           '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
-          "  let code;",
-          "  try { code = pm.response.json().error.code; } catch (e) {}",
+          "  let body;",
+          "  try { body = pm.response.json(); } catch (e) {}",
+          "  const code = body && body.error ? body.error.code : undefined;",
           '  const rejected = status === 422 && code !== "IDEMPOTENCY_KEY_REUSED";',
-          "  if (replayed || (status >= 200 && status < 300) || rejected) {",
+          "  const data = (body && body.data) || {};",
+          `  const moving = new Set(${JSON.stringify(NON_FINAL_STATUSES)});`,
+          "  const inFlight = [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
+          "    .some((record) => record && moving.has(record.status));",
+          "  const settled = status >= 200 && status < 300 ? !inFlight : replayed;",
+          "  if (settled || rejected) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}",
