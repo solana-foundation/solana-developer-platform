@@ -197,6 +197,65 @@ describe("ApiPlaygroundShell", () => {
     expect(sentKey(2)).toBe(sentKey(0));
     expect(sentKey(3)).not.toBe(sentKey(2));
   });
+
+  // Greptile (#2333): a GET between a lost write and its retry cleared the
+  // write's key, so the retry ran the write again under a new one.
+  it("keeps a lost POST's key across a GET, so the retry still reuses it", async () => {
+    storeApiKeySecret({
+      value: ["sk", "test", "idempotency", "fixture"].join("_"),
+      apiKeyId: "key-test",
+    });
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const envelope = (status: number) =>
+      new Response(
+        JSON.stringify({ ok: status < 400, status, statusText: "", body: {}, headers: {} }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    const answers: (Response | "lost")[] = ["lost", envelope(200), envelope(201)];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
+      const answer = answers.shift() ?? envelope(201);
+      if (answer === "lost") throw new TypeError("Failed to fetch");
+      return answer;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const postEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-retry",
+      method: "POST",
+    };
+    const getEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "get-check",
+      method: "GET",
+    };
+    const sendOn = async (config: ApiPlaygroundEndpointConfig, calls: number) => {
+      const view = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell apiKeyId="key-test" endpoints={[config]} productName="Test product" />
+        </I18nProvider>
+      );
+      await waitFor(() =>
+        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
+          false
+        )
+      );
+      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(calls));
+      cleanup();
+    };
+    const sentKey = (call: number) =>
+      z
+        .object({ idempotencyKey: z.string().optional() })
+        .parse(JSON.parse(String(fetchMock.mock.calls[call][1].body))).idempotencyKey;
+
+    await sendOn(postEndpoint, 1);
+    await sendOn(getEndpoint, 2);
+    await sendOn(postEndpoint, 3);
+
+    expect(sentKey(0)).toEqual(expect.any(String));
+    expect(sentKey(1)).toBeUndefined();
+    expect(sentKey(2)).toBe(sentKey(0));
+  });
 });
 
 describe("ApiPlaygroundShell refresh layout", () => {

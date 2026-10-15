@@ -527,7 +527,10 @@ async function executePlaygroundRequest({
       onValidationError(t("Shared.SharedComponents.playgroundExecutionFailed"));
       return;
     }
+    // Only an answer to the write itself settles its key; a keyless read (say,
+    // a GET checking whether the lost write landed) leaves it for the retry.
     if (
+      idempotencyKey !== undefined &&
       answerRetiresKey({
         status: envelope.status,
         replayed: envelope.headers?.["idempotent-replayed"] === "true",
