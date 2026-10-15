@@ -434,6 +434,29 @@ describe("Counterparties Routes", () => {
       expect(body.error.details.reason).toBe("provider_not_entitled");
       expect(fetchSpy).not.toHaveBeenCalled();
     });
+
+    it("reports Stripe off-ramp as unsupported on requirements submit", async () => {
+      const created = await createCounterparty({ externalId: "stripe_offramp_requirements" });
+      const cp = (await created.json()).data.counterparty;
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/requirements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ provider: "stripe", direction: "offramp" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toMatchObject({
+        provider: "stripe",
+        direction: "offramp",
+        status: "unsupported",
+        reason: "Stripe supports on-ramp only.",
+      });
+    });
   });
   describe("counterparty accounts", () => {
     it("creates, lists, updates, gets, and archives a crypto wallet account", async () => {

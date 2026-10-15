@@ -26,7 +26,6 @@ import {
 import { created, noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { admitRamp } from "@/routes/payments/ramps/admission";
-import { advanceCounterpartyRequirements } from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
   resolveScope,
@@ -265,12 +264,11 @@ export const submitCounterpartyRequirements = async (
   }
 
   const input = body;
-  const advanced = await advanceCounterpartyRequirements(c, {
-    ...input,
-    counterparty,
-    projectId,
-  });
-  return success(c, advanced);
+  const requirements = RAMP_PROVIDER_CLIENTS[input.provider].validateCounterparty(
+    mapToCounterparty(counterparty),
+    { direction: input.direction, providerData: counterparty.provider_data }
+  );
+  return success(c, requirements);
 };
 
 export const createCounterparty = async (

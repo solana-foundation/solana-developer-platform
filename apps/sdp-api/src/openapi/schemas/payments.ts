@@ -1436,7 +1436,7 @@ const offrampCurrencyPairSchema = z
     dest: z.string().openapi({ description: "Fiat destination currency code.", example: "USD" }),
     providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({
       description: "Providers that support this off-ramp pair.",
-      example: ["moonpay", "stripe"],
+      example: ["moonpay"],
     }),
   })
   .openapi({ description: "Provider support for one crypto-to-fiat off-ramp pair." });

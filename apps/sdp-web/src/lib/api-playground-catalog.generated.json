@@ -3270,7 +3270,7 @@
               {
                 "source": "usdc.solana",
                 "dest": "USD",
-                "providers": ["moonpay", "stripe"]
+                "providers": ["moonpay"]
               }
             ],
             "providerDetails": {
