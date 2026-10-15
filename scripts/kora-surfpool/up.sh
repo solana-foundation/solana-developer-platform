@@ -258,6 +258,15 @@ write_runtime_env() {
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
     echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
+    # Sponsorship prices and settles on the lane cluster's Kora upstream: point it at Surfpool,
+    # and blank the other cluster's so nothing inherits a real endpoint from Doppler.
+    if [ "${SOLANA_NETWORK:-devnet}" = "mainnet-beta" ]; then
+      echo "KORA_MAINNET_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      echo "KORA_DEVNET_RPC_URL="
+    else
+      echo "KORA_DEVNET_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      echo "KORA_MAINNET_RPC_URL="
+    fi
     echo "${KORA_SURFPOOL_ENV_PREFIX}_URL=$(shell_quote "${KORA_SURFPOOL_KORA_URL}")"
     echo "KORA_SHIM_RPC_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_RPC_TIMEOUT_MS}")"
     echo "KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS}")"

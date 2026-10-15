@@ -233,6 +233,10 @@ export interface Env extends ManagedRpcEnv {
   KORA_MAINNET_URL?: string;
   KORA_MAINNET_API_KEY?: string;
   KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
+  /** The Solana RPC the devnet Kora reads and sends on; sponsorship prices and settles devnet against it. */
+  KORA_DEVNET_RPC_URL?: string;
+  /** The Solana RPC the mainnet Kora reads and sends on; sponsorship prices and settles mainnet against it. */
+  KORA_MAINNET_RPC_URL?: string;
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;

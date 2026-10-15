@@ -4,8 +4,8 @@ import {
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
-import { createClusterRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import { createRpc, getTransactionNetworkFee, type SolanaRpc } from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -129,11 +129,39 @@ function resolveNetwork(scope: Pick<SponsorshipScope, "environment">): Sponsorsh
   return sponsorshipNetworkForCluster(CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
 }
 
+/** Each cluster's Kora upstream Solana RPC, the node that cluster's Kora simulates and sends on. */
+const KORA_RPC_URL_ENV_KEYS = {
+  devnet: "KORA_DEVNET_RPC_URL",
+  "mainnet-beta": "KORA_MAINNET_RPC_URL",
+} as const satisfies Record<SolanaCluster, keyof Env>;
+
 /**
- * The RPC that prices the network fee on the scope's cluster. A fee quoted on the wrong chain is
- * not a fee, and `getFeeForMessage` for a foreign blockhash answers null anyway. An unconfigured
- * cluster throws here and surfaces as "Sponsorship preflight is unavailable", the same fail-closed
- * answer as a dead RPC.
+ * The Solana RPC a cluster's Kora reads and sends on, so sponsorship prices and settles against
+ * the same chain view the paymaster signs against. An unconfigured cluster refuses: it never
+ * falls back to the process RPC or another cluster.
+ *
+ * @param env - API environment naming each cluster's `KORA_<CLUSTER>_RPC_URL`.
+ * @param cluster - The cluster the sponsored transaction executes on.
+ * @returns An RPC client for that cluster's Kora upstream.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the cluster's Kora RPC is unset.
+ */
+export function createKoraClusterRpc(env: Env, cluster: SolanaCluster): SolanaRpc {
+  const envKey = KORA_RPC_URL_ENV_KEYS[cluster];
+  const rpcUrl = env[envKey]?.trim();
+  if (!rpcUrl) {
+    throw new FeePaymentError(
+      `No Kora RPC is configured for ${cluster}: set ${envKey}`,
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  return createRpc(env, { rpcUrl });
+}
+
+/**
+ * The RPC that prices the network fee on the scope's cluster: that cluster's Kora upstream. A fee
+ * quoted on the wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash answers
+ * null anyway. An unconfigured cluster throws here and surfaces as "Sponsorship preflight is
+ * unavailable", the same fail-closed answer as a dead RPC.
  *
  * @param env - API environment for RPC configuration.
  * @param scope - The sponsorship scope.
@@ -141,7 +169,7 @@ function resolveNetwork(scope: Pick<SponsorshipScope, "environment">): Sponsorsh
  * @returns An RPC client for the scope's cluster.
  */
 function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "environment">) {
-  return createClusterRpc(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
+  return createKoraClusterRpc(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
 }
 
 function encodeBase64(value: Uint8Array): string {
