@@ -234,8 +234,8 @@ The row's `riskMetadata` carries the eligibility constraints an
 integrator asks about (Reg S non-US-person restriction, issuer freeze
 authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
-primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
-Jupiter trust boundary stays single-owner in the API.
+primary mint/redeem facility is deliberately unused (Ondo onboarding, no Solana
+entry point) and how the Jupiter trust boundary stays single-owner in the API.
 
 ## Two provider shapes — read this before assuming either model
 

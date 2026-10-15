@@ -15,11 +15,13 @@ import { type SolanaCluster, wellKnownMint } from "./well-known-tokens";
  * token, not a rebasing one), so the position IS the token balance and the
  * exchange rate IS the market price. SDP's deposit acquires USDY on the
  * SECONDARY market (a Jupiter-routed USDC→USDY swap) and the exit is the
- * reverse swap. The primary mint/redeem facility is deliberately not used:
- * freshly minted USDY carries a 40–50 day Reg S transfer lockup and sub-$100k
- * primary redemptions wait out that window, which is incompatible with
- * on-demand withdrawals — measured against Ondo's docs on 2026-09-02
- * (PRO-1803; docs.ondo.finance → USDY basics, eligibility, investing FAQ).
+ * reverse swap. The primary mint/redeem facility is deliberately not used
+ * (PRO-1803): it needs Ondo onboarding, and Ondo lists its on-chain entry
+ * point (`USDY_InstantManager`) on Ethereum, BNB Chain and Tempo, not Solana.
+ * Ondo's docs state no lockup duration for it (re-checked 2026-10-15:
+ * docs.ondo.finance → USDY basics, comparison to stablecoins, addresses).
+ * The lockup figure SDP used to cite is retired; see
+ * docs/earn/ondo-catalogue-inventory.md for the record.
  *
  * ── Why mainnet only ────────────────────────────────────────────────────────
  * Verified on-chain 2026-09-02 (PRO-1803): the USDY mint exists on

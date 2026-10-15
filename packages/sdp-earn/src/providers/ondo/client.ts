@@ -31,9 +31,11 @@ import { readOndoUsdyRate } from "./usdy-rate";
  * strategy is HOLDING USDY: the deposit is a custody-signed USDC→USDY swap on
  * the secondary market, the position is the wallet's USDY balance, and the
  * exit is the reverse swap. The primary mint/redeem facility is deliberately
- * not used — fresh primary mints carry a 40–50 day Reg S transfer lockup and
- * sub-$100k redemptions wait out that window (PRO-1803, measured against
- * Ondo's docs 2026-09-02) — so nothing here needs an Ondo credential.
+ * not used (PRO-1803): it needs Ondo onboarding, and Ondo lists its on-chain
+ * entry point (`USDY_InstantManager`) on Ethereum, BNB Chain and Tempo, not
+ * Solana. So nothing here needs an Ondo credential. Ondo's docs state no
+ * lockup duration for it (re-checked 2026-10-15); the figure SDP used to cite
+ * is retired, see docs/earn/ondo-catalogue-inventory.md.
  *
  * ── Where the rate comes from ───────────────────────────────────────────────
  * Nothing on Solana publishes USDY's rate of return, only its price. The row's
@@ -205,8 +207,8 @@ export class OndoEarnClient extends StubEarnClient {
         // into one.
         apyType: "variable",
         currentApy: rate.currentApy,
-        // Exit is a secondary-market swap: always open, no lock. The 40–50 day
-        // Reg S lockup applies only to PRIMARY mints, which SDP does not use.
+        // Exit is a secondary-market swap: always open, no lock. SDP never
+        // touches Ondo's primary facility, so none of its terms apply.
         liquidityTerm: "instant",
         riskMetadata: {
           // Ondo issues and manages the instrument; the attribution traces to

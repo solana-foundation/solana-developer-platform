@@ -35,11 +35,25 @@ depend on finding this file.
   on the USDY mint, so any token account, including an SDP custody wallet's,
   can be frozen by the issuer. A frozen account cannot exit through the
   secondary market until unfrozen.
-- **Primary mint/redeem is unused.** Freshly minted USDY carries a 40 to 50 day
-  Reg S transfer lockup and sub-$100k primary redemptions wait out that
-  window, which is why SDP trades the secondary market instead (PRO-1834 tracks
-  the primary facility as a large-size backstop). Positions taken through SDP
-  are therefore never subject to that lockup.
+- **Primary mint/redeem is unused.** SDP buys and sells USDY on the secondary
+  market, so positions taken through SDP are never subject to any
+  primary-facility term (PRO-1834 tracks the primary facility as a large-size
+  backstop). Ondo's docs, fetched 2026-10-15, state no lockup duration for it.
+  They say "onboarding is necessary for minting or redeeming"
+  ([comparison to stablecoins](https://docs.ondo.finance/general-access-products/usdy/comparison-stablecoins)),
+  describe the on-chain `USDY_InstantManager` as minting and redeeming
+  "instantly", within rate limits and minimums
+  ([integration guide](https://docs.ondo.finance/developer-guides/usdy-instant-manager-integration)),
+  and list that contract on Ethereum, BNB Chain and Tempo, with only the token
+  on Solana ([addresses](https://docs.ondo.finance/addresses)). The Ethereum
+  `USDYc` ("Cooking USDY") row there covers "the period before their USDY
+  tokens are issued" but gives no duration. The 40 to 50 day figure SDP used to
+  cite came from Ondo's since-retired USDY FAQ page "Investing & Redeeming": a
+  "Restricted Period", usually 40 to 50 days from deposit, before tokens were
+  issued, with early redemption only above $100,000
+  ([last archived 2026-03-01](https://web.archive.org/web/20260301113727/https://docs.ondo.finance/general-access-products/usdy/faq/investing-and-redeeming);
+  the live page now returns 404). Treat any primary-facility timing as
+  unconfirmed until Ondo states it directly.
 
 ## Where it shows and where it executes
 
