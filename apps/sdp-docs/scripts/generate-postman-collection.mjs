@@ -2,6 +2,12 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  isSuccessfulPaymentTransferStatus,
+  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+  RECURRING_PAYMENT_UPDATE_TRANSITION,
+} from "@sdp/types";
+import {
   getPrimaryTagName,
   isPublicOperation,
   POSTMAN_COLLECTION_FILENAME,
@@ -217,19 +223,21 @@ const SAVED_KEY_VARIABLE = [
 
 /**
  * Statuses that mean the movement a money route answered with is still under
- * way: a transfer or batch (`PaymentTransferStatus`, `PaymentTransferBatchStatus`),
- * a recurring schedule mid-transition (`PaymentRecurringPaymentStatus`), or a
- * collection attempt. While a response shows one, the saved key is kept.
+ * way, derived from `@sdp/types` so they never drift from the API's own: a
+ * transfer not yet in a terminal or successful status (pending, processing,
+ * awaiting payment, settling; a batch and a collection attempt use the same
+ * in-flight names), and a recurring schedule mid-transition (the statuses the
+ * cron recovers, plus the update's processing status). While a response shows
+ * one, the saved key is kept. Embedded into the script text at generation.
  */
 const NON_FINAL_STATUSES = [
-  "pending",
-  "processing",
-  "settling",
-  "awaiting_payment",
-  "activating",
-  "updating",
-  "canceling",
-  "resuming",
+  ...new Set([
+    ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
+      (status) => !isSuccessfulPaymentTransferStatus(status)
+    ),
+    ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
+  ]),
 ];
 
 /**
@@ -240,8 +248,10 @@ const NON_FINAL_STATUSES = [
  * the key is retired by a 2xx whose movement is final, a replayed refusal, or
  * a 422 other than `IDEMPOTENCY_KEY_REUSED` (the request itself was rejected).
  * A 2xx that still shows the transfer, batch, schedule or collection under way
- * (`NON_FINAL_STATUSES`) keeps it: pressing Send again with a new key would pay
- * again, so the user polls with GET until it is final, then clears the variable.
+ * (`NON_FINAL_STATUSES`), or whose body is unreadable or names no data (as the
+ * dashboard treats an unreadable answer), keeps it: pressing Send again with a
+ * new key would pay again, so the user polls with GET until it is final, then
+ * clears the variable.
  * Everything else keeps it too: a 400, 401, 403 or 429 refusal is not stored
  * and the original may still have run, a 409 (in flight, or outcome unknown) is
  * answered under the same key, a 5xx is retried under it, and a 422
@@ -282,11 +292,12 @@ function idempotencyKeyEvents() {
           "  try { body = pm.response.json(); } catch (e) {}",
           "  const code = body && body.error ? body.error.code : undefined;",
           '  const rejected = status === 422 && code !== "IDEMPOTENCY_KEY_REUSED";',
-          "  const data = (body && body.data) || {};",
+          "  const data = body && typeof body.data === 'object' ? body.data : null;",
           `  const moving = new Set(${JSON.stringify(NON_FINAL_STATUSES)});`,
-          "  const inFlight = [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
+          "  const inFlight = data !== null && [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
           "    .some((record) => record && moving.has(record.status));",
-          "  const settled = status >= 200 && status < 300 ? !inFlight : replayed;",
+          "  // A 2xx whose body is unreadable or names no data says nothing final: keep the key.",
+          "  const settled = status >= 200 && status < 300 ? data !== null && !inFlight : replayed;",
           "  if (settled || rejected) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
