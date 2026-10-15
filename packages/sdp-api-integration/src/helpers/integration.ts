@@ -1,4 +1,5 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
+import { resolveDefaultCluster } from "@sdp/rpc";
 import {
   confirmTransaction,
   createRpc,
@@ -476,7 +477,11 @@ async function fundAddressViaKoraFeePayer(
     return false;
   }
 
-  const feePayment = createFeePaymentAdapter(env);
+  const feePayment = createFeePaymentAdapter(
+    env,
+    "sdp:v1:system:integration-funding",
+    resolveDefaultCluster(env)
+  );
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
   const maxTransferLamports =

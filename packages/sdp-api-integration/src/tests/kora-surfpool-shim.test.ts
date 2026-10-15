@@ -22,7 +22,10 @@ const MEMO_PROGRAM_ADDRESS = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Ad
 describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Surfpool shim", () => {
   it("signs and sends a fee-payer transaction through the regular Kora adapter", async () => {
     const { rpcUrl } = requireKoraEndpoint();
-    const adapter = new KoraAdapter({ rpcUrl });
+    const adapter = new KoraAdapter({
+      rpcUrl,
+      userId: "sdp:v1:system:integration-kora-surfpool-shim",
+    });
     const config = await new KoraClient({ rpcUrl }).getConfig();
     expect(config.validation_config.allowed_programs).toContain(DVP_SWAP_PROGRAM_PROGRAM_ADDRESS);
     const rpc = createRpc(env);
@@ -51,7 +54,10 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
 
   it("answers a duplicate submit with the original signature, as the cluster does", async () => {
     const { rpcUrl } = requireKoraEndpoint();
-    const adapter = new KoraAdapter({ rpcUrl });
+    const adapter = new KoraAdapter({
+      rpcUrl,
+      userId: "sdp:v1:system:integration-kora-surfpool-shim",
+    });
     const rpc = createRpc(env);
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");

@@ -32,13 +32,9 @@ describe("resolveKoraEndpoint", () => {
     });
   });
 
-  it("resolves the SOLANA_NETWORK cluster when no cluster is named", () => {
+  it("takes the process cluster from SOLANA_NETWORK", () => {
     const mainnetProcess: FeePaymentEnv = { ...bothClusters, SOLANA_NETWORK: "mainnet-beta" };
     assert.equal(defaultFeePaymentCluster(mainnetProcess), "mainnet-beta");
-    assert.deepEqual(
-      resolveKoraEndpoint(mainnetProcess),
-      resolveKoraEndpoint(mainnetProcess, "mainnet-beta")
-    );
   });
 
   it("answers null for a cluster without its URL, whatever else that cluster has", () => {
@@ -84,6 +80,5 @@ describe("createFeePaymentAdapter", () => {
       KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
     };
     assert.equal(createFeePaymentAdapter(env, "sdp:v1:test", "mainnet-beta").providerId, "kora");
-    assert.equal(createFeePaymentAdapter(env, "sdp:v1:test").providerId, "kora");
   });
 });
