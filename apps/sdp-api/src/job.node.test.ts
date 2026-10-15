@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
@@ -276,7 +277,7 @@ describe("runCronJob", () => {
       expect.any(Object),
       { deadlineMs: -10_000 }
     );
-    expect(trackPendingTransfers).toHaveBeenCalledOnce();
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(collectDueRecurringPayments).toHaveBeenCalledOnce();
     expect(closeDatabasePools).toHaveBeenCalledOnce();
   });
@@ -397,7 +398,7 @@ describe("runCronJob", () => {
     const sweepOrder = vi.mocked(reconcileRevokedApiKeyCache).mock.invocationCallOrder[0];
     const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
     expect(sweepOrder).toBeLessThan(transfersOrder);
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     // The same ramp list the in-process scheduler runs (cron/ramp-transfers.ts),
     // right after the transfers tick.
@@ -449,7 +450,7 @@ describe("runCronJob", () => {
     );
     await vi.waitFor(() => {
       expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
-      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     });
     expect(settled).toBe(false);
 
@@ -494,7 +495,7 @@ describe("runCronJob", () => {
   it("waits for in-flight cleanup when pending transfers fail", async () => {
     const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+    vi.mocked(trackPendingTransfers).mockRejectedValueOnce(new Error("transfers down"));
 
     const running = runCronJob();
     let settled = false;
@@ -508,7 +509,7 @@ describe("runCronJob", () => {
     );
     await vi.waitFor(() => {
       expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
-      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     });
     expect(settled).toBe(false);
 
@@ -674,7 +675,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).resolves.toBeUndefined();
 
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -781,7 +782,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("sync exploded");
 
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
@@ -823,7 +824,7 @@ describe("runCronJob", () => {
   });
 
   it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+    vi.mocked(trackPendingTransfers).mockRejectedValueOnce(new Error("transfers down"));
 
     await expect(runCronJob()).rejects.toThrow("transfers down");
 

@@ -1,4 +1,10 @@
-import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
+import {
+  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  type PaymentTransferStatus,
+  SDP_ENVIRONMENTS,
+  type SdpEnvironment,
+  WALLET_TRANSFER_TYPES,
+} from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -1215,4 +1221,95 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     );
     expect(denied).toEqual({ rows: [], total: 0 });
   });
+});
+
+describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const TRANSFER_ID_BY_ENVIRONMENT = {
+    sandbox: "xfr_job_sandbox",
+    production: "xfr_job_production",
+  } as const satisfies Record<SdpEnvironment, string>;
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    await resetPaymentFixtures();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_payments_repo_production",
+          organizationId: TEST_ORG.id,
+          projectId: PRODUCTION_PROJECT_ID,
+          provider: "privy",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: "cwlt_payments_repo_production",
+          owner: { kind: "config", custodyConfigId: "cfg_payments_repo_production" },
+          walletId: "wallet_payments_repo_production",
+          publicKey: "Production111",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
+    const repo = createPostgresPaymentsRepository(getDb(env));
+    await repo.createTransfer({
+      ...transferInput({ suffix: "job_sandbox" }),
+      signature: "sig_job_sandbox",
+    });
+    await repo.createTransfer({
+      ...transferInput({
+        suffix: "job_production",
+        custodyWalletId: "cwlt_payments_repo_production",
+        walletId: "wallet_payments_repo_production",
+      }),
+      projectId: PRODUCTION_PROJECT_ID,
+      signature: "sig_job_production",
+    });
+  });
+
+  it.each(SDP_ENVIRONMENTS)(
+    "selects only %s processing transfers for that environment's run",
+    async (environment) => {
+      const rows = await createPostgresPaymentsRepository(getDb(env)).listTransfersByStatus({
+        environment,
+        statuses: ["processing"],
+        types: WALLET_TRANSFER_TYPES,
+        hasSignature: true,
+        limit: 50,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
+    }
+  );
+
+  it.each(SDP_ENVIRONMENTS)(
+    "polls only %s confirmed transfers for that environment's run",
+    async (environment) => {
+      const confirmedAt = new Date().toISOString();
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET status = 'confirmed', confirmed_at = ?")
+        .bind(confirmedAt)
+        .run();
+
+      const rows = await createPostgresPaymentsRepository(getDb(env)).listConfirmedTransfersToPoll({
+        environment,
+        confirmedAfter: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        limit: 50,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
+    }
+  );
 });

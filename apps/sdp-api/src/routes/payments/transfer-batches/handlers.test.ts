@@ -23,6 +23,7 @@ import * as paymentsRepositoryPostgres from "@/db/repositories/payments.reposito
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
@@ -754,7 +755,7 @@ describe("payment transfer batches", () => {
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
 
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -2012,7 +2013,7 @@ describe("payment transfer batches", () => {
           err: null,
         },
       ]);
-      await trackPendingTransfers(env);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
       const settledBatch = await getDb(env)
         .prepare(
           `SELECT status
@@ -2209,7 +2210,7 @@ describe("payment transfer batches", () => {
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
@@ -2338,7 +2339,7 @@ describe("payment transfer batches", () => {
               }
       )
     );
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
 
     const batchRow = await getDb(env)
       .prepare("SELECT status, error FROM payment_transfer_batches WHERE id = ?")
@@ -2536,8 +2537,8 @@ describe("payment transfer batches", () => {
         .first<{ count: number | string }>();
       expect(Number(required(orphanRows).count)).toBe(0);
 
-      await trackPendingTransfers(env);
-      await trackPendingTransfers(env);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+      await runInEachClusterScope(() => trackPendingTransfers(env));
 
       const batchRow = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -2667,7 +2668,7 @@ describe("payment transfer batches", () => {
             getSignatureStatusesMock.mockResolvedValueOnce([
               { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
             ]);
-            await trackPendingTransfers(env);
+            await runInEachClusterScope(() => trackPendingTransfers(env));
           }
           return repository.recomputeTransferBatchStatus(input);
         },
