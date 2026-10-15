@@ -43,6 +43,7 @@ import { apiErrorCode } from "@/lib/idempotency";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
+  paymentApiErrorBodySchema,
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
@@ -513,12 +514,16 @@ async function readRefusalText(response: Response, failedMessage: string): Promi
   }
 }
 
-function parseRefusalBody(text: string): unknown {
+/** A readable refusal's error fields; a body that is not JSON, or not an object, has none. */
+function parseRefusalBody(text: string): ApiErrorBody {
+  let json: unknown;
   try {
-    return text ? JSON.parse(text) : {};
+    json = text ? JSON.parse(text) : {};
   } catch {
     return {};
   }
+  const parsed = paymentApiErrorBodySchema.safeParse(json);
+  return parsed.success ? parsed.data : {};
 }
 
 /**
@@ -557,7 +562,7 @@ export async function createTransfer(
       t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
     );
     const code = apiErrorCode(text);
-    const body = parseRefusalBody(text) as TransferEnvelope;
+    const body = parseRefusalBody(text);
     throw new TransferRequestError(
       getApiError(
         body,
@@ -696,7 +701,7 @@ export async function createTransferBatch(
       t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
     );
     const code = apiErrorCode(text);
-    const body = parseRefusalBody(text) as PaymentTransferBatchEnvelope;
+    const body = parseRefusalBody(text);
     throw new TransferBatchRequestError(
       getApiError(
         body,
