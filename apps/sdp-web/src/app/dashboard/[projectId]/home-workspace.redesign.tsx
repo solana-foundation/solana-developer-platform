@@ -43,6 +43,7 @@ import { homeQueryKeys } from "./home-query-key";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { fetchHomeActivity, fetchHomeVolume } from "./home-workspace.data";
 import { OverviewNetwork } from "./overview-network";
+import { useOverviewNetwork } from "./overview-network.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -628,6 +629,7 @@ export function HomeWorkspace({
     issuedTokens.map((token) => [token.mintAddress, token])
   );
   const { todaysVolume, todaysVolumeUnavailable } = useHomeVolume();
+  const network = useOverviewNetwork();
   const { activityRows, symbolsByMint, activityError, activityNotice, emptyActivityMessage } =
     useHomeActivity(balances, flags.issuance, wallets.length === 0);
 
@@ -701,7 +703,7 @@ export function HomeWorkspace({
         )}
         <OverviewActions tiles={tiles} />
       </div>
-      <OverviewNetwork />
+      <OverviewNetwork {...network} />
       {firstRun ? null : (
         <RecentActivity
           rows={activityRows}

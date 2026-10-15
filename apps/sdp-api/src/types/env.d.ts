@@ -271,6 +271,9 @@ export interface Env extends ManagedRpcEnv {
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
+  // data.solana.com, the API behind solana.com/data (the Overview's Solana network figures)
+  DATA_API_KEY?: string;
+
   // MoonPay ramps configuration
   // MoonPay sandbox only: production projects bring their own MoonPay account.
   MOONPAY_ONRAMP_URL?: string;

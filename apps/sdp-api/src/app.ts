@@ -47,6 +47,7 @@ import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import internalHeliusRings from "@/routes/internal-helius-rings";
+import internalNetwork from "@/routes/internal-network";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -434,6 +435,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
+  app.route("/internal/dashboard/network", internalNetwork);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);

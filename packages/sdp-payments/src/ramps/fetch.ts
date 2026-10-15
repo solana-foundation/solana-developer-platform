@@ -22,10 +22,19 @@ export const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
 /** Ramp provider bodies are small JSON documents; a larger one is refused. */
 export const PROVIDER_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
-class ProviderResponseTooLargeError extends Error {}
+/** A provider body passed its byte cap; `readProviderBody` stopped reading it. */
+export class ProviderResponseTooLargeError extends Error {}
 
-/** Reads the body as text, refusing it once it passes the byte cap. */
-async function readProviderBody(response: Response): Promise<string> {
+/**
+ * Reads a provider body as text, refusing it once it passes the byte cap, so an oversized or
+ * endless answer never fills memory.
+ *
+ * @param response - The provider's response.
+ * @param maxBytes - The most the body may hold.
+ * @returns The body's text.
+ * @throws ProviderResponseTooLargeError once the body passes `maxBytes`.
+ */
+export async function readProviderBody(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) {
     return "";
   }
@@ -39,7 +48,7 @@ async function readProviderBody(response: Response): Promise<string> {
       return text + decoder.decode();
     }
     received += value.byteLength;
-    if (received > PROVIDER_MAX_RESPONSE_BYTES) {
+    if (received > maxBytes) {
       await reader.cancel();
       throw new ProviderResponseTooLargeError();
     }
@@ -214,7 +223,7 @@ export async function providerFetch<TBody = never>(
 
   let raw: string;
   try {
-    raw = await readProviderBody(response);
+    raw = await readProviderBody(response, PROVIDER_MAX_RESPONSE_BYTES);
   } catch (cause) {
     // The status line already arrived: a success may have acted, and a refusal
     // still proves what its status proves, readable body or not.
@@ -253,6 +262,20 @@ export async function providerFetch<TBody = never>(
  * @param schema - The fields the adapter reads from the response.
  * @returns The validated response body.
  */
+/**
+ * Where a provider answer missed its schema, for operators: each issue's path and code, never
+ * the values, which can carry the provider's data.
+ *
+ * @param error - The schema's parse failure.
+ * @returns One path and code per issue.
+ */
+export function providerResponseIssues(error: z.ZodError): { path: string; code: string }[] {
+  return error.issues.map((issue) => ({
+    path: issue.path.map(String).join("."),
+    code: issue.code,
+  }));
+}
+
 export async function providerFetchJson<TSchema extends z.ZodType, TBody = never>(
   provider: RampProviderId,
   url: string,
@@ -288,12 +311,7 @@ export async function providerFetchJson<TSchema extends z.ZodType, TBody = never
       "PROVIDER_RESPONSE_INVALID",
       `${provider} returned an unexpected response`,
       { provider, outcome: "unknown" },
-      {
-        issues: result.error.issues.map((issue) => ({
-          path: issue.path.map(String).join("."),
-          code: issue.code,
-        })),
-      }
+      { issues: providerResponseIssues(result.error) }
     );
   }
   return result.data;

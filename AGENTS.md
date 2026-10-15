@@ -59,6 +59,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
+- A new env key the API reads goes in `apps/sdp-api/src/types/env.d.ts`, `scripts/secret-keys.mjs` and
+  `turbo.json` `globalEnv`: turbo drops undeclared keys, so without the last two the local API never sees it.
 - **Migrations run while the previous revision still serves traffic.** `pnpm check:migration-compat`
   rejects one the previous image cannot run against and common DDL that holds a blocking lock on an
   existing table: build an index `CONCURRENTLY`, alone in a `-- sdp:migration-mode: non-transactional`
