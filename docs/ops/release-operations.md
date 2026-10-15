@@ -208,7 +208,7 @@ The restore and the hold run in their own job under `always()` once the deploy j
 
 ### Quick rollback
 
-Dispatch `Roll back sdp-api prod to the previous build` from `main`. In a couple of minutes it moves traffic, cron and worker back to the revision that served before the last promotion, with no rebuild and no migrations, and keeps production held. It refuses when there is no previous build to return to (a breaking migration ran since, a failed rollout was restored, or a rollback already ran), when traffic is split across revisions, or when that revision is not Ready. Web has the same shape: Instant Rollback on sdp-web in Vercel. Then fix `main` and resume deploys.
+Dispatch `Roll back sdp-api prod to the previous build` from `main`. In a couple of minutes it moves traffic, cron and worker back to the revision that served before the last promotion, with no rebuild and no migrations, and keeps production held. It refuses when there is no previous build to return to (a breaking migration ran since, a failed rollout was restored, or a rollback already ran), when traffic is split across revisions, or when that revision is not Ready. If a step fails, run it again: it finishes what is left. Web has the same shape: Instant Rollback on sdp-web in Vercel. Then fix `main` and resume deploys.
 
 ### Resuming deploys
 

@@ -1246,10 +1246,6 @@ test("the quick rollback moves traffic, cron and worker back to the previous bui
 test("the quick rollback refuses instead of guessing", () => {
   for (const [options, reason] of [
     [{ previous: "" }, /No previous build is recorded/],
-    [
-      { previous: "sdp-prod-api-public-00042-new" },
-      /Production already serves sdp-prod-api-public-00042-new/,
-    ],
     [{ revision: readyRevision("False") }, /is not Ready, so it cannot take traffic back/],
     [
       {
@@ -1271,4 +1267,23 @@ test("the quick rollback refuses instead of guessing", () => {
   assert.equal(unreached.code, 1);
   assert.match(unreached.out, /Production traffic did not reach sdp-prod-api-public-00041-old/);
   assert.ok(!unreached.calls.some((call) => call.includes("--remove-labels")));
+});
+
+test("re-running the quick rollback after a partial failure finishes cron and worker", () => {
+  const run = runQuickRollback({
+    hold: "rollback-4241",
+    service: serviceJson([{ revisionName: "sdp-prod-api-public-00041-old", percent: 100 }]),
+  });
+  assert.equal(run.code, 0, run.out);
+  assert.match(
+    run.out,
+    /Traffic is already on sdp-prod-api-public-00041-old; finishing the rollback\./
+  );
+  const mutations = run.calls.filter((call) => /update|remove-labels/.test(call));
+  assert.deepEqual(mutations, [
+    `gcloud run services update-traffic sdp-prod-api-public ${scope} --to-revisions sdp-prod-api-public-00041-old=100`,
+    `gcloud run jobs update sdp-prod-api-public-cron ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run services update sdp-prod-worker ${scope} --image registry.example/api@sha256:old`,
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --remove-labels sdp_prod_previous_revision`,
+  ]);
 });

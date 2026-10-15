@@ -68,9 +68,10 @@ jobs:
                   else error("production traffic is not on exactly one revision") end
               '
           )"
+          # A re-run after a partial failure finds traffic already moved and
+          # finishes the cron and worker rollback; the label clears only at the end.
           if [[ "${serving}" == "${previous}" ]]; then
-            echo "Production already serves ${previous}." >&2
-            exit 1
+            echo "Traffic is already on ${previous}; finishing the rollback."
           fi
           revision_json="$(
             gcloud run revisions describe "${previous}" \
