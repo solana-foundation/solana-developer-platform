@@ -25,10 +25,3 @@ ALTER TABLE ramp_webhook_events
     'applied', 'ignored', 'unmatched', 'refused', 'discarded',
     'invalid', 'retryable_error'
   ));
-
-CREATE UNIQUE INDEX IF NOT EXISTS ramp_webhook_events_provider_event_id_unique
-  ON ramp_webhook_events (provider, environment, provider_event_id);
-
-CREATE INDEX IF NOT EXISTS ramp_webhook_events_discharged_at
-  ON ramp_webhook_events (discharged_at)
-  WHERE status = 'discharged';
