@@ -2,12 +2,14 @@ import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
   hasAllPermissions,
+  type MovementId,
   PERMISSIONS,
   type Permission,
 } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
 import {
   AppError,
@@ -17,11 +19,7 @@ import {
   providerUnavailable,
   walletNotFound,
 } from "@/lib/errors";
-import {
-  assertFreshApiKeyActive,
-  assertFreshApiKeyCustodyWalletAccess,
-} from "@/services/api-key-scope.service";
-import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
+import { assertApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
@@ -30,24 +28,32 @@ import type { Env } from "@/types/env";
 
 const explicitPermissionsSchema = z.array(z.enum(PERMISSIONS));
 
-/** Refresh coarse access before authorizing a specific operation or wallet. */
+/**
+ * Refresh the key's role and permissions before authorizing a specific
+ * operation or wallet, and its liveness from the same row, so a key revoked
+ * between authentication and this read signs nothing. Wallet bindings need no
+ * re-read: authentication read them fresh for this request.
+ */
 export async function refreshPrivateChannelAuth(
   env: Env,
   auth: ApiKeyContext,
   projectId: string
 ): Promise<ApiKeyContext> {
   if (auth.authType !== "api_key") return auth;
-  const db = getDb(env);
-  await assertFreshApiKeyActive(db, auth);
-  const current = await db.queryOne<{
-    role: ApiKeyRole;
-    permissions: string | null;
-    signing_wallet_id: string | null;
-  }>(
-    "SELECT role, permissions, signing_wallet_id FROM api_keys WHERE id = ? AND organization_id = ? AND project_id = ?",
+  const current = await getDb(env).queryOne<
+    { role: ApiKeyRole; permissions: string | null } & ApiKeyLifecycleColumns
+  >(
+    `SELECT role, permissions, status, expires_at, rotation_deadline
+       FROM api_keys
+      WHERE id = ? AND organization_id = ? AND project_id = ?`,
     [auth.apiKeyId, auth.organizationId, projectId]
   );
   if (!current) throw forbidden("API key is not authorized for this project");
+  // The predicate request authentication applies: active, not past expiry,
+  // not past its rotation grace period.
+  if (apiKeyRowRefusal(current, Date.now()) !== null) {
+    throw forbidden("API key is no longer active");
+  }
   let permissions: Permission[];
   try {
     // SQL NULL inherits the current role; an explicit empty array grants nothing.
@@ -62,7 +68,6 @@ export async function refreshPrivateChannelAuth(
     ...auth,
     role: current.role,
     permissions,
-    signingWalletId: current.signing_wallet_id,
   };
 }
 
@@ -110,18 +115,7 @@ export async function resolvePrivateChannelCustodyWallet(
     publicKey: allowAddress ? selector : undefined,
   });
   if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
-  if (current.authType === "api_key") {
-    const bindings = await loadApiKeyWalletAuthorization(
-      getDb(env),
-      current.apiKeyId,
-      current.organizationId,
-      projectId,
-      current.signingWalletId
-    );
-    await assertFreshApiKeyCustodyWalletAccess(getDb(env), { ...current, ...bindings }, wallet.id, [
-      "payments:write",
-    ]);
-  }
+  assertApiKeyCustodyWalletAccess(current, wallet.id, ["payments:write"]);
   return wallet;
 }
 
@@ -130,11 +124,18 @@ export async function createPrivateChannelSigner(
   env: Env,
   organizationId: string,
   projectId: string,
-  wallet: CustodyWallet
+  wallet: CustodyWallet,
+  movement: MovementId
 ) {
   await createSigningService(env).admitRuntimeExecution(organizationId, projectId, wallet.id);
   try {
-    return await createOrgSignerForCustodyWallet(env, organizationId, projectId, wallet.id);
+    return await createOrgSignerForCustodyWallet(
+      env,
+      organizationId,
+      projectId,
+      wallet.id,
+      movement
+    );
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw providerUnavailable("The source custody wallet is not currently signable.");

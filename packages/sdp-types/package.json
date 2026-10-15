@@ -109,11 +109,6 @@
       "import": "./src/ramp-destinations.ts",
       "default": "./src/ramp-destinations.ts"
     },
-    "./ramp-resolution": {
-      "types": "./src/ramp-resolution.ts",
-      "import": "./src/ramp-resolution.ts",
-      "default": "./src/ramp-resolution.ts"
-    },
     "./generated/ramp": {
       "types": "./src/generated/ramp.generated.ts",
       "import": "./src/generated/ramp.generated.ts",

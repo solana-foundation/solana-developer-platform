@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -59,6 +60,12 @@ async function requestAutocomplete(): Promise<Response> {
 describe("Places routes — metered quota", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await getDb(env)
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Places', 'places-test', 'individual', 'active')"
+      )
+      .bind(TEST_ORG_ID)
+      .run();
   });
 
   afterEach(async () => {

@@ -16,7 +16,6 @@ import {
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { custody } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -248,7 +247,10 @@ export default async function IntegrationDetailPage({
   if (!isKnownIntegrationProvider(provider)) {
     notFound();
   }
-  const [custodyEnabled, rampProviders] = await Promise.all([custody(), getOfferedRampProviders()]);
+  const [custodyEnabled, rampProviders] = await Promise.all([
+    isModuleInDeploymentReleaseChannel("custody"),
+    getOfferedRampProviders(),
+  ]);
   const complianceEnabled = isModuleInDeploymentReleaseChannel("compliance");
   if (
     !isIntegrationProviderEnabled(provider, {

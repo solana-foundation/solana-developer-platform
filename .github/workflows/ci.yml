@@ -474,6 +474,7 @@ jobs:
             turbo-${{ github.job }}-${{ runner.os }}-
 
       - name: Install
+        id: install
         run: pnpm install --frozen-lockfile
 
       - name: Validate Doppler OIDC configuration
@@ -525,6 +526,15 @@ jobs:
 
       - name: Check UI flow matrix
         run: pnpm check:ui-flow-coverage
+
+      # Pins the constructors that turn a stored secret into signing authority
+      # to the custody signer and sponsorship waists, where money admission is
+      # enforced (HOO-1955). Needs the TypeScript checker, so it runs where
+      # dependencies are installed. It runs whenever the install succeeded, so
+      # it and the unit tests each report whatever the other did.
+      - name: Check value movement
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm check:value-movement
 
   build_api:
     name: Build API
@@ -735,10 +745,22 @@ jobs:
           pnpm --filter sdp-docs generate:ai
 
       - name: Committed docs artifacts match generated output
-        run: git diff --exit-code apps/sdp-docs/public
+        run: git diff --exit-code apps/sdp-docs/public apps/sdp-docs/src/generated
 
-      - name: Check docs links
+      - name: Docs release-channel tests
+        run: pnpm --filter sdp-docs test
+
+      - name: Check docs links (experimental)
         run: pnpm --filter sdp-docs check:links
+
+      # Production runs stable: its pages must never link to a page or API
+      # reference family the stable build leaves out.
+      - name: Check docs links (stable)
+        env:
+          SDP_RELEASE_CHANNEL: stable
+        run: |
+          pnpm --filter sdp-docs generate:api
+          pnpm --filter sdp-docs check:links
 
   integration_tests_shard:
     name: Integration Tests (${{ matrix.name }})
@@ -890,9 +912,6 @@ jobs:
           read -r -a test_files <<< "${INTEGRATION_TEST_FILES}"
           if [ "${CI_HAS_DOPPLER_TOKEN}" = "true" ]; then
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:integration -- "${test_files[@]}"
-          elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ] && [ "${INTEGRATION_SHARD_NAME}" = "Surfpool / Access" ]; then
-            echo "::notice title=Fork-safe Surfpool Access::Running the Surfpool Access shard without managed RPC or hosted custody secrets."
-            SOLANA_RPC_CI_PREFERRED_PROVIDER=default pnpm kora:surfpool:integration -- "${test_files[@]}"
           elif [ "${CI_IS_FORK_PULL_REQUEST}" = "true" ]; then
             echo "::notice title=Fork-safe Surfpool integration skip::Forked pull requests cannot access managed Solana RPC secrets, so this Surfpool shard is skipped."
           else
@@ -979,8 +998,7 @@ jobs:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,CUSTODY_ENABLED,ISSUANCE_ENABLED
-      CUSTODY_ENABLED: "true"
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED
       ISSUANCE_ENABLED: "true"
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787

@@ -1,4 +1,8 @@
-import { SOL_MINT } from "@sdp/types";
+import {
+  SOL_MINT,
+  SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES,
+  SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES,
+} from "@sdp/types";
 import { blockhash } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -121,7 +125,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     expect(provider.getSponsorshipConfiguration).toHaveBeenCalledOnce();
   });
 
-  it.each(["signed", "submitted", "committed"])(
+  it.each(SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES)(
     "continues an unsigned legacy claim from its original %s reservation",
     async (status) => {
       const request = await createRequest();
@@ -150,7 +154,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     }
   );
 
-  it.each(["reserved", "charged_unknown"])(
+  it.each(SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES)(
     "keeps an expired legacy %s outcome blocked without replacing its accounting",
     async (status) => {
       const request = await createRequest();
@@ -233,7 +237,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     }
   });
 
-  it.each(["reserved", "charged_unknown"])(
+  it.each(SPONSORSHIP_RESERVATION_CONTINUITY_BLOCKED_STATUSES)(
     "preserves the %s fence through live retries and expired-window replacement",
     async (status) => {
       const request = await createRequest();
@@ -362,7 +366,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     ).toEqual({ spent: "10000" });
   });
 
-  it.each(["signed", "submitted", "committed"])(
+  it.each(SPONSORSHIP_RESERVATION_SIGNED_RESPONSE_STATUSES)(
     "keeps an old public link payable after its proven %s legacy window expires",
     async (status) => {
       const request = await createRequest();

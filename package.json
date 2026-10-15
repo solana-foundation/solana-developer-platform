@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.83.1",
+  "version": "0.85.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -52,6 +52,7 @@
   },
   "scripts": {
     "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose --continue=always",
+    "dev:kora": "scripts/doppler/run-with-config.sh scripts/kora-local/dev.sh",
     "dev:webhooks": "scripts/doppler/run-with-config.sh turbo run dev:webhook --env-mode=loose",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "turbo run dev --filter=sdp-docs",
@@ -60,6 +61,7 @@
     "build": "turbo run build",
     "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:value-movement": "node scripts/check-value-movement.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",
@@ -82,9 +84,8 @@
     "db:postgres:down": "docker compose -f infra/postgres/docker-compose.yml down",
     "db:postgres:reset": "docker compose -f infra/postgres/docker-compose.yml down -v && docker compose -f infra/postgres/docker-compose.yml up -d",
     "db:postgres:logs": "docker compose -f infra/postgres/docker-compose.yml logs -f postgres",
-    "kora:up": "docker compose -f infra/kora/docker-compose.yml up -d",
-    "kora:down": "docker compose -f infra/kora/docker-compose.yml down",
-    "kora:logs": "docker compose -f infra/kora/docker-compose.yml logs -f kora",
+    "kora:local:up": "scripts/doppler/run-with-config.sh scripts/kora-local/up.sh",
+    "kora:local:down": "scripts/kora-local/down.sh",
     "kora:surfpool:up": "scripts/kora-surfpool/up.sh",
     "kora:surfpool:down": "scripts/kora-surfpool/down.sh",
     "kora:surfpool:run": "scripts/kora-surfpool/run.sh",

@@ -5,8 +5,8 @@ import {
   type FeePaymentPort,
   resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
-} from "@sdp/payments/fee-payment";
-import type { ProjectEnvironment, SolanaCluster } from "@sdp/types";
+} from "@sdp/fee-payment";
+import type { MovementId, ProjectEnvironment, SolanaCluster } from "@sdp/types";
 import { type Address, getTransactionDecoder, type Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -18,6 +18,7 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
+import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
@@ -72,7 +73,12 @@ export interface SponsorshipScope {
    */
   cluster?: SolanaCluster;
   continuity?: SponsorshipContinuity;
+  /** The movement served by a new sponsor signature. */
+  movement: MovementId;
 }
+
+/** A scope that only ever names the fee payer, never signs. */
+export type SponsorshipAddressScope = Omit<SponsorshipScope, "movement">;
 
 export interface OwnedSignedSubmission {
   signedTransaction: Uint8Array;
@@ -101,6 +107,7 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
 
 function withOwnedSubmissionLifecycle(
   provider: FeePaymentPort,
+  admission: { env: Env; scope: SponsorshipScope },
   assertAccounting?: (transaction: Uint8Array) => Promise<void>
 ): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
@@ -114,8 +121,15 @@ function withOwnedSubmissionLifecycle(
     }
     return feePayer;
   };
+  const admit = async () => {
+    assertSponsorshipAdmitted(
+      admission.scope,
+      await readSponsorshipAdmissionFacts(admission.env, admission.scope)
+    );
+  };
   const signVerified = async (transaction: Uint8Array) => {
     await assertAccounting?.(transaction);
+    await admit();
     const signedTransaction = await provider.signAsFeePayer(transaction);
     const decoded = await assertSponsorSignedSameMessage({
       requested: transaction,
@@ -133,6 +147,7 @@ function withOwnedSubmissionLifecycle(
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
     signAndSend: async (transaction) => {
       await assertAccounting?.(transaction);
+      await admit();
       return provider.signAndSend(transaction);
     },
     ...(getSponsorshipConfiguration
@@ -170,7 +185,7 @@ function requireScopeSegment(value: string, label: string): string {
  * transaction payloads and public caller input never participate in the quota
  * identity.
  */
-export function buildKoraUserId(scope: SponsorshipScope): string {
+export function buildKoraUserId(scope: SponsorshipAddressScope): string {
   const environment = requireScopeSegment(scope.environment, "Sponsorship environment");
   const organizationId = requireScopeSegment(scope.organizationId, "Sponsorship organization id");
   const tenantScope =
@@ -249,6 +264,7 @@ export function createSponsorshipFeePayment(
   return selfHosted
     ? withOwnedSubmissionLifecycle(
         provider,
+        { env, scope },
         continuity
           ? async (transaction) => {
               const decoded = getTransactionDecoder().decode(transaction);
@@ -275,6 +291,21 @@ export function createSponsorshipFeePayment(
     : new BudgetedFeePayment(env, scope, provider, { providerForActor });
 }
 
+/**
+ * The fee payer a sponsored transaction will name, for flows that build a
+ * transaction someone else signs and submits. Returns only the address: no
+ * way to sponsor-sign escapes it, so it needs no movement.
+ */
+export function resolveSponsoredFeePayer(
+  env: Env,
+  scope: SponsorshipAddressScope
+): Promise<Address> {
+  return instrumentVendorPort(
+    resolveFeePaymentProvider(env),
+    createFeePaymentAdapter(env, buildKoraUserId(scope), scope.cluster)
+  ).getFeePayer();
+}
+
 /** Read Kora security configuration through the same owned construction boundary. */
 export async function getManagedSponsorshipProviderConfiguration(
   env: Env,
@@ -293,27 +324,14 @@ export async function getManagedSponsorshipProviderConfiguration(
   return provider.getSponsorshipConfiguration();
 }
 
-/** Compatibility boundary for self-hosted consumers without tenant context. */
-export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
-  if (!isSelfHostedDeployment(env)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Managed sponsorship requires a trusted organization or project scope"
-    );
-  }
-  return withOwnedSubmissionLifecycle(
-    instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env))
-  );
-}
-
 /** Resolve a scope exclusively from trusted request middleware state. */
-export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope {
+export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipAddressScope {
   const scope = resolveAuthenticatedSponsorshipScope(c);
   return { ...scope, projectId: requireProjectId(c) };
 }
 
 /** Resolve either project or organization scope from trusted authentication state. */
-export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipScope {
+export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipAddressScope {
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
 
@@ -328,12 +346,16 @@ export function resolveAuthenticatedSponsorshipScope(c: AppContext): Sponsorship
   };
 }
 
-export function createRequestSponsorshipFeePayment(c: AppContext): SponsorshipFeePayment {
-  return createSponsorshipFeePayment(c.env, resolveRequestSponsorshipScope(c));
+export function createRequestSponsorshipFeePayment(
+  c: AppContext,
+  movement: MovementId
+): SponsorshipFeePayment {
+  return createSponsorshipFeePayment(c.env, { ...resolveRequestSponsorshipScope(c), movement });
 }
 
-export function createAuthenticatedSponsorshipFeePayment(c: AppContext): SponsorshipFeePayment {
-  return createSponsorshipFeePayment(c.env, resolveAuthenticatedSponsorshipScope(c));
+/** The fee payer for the request's authenticated scope (project or organization). */
+export function resolveAuthenticatedSponsoredFeePayer(c: AppContext): Promise<Address> {
+  return resolveSponsoredFeePayer(c.env, resolveAuthenticatedSponsorshipScope(c));
 }
 
 /**
@@ -349,6 +371,7 @@ export async function createProjectSponsorshipFeePayment(
     actor: SponsorshipScope["actor"];
     cluster?: SolanaCluster;
     continuity?: SponsorshipContinuity;
+    movement: MovementId;
   }
 ): Promise<SponsorshipFeePayment> {
   const project = await new ProjectService(getDb(env)).getProject(input.projectId);
@@ -363,5 +386,6 @@ export async function createProjectSponsorshipFeePayment(
     actor: input.actor,
     cluster: input.cluster,
     continuity: input.continuity,
+    movement: input.movement,
   });
 }

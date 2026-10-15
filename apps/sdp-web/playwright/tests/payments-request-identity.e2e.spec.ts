@@ -13,6 +13,7 @@ import { createLocalApiClient, type LocalApiClient } from "../support/local-api-
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
+  getPlaywrightDatabaseUrl,
   gotoProjectPage,
   resolvePlaywrightProjects,
 } from "../support/local-dashboard-bootstrap";
@@ -22,36 +23,31 @@ const REQUESTS_PATH = "/dashboard/payments/requests";
 type LabeledWallet = PaymentsDashboardWallet & { label: string };
 
 function isolatedDatabaseUrl(): string {
-  const value = process.env.DATABASE_URL;
-  if (!value) throw new Error("Request identity E2E requires an explicit DATABASE_URL");
+  const value = getPlaywrightDatabaseUrl();
   const database = new URL(value);
   const api = new URL(getBootstrapApiBaseUrl());
   if (
     getE2EEnv().useExternalApi ||
+    !["http:", "https:"].includes(api.protocol) ||
+    !["postgres:", "postgresql:"].includes(database.protocol) ||
     !["localhost", "127.0.0.1"].includes(api.hostname) ||
-    api.port !== "8913" ||
-    !["localhost", "127.0.0.1"].includes(database.hostname) ||
-    database.port !== "15453" ||
-    database.pathname !== "/sdp_payments_pr3_8996"
+    !["localhost", "127.0.0.1"].includes(database.hostname)
   )
-    throw new Error("Request identity E2E requires the isolated PR3 API and database");
+    throw new Error("Request identity E2E requires loopback API and Postgres");
   return value;
 }
 
 test.describe
   .serial("Payment Request exact recipient journeys", () => {
-    // shortcut: opt in only with the isolated PR3 database/API/RPC fixture; release acceptance runs both design flags.
-    test.skip(
-      process.env.PLAYWRIGHT_REQUEST_IDENTITY !== "1",
-      "Requires isolated Request identity fixtures"
-    );
     let admin: PlaywrightAdminSession;
     let api: LocalApiClient;
     let projectId: string;
     let otherProjectId: string;
     let wallets: LabeledWallet[];
-    let connectionId: string;
-    let credentialId: string;
+    let organizationId: string | undefined;
+    let aliasWalletId: string | undefined;
+    let connectionId: string | undefined;
+    let credentialId: string | undefined;
     const requests: DashboardPaymentRequest[] = [];
 
     async function database<T>(run: (db: Client) => Promise<T>): Promise<T> {
@@ -76,6 +72,7 @@ test.describe
         fundSourceWallet: false,
         tier: "enterprise",
       });
+      organizationId = fixture.organization.localOrgId;
       projectId = fixture.projectId;
       otherProjectId = (
         await resolvePlaywrightProjects(getBootstrapApiBaseUrl(), admin.getBearerToken)
@@ -85,6 +82,7 @@ test.describe
       if (!first) throw new Error("Missing local recipient fixture");
       const suffix = crypto.randomUUID();
       const secondId = `cwlt_request_identity_${suffix}`;
+      aliasWalletId = secondId;
       connectionId = `cconn_request_identity_${suffix}`;
       credentialId = `pcred_request_identity_${suffix}`;
       await database(async (db) => {
@@ -131,22 +129,49 @@ test.describe
     });
 
     test.afterAll(async () => {
-      await admin?.page.close();
-      await database(async (db) => {
-        for (const request of requests)
-          await db.query("DELETE FROM payment_requests WHERE id = $1", [request.id]);
-        if (connectionId) {
-          await db.query(
-            "UPDATE custody_connections SET default_custody_wallet_id = NULL WHERE id = $1",
-            [connectionId]
-          );
-          await db.query("DELETE FROM custody_wallets WHERE custody_connection_id = $1", [
-            connectionId,
-          ]);
-          await db.query("DELETE FROM custody_connections WHERE id = $1", [connectionId]);
-          await db.query("DELETE FROM provider_credentials WHERE id = $1", [credentialId]);
-        }
-      });
+      try {
+        if (!organizationId) return;
+        await database(async (db) => {
+          await db.query("BEGIN");
+          try {
+            await db.query(
+              `DELETE FROM payment_requests
+               WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::text[])`,
+              [organizationId, projectId, requests.map(({ id }) => id)]
+            );
+            await db.query(
+              `UPDATE custody_connections SET default_custody_wallet_id = NULL
+               WHERE id = $1 AND organization_id = $2 AND project_id = $3`,
+              [connectionId, organizationId, projectId]
+            );
+            await db.query(
+              `DELETE FROM custody_wallets USING custody_connections
+               WHERE custody_wallets.id = $1
+                 AND custody_wallets.custody_connection_id = custody_connections.id
+                 AND custody_connections.id = $2
+                 AND custody_connections.organization_id = $3
+                 AND custody_connections.project_id = $4`,
+              [aliasWalletId, connectionId, organizationId, projectId]
+            );
+            await db.query(
+              `DELETE FROM custody_connections
+               WHERE id = $1 AND organization_id = $2 AND project_id = $3`,
+              [connectionId, organizationId, projectId]
+            );
+            await db.query(
+              `DELETE FROM provider_credentials
+               WHERE id = $1 AND organization_id = $2 AND project_id = $3`,
+              [credentialId, organizationId, projectId]
+            );
+            await db.query("COMMIT");
+          } catch (error) {
+            await db.query("ROLLBACK");
+            throw error;
+          }
+        });
+      } finally {
+        await admin?.page.close();
+      }
     });
 
     async function createRequest(page: Page, wallet: LabeledWallet, amount: string) {
@@ -225,7 +250,7 @@ test.describe
           },
         });
         expect(response.status()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+        expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
       }
       const after = await api.get<{ paymentRequests: DashboardPaymentRequest[]; total: number }>(
         "/v1/payments/requests"

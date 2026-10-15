@@ -1,18 +1,20 @@
+import type { SdpReleaseChannel } from "@sdp/types";
 import {
   assetProfiles,
-  custody,
   dvp,
   earn,
   heliusRings,
   issuance,
   markets,
   newDesign,
-  payments,
   paymentsDemoMode,
   privateChannels,
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+} from "@/flags/release-channel";
 import type { DesignModuleFlags } from "@/lib/design-modules";
 import { isRampsEnabled } from "./ramps";
 
@@ -35,6 +37,8 @@ export type DashboardFlags = {
   paymentsDemoMode?: boolean;
   privateChannels: boolean;
   ramps: boolean;
+  /** This deployment's release channel; the API playground offers only its modules. */
+  releaseChannel: SdpReleaseChannel;
 };
 
 /**
@@ -50,7 +54,6 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
-    custodyEnabled,
     dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
@@ -58,13 +61,11 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     marketsEnabled,
     newDesignEnabled,
     newDesignModules,
-    paymentsEnabled,
     paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
-    custody(),
     dvp(),
     earn(),
     heliusRings(),
@@ -72,7 +73,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets(),
     newDesign(),
     getDesignModuleFlags(),
-    payments(),
     paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
@@ -81,7 +81,8 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
   return {
     assetProfiles: assetProfilesEnabled,
     compliance: isModuleInDeploymentReleaseChannel("compliance"),
-    custody: custodyEnabled,
+    // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
+    custody: isModuleInDeploymentReleaseChannel("custody"),
     dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
@@ -89,9 +90,10 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets: marketsEnabled,
     newDesign: newDesignEnabled,
     newDesignModules,
-    payments: paymentsEnabled,
+    payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
+    releaseChannel: deploymentReleaseChannel(),
   };
 }

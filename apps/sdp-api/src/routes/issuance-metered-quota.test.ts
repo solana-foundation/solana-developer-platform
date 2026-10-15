@@ -26,9 +26,6 @@ describe("Issuance routes — metered quota", () => {
   beforeEach(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await clearKVStores(env);
-    const keyHash = await hashString(TEST_PROJECT_API_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, keyHash, TEST_PROJECT_CACHED_KEY);
-
     const db = getDb(env);
     await db
       .prepare(
@@ -49,6 +46,9 @@ describe("Issuance routes — metered quota", () => {
       )
       .bind(TEST_PROJECT.id, TEST_ORG.id, TEST_PROJECT.slug, TEST_USER.id)
       .run();
+    // After the organization and project, so the key's row is seeded with it.
+    const keyHash = await hashString(TEST_PROJECT_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, keyHash, TEST_PROJECT_CACHED_KEY);
   });
 
   it("does not charge quota counters for callers the permission gate rejects", async () => {

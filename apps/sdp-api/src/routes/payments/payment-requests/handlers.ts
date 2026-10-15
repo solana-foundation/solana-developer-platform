@@ -13,7 +13,6 @@ import {
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -84,7 +83,6 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, body.custodyWalletId);
   assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
     c.env,

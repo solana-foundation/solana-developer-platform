@@ -350,7 +350,8 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     });
   }
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId,
@@ -358,8 +359,10 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
     requiredWalletPermissions: ["tokens:admin"],
   });
 
+  const signer = authority.signer;
+
   // Execute freeze on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "freeze",
     resourceType: "token_transaction",
@@ -594,7 +597,8 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     });
   }
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     custodyWalletId,
@@ -602,13 +606,15 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
     requiredWalletPermissions: ["tokens:admin"],
   });
 
+  const signer = authority.signer;
+
   const frozen = await tokenService.isAccountFrozen(tokenId, tokenAccount);
   if (!frozen) {
     throw new AppError("ACCOUNT_NOT_FROZEN", "Account is not frozen");
   }
 
   // Execute thaw on Solana first (Token ACL-aware via Mosaic)
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "unfreeze",
     resourceType: "token_transaction",

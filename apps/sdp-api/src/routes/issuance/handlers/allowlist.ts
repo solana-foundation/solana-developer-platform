@@ -1,6 +1,5 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenAllowlistEntry, TokenAllowlistResponse } from "@sdp/types";
-import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -11,7 +10,6 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
-
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -23,6 +21,8 @@ import {
   listAllowlistQuerySchema,
   removeAllowlistQuerySchema,
 } from "../schemas";
+import { controlListMovement } from "./access-control";
+import type { IssuanceAuthority, IssuanceMovement } from "./authority-resolution";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -81,13 +81,13 @@ async function withTimeout<T>(
  */
 async function syncNewAllowlistEntryOnChain(opts: {
   c: AppContext;
-  signer: TransactionSigner;
+  authority: IssuanceAuthority;
   tokenService: TokenService;
   entryId: string;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
 }): Promise<TokenAllowlistEntry> {
-  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.authority, "sponsored");
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -102,11 +102,11 @@ async function syncNewAllowlistEntryOnChain(opts: {
 
 async function removeExistingAllowlistEntryOnChain(opts: {
   c: AppContext;
-  signer: TransactionSigner;
+  authority: IssuanceAuthority;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
 }): Promise<void> {
-  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.authority, "sponsored");
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,
@@ -166,13 +166,14 @@ async function resolveAllowlistAuthoritySigner(
   auth: ApiKeyContext,
   tokenService: TokenService,
   list: ReturnType<typeof assertValidAddress>,
+  movement: IssuanceMovement,
   signingCustodyWalletId?: string
 ) {
-  const authority = await resolveAllowlistAuthority(c.env, list);
+  const authorityAddress = await resolveAllowlistAuthority(c.env, list);
   const authorityWallet = await resolveAuthorityWallet({
     env: c.env,
     auth,
-    currentAuthority: authority,
+    currentAuthority: authorityAddress,
     requestedCustodyWalletId: signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
@@ -182,14 +183,15 @@ async function resolveAllowlistAuthoritySigner(
     custodyWalletId: authorityWallet.custodyWalletId,
     tokenService,
   });
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
     custodyWalletId: authorityWallet.custodyWalletId,
-    currentAuthority: authority,
+    currentAuthority: authorityAddress,
     requiredWalletPermissions: ["tokens:write"],
+    movement,
   });
-  return { ...authorityWallet, signer };
+  return { ...authorityWallet, authority };
 }
 
 export const listAllowlist = async (c: AppContext) => {
@@ -266,12 +268,14 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     const list = token.ablListAddress
       ? assertValidAddress(token.ablListAddress, "ablListAddress")
       : null;
+    const additionMovement = controlListMovement(token, "add");
     const authorityWallet = list
       ? await resolveAllowlistAuthoritySigner(
           c,
           auth,
           tokenService,
           list,
+          additionMovement,
           body.signingCustodyWalletId
         )
       : null;
@@ -302,7 +306,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
       try {
         entry = await syncNewAllowlistEntryOnChain({
           c,
-          signer: authorityWallet.signer,
+          authority: authorityWallet.authority,
           tokenService,
           entryId: entry.id,
           list,
@@ -375,12 +379,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const list = token.ablListAddress
     ? assertValidAddress(token.ablListAddress, "ablListAddress")
     : null;
+  const removalMovement = controlListMovement(token, "remove");
   const authorityWallet = list
     ? await resolveAllowlistAuthoritySigner(
         c,
         auth,
         tokenService,
         list,
+        removalMovement,
         parsed.data.signingCustodyWalletId
       )
     : null;
@@ -406,7 +412,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
     if (list && authorityWallet) {
       await removeExistingAllowlistEntryOnChain({
         c,
-        signer: authorityWallet.signer,
+        authority: authorityWallet.authority,
         list,
         wallet: assertValidAddress(entry.address, "address"),
       });

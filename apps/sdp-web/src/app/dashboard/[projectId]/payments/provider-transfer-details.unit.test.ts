@@ -118,7 +118,7 @@ describe("providerTransferDetailRows", () => {
   it.each([
     { type: "transfer", provider: "moonpay" },
     { type: "offramp", provider: undefined },
-    { type: "offramp", provider: "moneygram" },
+    { type: "offramp", provider: "stripe" },
   ] as const)("omits unsupported transfer details", ({ type, provider }) => {
     expect(
       providerTransferDetailRows(

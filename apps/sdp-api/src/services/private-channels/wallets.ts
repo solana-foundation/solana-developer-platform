@@ -163,7 +163,13 @@ export async function verifyPrivateChannelWallet(
   principalId?: string
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
   const wallet = await resolvePrivateChannelCustodyWallet(env, auth, projectId, walletId);
-  const signer = await createPrivateChannelSigner(env, auth.organizationId, projectId, wallet);
+  const signer = await createPrivateChannelSigner(
+    env,
+    auth.organizationId,
+    projectId,
+    wallet,
+    "private_channels.session"
+  );
   if (!isMessagePartialSigner(signer)) {
     throw new AppError("SIGNING_FAILED", "This wallet cannot sign verification messages.");
   }

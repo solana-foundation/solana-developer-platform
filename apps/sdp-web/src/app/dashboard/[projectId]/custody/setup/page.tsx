@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -14,6 +15,7 @@ import {
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
+import RedesignCurrentCustodySetupPage from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 interface CustodySetupPageProps {
@@ -54,7 +56,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
+async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -128,3 +130,5 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     />
   );
 }
+
+export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage, "wallets");

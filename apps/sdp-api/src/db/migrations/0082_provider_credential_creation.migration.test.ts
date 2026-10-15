@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 describe("0082 Provider Credential creation", () => {
@@ -10,15 +11,24 @@ describe("0082 Provider Credential creation", () => {
       `INSERT INTO organizations (id, name, slug, tier, status)
        VALUES ('org_creation', 'Creation', 'creation', 'enterprise', 'active')`
     );
+    await getDb(env).execute(
+      "INSERT INTO users (id, email) VALUES ('usr_creation', 'creation@example.test')"
+    );
+    await seedDefaultProjects(getDb(env), {
+      organizationId: "org_creation",
+      createdBy: "usr_creation",
+      members: [],
+      ids: { sandbox: "prj_creation", production: "prj_creation_production" },
+    });
   });
 
   it("reserves a GCP location before a version exists, then retains abandoned root cleanup", async () => {
     await getDb(env).execute(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, status
        ) VALUES (
-         'pcred_creation', 'org_creation', 'privy', 'Privy', 'organization', 'stored',
+         'pcred_creation', 'org_creation', 'prj_creation', 'privy', 'Privy', 'project', 'stored',
          'gcp_secret_manager', 'projects/p/secrets/sdp-provider-credentials-pcred_creation',
          'creating'
        )`
@@ -38,10 +48,10 @@ describe("0082 Provider Credential creation", () => {
     await expect(
       getDb(env).execute(
         `INSERT INTO provider_credentials (
-           id, organization_id, provider, label, scope, source, storage_backend,
+           id, organization_id, project_id, provider, label, scope, source, storage_backend,
            secret_ref, status, deactivated_at, secret_retention_expires_at
          ) VALUES (
-           'pcred_unrelated', 'org_creation', 'privy', 'Privy', 'organization', 'stored',
+           'pcred_unrelated', 'org_creation', 'prj_creation', 'privy', 'Privy', 'project', 'stored',
            'gcp_secret_manager', 'projects/p/secrets/unrelated',
            'deactivated', sdp_iso_now(), sdp_iso_now()
          )`
@@ -56,10 +66,10 @@ describe("0082 Provider Credential creation", () => {
   ])("restricts creating to a stored GCP location without a version: %s", async (change) => {
     await getDb(env).execute(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, status
-       ) VALUES ('pcred_creating_constraint', 'org_creation', 'privy', 'Privy',
-         'organization', 'stored', 'gcp_secret_manager', 'projects/p/secrets/creation', 'creating')`
+       ) VALUES ('pcred_creating_constraint', 'org_creation', 'prj_creation', 'privy', 'Privy',
+         'project', 'stored', 'gcp_secret_manager', 'projects/p/secrets/creation', 'creating')`
     );
     await expect(
       getDb(env).execute(

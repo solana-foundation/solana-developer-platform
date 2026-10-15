@@ -15,6 +15,7 @@ import {
   CHECK_VIOLATION,
   expectSqlstate,
   FK_VIOLATION,
+  RAISE_EXCEPTION,
   seedOrgProject,
   seedStoredProviderCredential,
 } from "@/test/helpers/migration-db";
@@ -24,9 +25,9 @@ import {
   CUSTODY_DEFAULTS_DROP_MIGRATION,
   restorePreCustodyDefaultsDropSchema,
 } from "./custody-defaults-schema";
+import { restorePreProjectIdNotNullSchema } from "./project-id-not-null-schema";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const RAISE_EXCEPTION = "P0001";
 const ORGANIZATION_CREDENTIAL_SCOPE_KEY = "__organization__";
 const seededAt = "2026-01-01T00:00:00.000Z";
 let client: Client;
@@ -45,7 +46,7 @@ interface PinnedConfigRow extends ConfigRow {
 
 interface ConnectionRow {
   id: string;
-  project_id: string | null;
+  project_id: string;
   scope: string;
   provider_credential_id: string;
   provider_credential_scope_key: string;
@@ -137,7 +138,7 @@ async function seedOrganizationCredential(credential: {
 async function seedConnection(connection: {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   credentialId: string;
   credentialScopeKey: string;
   status: CustodyConnectionLifecycle;
@@ -149,12 +150,11 @@ async function seedConnection(connection: {
     `INSERT INTO custody_connections (
        id, organization_id, project_id, provider, scope, provider_credential_id,
        provider_credential_scope_key, status, last_check_status, last_check_at, activated_at
-     ) VALUES ($1, $2, $3, 'privy', $4, $5, $6, $7, $8, $9, $10)`,
+     ) VALUES ($1, $2, $3, 'privy', 'project', $4, $5, $6, $7, $8, $9)`,
     [
       connection.id,
       connection.organizationId,
       connection.projectId,
-      connection.projectId === null ? "organization" : "project",
       connection.credentialId,
       connection.credentialScopeKey,
       connection.status,
@@ -324,6 +324,7 @@ describe("0126 drop custody defaults migration", () => {
   });
 
   it("fails the migration and leaves it unrecorded when a connection is not bound to a credential scoped to its own project", async () => {
+    await restorePreProjectIdNotNullSchema(client);
     const tenant = await seedOrgProject(client, "0126_credential_guard");
     await seedOrganizationCredential({
       id: "pcred_0126_credential_guard",
@@ -500,39 +501,27 @@ describe("0126 drop custody defaults constraints", () => {
     );
   });
 
-  it("rejects an organization-scope connection and a project connection bound to an organization credential", async () => {
+  it("rejects a project connection bound to another project's credential", async () => {
     const tenant = await seedOrgProject(client, "0126_credential_scope");
-    await seedOrganizationCredential({
+    const productionProjectId = `${tenant.projectId}_production`;
+    await seedStoredProviderCredential(client, {
       id: "pcred_0126_credential_scope",
+      label: "0126_credential_scope",
       organizationId: tenant.organizationId,
+      projectId: productionProjectId,
       userId: tenant.userId,
+      provider: "privy",
     });
 
     await expectSqlstate(
       client,
       () =>
         seedConnection({
-          id: "cconn_0126_credential_scope_organization",
-          organizationId: tenant.organizationId,
-          projectId: null,
-          credentialId: "pcred_0126_credential_scope",
-          credentialScopeKey: ORGANIZATION_CREDENTIAL_SCOPE_KEY,
-          status: "pending",
-          lastCheckStatus: null,
-          lastCheckAt: null,
-          activatedAt: null,
-        }),
-      CHECK_VIOLATION
-    );
-    await expectSqlstate(
-      client,
-      () =>
-        seedConnection({
-          id: "cconn_0126_credential_scope_project",
+          id: "cconn_0126_credential_scope",
           organizationId: tenant.organizationId,
           projectId: tenant.projectId,
           credentialId: "pcred_0126_credential_scope",
-          credentialScopeKey: ORGANIZATION_CREDENTIAL_SCOPE_KEY,
+          credentialScopeKey: productionProjectId,
           status: "pending",
           lastCheckStatus: null,
           lastCheckAt: null,

@@ -12,14 +12,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { DashboardFlags } from "@/flags/dashboard";
 
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
 const STRATEGY_SKELETON_IDS = ["one", "two", "three"];
 const TREASURY_SECTION_SKELETON_IDS = ["one", "two"];
-const LANDING_PATH_SKELETON_IDS = ["treasury", "program", "dvp"];
+const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
+const DVP_PATH_SKELETON_IDS = ["dvp"];
 const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
 
-export function MarketsLandingSkeleton() {
+/**
+ * One block per path card the landing renders: Earn's two, then DvP's. Markets runs when
+ * either sub-module does, so drawing both showed a DvP card on stage (Earn `beta`, DvP
+ * `experimental`) that the page leaves out.
+ */
+export function MarketsLandingSkeleton({ earn, dvp }: { earn: boolean; dvp: boolean }) {
+  const paths = [...(earn ? EARN_PATH_SKELETON_IDS : []), ...(dvp ? DVP_PATH_SKELETON_IDS : [])];
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true">
       <div className="mx-auto w-full max-w-4xl space-y-5">
@@ -28,13 +36,18 @@ export function MarketsLandingSkeleton() {
           <SkeletonBlock className="mt-3 h-4 w-[32rem] max-w-full" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          {LANDING_PATH_SKELETON_IDS.map((id) => (
+          {paths.map((id) => (
             <SkeletonBlock className="h-40 w-full rounded-2xl" key={id} />
           ))}
         </div>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/** The client loading path: the shell's flag snapshot, already capped at the channel. */
+export function MarketsLandingFlagsSkeleton({ flags }: { flags?: DashboardFlags }) {
+  return <MarketsLandingSkeleton earn={flags?.earn ?? false} dvp={flags?.dvp ?? false} />;
 }
 
 export function TreasurySolutionsSkeleton() {

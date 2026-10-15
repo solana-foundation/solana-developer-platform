@@ -1,5 +1,10 @@
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
-import { fiatCurrencyFlagEmoji, regionFlagEmoji } from "@sdp/types/payment-rails";
+import {
+  FIAT_PEG_CURRENCIES,
+  type FiatCurrencyCode,
+  fiatCurrencyFlagEmoji,
+  regionFlagEmoji,
+} from "@sdp/types/payment-rails";
 import { describe, expect, it } from "vitest";
 
 // The helpers live in @sdp/types, which carries no test runner of its own. They
@@ -57,7 +62,8 @@ describe("fiatCurrencyFlagEmoji", () => {
     // Independent of the allowlist: CLDR canonicalisation rewrites a withdrawn
     // code to its successor, so region === canonical(region) only holds for
     // codes still in use — the ones vendors ship flags for.
-    for (const currency of RAMP_FIAT_CURRENCIES) {
+    const rendered = new Set<FiatCurrencyCode>([...RAMP_FIAT_CURRENCIES, ...FIAT_PEG_CURRENCIES]);
+    for (const currency of rendered) {
       const flag = fiatCurrencyFlagEmoji(currency);
       if (flag === null) {
         continue;

@@ -2,7 +2,6 @@
 
 import {
   getCryptoRailAssetLabel,
-  isMuralSandboxPayinCurrency,
   type PaymentOnrampQuoteRequest,
   type PaymentRampQuote,
   type PaymentTransferSummary,
@@ -75,14 +74,9 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
-/**
- * Whether the provider's sandbox can simulate this quote's pay-in: Lightspark's always, BVNK's
- * once its funding account is ready, Mural's in the currencies its sandbox pays in.
- */
-function canSimulateQuote(quote: PaymentRampQuote, fiatCurrency: string): boolean {
+/** Whether the provider's sandbox can simulate this quote's pay-in: BVNK's once its funding account is ready. */
+function canSimulateQuote(quote: PaymentRampQuote): boolean {
   switch (quote.provider) {
-    case "lightspark":
-      return true;
     case "bvnk":
       return (
         quote.deliveryMode === "manual_instructions" &&
@@ -91,8 +85,6 @@ function canSimulateQuote(quote: PaymentRampQuote, fiatCurrency: string): boolea
             instruction.kind === "fiat_funding" && instruction.onboardingStatus === "ready"
         )
       );
-    case "mural":
-      return isMuralSandboxPayinCurrency(fiatCurrency);
     default:
       return false;
   }
@@ -105,7 +97,6 @@ interface SimulationContext {
   succeeded: boolean;
   demo: boolean;
   sandbox: boolean;
-  fiatCurrency: string;
 }
 
 /**
@@ -122,7 +113,7 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   if (quote === null || transferId === null || transferStatus === undefined) return false;
   if (getRampTransferState(transferStatus.status).terminal) return false;
   if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
-  return context.demo || (context.sandbox && canSimulateQuote(quote, context.fiatCurrency));
+  return context.demo || (context.sandbox && canSimulateQuote(quote));
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
@@ -222,7 +213,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     succeeded: quoteSimulationSucceeded,
     demo,
     sandbox: sdpEnvironment === "sandbox",
-    fiatCurrency: wizard.selectedRampPair.fiatCurrency,
   };
   const simulateAvailable = simulationOffered(simulation);
 

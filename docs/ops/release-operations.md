@@ -159,7 +159,7 @@ The production deploy workflow:
 4. Runs the migration job with that image.
 5. Captures the current service traffic and cron image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
-7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready.
+7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready and the instance has working egress. A fresh instance reports `checks.egress: "pending"` (503) until it can reach Clerk, which is also its Cloud Run startup probe.
 8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-api-public-cron` to the same digest.
 9. Runs the production canary.
 10. In `release-web`, confirms `/health/ready` still reports the promoted revision and posts the `sdp-web production gate` status for the commit.
@@ -172,7 +172,7 @@ Check:
 
 1. The production GitHub Actions job completed successfully.
 2. The `sdp_schema_sha` label on `sdp-prod-api-public-migrate` is at or ahead of the deployed commit's last migration.
-3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres and Redis.
+3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres, Redis and egress. `checks.egress: "unverified"` means the instance stopped waiting for egress and served anyway; look for `sdp_api_egress_unverified` in the API logs.
 4. The cron job references the same image as the service.
 5. `https://api.solana.com/health` succeeds.
 6. Cloud Run error rate, latency, logs, and Sentry remain healthy.

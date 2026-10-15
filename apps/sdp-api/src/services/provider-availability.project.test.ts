@@ -34,6 +34,7 @@ vi.mock("@sdp/types", async (importOriginal) => {
 const ORGANIZATION_ID = "org_project_provider_rule";
 const USER_ID = "usr_project_provider_rule";
 const BETA_CHANNEL = { SDP_RELEASE_CHANNEL: "beta" } as const satisfies Partial<Env>;
+const STABLE_CHANNEL = { SDP_RELEASE_CHANNEL: "stable" } as const satisfies Partial<Env>;
 const PRIVY_CREDENTIALS = {
   PRIVY_APP_ID: "privy_project_provider_rule_app",
   PRIVY_APP_SECRET: "privy_project_provider_rule_secret",
@@ -192,7 +193,11 @@ describe("assertProjectProviderAdmitted", () => {
       )
     );
     await expect(
-      admit(projects.production, deploymentEnv({ ...BETA_CHANNEL, ...EARN_ENABLED_FLAGS }), UPSHIFT)
+      admit(
+        projects.production,
+        deploymentEnv({ ...STABLE_CHANNEL, ...EARN_ENABLED_FLAGS }),
+        UPSHIFT
+      )
     ).rejects.toMatchObject(
       refusal(
         "Upshift is not available in this release channel.",

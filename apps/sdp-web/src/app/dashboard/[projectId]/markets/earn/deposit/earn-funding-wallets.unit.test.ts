@@ -1,3 +1,4 @@
+import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
@@ -71,6 +72,32 @@ describe("fetchFundingWallets", () => {
 });
 
 describe("live funding wallet balances", () => {
+  it.each(["   ", "0x10"])(
+    "rejects a fresh balance response with invalid token amount %j",
+    async (uiAmount) => {
+      stubResponse({
+        data: {
+          balanceReadContext: { minimumSlot: 101 },
+          walletBalances: {
+            custodyWalletId: "cwlt_requested",
+            address: "address",
+            balances: [
+              {
+                token: WELL_KNOWN_TOKENS.SOL.symbol,
+                mint: SOL_MINT,
+                amount: "1000000000",
+                uiAmount,
+                decimals: SOL_DECIMALS,
+              },
+            ],
+          },
+        },
+      });
+      await expect(fetchLiveFundingWalletBalance("cwlt_requested", 101)).rejects.toThrow(
+        "Invalid custody wallet balance response"
+      );
+    }
+  );
   it.each([
     ["missing identity", { balances: [] }],
     ["wrong exact identity", { custodyWalletId: "cwlt_other", address: "address", balances: [] }],

@@ -34,23 +34,16 @@ export type {
 } from "./counterparty-account.repository";
 export { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
 export type {
-  ArchiveExternalAccountInput,
   AssignFundingWalletReferenceInput,
   ClaimFundingWalletInput,
-  CompleteExternalAccountInput,
   CounterpartyProviderAccountKind,
   CounterpartyProviderAccountRow,
   CounterpartyProviderAccountsRepository,
   GetAccountByKindAndCurrencyInput,
   GetCounterpartyProviderAccountInput,
-  GetExternalAccountByIdInput,
-  InsertPendingExternalAccountInput,
   InsertProviderResourceAccountInput,
-  ListActiveExternalAccountsInput,
-  ListExternalAccountsInput,
   ListProviderAccountsInput,
   PatchAccountMetadataInput,
-  UpdateExternalAccountStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";

@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -31,6 +32,7 @@ function buildApp() {
       projectEnvironment: c.get("projectEnvironment"),
     })
   );
+  app.get("/scope", (c) => c.json(currentClusterScope()));
   app.onError((error, c) => {
     if (error instanceof AppError) {
       return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403);
@@ -222,6 +224,21 @@ describe("projectContextMiddleware", () => {
       expect(await res.json()).toEqual({
         projectId: PRODUCTION_PROJECT_ID,
         projectEnvironment: "production",
+      });
+    });
+
+    it("runs the handler under the cluster scope of the resolved project", async () => {
+      await setOrganizationSettings(entitled);
+      const res = await buildApp().request(
+        "/scope",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        projectId: PRODUCTION_PROJECT_ID,
+        environment: "production",
+        cluster: "mainnet-beta",
       });
     });
 

@@ -139,6 +139,7 @@ function wrapper({ children }: { children: ReactNode }) {
           markets: false,
           payments: true,
           privateChannels: false,
+          releaseChannel: "experimental",
           ramps: true,
           newDesign: true,
         }}
@@ -399,14 +400,9 @@ describe("useOnrampWizard — demo mode's Simulate verification", () => {
   });
 });
 
-describe("useOnrampWizard — a first Mural onboarding", () => {
-  it("moves past the memo step while the terms are still to accept", async () => {
-    const termsRequired = {
-      provider: "mural",
-      direction: "onramp",
-      status: "terms_of_service_required",
-      termsOfServiceUrl: "https://app.mural.example/tos",
-    };
+describe("useOnrampWizard: an onboarding with nothing left to collect", () => {
+  it("moves past the memo step while the verification is still in review", async () => {
+    const verifying = { provider: "bvnk", direction: "onramp", status: "customer_verifying" };
     let started = false;
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -415,16 +411,21 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
         return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
       }
       if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
-        // A first Mural onboarding has no fields to collect, so no requirements step is
-        // inserted; the advance from the memo step starts it and answers with the terms.
+        // Nothing is left to collect, so no requirements step is inserted; the advance
+        // from the memo step answers with the verification still in review.
         if (method === "POST") {
           started = true;
         }
         return Promise.resolve(
           Response.json({
             data: started
-              ? termsRequired
-              : { provider: "mural", direction: "onramp", status: "onboarding_not_started" },
+              ? verifying
+              : {
+                  provider: "bvnk",
+                  direction: "onramp",
+                  status: "customer_verification_required",
+                  verificationUrl: "https://bvnk.example/verify",
+                },
           })
         );
       }
@@ -432,15 +433,15 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
     });
 
     const { result } = renderHook(
-      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["mural"] }),
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["bvnk"] }),
       { wrapper }
     );
     await act(async () => {});
-    act(() => result.current.selectProvider("mural"));
+    act(() => result.current.selectProvider("bvnk"));
     act(() => result.current.setField("amount", "100"));
     act(() => result.current.setField("walletId", WALLET.id));
     await waitFor(() => expect(result.current.canProceed).toBe(true));
-    expect(result.current.fields.provider).toBe("mural");
+    expect(result.current.fields.provider).toBe("bvnk");
     expect(result.current.steps.map((step) => step.id)).not.toContain("REQUIREMENTS");
 
     await act(async () => {
@@ -452,7 +453,183 @@ describe("useOnrampWizard — a first Mural onboarding", () => {
     });
 
     expect(result.current.currentStepId).toBe("REVIEW");
-    expect(result.current.onboarding?.status).toBe("terms_of_service_required");
+    expect(result.current.onboarding?.status).toBe("customer_verifying");
     expect(result.current.quoteTransferId).toBeNull();
+  });
+});
+
+describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () => {
+  const WALLET_B: PaymentsDashboardWallet = {
+    ...WALLET,
+    id: "wallet-b",
+    walletId: "provider-b",
+    publicKey: "wallet-b-pubkey",
+    label: "Wallet B",
+  };
+  // Primary presses from the deposit step to the transaction stage.
+  const STEPS_TO_TRANSACTION_STAGE = 3;
+  const quoteCreated = () =>
+    Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } });
+  const quoteFailed = () =>
+    Response.json({ error: { message: "The provider is unavailable." } }, { status: 502 });
+
+  interface QuoteCall {
+    body: unknown;
+    respond: (response: Response) => void;
+  }
+  /** One render of the wizard: whether it waits on a quote, and whether Previous is held. */
+  interface StageRender {
+    awaitingQuote: boolean;
+    quoteInFlight: boolean;
+  }
+  let quoteCalls: QuoteCall[] = [];
+  let renders: StageRender[] = [];
+
+  beforeEach(() => {
+    quoteCalls = [];
+    renders = [];
+    const base = fetchMock.getMockImplementation();
+    if (base === undefined) {
+      throw new Error("The file's beforeEach must install the default fetch mock first");
+    }
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET, WALLET_B] } }));
+      }
+      if (url === "/api/dashboard/payments/ramps/onramp/quote" && init?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          quoteCalls.push({ body: JSON.parse(String(init.body)), respond: resolve });
+        });
+      }
+      return base(input, init);
+    });
+  });
+
+  async function enterTransactionStage(rendered: WizardRender, walletId: string, amount: string) {
+    act(() => rendered.result.current.setField("walletId", walletId));
+    act(() => rendered.result.current.setField("amount", amount));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE; press += 1) {
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+  }
+
+  function renderWizard(): WizardRender {
+    return renderHook(
+      () => {
+        const wizard = useOnrampWizard({ ...PROPS, wallets: [WALLET, WALLET_B] });
+        renders.push({
+          awaitingQuote:
+            wizard.isLastStep &&
+            wizard.onboarding?.status === "ready" &&
+            wizard.quote === null &&
+            wizard.quoteCreationError === null,
+          quoteInFlight: wizard.quoteInFlight,
+        });
+        return wizard;
+      },
+      { wrapper }
+    );
+  }
+
+  async function renderWithQuoteInFlight(): Promise<WizardRender> {
+    const rendered = renderWizard();
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("bvnk"));
+    await enterTransactionStage(rendered, WALLET.id, "100");
+    await waitFor(() => expect(quoteCalls).toHaveLength(1));
+    expect(quoteCalls[0]?.body).toMatchObject({
+      destinationCustodyWalletId: WALLET.id,
+      fiatAmount: "100",
+    });
+    return rendered;
+  }
+
+  async function respondToQuote(index: number, response: Response) {
+    await act(async () => {
+      quoteCalls[index]?.respond(response);
+    });
+  }
+
+  it("holds Previous from the first render on the transaction stage until the quote lands", async () => {
+    const rendered = await renderWithQuoteInFlight();
+
+    const awaiting = renders.filter((render) => render.awaitingQuote);
+    expect(awaiting.length).toBeGreaterThan(0);
+    expect(awaiting.filter((render) => !render.quoteInFlight)).toEqual([]);
+
+    await respondToQuote(0, quoteCreated());
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(rendered.result.current.quoteInFlight).toBe(false);
+  });
+
+  it("frees Previous when the quote fails and holds it again during the retry", async () => {
+    const rendered = await renderWithQuoteInFlight();
+
+    await respondToQuote(0, quoteFailed());
+    await waitFor(() =>
+      expect(rendered.result.current.quoteCreationError?.message).toBe(
+        "The provider is unavailable."
+      )
+    );
+    expect(rendered.result.current.quoteInFlight).toBe(false);
+
+    act(() => rendered.result.current.retryQuoteCreation());
+    expect(rendered.result.current.quoteInFlight).toBe(true);
+    await waitFor(() => expect(quoteCalls).toHaveLength(2));
+    await respondToQuote(1, quoteCreated());
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(rendered.result.current.quoteInFlight).toBe(false);
+  });
+
+  it("quotes the edited selection after a failed quote and Previous", async () => {
+    const rendered = await renderWithQuoteInFlight();
+    await respondToQuote(0, quoteFailed());
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE; press += 1) {
+      act(() => rendered.result.current.handleSecondary());
+    }
+    expect(rendered.result.current.stepIndex).toBe(0);
+    expect(rendered.result.current.quoteCreationError).toBeNull();
+
+    await enterTransactionStage(rendered, WALLET_B.id, "200");
+    await waitFor(() => expect(quoteCalls).toHaveLength(2));
+    expect(quoteCalls[1]?.body).toMatchObject({
+      destinationCustodyWalletId: WALLET_B.id,
+      fiatAmount: "200",
+    });
+    await respondToQuote(1, quoteCreated());
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);
+  });
+
+  it("waits on the transaction stage for a complete selection, with Previous free", async () => {
+    const rendered = renderWizard();
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("bvnk"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    act(() => rendered.result.current.setField("amount", "100"));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE - 1; press += 1) {
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+    // The review step has no gate, so this stands in for a selection that turns incomplete
+    // before the stage, such as a wallet leaving the live list.
+    act(() => rendered.result.current.setField("amount", ""));
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    expect(rendered.result.current.isLastStep).toBe(true);
+    expect(rendered.result.current.quoteInFlight).toBe(false);
+
+    act(() => rendered.result.current.setField("amount", "100"));
+    await waitFor(() => expect(quoteCalls).toHaveLength(1));
+    expect(rendered.result.current.quoteInFlight).toBe(true);
   });
 });

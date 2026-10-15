@@ -1,4 +1,4 @@
-import type { FeePaymentPort, SponsorshipProviderConfiguration } from "@sdp/payments/fee-payment";
+import type { FeePaymentPort, SponsorshipProviderConfiguration } from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types";
 import {
   AccountRole,

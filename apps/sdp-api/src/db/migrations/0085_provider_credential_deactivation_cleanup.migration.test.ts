@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
+import { seedOrgProject } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   runPostgresMigrations,
@@ -32,12 +33,12 @@ async function insertCredential(params: {
   const gcp = backend === "gcp_secret_manager";
   await client.query(
     `INSERT INTO provider_credentials (
-       id, organization_id, provider, label, scope, source, storage_backend,
+       id, organization_id, project_id, provider, label, scope, source, storage_backend,
        secret_ref, secret_version_ref, encrypted_secret_payload, status,
        deactivated_at, secret_retention_expires_at, rotated_from_provider_credential_id,
        last_failure_code, created_by
-     ) VALUES ($1, 'org_cleanup_0085', 'privy', 'Privy', 'organization', $2, $3,
-       $4, $5, $6, $7, $8, $9, $10, $11, 'usr_cleanup_0085')`,
+     ) VALUES ($1, 'org_cleanup_0085', 'proj_cleanup_0085', 'privy', 'Privy', 'project', $2, $3,
+       $4, $5, $6, $7, $8, $9, $10, $11, 'user_cleanup_0085')`,
     [
       params.id,
       backend === "runtime_env" ? "runtime" : "stored",
@@ -64,12 +65,7 @@ describe("0085 provider Credential deactivation cleanup", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await client.query(
-      "INSERT INTO organizations (id, name, slug) VALUES ('org_cleanup_0085', 'Cleanup', 'cleanup-0085')"
-    );
-    await client.query(
-      "INSERT INTO users (id, email) VALUES ('usr_cleanup_0085', 'cleanup-0085@example.test')"
-    );
+    await seedOrgProject(client, "cleanup_0085");
   });
 
   afterEach(async () => {

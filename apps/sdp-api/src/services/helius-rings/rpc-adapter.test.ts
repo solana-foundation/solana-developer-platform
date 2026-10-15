@@ -1,12 +1,12 @@
-import { getBase64Codec } from "@solana/codecs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as guardedEgress from "@/services/guarded-egress";
+import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 
 const productionEnv: Env = { ENVIRONMENT: "production", API_VERSION: "v1" };
-const SIGNED_TX_BASE64 = getBase64Codec().decode(new Uint8Array(8).fill(1));
+const SIGNED_TX_BASE64 = signedRingsTransaction(1).signedTxBase64;
 const TENANT_RPC_URL = "https://rings-tenant.example.com/rpc";
 const LOOPBACK_RPC_URL = "https://127.0.0.1/rpc";
 const SIGNATURE = "1".repeat(64);

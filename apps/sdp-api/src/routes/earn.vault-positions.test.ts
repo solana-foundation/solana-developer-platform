@@ -775,11 +775,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
   });
 
   it("refuses a movement recorded in another environment", async () => {
-    // Written straight to the tables so the environment is the ONLY thing that
-    // differs: same organization, same in-scope wallet, direction `deposit`.
-    // `createSignedDepositIntent` derives the environment from the project, so
-    // it cannot produce this row, and the composite position FK means the two
-    // rows have to be inserted mismatched rather than updated after the fact.
+    const productionProjectId = `${PROJECT_A}_production`;
     const positionId = `earn_vault_position_${crypto.randomUUID()}`;
     const movementId = `earn_vault_movement_${crypto.randomUUID()}`;
     await getDb(env).batch([
@@ -791,7 +787,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
            ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', 'vault_read_environment',
                      ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
         )
-        .bind(positionId, ORG, PROJECT_A, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
+        .bind(positionId, ORG, productionProjectId, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
       getDb(env)
         .prepare(
           `INSERT INTO earn_movements (
@@ -806,7 +802,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
         .bind(
           movementId,
           ORG,
-          PROJECT_A,
+          productionProjectId,
           positionId,
           WALLET_A,
           crypto.randomUUID(),

@@ -1,4 +1,4 @@
-import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import type * as feePaymentAdapters from "@sdp/fee-payment";
 import { SOL_MINT } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";

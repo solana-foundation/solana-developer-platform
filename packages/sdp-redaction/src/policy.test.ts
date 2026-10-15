@@ -112,9 +112,9 @@ describe("isPiiKey", () => {
   it("covers every provider spelling of a street line", () => {
     // The `address` container is excluded to protect Solana addresses, so the
     // street line is only defused if each provider's spelling is named. These
-    // are the shapes actually submitted: `MuralPhysicalAddress` in the Mural
-    // client, `BvnkRuleEntityAddress` in BVNK's provider-data, and SDP's own
-    // `CounterpartyAddress`.
+    // are the shapes actually submitted: a retired ramp provider's
+    // `physicalAddress`, `BvnkRuleEntityAddress` in BVNK's provider-data, and
+    // SDP's own `CounterpartyAddress`.
     for (const key of [
       "line1",
       "address1",

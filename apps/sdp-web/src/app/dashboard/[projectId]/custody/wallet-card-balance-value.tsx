@@ -18,12 +18,14 @@ interface WalletCardBalanceValueProps {
   initialBalances?: CustodyWalletTokenBalance[];
 }
 
-export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
-  const t = useTranslations();
-  const { data: batchBalances, error: batchError } = usePersistedDashboardSWR<
-    Record<string, CustodyWalletTokenBalance[]>
-  >(
-    walletId ? custodyQueryKeys.walletCardBalances() : null,
+/**
+ * Every wallet's balances in one request, refreshed every 30 seconds. SWR shares the one read
+ * between the cards and the Wallets page's refresh control, which calls `mutate` to re-read now;
+ * an airdrop refreshes it through `custodyQueryKeys.isWalletLiveDataKey`.
+ */
+export function useWalletCardBalances(enabled = true) {
+  return usePersistedDashboardSWR<Record<string, CustodyWalletTokenBalance[]>>(
+    enabled ? custodyQueryKeys.walletCardBalances() : null,
     fetchWalletBalances,
     {
       revalidateOnFocus: true,
@@ -38,6 +40,11 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
       version: 3,
     }
   );
+}
+
+export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
+  const t = useTranslations();
+  const { data: batchBalances, error: batchError } = useWalletCardBalances(Boolean(walletId));
   const batchFailed =
     Boolean(batchError) || (batchBalances !== undefined && batchBalances[walletId] === undefined);
   const { data: fallbackBalances, error: fallbackError } = usePersistedDashboardSWR<
@@ -63,13 +70,13 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
     : (batchBalances?.[walletId] ?? initialBalances);
   const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
-  if (balances === undefined || hasError) {
-    return <span className="font-medium text-muted">{t("DashboardCustody.unavailable")}</span>;
-  }
+  // shortcut: preserve the legacy zero/stale display until balance-state UX is changed separately.
+  const totalBalance = resolveTotalBalance(balances ?? []);
 
   return (
-    <span className="font-medium text-primary">
-      {formatCurrencyAmount(resolveTotalBalance(balances))}
+    <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>
+      {formatCurrencyAmount(totalBalance)}
+      {hasError ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
     </span>
   );
 }

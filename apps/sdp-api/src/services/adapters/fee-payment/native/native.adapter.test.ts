@@ -1,4 +1,4 @@
-import { NativeAdapter } from "@sdp/payments/fee-payment/native";
+import { NativeAdapter } from "@sdp/fee-payment/native";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type Address,

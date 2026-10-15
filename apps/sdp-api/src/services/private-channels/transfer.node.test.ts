@@ -31,6 +31,7 @@ import type {
 } from "@/db/repositories";
 import * as repositories from "@/db/repositories";
 import { isAbandonedReservation } from "@/lib/idempotency";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { matchesTransferReplay } from "@/routes/private-channels/replay";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -488,6 +489,24 @@ describe("createChannelTransfer", () => {
     expect(result.status).toBe("failed");
     expect(result.failureReason).toBe(
       "SPC is at capacity and did not accept the transfer. Try again shortly."
+    );
+  });
+
+  it("records a money-admission refusal as failed and surfaces it as a 403", async () => {
+    const refusing = {
+      address: senderSigner.address,
+      signTransactions: async () => {
+        throw new MoneyMovementRefusedError("organization_inactive");
+      },
+    } as unknown as typeof senderSigner;
+
+    await expect(
+      createChannelTransfer(TEST_ENV, makeInput({ signer: refusing }))
+    ).rejects.toBeInstanceOf(MoneyMovementRefusedError);
+
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    expect(repo.updateTransfer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "failed" })
     );
   });
 

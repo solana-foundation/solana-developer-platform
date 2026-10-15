@@ -82,16 +82,16 @@ describe("ramp currency provider details", () => {
     const data = await responseData(response);
 
     expect(Object.keys(data.providerDetails).sort()).toEqual(sortedProvidersFromPairs(data.pairs));
-    expect(data.providerDetails.mural).toMatchObject({
+    expect(data.providerDetails.stripe).toMatchObject({
       currencies: { USD: { min: null, max: null } },
       countrySupport: { coverage: "by-country" },
-      entityTypes: ["business"],
+      entityTypes: ["individual"],
     });
   });
 
   it("narrows on-ramp providerDetails when the provider query filter is present", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana&provider=mural",
+      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana&provider=stripe",
       {},
       env
     );
@@ -99,8 +99,8 @@ describe("ramp currency provider details", () => {
     expect(response.status).toBe(200);
     const data = await responseData(response);
 
-    expect(data.pairs).toEqual([{ source: "USD", dest: "usdc.solana", providers: ["mural"] }]);
-    expect(Object.keys(data.providerDetails).sort()).toEqual(["mural"]);
+    expect(data.pairs).toEqual([{ source: "USD", dest: "usdc.solana", providers: ["stripe"] }]);
+    expect(Object.keys(data.providerDetails).sort()).toEqual(["stripe"]);
   });
 
   it("returns off-ramp providerDetails keyed by the providers present in source and dest filtered pairs", async () => {
@@ -148,33 +148,5 @@ describe("ramp currency provider details", () => {
         expect(data.providerDetails).not.toHaveProperty(unsurfaced);
       }
     }
-  });
-
-  it("returns no pairs when the provider query filter names a provider un-surfaced in this environment", async () => {
-    const response = await buildApp("production").request(
-      "/v1/payments/ramps/onramp/currency?provider=moneygram",
-      {},
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const data = await responseData(response);
-
-    expect(data.pairs).toEqual([]);
-    expect(data.providerDetails).toEqual({});
-  });
-
-  it("returns pairs for the same provider where its environment surfaces it", async () => {
-    const response = await buildApp("sandbox").request(
-      "/v1/payments/ramps/onramp/currency?provider=moneygram",
-      {},
-      env
-    );
-
-    expect(response.status).toBe(200);
-    const data = await responseData(response);
-
-    expect(data.pairs.length).toBeGreaterThan(0);
-    expect(data.providerDetails).toHaveProperty("moneygram");
   });
 });

@@ -6,7 +6,6 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import Image from "next/image";
 import {
   formatDisplayAmount,
-  formatMinorCurrencyAmount,
   formatTimestamp,
   resolveTransferTokenLabel,
   shortenAddress,
@@ -150,34 +149,6 @@ function completionDetailRows(
       value: shortenAddress(transfer.destination),
       copyValue: transfer.destination,
     });
-  }
-  if (quote.provider === "lightspark") {
-    const sendingAmount = formatMinorCurrencyAmount(
-      quote.totalSendingAmount,
-      quote.sendingCurrency.code,
-      quote.sendingCurrency.decimals
-    );
-    const receivingAmount = formatMinorCurrencyAmount(
-      quote.totalReceivingAmount,
-      quote.receivingCurrency.code,
-      quote.receivingCurrency.decimals
-    );
-    if (sendingAmount) {
-      rows.push({
-        label: onramp
-          ? t("DashboardPayments.ramps.finalFundedAmount")
-          : t("DashboardPayments.ramps.finalSentAmount"),
-        value: sendingAmount,
-      });
-    }
-    if (receivingAmount) {
-      rows.push({
-        label: onramp
-          ? t("DashboardPayments.ramps.finalReceivedAmount")
-          : t("DashboardPayments.ramps.finalPayoutAmount"),
-        value: receivingAmount,
-      });
-    }
   }
   if (transfer.createdAt) {
     rows.push({

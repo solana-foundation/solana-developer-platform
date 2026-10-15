@@ -25,7 +25,7 @@ offramp.post(
 );
 offramp.post(
   "/quote",
-  requirePermissions("payments:write", "wallets:read"),
+  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
   requireAllowedOperation("ramp_offramp_quote"),
   validateBody(createOfframpQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),

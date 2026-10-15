@@ -162,12 +162,7 @@ export function createCounterpartiesRepository(
     createPostgresCounterpartiesRepository(getDb(env)),
     scope,
     "CounterpartiesRepository",
-    [
-      "findActiveCounterpartyById",
-      "findActiveCounterpartyByProviderCustomerReference",
-      "findCounterpartyByMuralOrganizationId",
-      "patchMuralOrganizationById",
-    ]
+    ["findActiveCounterpartyById", "findActiveCounterpartyByProviderCustomerReference"]
   );
 }
 
