@@ -254,7 +254,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
     this.getNetworkFee =
       dependencies.getNetworkFee ??
-      ((transaction) =>
+      (async (transaction) =>
         getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
   }

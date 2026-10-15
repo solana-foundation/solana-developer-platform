@@ -73,7 +73,7 @@ surfpool_rpc_url="$(awk -F= '$1 == "SURFPOOL_RPC_URL" { v = substr($0, index($0,
 # --- hand-off to the API ----------------------------------------------------
 # The per-cluster Kora URLs override Doppler's deployed Koras (empty audiences:
 # the local Koras are plain HTTP, and a Doppler audience would reject them), and the
-# mainnet RPC points at the fork so the API and its paymaster see one chain.
+# mainnet RPCs point at the fork so the API, its fee preflight and its paymaster see one chain.
 {
   echo "FEE_PAYMENT_PROVIDER=kora"
   echo "KORA_DEVNET_URL=http://127.0.0.1:${KORA_LOCAL_DEVNET_PORT}"
@@ -81,6 +81,7 @@ surfpool_rpc_url="$(awk -F= '$1 == "SURFPOOL_RPC_URL" { v = substr($0, index($0,
   echo "KORA_DEVNET_CLOUD_RUN_AUDIENCE="
   echo "KORA_MAINNET_CLOUD_RUN_AUDIENCE="
   echo "SOLANA_MAINNET_RPC_URL=${surfpool_rpc_url}"
+  echo "KORA_MAINNET_RPC_URL=${surfpool_rpc_url}"
 } >"${API_ENV_FILE}"
 
 echo "Local paymasters ready; API env written to ${API_ENV_FILE#"${ROOT_DIR}"/}."
