@@ -733,6 +733,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   nextCollectionDueAt: string | null | undefined;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -808,6 +809,18 @@ async function finalizeMetadataScheduleUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -823,6 +836,7 @@ async function runMetadataScheduleUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -933,6 +947,7 @@ async function runMetadataScheduleUpdate(input: {
     resolved: input.resolved,
     nextCollectionDueAt: nextDueAt,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -1135,6 +1150,7 @@ async function finalizeReplacementUpdate(input: {
   currentPeriodStartAt: string;
   nextCollectionDueAt: string;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
@@ -1267,6 +1283,18 @@ async function finalizeReplacementUpdate(input: {
       createdAt: finalizedAt,
     });
 
+    // A request that finished a stale attempt another key claimed (the attempt
+    // keeps that key) is answered under its own key in the same commit, so the
+    // update never lands without the record its retry is answered from.
+    await recordAnsweredUpdate({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment: updated,
+      createdBy: input.createdBy,
+      idempotency: input.idempotency,
+      ranAttemptKey: input.attempt.idempotency_key,
+    });
     return updated;
   });
 }
@@ -1282,6 +1310,7 @@ async function runReplacementUpdate(input: {
   resolved: ResolvedRecurringPaymentUpdate;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (
     !input.claimed.plan_pda ||
@@ -1636,6 +1665,7 @@ async function runReplacementUpdate(input: {
     currentPeriodStartAt: finalizedAt,
     nextCollectionDueAt: safeNextDue,
     createdBy: input.createdBy,
+    idempotency: input.idempotency,
   });
 }
 
@@ -1890,6 +1920,7 @@ export async function updateRecurringPayment(input: {
         resolved,
         request: input.request,
         createdBy: input.createdBy,
+        idempotency: input.idempotency,
       });
     } else {
       updated = await runReplacementUpdate({
@@ -1903,6 +1934,7 @@ export async function updateRecurringPayment(input: {
         resolved,
         request: input.request,
         createdBy: input.createdBy,
+        idempotency: input.idempotency,
       });
     }
   } catch (error) {
@@ -1962,13 +1994,5 @@ export async function updateRecurringPayment(input: {
     throw error;
   }
 
-  // When this request finished a stale attempt another key claimed (the
-  // attempt keeps that key), it is answered under its own key too.
-  await recordAnsweredUpdate({
-    ...input,
-    recurringRepo,
-    recurringPayment: updated,
-    ranAttemptKey: attempt.idempotency_key,
-  });
   return updated;
 }

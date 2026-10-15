@@ -1,4 +1,7 @@
-import { decideRecurringPaymentUpdateTransition } from "@sdp/payments/recurring-payment-lifecycle";
+import {
+  decideRecurringPaymentUpdateTransition,
+  RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
+} from "@sdp/payments/recurring-payment-lifecycle";
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
@@ -204,11 +207,15 @@ export const findRecurringPaymentCancelReplay = findLifecycleReplay("cancel");
 export const findRecurringPaymentResumeReplay = findLifecycleReplay("resume");
 
 /**
- * PATCH, answered from its update attempt; the same key with other terms is a
- * 422. The cron never recovers an `updating` schedule, so a stale in-flight
- * attempt of this same request (it crashed after its claim) is not answered:
- * the handler runs and resumes it under the same key, as another key with the
- * same terms would.
+ * PATCH, answered from its update attempt once that attempt has settled; the
+ * same key with other terms is a 422. The cron never recovers an `updating`
+ * schedule, so an in-flight attempt of this same request is never an answer:
+ * stored, it would hold the key on `updating` for 24 hours. While the schedule
+ * is not yet stale (the original may still be running, or another key may be
+ * resuming it) the retry is a 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with Retry-After,
+ * unstored; once it is stale (it crashed after its claim) the handler runs and
+ * resumes the attempt under the same key, as another key with the same terms
+ * would.
  */
 export async function findRecurringPaymentUpdateReplay(
   c: AppContext,
@@ -224,14 +231,25 @@ export async function findRecurringPaymentUpdateReplay(
     attempt !== null &&
     attempt.recurring_payment_id === recurringPayment.id &&
     attempt.idempotency_fingerprint === getIdempotencyFingerprint(c) &&
-    isInFlightRecurringPaymentAttemptStatus(attempt.status) &&
-    decideRecurringPaymentUpdateTransition({
+    isInFlightRecurringPaymentAttemptStatus(attempt.status)
+  ) {
+    const nowIso = new Date().toISOString();
+    const transition = decideRecurringPaymentUpdateTransition({
       status: recurringPayment.status,
       updatedAt: recurringPayment.updated_at,
-      nowIso: new Date().toISOString(),
-    }) === "recoverable"
-  ) {
-    return null;
+      nowIso,
+    });
+    if (transition === "recoverable") {
+      return null;
+    }
+    if (transition === "processing") {
+      const staleInMs =
+        new Date(recurringPayment.updated_at).getTime() +
+        RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS -
+        new Date(nowIso).getTime();
+      c.header("Retry-After", String(Math.max(1, Math.ceil(staleInMs / 1000))));
+      throw new AppError("IDEMPOTENCY_KEY_IN_FLIGHT");
+    }
   }
   // The update attempt records the key layer's fingerprint; the step compares it.
   return answerFromAttempt(c, recurringPayment, attempt);
