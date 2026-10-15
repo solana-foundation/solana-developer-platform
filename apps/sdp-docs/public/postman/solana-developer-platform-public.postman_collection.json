@@ -44,9 +44,8 @@
           "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
           "  let code;",
           "  try { code = pm.response.json().error.code; } catch (e) {}",
-          "  const outcomeUnknown = status === 409 && code === \"IDEMPOTENCY_KEY_OUTCOME_UNKNOWN\";",
-          "  const reused = status === 422 && code === \"IDEMPOTENCY_KEY_REUSED\";",
-          "  if (!reused && (replayed || outcomeUnknown || (status < 500 && status !== 409 && status !== 429))) {",
+          "  const rejected = status === 422 && code !== \"IDEMPOTENCY_KEY_REUSED\";",
+          "  if (replayed || (status >= 200 && status < 300) || rejected) {",
           "    pm.collectionVariables.unset(variable);",
           "  }",
           "}"
