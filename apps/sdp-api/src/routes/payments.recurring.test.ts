@@ -5295,6 +5295,35 @@ describe("Payments routes — recurring", () => {
           .first<{ metadata_uri: string | null }>()
       )?.metadata_uri;
 
+    // Greptile (#2334): the 422 for a key reused on another schedule was stored
+    // under that request, so the original request's own retry then got the 422.
+    it("refuses a key reused on another schedule unstored, so the original retry is still answered", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const original = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const other = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const activate = (id: string) =>
+        app.request(
+          actionPath(id, "activate"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await activate(original.id)).status).toBe(200);
+      await forgetIdempotencyKey(key);
+
+      const reused = await activate(other.id);
+      expect(reused.status).toBe(422);
+      expect(await errorCode(reused)).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect(await storedKeyCount(key)).toBe(0);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await activate(original.id);
+      expect(retry.status).toBe(200);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.id).toBe(original.id);
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
     it("refuses a keyed activate that would finish another key's stale activation, unstored; the cron finishes it", async () => {
       const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
       const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);

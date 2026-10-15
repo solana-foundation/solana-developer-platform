@@ -52,6 +52,7 @@ import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
   markIdempotencyCommitted,
+  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
@@ -173,6 +174,9 @@ async function createTransferRecord(
       });
       if (existing) {
         if (existing.idempotency_fingerprint !== input.idempotency?.fingerprint) {
+          // Another request's row: refused unstored, so that request's own retry
+          // is still answered from it.
+          markIdempotencyRecordMismatch(c);
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }
         return { row: existing, replayed: true };

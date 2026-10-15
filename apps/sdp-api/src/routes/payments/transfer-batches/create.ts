@@ -13,6 +13,7 @@ import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
   markIdempotencyCommitted,
+  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -204,6 +205,9 @@ export async function createTransferBatch(
       });
       if (replay) {
         if (replay.idempotency_fingerprint !== idempotencyFingerprint) {
+          // Another request's row: refused unstored, so that request's own retry
+          // is still answered from it.
+          markIdempotencyRecordMismatch(c);
           throw new AppError("IDEMPOTENCY_KEY_REUSED");
         }
         return respondToTransferBatchReplay(

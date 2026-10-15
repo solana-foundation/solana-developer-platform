@@ -27,6 +27,7 @@ import {
   getIdempotencyClaim,
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -160,6 +161,9 @@ function answerFromAttempt(
   // Activation, lifecycle and collection attempts record no fingerprint: the
   // schedule they name is the request (the path's id, an empty body).
   if (attempt.recurring_payment_id !== recurringPayment.id) {
+    // Another request's row: refused unstored, so that request's own retry
+    // is still answered from it.
+    markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   const response: PaymentRecurringPaymentResponse = {
@@ -272,6 +276,9 @@ export async function findRecurringPaymentCollectReplay(
   if (attempt === null) return null;
   const { recurringPayment } = input.authorized;
   if (attempt.metadata.recurringPaymentId !== recurringPayment.id) {
+    // Another request's row: refused unstored, so that request's own retry
+    // is still answered from it.
+    markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   const transfer =
