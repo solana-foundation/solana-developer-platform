@@ -59,12 +59,7 @@ import {
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
-import { advanceBvnkRequirements } from "./providers/bvnk";
-import {
-  assertRampQuoteBindingMatches,
-  type RampQuoteBinding,
-  rampQuoteCryptoDepositProviderData,
-} from "./quote-binding";
+import { assertRampQuoteBindingMatches, type RampQuoteBinding } from "./quote-binding";
 
 type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
   counterparty: CounterpartyRow;
@@ -221,9 +216,6 @@ export async function resolveRampQuoteRequest(
 }
 
 export function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
-  if (quote.deliveryMode === "manual_instructions" && quote.status === "pending") {
-    return "awaiting_payment";
-  }
   return quote.status;
 }
 
@@ -286,7 +278,6 @@ export async function persistRampQuoteTransfer(
       rampsMemo: input.rampsMemo,
       providerData: {
         ...(input.providerData ?? {}),
-        ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
       serializedTx: null,
       signature: null,
@@ -311,14 +302,12 @@ export async function persistRampQuoteTransfer(
 }
 
 export async function advanceCounterpartyRequirements(
-  c: AppContext,
+  _c: AppContext,
   input: ScopedSubmitCounterpartyRequirementsInput
 ): Promise<CounterpartyRequirements> {
   switch (input.provider) {
     case "moonpay":
       return readyCounterparty("moonpay", input.direction);
-    case "bvnk":
-      return advanceBvnkRequirements(c, input);
     case "stripe":
       return readyCounterparty("stripe", input.direction);
     default: {

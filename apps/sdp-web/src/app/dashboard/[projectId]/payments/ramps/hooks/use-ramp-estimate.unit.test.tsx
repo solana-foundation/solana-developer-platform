@@ -30,7 +30,7 @@ describe("ramp estimate identity", () => {
   it("clears the previous amount immediately while the next input is debounced", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { estimates: [{ provider: "bvnk", status: "unsupported" }] } })
+      Response.json({ data: { estimates: [{ provider: "moonpay", status: "unsupported" }] } })
     );
     vi.stubGlobal("fetch", fetchMock);
     const { result, rerender } = renderHook(
@@ -69,7 +69,7 @@ describe("ramp estimate identity", () => {
       vi
         .fn()
         .mockResolvedValueOnce(
-          Response.json({ data: { estimates: [{ provider: "bvnk", status: "unsupported" }] } })
+          Response.json({ data: { estimates: [{ provider: "moonpay", status: "unsupported" }] } })
         )
         .mockResolvedValue(Response.json({ error: { message: "Unavailable" } }, { status: 503 }))
     );

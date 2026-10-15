@@ -3,13 +3,10 @@ import {
   ONRAMP_SUPPORT,
   type PaymentRampEstimate,
   type PaymentRampQuote,
-  type RampFiatCurrency,
   type RampProviderEstimateResult,
   type RampProviderId,
 } from "@sdp/types";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { getRampProviderLabel } from "../ramps";
 import {
@@ -25,11 +22,8 @@ import {
 import { type DemoOp, newDemoId } from "./demo-ops";
 import {
   accountById,
-  consentKey,
   contactById,
   DEMO_BATCH_RECIPIENTS_PER_TRANSACTION,
-  rampDepositAddress,
-  rampReference,
   tokenKeyForMint,
   tokenKeyForRail,
   transferById,
@@ -221,101 +215,24 @@ function isOfferedRampProvider(world: DemoWorld, value: string): value is RampPr
 }
 
 /**
- * BVNK's agreements, as it asks a contact to accept them before its first ramp. The links are
- * BVNK's public legal pages, which the consent step only offers to open.
- */
-function bvnkAgreement(name: string, displayName: string, description: string, page: string) {
-  return {
-    name,
-    displayName,
-    description,
-    url: `https://www.bvnk.com/legal/${page}`,
-    privacyPolicyUrl: "https://www.bvnk.com/legal/privacy-policy",
-  };
-}
-
-const BVNK_AGREEMENTS = [
-  bvnkAgreement(
-    "bvnk_terms_of_service",
-    "BVNK Terms of Service",
-    "How BVNK holds, converts and pays out funds for this contact.",
-    "terms-of-service"
-  ),
-];
-
-function bvnkAgreements(direction: "onramp" | "offramp"): CounterpartyRequirements {
-  return {
-    provider: "bvnk",
-    direction,
-    status: "counterparty_collect_agreement",
-    agreements: BVNK_AGREEMENTS,
-  };
-}
-
-/** How long BVNK reviews a contact's identity check, then takes to open the contact's account. */
-const BVNK_REVIEW_MS = 8_000;
-const BVNK_ACCOUNT_SETUP_MS = 5_000;
-/** Where BVNK's hosted identity check opens; demo mode approves it with Simulate verification. */
-const BVNK_VERIFICATION_URL = "https://www.bvnk.com/";
-
-/**
- * Where a demo contact stands with BVNK, as its onboarding runs: the agreements to accept, then
- * the identity check waiting for the contact, then BVNK's review for a few seconds once Simulate
- * verification approves it, then the account BVNK opens, then ready.
- */
-function bvnkStanding(
-  world: DemoWorld,
-  counterpartyId: string,
-  direction: "onramp" | "offramp",
-  now: Date
-): CounterpartyRequirements {
-  const key = consentKey("bvnk", counterpartyId);
-  if (!world.consents.includes(key)) return bvnkAgreements(direction);
-  const approvedAt = world.verifications[key];
-  if (approvedAt === undefined) {
-    return {
-      provider: "bvnk",
-      direction,
-      status: "customer_verification_required",
-      verificationUrl: BVNK_VERIFICATION_URL,
-    };
-  }
-  const elapsed = now.getTime() - approvedAt;
-  if (elapsed < BVNK_REVIEW_MS)
-    return { provider: "bvnk", direction, status: "customer_verifying" };
-  if (elapsed < BVNK_REVIEW_MS + BVNK_ACCOUNT_SETUP_MS) {
-    return { provider: "bvnk", direction, status: "customer_funding_account_provisioning" };
-  }
-  return { provider: "bvnk", direction, status: "ready" };
-}
-
-/**
- * Where a demo contact stands with a ramp provider. Most are ready at once; BVNK first runs its
- * onboarding (agreements, then an identity check). A provider the demo doesn't offer is refused,
+ * Where a demo contact stands with a ramp provider. A provider the demo doesn't offer is refused,
  * as the advance refuses it.
  */
-function requirementsFor(
-  world: DemoWorld,
-  counterpartyId: string,
-  params: URLSearchParams,
-  now: Date
-): DemoAnswer {
+function requirementsFor(world: DemoWorld, params: URLSearchParams): DemoAnswer {
   const provider = params.get("provider") ?? "";
   const direction = params.get("direction") === "offramp" ? "offramp" : "onramp";
   if (!isOfferedRampProvider(world, provider)) {
     return error(400, "That provider isn't part of the demo.").answer(world);
   }
-  if (provider === "bvnk") return ok({ data: bvnkStanding(world, counterpartyId, direction, now) });
   return ok({ data: { provider, direction, status: "ready" } });
 }
 
 const advanceSchema = z.object({
   provider: z.string(),
   direction: z.enum(["onramp", "offramp"]),
-  agreementConsent: z.boolean().optional(),
 });
 
-function advanceRequirements({ segments, body, world, now }: WriteContext): DemoWriteResult {
+function advanceRequirements({ segments, body, world }: WriteContext): DemoWriteResult {
   const counterpartyId = segments[1] ?? "";
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   const input = parse(advanceSchema, body);
@@ -323,23 +240,6 @@ function advanceRequirements({ segments, body, world, now }: WriteContext): Demo
   const { provider, direction } = input.data;
   if (!isOfferedRampProvider(world, provider))
     return error(400, "That provider isn't part of the demo.");
-  if (provider === "bvnk") {
-    const standing = bvnkStanding(world, counterpartyId, direction, now);
-    if (standing.status !== "counterparty_collect_agreement" || !input.data.agreementConsent) {
-      return record([], () => ok({ data: standing }));
-    }
-    // Accepting the agreements moves the contact on to BVNK's identity check.
-    return record([{ k: "consent", id: counterpartyId, at: now.getTime(), provider }], () =>
-      ok({
-        data: bvnkStanding(
-          { ...world, consents: [...world.consents, consentKey(provider, counterpartyId)] },
-          counterpartyId,
-          direction,
-          now
-        ),
-      })
-    );
-  }
   return record([], () => ok({ data: { provider, direction, status: "ready" } }));
 }
 
@@ -360,7 +260,6 @@ const USD_PER_UNIT: Record<string, number> = {
 };
 /** Each provider's cut of what is sent, so the provider cards compare the way real ones do. */
 const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
-  bvnk: 0.008,
   moonpay: 0.035,
   stripe: 0.029,
 };
@@ -487,58 +386,12 @@ const offrampQuoteSchema = z.object({
 interface QuoteContext {
   quoteId: string;
   transferId: string;
-  reference: string;
-  fiatCurrency: string;
-  amounts: RampAmounts;
-  crypto: string;
-  /** The wallet the crypto lands in (on-ramp) or leaves from (off-ramp). */
-  walletAddress: string;
-  /** Where an off-ramp's crypto is sent. */
-  depositAddress: Address;
 }
 
-function bvnkBankAccount(fiatCurrency: string, reference: string) {
-  return fiatCurrency === "EUR"
-    ? {
-        accountNumber: "GB33BUKB20201555555555",
-        code: "BUKBGB22",
-        accountNumberFormat: "IBAN",
-        paymentReference: reference,
-        bankName: "BVNK Sandbox Bank",
-      }
-    : {
-        accountNumber: "8310005521",
-        routingNumber: "026073150",
-        accountNumberFormat: "ACH",
-        paymentReference: reference,
-        bankName: "BVNK Sandbox Bank",
-      };
-}
-
-/** A provider's on-ramp quote: bank instructions, a hosted checkout, or a widget session. */
+/** A provider's on-ramp hosted checkout or widget session. */
 function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQuote {
   const base = { id: q.quoteId, status: "pending" as const };
-  const { fiatCurrency, reference } = q;
   switch (provider) {
-    case "bvnk":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "manual_instructions",
-        paymentInstructions: [
-          {
-            provider,
-            kind: "fiat_funding",
-            onboardingStatus: "ready",
-            fiatCurrency,
-            beneficiaryAddress: q.walletAddress,
-            network: "SOLANA",
-            bankAccount: bvnkBankAccount(fiatCurrency, reference),
-            paymentReference: reference,
-            instructionsNotes: "Include the reference so BVNK matches the payment to this deposit.",
-          },
-        ],
-      };
     case "moonpay":
       return {
         ...base,
@@ -558,30 +411,10 @@ function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQ
   }
 }
 
-/** A provider's off-ramp quote: where to send the crypto, or its hosted page or widget. */
+/** A provider's off-ramp hosted checkout. */
 function offrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQuote {
   const base = { id: q.quoteId, status: "pending" as const };
-  const { amounts, fiatCurrency, reference } = q;
-  const symbol = amounts.symbol as "USDC";
   switch (provider) {
-    case "bvnk":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "manual_instructions",
-        paymentInstructions: [
-          {
-            provider,
-            kind: "crypto_deposit",
-            destinationAddress: q.depositAddress,
-            cryptoCurrency: symbol,
-            network: "SOLANA",
-            reference,
-            fiatCurrency: fiatCurrency as RampFiatCurrency,
-            instructionsNotes: "Send exactly this amount; BVNK pays out once it arrives.",
-          },
-        ],
-      };
     case "moonpay":
       return {
         ...base,
@@ -605,26 +438,6 @@ function assetRefusal(assetRail: string): DemoWriteResult {
   );
 }
 
-/** Whether a contact finished a provider's onboarding; only BVNK runs one in the demo. */
-function onboardedWith(
-  provider: RampProviderId,
-  world: DemoWorld,
-  counterpartyId: string,
-  now: Date
-): boolean {
-  return (
-    provider !== "bvnk" || bvnkStanding(world, counterpartyId, "onramp", now).status === "ready"
-  );
-}
-
-function notOnboarded(provider: RampProviderId): DemoWriteResult {
-  return error(
-    409,
-    `${getRampProviderLabel(provider)} hasn't finished onboarding this contact.`,
-    "conflict"
-  );
-}
-
 function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const direction = segments[2] === "offramp" ? "offramp" : "onramp";
   const head = z.object({ provider: z.string() }).safeParse(body);
@@ -637,8 +450,6 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const context = {
     quoteId,
     transferId: id,
-    reference: rampReference(provider, quoteId),
-    depositAddress: rampDepositAddress(id) as Address,
   };
 
   if (direction === "onramp") {
@@ -648,7 +459,6 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     const tokenKey = tokenKeyForRail(assetRail);
     if (!tokenKey) return assetRefusal(assetRail);
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
-    if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
     const wallet = findWallet(world, destinationCustodyWalletId);
     if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
     if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
@@ -666,13 +476,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
       Number(input.data.fiatAmount)
     );
     const crypto = cryptoText(amounts);
-    const onrampQuote = onrampQuoteFor(provider, {
-      ...context,
-      fiatCurrency,
-      amounts,
-      crypto,
-      walletAddress: wallet.publicKey,
-    });
+    const onrampQuote = onrampQuoteFor(provider, context);
     return record(
       [
         {
@@ -701,7 +505,6 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const tokenKey = tokenKeyForRail(assetRail);
   if (!tokenKey) return assetRefusal(assetRail);
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
-  if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
   const wallet = findWallet(world, sourceCustodyWalletId);
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
@@ -710,13 +513,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const amounts = rampAmounts(provider, direction, fiatCurrency, tokenKey, Number(cryptoAmount));
   const notEnough = shortfall(world, sourceCustodyWalletId, amounts.mint, cryptoAmount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
-  const offrampQuote = offrampQuoteFor(provider, {
-    ...context,
-    fiatCurrency,
-    amounts,
-    crypto: cryptoAmount,
-    walletAddress: wallet.publicKey,
-  });
+  const offrampQuote = offrampQuoteFor(provider, context);
   return record(
     [
       {
@@ -735,33 +532,6 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
       },
     ],
     () => ok({ data: { quote: offrampQuote, transferId: id } }, 201)
-  );
-}
-
-const verificationSchema = z.object({
-  provider: z.string(),
-  counterpartyId: z.string().min(1),
-});
-
-/**
- * Simulate verification, a demo-only write (the SDP API has no such endpoint): BVNK approves the
- * identity check of a contact that accepted its terms.
- */
-function approveVerification({ body, world, now }: WriteContext): DemoWriteResult {
-  const input = parse(verificationSchema, body);
-  if ("failure" in input) return input.failure;
-  const { provider, counterpartyId } = input.data;
-  if (provider !== "bvnk") return error(400, "Only BVNK asks for an identity check in the demo.");
-  if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
-  const status = bvnkStanding(world, counterpartyId, "onramp", now).status;
-  if (status === "counterparty_collect_agreement") {
-    return error(409, "The contact hasn't accepted BVNK's agreements yet.", "conflict");
-  }
-  if (status !== "customer_verification_required") {
-    return error(409, "BVNK has already verified this contact.", "conflict");
-  }
-  return record([{ k: "verified", id: counterpartyId, at: now.getTime(), provider }], () =>
-    ok({ data: {} })
   );
 }
 
@@ -1169,7 +939,6 @@ const WRITE_ROUTES: ReadonlyArray<[method: string, shape: string, handler: Handl
   ["POST", "payments/ramps/*/estimate", estimate],
   ["POST", "payments/ramps/*/quote", quote],
   ["POST", "payments/ramps/sandbox/simulate", simulatePayIn],
-  ["POST", "payments/demo/verifications", approveVerification],
   ["POST", "payments/ramps/transfers/cancel", cancelRamp],
   ["POST", "payments/ramps/*/events", () => record([], () => ({ status: 204 }))],
   ["POST", "payments/requests", createRequest],
@@ -1210,7 +979,7 @@ export function demoFlowRead(
     if (!contactById(world, counterpartyId)) {
       return { status: 404, body: { error: { code: "not_found", message: "Contact not found." } } };
     }
-    return requirementsFor(world, counterpartyId, params, now);
+    return requirementsFor(world, params);
   }
   return undefined;
 }

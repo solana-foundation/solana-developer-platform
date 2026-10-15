@@ -103,57 +103,14 @@ export function offeredFiatCurrencies(
 /** Slug-keyed values the client collects for `status: "collect"` fields and passes through on the quote. */
 export type CollectedFieldData = Record<string, string>;
 
-// TODO: tag RequirementField with a `group` ("kyc" | "bank") so the FE can section collect forms; deferred — today each collect is a single group.
 export type CounterpartyRequirements = { direction: RampDirection } & (
   | { provider: RampProviderId; status: "ready" }
   | { provider: RampProviderId; status: "collect"; fields: RequirementField[] }
   | { provider: RampProviderId; status: "unsupported"; reason: string }
-  | { provider: "bvnk"; status: "collect_counterparty"; fields: RequirementField[] }
-  | {
-      provider: "bvnk";
-      /**
-       * First BVNK step: collects only the tax-residence country so agreements
-       * can be minted for it before any other PII is requested.
-       */
-      status: "collect_counterparty_residence";
-      fields: RequirementField[];
-    }
-  | {
-      provider: "bvnk";
-      status: "counterparty_collect_agreement";
-      /**
-       * Agreements of the minted v1 session. The document links are the
-       * session's static help-centre URLs stored on the customer link; nothing
-       * is minted per response. `name` is the v1 agreement identifier (v1 has
-       * no id).
-       */
-      agreements: {
-        name: string;
-        displayName: string;
-        description: string;
-        url: string;
-        privacyPolicyUrl: string;
-      }[];
-    }
-  | {
-      provider: "bvnk";
-      status: "customer_verification_required";
-      /** The authenticated verification link is minted JIT per response. */
-      verificationUrl: string;
-    }
-  | { provider: "bvnk"; status: "customer_verifying" }
-  | { provider: "bvnk"; status: "counterparty_agreement_signing" }
-  | { provider: "bvnk"; status: "customer_verification_failed" }
-  | { provider: "bvnk"; status: "customer_funding_account_provisioning" }
-  | { provider: "bvnk"; status: "customer_funding_account_provisioning_failed" }
 );
 
-export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES = [
-  "customer_verification_required",
-  "customer_verifying",
-  "counterparty_agreement_signing",
-  "customer_funding_account_provisioning",
-] as const satisfies readonly CounterpartyRequirements["status"][];
+export const COUNTERPARTY_REQUIREMENTS_POLL_STATUSES =
+  [] as const satisfies readonly CounterpartyRequirements["status"][];
 
 export type CounterpartyRequirementsPollStatus =
   (typeof COUNTERPARTY_REQUIREMENTS_POLL_STATUSES)[number];
@@ -170,63 +127,19 @@ export function isCounterpartyRequirementsPollStatus(
   return COUNTERPARTY_REQUIREMENTS_POLL_STATUSES.some((candidate) => candidate === status);
 }
 
-export const RAMP_ONBOARDING_PENDING_STATUSES = [
-  "customer_verifying",
-  "counterparty_agreement_signing",
-  "customer_funding_account_provisioning",
-] as const satisfies readonly CounterpartyRequirements["status"][];
-
-export type RampOnboardingPendingStatus = (typeof RAMP_ONBOARDING_PENDING_STATUSES)[number];
-
-/**
- * Whether a requirements status blocks ramp progression while a provider transition completes.
- *
- * @param status - Requirements lifecycle status to classify.
- * @returns True when the provider transition is still pending.
- */
-export function isRampOnboardingPendingStatus(
-  status: CounterpartyRequirements["status"]
-): status is RampOnboardingPendingStatus {
-  return RAMP_ONBOARDING_PENDING_STATUSES.some((candidate) => candidate === status);
-}
-
 /** Collect stages whose answer carries a `fields` array for the client to render. */
-export const COLLECT_FIELDS_STATUSES = [
-  "collect",
-  "collect_counterparty",
-  "collect_counterparty_residence",
-] as const;
-
+export const COLLECT_FIELDS_STATUSES = ["collect"] as const;
 export type CollectFieldsStatus = (typeof COLLECT_FIELDS_STATUSES)[number];
+export const COLLECT_STAGE_STATUSES = COLLECT_FIELDS_STATUSES;
+export type CollectStageStatus = CollectFieldsStatus;
 
-/**
- * Requirement statuses answered on the client's requirements step before the
- * provider can advance: field collection or agreement consent.
- */
-export const COLLECT_STAGE_STATUSES = [
-  ...COLLECT_FIELDS_STATUSES,
-  "counterparty_collect_agreement",
-] as const;
-
-export type CollectStageStatus = (typeof COLLECT_STAGE_STATUSES)[number];
-
-/**
- * Whether a requirements status is a collect stage.
- *
- * @param status - Requirements lifecycle status to classify.
- * @returns True for the collect-stage statuses.
- */
 export function isCollectStageStatus(
   status: CounterpartyRequirements["status"]
 ): status is CollectStageStatus {
-  return COLLECT_STAGE_STATUSES.some((candidate) => candidate === status);
+  return status === "collect";
 }
 
-/** Collect-stage requirements whose answer carries a field set rather than agreements. */
-export type CollectFieldsRequirements = Extract<
-  CounterpartyRequirements,
-  { status: CollectFieldsStatus }
->;
+export type CollectFieldsRequirements = Extract<CounterpartyRequirements, { status: "collect" }>;
 
 /**
  * Whether a requirements answer is a collect stage with collectable fields.

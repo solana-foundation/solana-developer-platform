@@ -1,59 +1,21 @@
 "use client";
 
-import { isTerminalRampTransferStatus } from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
-import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
-import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
-import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-function OfframpManualQuoteStep({
-  wizard,
-  quote,
-  t,
-}: {
-  wizard: OfframpWizard;
-  quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
-  t: Translate;
-}) {
-  const { selectedRampPair, fields, transferStatus } = wizard;
-
-  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
-    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
-  }
-
-  const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
-  const depositCopy = { amount: fields.amount.trim(), token: cryptoToken };
-
-  return (
-    <ManualInstructionsQuote
-      amount={fields.amount.trim()}
-      instructions={quote.paymentInstructions}
-      description={t("DashboardPayments.ramps.offrampManualDescription", depositCopy)}
-    />
-  );
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every offramp stage in one component while each branch stays simple.
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const {
@@ -78,12 +40,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
-    onboarding,
     isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
     memoRows,
     setMemoRows,
     sourceWalletHint,
@@ -161,21 +118,7 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   if (currentStepId === "REQUIREMENTS") {
-    // Native fieldset[disabled] freezes every nested input and combobox trigger
-    // while the advance POST is in flight, so mid-flight edits can't desync the
-    // form from what the provider was sent.
-    return pendingAgreements !== null ? (
-      <BvnkAgreementConsent
-        agreements={pendingAgreements}
-        acceptedAgreements={acceptedAgreements}
-        onToggle={toggleAgreement}
-        disabled={isAdvancing}
-      />
-    ) : onboarding !== null &&
-      hasOnboardingLifecycle(onboarding.provider) &&
-      isOnboardingPanelStatus(onboarding) ? (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
-    ) : (
+    return (
       <div className="space-y-4">
         {requirementsBlocker ? (
           <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
@@ -203,18 +146,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  if (
-    currentStepId === "COMPLETE" &&
-    onboarding &&
-    !quote &&
-    hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding)
-  ) {
-    return (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
-    );
-  }
-
   if (currentStepId === "COMPLETE" && quote && transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
@@ -226,10 +157,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
         src={quote.hostedUrl}
       />
     );
-  }
-
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "manual_instructions") {
-    return <OfframpManualQuoteStep wizard={wizard} quote={quote} t={t} />;
   }
 
   return <RampQuoteSkeleton />;

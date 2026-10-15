@@ -1,27 +1,18 @@
 "use client";
 
-import { isTerminalRampTransferStatus } from "@sdp/types";
-import { useThemeScope } from "@/components/theme-scope";
-import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard.redesign";
-import { BvnkAgreementConsent } from "./bvnk-agreement-consent.redesign";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
-import { DepositTimeline } from "./deposit-timeline";
-import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
-import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
-import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector.redesign";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
-import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -32,7 +23,6 @@ interface StepContentProps {
 }
 
 type OnrampQuote = NonNullable<OnrampWizard["quote"]>;
-type ManualInstructionsQuoteRecord = Extract<OnrampQuote, { deliveryMode: "manual_instructions" }>;
 type HostedQuoteRecord = Extract<OnrampQuote, { deliveryMode: "hosted" }>;
 
 /** The details step: the contact, then the amount, wallet, currency pair and provider. */
@@ -97,41 +87,9 @@ function DepositStep({ wizard, contact }: StepContentProps) {
   );
 }
 
-/** What the provider needs: agreements to accept, an onboarding in progress, or its fields. */
+/** Renders the fields requested by the active provider. */
 function RequirementsStep({ wizard }: { wizard: OnrampWizard }) {
-  const {
-    onboarding,
-    isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
-    requirementFields,
-    collectedData,
-    setCollectedField,
-  } = wizard;
-  if (pendingAgreements !== null) {
-    return (
-      <BvnkAgreementConsent
-        agreements={pendingAgreements}
-        acceptedAgreements={acceptedAgreements}
-        onToggle={toggleAgreement}
-        disabled={isAdvancing}
-      />
-    );
-  }
-  if (
-    onboarding !== null &&
-    hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding)
-  ) {
-    return (
-      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
-    );
-  }
-  // Native fieldset[disabled] freezes every nested input and combobox trigger
-  // while the advance POST is in flight, so mid-flight edits can't desync the
-  // form from what the provider was sent.
+  const { isAdvancing, requirementFields, collectedData, setCollectedField } = wizard;
   return (
     <fieldset disabled={isAdvancing} className="min-w-0">
       <RequirementsFields
@@ -140,43 +98,6 @@ function RequirementsStep({ wizard }: { wizard: OnrampWizard }) {
         onChange={setCollectedField}
       />
     </fieldset>
-  );
-}
-
-/** A quote paid by bank transfer: the instructions, with the funding wait around them. */
-function ManualInstructionsStep({
-  wizard,
-  quote,
-}: {
-  wizard: OnrampWizard;
-  quote: ManualInstructionsQuoteRecord;
-}) {
-  const t = useTranslations();
-  const refresh = useThemeScope() === "refresh";
-  const { fields, selectedRampPair, transferStatus } = wizard;
-  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
-    return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
-  }
-
-  // The sandbox's Simulate deposit is the footer's primary action, not part of the instructions.
-  const instructionsQuote = (
-    <ManualInstructionsQuote
-      amount={fields.amount.trim()}
-      quote={quote}
-      fiatCurrency={selectedRampPair.fiatCurrency}
-      instructions={quote.paymentInstructions}
-    />
-  );
-  return refresh ? (
-    <div className="space-y-8">
-      <Callout variant="warning" title={t("DashboardPayments.ramps.status.waitingForFunding")}>
-        {t("DashboardPayments.manualInstructions.waitingBody")}
-      </Callout>
-      {instructionsQuote}
-      <DepositTimeline status={transferStatus?.status} />
-    </div>
-  ) : (
-    instructionsQuote
   );
 }
 
@@ -207,7 +128,7 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
   }
 
   // A provider's own checkout can't open on sample data; the demo stands in for it.
-  if (demo && quote.deliveryMode !== "manual_instructions") {
+  if (demo) {
     return (
       <div className="space-y-6">
         <DemoProviderCheckout
@@ -229,10 +150,6 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
     return <HostedQuoteStep quote={quote} />;
   }
 
-  if (quote.deliveryMode === "manual_instructions") {
-    return <ManualInstructionsStep wizard={wizard} quote={quote} />;
-  }
-
   return <RampQuoteSkeleton />;
 }
 
@@ -241,14 +158,7 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
  * the onboarding or error that stands in its way, or the outcome once the transfer is done.
  */
 function ProviderStep({ wizard }: { wizard: OnrampWizard }) {
-  const {
-    onboarding,
-    retryOnboarding,
-    quote,
-    quoteCreationError,
-    quoteCreationRetrying,
-    retryQuoteCreation,
-  } = wizard;
+  const { quote, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } = wizard;
 
   if (quote) {
     return <QuoteStep wizard={wizard} quote={quote} />;
@@ -261,16 +171,6 @@ function ProviderStep({ wizard }: { wizard: OnrampWizard }) {
         retrying={quoteCreationRetrying}
         onRetry={() => void retryQuoteCreation()}
       />
-    );
-  }
-
-  if (
-    onboarding &&
-    hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding)
-  ) {
-    return (
-      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
     );
   }
 

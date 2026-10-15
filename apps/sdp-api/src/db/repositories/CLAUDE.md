@@ -132,7 +132,7 @@ types (HOO-2033).
   observation revives.
 - **Only the settlement core writes through it so far.** Cancel, MoonPay quote
   fill and failure, and the off-ramp deposit claim and outcome still set the
-  status themselves; BVNK's writers go with BVNK (HOO-2037). The inventory is
+  status themselves. The retired provider's writers were removed in HOO-2037. The inventory is
   in `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
   guarded writes per file, so a new `updateTransferStatusGuarded` call fails it
   even in a listed file.

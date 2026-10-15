@@ -90,17 +90,6 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     notes: "Separate sandbox and production credentials, chosen per request.",
   },
   {
-    provider: "bvnk",
-    name: "BVNK",
-    onramp: "✓",
-    offramp: "✓",
-    sandbox: "✓",
-    deliveryMode: "manual_instructions",
-    bestFor: "Fast sandbox iteration; travel-rule and compliance party metadata.",
-    notes:
-      "Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request.",
-  },
-  {
     provider: "stripe",
     name: "Stripe",
     onramp: "✓",

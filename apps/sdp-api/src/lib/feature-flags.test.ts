@@ -294,15 +294,14 @@ describe("release channels", () => {
   );
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
-    const bvnkInBeta: SdpRampProviderStages = {
+    const stripeInBeta: SdpRampProviderStages = {
       moonpay: "experimental",
-      bvnk: "beta",
-      stripe: "experimental",
+      stripe: "beta",
     };
-    expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);
-    expect(isModuleInReleaseChannel("stable", "ramps", bvnkInBeta)).toBe(false);
-    expect(isRampProviderInReleaseChannel("beta", "bvnk", bvnkInBeta)).toBe(true);
-    expect(isRampProviderInReleaseChannel("beta", "moonpay", bvnkInBeta)).toBe(false);
+    expect(isModuleInReleaseChannel("beta", "ramps", stripeInBeta)).toBe(true);
+    expect(isModuleInReleaseChannel("stable", "ramps", stripeInBeta)).toBe(false);
+    expect(isRampProviderInReleaseChannel("beta", "stripe", stripeInBeta)).toBe(true);
+    expect(isRampProviderInReleaseChannel("beta", "moonpay", stripeInBeta)).toBe(false);
   });
 
   it("keeps release-channel-excluded modules off in stable even with every flag on", () => {

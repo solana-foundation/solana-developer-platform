@@ -1,14 +1,9 @@
 import {
-  BVNK_CUSTOMER_LINK_APPROVED_HOSTS,
   isTrustedRampDestination,
   MOONPAY_HOSTED_APPROVED_HOSTS,
 } from "@sdp/types/ramp-destinations";
 
-export {
-  BVNK_CUSTOMER_LINK_APPROVED_HOSTS,
-  isTrustedRampDestination,
-  MOONPAY_HOSTED_APPROVED_HOSTS,
-};
+export { isTrustedRampDestination, MOONPAY_HOSTED_APPROVED_HOSTS };
 
 /**
  * Opens a provider-supplied link (KYC/verification/terms pages) in a new tab
@@ -30,14 +25,4 @@ function openExternalRampDestination(url: string, approvedHosts: readonly string
 /** Opens an unpinned provider link (e.g. the Sumsub verification page) in a new tab. */
 export function openExternalRampUrl(url: string): void {
   openExternalRampDestination(url, null);
-}
-
-/**
- * Opens a BVNK agreement or privacy-policy link in a new tab, pinned to the
- * approved BVNK document hosts (help centre + corporate site). The Sumsub
- * verification link is opened via `openExternalRampUrl` (offramp-rail.tsx) and
- * is not host-pinned by design.
- */
-export function openBvnkCustomerLink(url: string): void {
-  openExternalRampDestination(url, BVNK_CUSTOMER_LINK_APPROVED_HOSTS);
 }

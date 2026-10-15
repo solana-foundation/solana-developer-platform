@@ -383,7 +383,6 @@
     "rpcActiveUnavailable": "Este despliegue ya no tiene un endpoint para este proveedor, así que el tráfico RPC está cayendo en otro.",
     "rampMoonpayDescription": "Onramp y offramp de fiat con tarjeta y banco.",
     "rampLightsparkDescription": "Rails de liquidación de fiat sobre la red Lightning.",
-    "rampBvnkDescription": "Pagos empresariales entre fiat y stablecoins.",
     "rampMoneygramDescription": "Transferencias en efectivo y bancarias a través de la red de MoneyGram.",
     "rampCoinbaseDescription": "Onramp y offramp de fiat a través de cuentas de Coinbase.",
     "rampMuralDescription": "Rails de pagos salientes e invoicing con stablecoins.",

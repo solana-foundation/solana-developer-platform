@@ -1,26 +1,16 @@
 import {
-  BVNK_CUSTOMER_LINK_STAGE,
-  type BvnkCounterpartyProviderCustomerLink,
   type CounterpartyProviderAccount,
-  type GenericCounterpartyProviderCustomerLink,
   isRetiredRampProviderId,
   type ListCounterpartyProviderAccountsResponse,
-  type ProviderWalletBalance,
 } from "@sdp/types";
 import { z } from "zod";
-import type {
-  BvnkCustomerProviderAccountMetadata,
-  CounterpartyProviderAccountRow,
-} from "@/db/repositories/counterparty-provider-account.repository";
-import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { rampRuntime } from "@/routes/payments/context";
 import { loadRampListingAdmission } from "@/routes/payments/ramps/admission";
 import type { AppContext } from "../counterparties/context";
 import { getCounterpartiesRepository } from "../counterparties/context";
-import { readBvnkFundingWalletBalances } from "./bvnk-funding-wallet-balances";
 import { getCounterpartyProviderAccountsRepository } from "./context";
 import {
   counterpartyProviderAccountParamsSchema,
@@ -28,7 +18,7 @@ import {
 } from "./schemas";
 
 /**
- * Lists parent-scoped provider accounts, with live BVNK funding-wallet balances.
+ * Lists parent-scoped provider accounts, including retired providers as stored.
  *
  * @param c - Authenticated request context.
  * @returns Provider-account rows in the standard success envelope.
@@ -68,11 +58,6 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       ...query.data,
     })
   ).filter((row) => isRetiredRampProviderId(row.provider) || admits(row.provider));
-  const walletBalances = await readBvnkFundingWalletBalances(
-    rampRuntime(c),
-    rows.filter((row) => row.kind === "funding_wallet")
-  );
-
   const rowsByProvider = new Map<
     CounterpartyProviderAccountRow["provider"],
     CounterpartyProviderAccountRow[]
@@ -98,7 +83,7 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       accounts.push(mapPayoutAccount(row, customerLink));
     }
     for (const row of fundingWalletRows) {
-      accounts.push(mapFundingWalletAccount(row, walletBalances, customerLink));
+      accounts.push(mapFundingWalletAccount(row, customerLink));
     }
   }
 
@@ -149,139 +134,28 @@ function mapPayoutAccount(
   return baseProviderAccount(row, customerLink);
 }
 
-/**
- * Projects a funding-wallet row with the provider's wallet id and its
- * just-in-time balance; both appear only once the provider assigned a wallet
- * to the row.
- *
- * @param row - Parent-scoped funding-wallet row.
- * @param balances - Live BVNK balances keyed by row id for referenced rows.
- * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
- * @returns Public provider-account response row for the wallet.
- */
+/** Projects a stored funding-wallet row without provider enrichment. */
 function mapFundingWalletAccount(
   row: CounterpartyProviderAccountRow,
-  balances: ReadonlyMap<string, ProviderWalletBalance>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
   const result = baseProviderAccount(row, customerLink);
   if (row.external_account_reference !== null) {
     result.providerAccountReference = row.external_account_reference;
-    const balance = balances.get(row.id);
-    if (balance === undefined) {
-      throw internalError("Funding-wallet balance is missing for a referenced row.");
-    }
-    result.balance = balance;
   }
   return result;
 }
 
-/**
- * Maps a customer-link row into the public customer-link shape, dispatching
- * per provider so BVNK's pre-customer session metadata gets its own stage
- * mapping while every other provider, retired ones included, maps from the
- * row columns directly. The provider cases mirror RAMP_PROVIDERS, so a
- * provider added there without a case here fails the exhaustive default at
- * compile time.
- *
- * @param row - Parent-scoped customer-link row.
- * @returns Public customer-link object.
- */
+/** Maps a stored customer-link row for live or retired providers. */
 function mapCustomerLink(
   row: CounterpartyProviderAccountRow
 ): NonNullable<CounterpartyProviderAccount["customerLink"]> {
-  switch (row.provider) {
-    case "bvnk":
-      return mapBvnkCustomerLink(row);
-    case "moonpay":
-    case "stripe":
-      return mapGenericCustomerLink(row, row.provider);
-    default: {
-      if (isRetiredRampProviderId(row.provider)) {
-        return mapGenericCustomerLink(row, row.provider);
-      }
-      const exhaustive: never = row.provider;
-      throw internalError(`Unhandled ramp provider: ${String(exhaustive)}`);
-    }
-  }
-}
-
-function mapGenericCustomerLink(
-  row: CounterpartyProviderAccountRow,
-  provider: GenericCounterpartyProviderCustomerLink["provider"]
-): GenericCounterpartyProviderCustomerLink {
   return {
-    provider,
+    provider: row.provider,
     id: row.id,
     providerCustomerReference: row.provider_customer_reference,
     status: row.status,
     providerStatus: row.provider_status,
     createdAt: row.created_at,
   };
-}
-
-/**
- * Maps a BVNK customer-link row to its public shape. Before the v1 customer
- * exists, the reference column carries SDP's outbound externalReference alias,
- * so the stage comes from the stored agreement session (PENDING_AGREEMENT until
- * consent, AGREEMENT_SIGNED once signed) and the reference stays null until the
- * v1 create replaces the alias. A claimed row whose session is not yet minted
- * (crash or concurrent window) reads as PENDING_AGREEMENT with no agreements.
- * The residence country and session are kept on the row through the create,
- * so they stay visible afterwards.
- *
- * @param row - Parent-scoped BVNK customer-link row.
- * @returns Public BVNK customer-link object.
- */
-function mapBvnkCustomerLink(
-  row: CounterpartyProviderAccountRow
-): BvnkCounterpartyProviderCustomerLink {
-  const metadata = bvnkCustomerProviderAccountMetadataSchema.parse(row.metadata);
-  const residenceCountryCode = metadata.residenceCountryCode;
-  if (residenceCountryCode === undefined) {
-    throw internalError("BVNK customer-link metadata is missing residence country.");
-  }
-  const session = metadata.session;
-  if (metadata.status !== undefined && session === undefined) {
-    throw internalError("BVNK customer-link metadata is missing session state.");
-  }
-  return {
-    provider: "bvnk",
-    id: row.id,
-    providerCustomerReference:
-      metadata.status === undefined ? null : row.provider_customer_reference,
-    status: row.status,
-    providerStatus: bvnkCustomerLinkProviderStatus(metadata),
-    createdAt: row.created_at,
-    residenceCountryCode,
-    agreements:
-      session === undefined
-        ? []
-        : session.agreements.map((agreement) => ({
-            name: agreement.name,
-            displayName: agreement.displayName,
-            url: agreement.url,
-            privacyPolicyUrl: agreement.privacyPolicyUrl,
-            signedAt: session.signedAt === undefined ? null : session.signedAt,
-          })),
-  };
-}
-
-/**
- * Derives the public provider status of a BVNK customer link: the v1 customer
- * status once the customer exists, otherwise the pre-customer stage.
- *
- * @param metadata - Parsed BVNK customer-link metadata.
- * @returns The BVNK customer status or the pre-customer stage label.
- */
-export function bvnkCustomerLinkProviderStatus(
-  metadata: BvnkCustomerProviderAccountMetadata
-): string {
-  if (metadata.status !== undefined) {
-    return metadata.status;
-  }
-  if (metadata.session === undefined || metadata.session.signedAt === undefined) {
-    return BVNK_CUSTOMER_LINK_STAGE.pendingAgreement;
-  }
-  return BVNK_CUSTOMER_LINK_STAGE.agreementSigned;
 }

@@ -11,14 +11,8 @@ import type {
   ListCounterpartiesResult,
   MutateCounterpartyProviderDataInput,
   UpdateCounterpartyInput,
-  UpsertBvnkCustomerProviderDataInput,
 } from "./counterparty.repository";
 import { generateCounterpartyId } from "./counterparty.repository";
-import {
-  type BvnkCustomerProviderAccountMetadata,
-  bvnkCustomerProviderAccountMetadataSchema,
-} from "./counterparty-provider-account.repository";
-import { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 
 function assertString(value: unknown, field: string): string {
   if (typeof value !== "string") {
@@ -291,25 +285,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
 
     async mutateProviderData(params) {
       return mutateProviderDataLocked(db, params);
-    },
-
-    async upsertBvnkCustomerProviderData(params: UpsertBvnkCustomerProviderDataInput) {
-      const metadata: BvnkCustomerProviderAccountMetadata = {};
-      if (params.customer.residenceCountryCode !== undefined) {
-        metadata.residenceCountryCode = params.customer.residenceCountryCode;
-      }
-      if (params.customer.session !== undefined) {
-        metadata.session = params.customer.session;
-      }
-      const parsedMetadata = bvnkCustomerProviderAccountMetadataSchema.parse(metadata);
-      await createPostgresCounterpartyProviderAccountsRepository(db).upsertProviderAccount({
-        organizationId: params.organizationId,
-        projectId: params.projectId,
-        counterpartyId: params.counterpartyId,
-        provider: "bvnk",
-        providerCustomerReference: params.customer.customerReference,
-        metadata: parsedMetadata,
-      });
     },
 
     async listCounterparties(params: ListCounterpartiesInput): Promise<ListCounterpartiesResult> {

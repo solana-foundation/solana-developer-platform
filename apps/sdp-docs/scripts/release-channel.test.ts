@@ -12,7 +12,7 @@ import { isPagePublished, type PublicSurface } from "../src/lib/release-channel"
 
 const ALL: Pick<PublicSurface, "allModules" | "allRampProviders"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],
-  allRampProviders: ["moonpay", "bvnk", "stripe"],
+  allRampProviders: ["moonpay", "stripe"],
 };
 
 const STABLE: PublicSurface = {
@@ -26,7 +26,7 @@ const STABLE: PublicSurface = {
 const EXPERIMENTAL: PublicSurface = {
   releaseChannel: "experimental",
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
-  rampProviders: ["bvnk", "stripe"],
+  rampProviders: ["stripe"],
   allowedOperations: [
     { family: "payment", types: ["payment_transfer_execute"] },
     { family: "ramp", types: ["ramp_onramp_quote"] },
@@ -79,21 +79,21 @@ describe("docs follow the release channel", () => {
   it("renders generated blocks for what the build publishes, in text", () => {
     const stable = expandDocsBlocks(PAGE, "page.mdx", { surface: STABLE });
     assert.match(stable, /\| \*\*Payments\*\* \|/);
-    assert.doesNotMatch(stable, /Issuance|Ramps|BVNK|Stripe|ramp_onramp_quote|ModuleTable/);
+    assert.doesNotMatch(stable, /Issuance|Ramps|Stripe|ramp_onramp_quote|ModuleTable/);
     assert.match(stable, /`payment_transfer_execute`/);
 
     const experimental = expandDocsBlocks(PAGE, "page.mdx", { surface: EXPERIMENTAL });
     assert.match(experimental, /\| \*\*Issuance\*\* \|/);
-    assert.match(experimental, /\[BVNK\]\(\/docs\/payments\/ramps-bvnk\)/);
+    assert.match(experimental, /\[Stripe\]\(\/docs\/payments\/ramps-stripe\)/);
     assert.doesNotMatch(experimental, /MoonPay/);
-    assert.match(experimental, /"provider": "bvnk"/);
+    assert.match(experimental, /"provider": "stripe"/);
     assert.match(experimental, /After$/);
   });
 
   it("renders the same blocks into the compiled page", () => {
-    assert.doesNotMatch(compiledText(PAGE, STABLE), /Issuance|BVNK/);
+    assert.doesNotMatch(compiledText(PAGE, STABLE), /Issuance|Stripe/);
     assert.match(compiledText(PAGE, EXPERIMENTAL), /Issuance/);
-    assert.match(compiledText(PAGE, EXPERIMENTAL), /BVNK/);
+    assert.match(compiledText(PAGE, EXPERIMENTAL), /Stripe/);
   });
 
   it("leaves no sentence-level gates in the content", () => {

@@ -2,7 +2,6 @@
 
 import type {
   PaymentOfframpQuoteRequest,
-  PaymentRampInstruction,
   PaymentTransferSummary,
   RampCryptoDeposit,
 } from "@sdp/types";
@@ -39,14 +38,6 @@ import {
   type UseRampWizardProps,
   useRampWizard,
 } from "./use-ramp-wizard.redesign";
-
-type CryptoDepositInstruction = Extract<PaymentRampInstruction, { kind: "crypto_deposit" }>;
-
-function isCryptoDepositInstruction(
-  instruction: PaymentRampInstruction
-): instruction is CryptoDepositInstruction {
-  return instruction.kind === "crypto_deposit";
-}
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OfframpStepId = "WALLET" | "WITHDRAW" | "MEMO" | "COMPLETE" | "REQUIREMENTS";
@@ -150,30 +141,14 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     }
   );
 
-  // Where the crypto must be sent: the manual provider's deposit instruction,
-  // or the deposit wallet a hosted provider reported while the sale awaits
-  // payment (the provider can rebind it, so the polled transfer always wins).
+  // The hosted provider can report a deposit address while payment is pending.
   const depositTarget = useMemo((): RampCryptoDeposit | null => {
     const quote = wizard.quote;
-    if (quote?.deliveryMode === "manual_instructions") {
-      const instruction = quote.paymentInstructions.find(isCryptoDepositInstruction);
-      return instruction
-        ? {
-            destinationAddress: instruction.destinationAddress,
-            amount: wizard.fields.amount.trim(),
-          }
-        : null;
-    }
-    const reportsDeposit = quote?.deliveryMode === "hosted";
-    if (
-      reportsDeposit &&
-      transferStatus?.status === "awaiting_payment" &&
-      transferStatus.cryptoDeposit
-    ) {
-      return transferStatus.cryptoDeposit;
+    if (quote?.deliveryMode === "hosted" && transferStatus?.status === "awaiting_payment") {
+      return transferStatus.cryptoDeposit ?? null;
     }
     return null;
-  }, [wizard.quote, wizard.fields.amount, transferStatus]);
+  }, [wizard.quote, transferStatus]);
 
   const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.

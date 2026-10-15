@@ -59,46 +59,6 @@
       "import": "./src/ramps/types.ts",
       "default": "./src/ramps/types.ts"
     },
-    "./ramps/providers/bvnk/client": {
-      "types": "./src/ramps/providers/bvnk/client.ts",
-      "import": "./src/ramps/providers/bvnk/client.ts",
-      "default": "./src/ramps/providers/bvnk/client.ts"
-    },
-    "./ramps/providers/bvnk/counterparty": {
-      "types": "./src/ramps/providers/bvnk/counterparty.ts",
-      "import": "./src/ramps/providers/bvnk/counterparty.ts",
-      "default": "./src/ramps/providers/bvnk/counterparty.ts"
-    },
-    "./ramps/providers/bvnk/currencies": {
-      "types": "./src/ramps/providers/bvnk/currencies.ts",
-      "import": "./src/ramps/providers/bvnk/currencies.ts",
-      "default": "./src/ramps/providers/bvnk/currencies.ts"
-    },
-    "./ramps/providers/bvnk/provider-data": {
-      "types": "./src/ramps/providers/bvnk/provider-data.ts",
-      "import": "./src/ramps/providers/bvnk/provider-data.ts",
-      "default": "./src/ramps/providers/bvnk/provider-data.ts"
-    },
-    "./ramps/providers/bvnk/requirements": {
-      "types": "./src/ramps/providers/bvnk/requirements.ts",
-      "import": "./src/ramps/providers/bvnk/requirements.ts",
-      "default": "./src/ramps/providers/bvnk/requirements.ts"
-    },
-    "./ramps/providers/bvnk/schemas": {
-      "types": "./src/ramps/providers/bvnk/schemas.ts",
-      "import": "./src/ramps/providers/bvnk/schemas.ts",
-      "default": "./src/ramps/providers/bvnk/schemas.ts"
-    },
-    "./ramps/providers/bvnk/settlement": {
-      "types": "./src/ramps/providers/bvnk/settlement.ts",
-      "import": "./src/ramps/providers/bvnk/settlement.ts",
-      "default": "./src/ramps/providers/bvnk/settlement.ts"
-    },
-    "./ramps/providers/bvnk/test-fixtures": {
-      "types": "./src/ramps/providers/bvnk/test-fixtures.ts",
-      "import": "./src/ramps/providers/bvnk/test-fixtures.ts",
-      "default": "./src/ramps/providers/bvnk/test-fixtures.ts"
-    },
     "./ramps/providers/moonpay/client": {
       "types": "./src/ramps/providers/moonpay/client.ts",
       "import": "./src/ramps/providers/moonpay/client.ts",

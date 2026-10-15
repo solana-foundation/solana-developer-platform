@@ -138,20 +138,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
   );
 
-  const bvnkSettlementReached =
-    transferStatus !== undefined &&
-    transferStatus.status === "settling" &&
-    transferStatus.settlement !== undefined &&
-    transferStatus.settlement.provider === "bvnk";
-  const showCompleteScreen =
-    bvnkSettlementReached ||
-    (transferStatus !== undefined && transferStatus.status === "completed");
+  const showCompleteScreen = transferStatus?.status === "completed";
 
   const simulateCurrentQuote = async () => {
-    const quote = wizard.quote;
-    if (quote?.provider !== "bvnk") {
-      return;
-    }
     if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
       return;
     }

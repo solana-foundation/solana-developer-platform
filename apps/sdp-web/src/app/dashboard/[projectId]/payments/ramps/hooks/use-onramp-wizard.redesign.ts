@@ -74,22 +74,6 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
-/** Whether the provider's sandbox can simulate this quote's pay-in: BVNK's once its funding account is ready. */
-function canSimulateQuote(quote: PaymentRampQuote): boolean {
-  switch (quote.provider) {
-    case "bvnk":
-      return (
-        quote.deliveryMode === "manual_instructions" &&
-        quote.paymentInstructions.some(
-          (instruction) =>
-            instruction.kind === "fiat_funding" && instruction.onboardingStatus === "ready"
-        )
-      );
-    default:
-      return false;
-  }
-}
-
 interface SimulationContext {
   quote: PaymentRampQuote | null;
   transferId: string | null;
@@ -113,7 +97,7 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   if (quote === null || transferId === null || transferStatus === undefined) return false;
   if (getRampTransferState(transferStatus.status).terminal) return false;
   if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
-  return context.demo || (context.sandbox && canSimulateQuote(quote));
+  return context.demo;
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
@@ -195,14 +179,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     }
   );
 
-  const bvnkSettlementReached =
-    transferStatus !== undefined &&
-    transferStatus.status === "settling" &&
-    transferStatus.settlement !== undefined &&
-    transferStatus.settlement.provider === "bvnk";
-  const showCompleteScreen =
-    bvnkSettlementReached ||
-    (transferStatus !== undefined && transferStatus.status === "completed");
+  const showCompleteScreen = transferStatus?.status === "completed";
 
   const simulation = {
     quote: wizard.quote,

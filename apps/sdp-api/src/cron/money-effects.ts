@@ -25,12 +25,7 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
     effect: "starts",
     admission: { via: "money_admission" },
   },
-  "sdp-api-track-pending-transfers": {
-    effect: "starts",
-    admission: {
-      gap: "In process, this tick also creates BVNK on-ramp payouts (reconcile-bvnk-onramp-payouts.ts) with no admission; the ramps slice adds it.",
-    },
-  },
+  "sdp-api-track-pending-transfers": { effect: "finishes" },
   "sdp-api-poll-rings-indexing": {
     effect: "starts",
     admission: {
