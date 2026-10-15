@@ -3,6 +3,7 @@ import {
   FeePaymentError,
   type FeePaymentPort,
   resolveFeePaymentProvider,
+  resolveKoraEndpoint,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
 import { currentClusterScope } from "@sdp/rpc/scope";
@@ -25,7 +26,7 @@ import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./spon
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
-export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
+type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
 export interface SponsorshipScope {
   /**
@@ -149,7 +150,7 @@ function requireScopeSegment(value: string, label: string): string {
  * transaction payloads and public caller input never participate in the quota
  * identity.
  */
-export function buildKoraUserId(scope: SponsorshipScope): string {
+function buildKoraUserId(scope: SponsorshipScope): string {
   const environment = requireScopeSegment(scope.environment, "Sponsorship environment");
   const organizationId = requireScopeSegment(scope.organizationId, "Sponsorship organization id");
   const projectId = requireScopeSegment(scope.projectId, "Sponsorship project id");
@@ -211,6 +212,18 @@ export function resolveSponsoredFeePayer(env: Env, scope: SponsorshipScope): Pro
     buildKoraUserId(scope),
     CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]
   ).getFeePayer();
+}
+
+/**
+ * Whether a Kora serves the scope's cluster, so a flow that may degrade to signer-paid fees can
+ * decide before it asks for a sponsor.
+ *
+ * @param env - API environment naming the per-cluster Kora endpoints.
+ * @param scope - Who would be sponsored.
+ * @returns True when the scope's cluster has a Kora endpoint.
+ */
+export function isKoraSponsorshipConfigured(env: Env, scope: SponsorshipScope): boolean {
+  return resolveKoraEndpoint(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]) !== null;
 }
 
 /** Read Kora security configuration through the same owned construction boundary. */

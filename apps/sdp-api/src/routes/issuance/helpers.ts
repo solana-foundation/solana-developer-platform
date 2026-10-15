@@ -41,17 +41,18 @@ export const createIssuanceMosaicService = (
   createMosaicService(
     c.env,
     authority.signer,
-    feePayment,
     feePayment === "sponsored"
-      ? { scope: resolveRequestSponsorshipScope(c), movement: authority.movement }
-      : undefined
+      ? {
+          mode: "sponsored",
+          scope: resolveRequestSponsorshipScope(c),
+          movement: authority.movement,
+        }
+      : { mode: "wallet" }
   );
 
 /** The Token-2022 service for one authority; its sponsor serves the signer's movement. */
 export const createIssuanceToken2022Service = (c: AppContext, authority: IssuanceAuthority) =>
-  createToken2022Service(
-    c.env,
-    authority.signer,
-    resolveRequestSponsorshipScope(c),
-    authority.movement
-  );
+  createToken2022Service(c.env, authority.signer, {
+    scope: resolveRequestSponsorshipScope(c),
+    movement: authority.movement,
+  });
