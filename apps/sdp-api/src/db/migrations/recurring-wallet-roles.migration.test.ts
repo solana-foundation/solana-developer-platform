@@ -17,13 +17,23 @@ it("migrates exact plan roles independently of commission accounting and retains
     await client.query("BEGIN");
     await client.query("CREATE SCHEMA recurring_roles_test");
     await client.query("SET LOCAL search_path = recurring_roles_test");
-    await client.query(`CREATE TABLE custody_wallets (id text PRIMARY KEY)`);
+    await client.query(`CREATE TABLE custody_configs (
+      id text PRIMARY KEY, organization_id text, project_id text
+    )`);
+    await client.query(`CREATE TABLE custody_connections (
+      id text PRIMARY KEY, organization_id text, project_id text
+    )`);
+    await client.query(`CREATE TABLE custody_wallets (
+      id text PRIMARY KEY, wallet_id text, public_key text,
+      custody_config_id text, custody_connection_id text
+    )`);
     await client.query(`CREATE TABLE payment_subscription_plans (
-      id text PRIMARY KEY, owner_wallet_id text NOT NULL, owner_address text NOT NULL,
+      id text PRIMARY KEY, organization_id text, project_id text,
+      owner_wallet_id text NOT NULL, owner_address text NOT NULL,
       puller_wallet_id text, puller_address text, plan_pda text, status text
     )`);
     await client.query(readFileSync(migration, "utf8"));
-    await client.query("INSERT INTO custody_wallets VALUES ('wallet_a'), ('wallet_b')");
+    await client.query("INSERT INTO custody_wallets (id) VALUES ('wallet_a'), ('wallet_b')");
     await client.query(`INSERT INTO payment_subscription_plans
       (id,owner_wallet_id,owner_address,puller_wallet_id,puller_address,
        owner_custody_wallet_id,puller_custody_wallet_id)

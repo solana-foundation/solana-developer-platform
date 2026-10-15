@@ -20,7 +20,7 @@ function recurringCatchUpSql(): string {
     .replace(/^\\.*$/gm, "");
 }
 
-it("catches up only proven retained recurring roles without rebinding history", async () => {
+it("catches up only proven plan roles without changing recurring sources or update attempts", async () => {
   const client = new Client({ connectionString: adminDatabaseUrl });
   await client.connect();
   try {
@@ -49,7 +49,7 @@ it("catches up only proven retained recurring roles without rebinding history", 
       id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT, status TEXT,
       mode TEXT, stage TEXT, recurring_payment_id TEXT, new_source_custody_wallet_id TEXT,
       old_plan_id TEXT, new_plan_id TEXT, before_values JSONB, after_values JSONB,
-      authorization_setup_signature TEXT
+      authorization_setup_signature TEXT, changed_fields TEXT[]
     )`);
     await client.query(`INSERT INTO custody_configs VALUES
       ('cfg', 'org', 'project', 'active'),
@@ -85,17 +85,21 @@ it("catches up only proven retained recurring roles without rebinding history", 
        'puller_ref', 'puller_address', NULL, 'independent_puller_pda');
     INSERT INTO payment_recurring_payments VALUES
       ('recurring', 'org', 'project', 'canceled', 'owner_ref', 'owner_address', NULL, 'old', 'sub'),
+      ('pinned', 'org', 'project', 'active', 'owner_ref', 'owner_address', 'owner', 'old', 'pinned_sub'),
       ('ambiguous', 'org', 'project', 'active', 'collision_ref', 'collision_address', NULL, 'ambiguous', NULL),
       ('foreign', 'org', 'project', 'paused', 'foreign_ref', 'foreign_address', NULL, 'foreign_plan', NULL);
     INSERT INTO payment_recurring_payment_update_attempts VALUES
       ('replacement', 'org', 'project', 'processing', 'replacement', 'authorize_subscription',
-       'recurring', NULL, 'old', 'new', '{}', '{}', 'saved_setup'),
+       'recurring', NULL, 'old', 'new', '{}', '{}', 'saved_setup', ARRAY['sourceCustodyWalletId']),
       ('unresolved', 'org', 'project', 'processing', 'replacement', 'create_plan',
-       'recurring', NULL, 'old', NULL, '{}', '{}', NULL),
+       'recurring', NULL, 'old', NULL, '{}', '{}', NULL, ARRAY['sourceCustodyWalletId']),
       ('stale_attempt', 'org', 'project', 'processing', 'replacement', 'authorize_subscription',
-       'recurring', 'owner', 'old', 'new', '{}', '{}', 'retained_signature'),
+       'recurring', 'owner', 'old', 'new', '{}', '{}', 'retained_signature', ARRAY['sourceCustodyWalletId']),
       ('conflicting_snapshot', 'org', 'project', 'processing', 'replacement', 'create_plan',
-       'recurring', NULL, 'old', 'new', '{}', '{"sourceCustodyWalletId":"owner"}', NULL)`);
+       'recurring', NULL, 'old', 'new', '{}', '{"sourceCustodyWalletId":"owner"}', NULL, ARRAY['sourceCustodyWalletId']),
+      ('amount_only', 'org', 'project', 'processing', 'replacement', 'create_plan',
+       'pinned', NULL, 'old', 'old', '{"amount":"100","sourceCustodyWalletId":"owner"}',
+       '{"amount":"250","sourceCustodyWalletId":"owner"}', NULL, ARRAY['amount'])`);
 
     const snapshot = async () => ({
       plans: (await client.query("SELECT * FROM payment_subscription_plans ORDER BY id")).rows,
@@ -119,16 +123,8 @@ it("catches up only proven retained recurring roles without rebinding history", 
     ]);
     expect(first).toEqual({
       plans: before.plans.map((plan) => ({ ...plan, ...expectedPlanPins.get(plan.id) })),
-      recurring: before.recurring.map((recurring) =>
-        recurring.id === "recurring"
-          ? { ...recurring, source_custody_wallet_id: "owner" }
-          : recurring
-      ),
-      attempts: before.attempts.map((attempt) =>
-        attempt.id === "replacement"
-          ? { ...attempt, new_source_custody_wallet_id: "replacement" }
-          : attempt
-      ),
+      recurring: before.recurring,
+      attempts: before.attempts,
     });
     await client.query(catchup);
     expect(await snapshot()).toEqual(first);

@@ -104,8 +104,8 @@ SELECT
     AS requests_without_exact_wallet;
 
 -- BEGIN recurring exact identity
--- Repeat after incompatible writers retire. Retained inactive/archived wallets
--- count as evidence; catch-up never makes them operational or replaces a pin.
+-- Fill plan roles when 0130 is already recorded or evidence becomes resolvable.
+-- Retained inactive/archived matches prove identity, not operational eligibility.
 BEGIN;
 
 CREATE TEMP VIEW recurring_catchup_wallet_scope AS
@@ -164,62 +164,6 @@ WHERE plan.id = matches.id
   AND plan.puller_custody_wallet_id IS NULL
   AND plan.puller_wallet_id = matches.puller_wallet_id
   AND plan.puller_address = matches.puller_address;
-
-WITH matches AS (
-  SELECT recurring.id, recurring.organization_id, recurring.project_id, recurring.source_wallet_id, recurring.source_address,
-         MIN(wallet.id) AS custody_wallet_id
-  FROM payment_recurring_payments recurring
-  JOIN recurring_catchup_wallet_scope wallet
-    ON wallet.organization_id = recurring.organization_id
-   AND wallet.project_id = recurring.project_id
-   AND wallet.wallet_id = recurring.source_wallet_id
-   AND wallet.public_key = recurring.source_address
-  WHERE recurring.source_custody_wallet_id IS NULL
-  GROUP BY recurring.id, recurring.organization_id, recurring.project_id, recurring.source_wallet_id, recurring.source_address
-  HAVING COUNT(*) = 1
-)
-UPDATE payment_recurring_payments recurring
-SET source_custody_wallet_id = matches.custody_wallet_id
-FROM matches
-WHERE recurring.id = matches.id
-  AND recurring.organization_id = matches.organization_id
-  AND recurring.project_id = matches.project_id
-  AND recurring.source_custody_wallet_id IS NULL
-  AND recurring.source_wallet_id = matches.source_wallet_id
-  AND recurring.source_address = matches.source_address;
-
--- A replacement's new source belongs to its saved new plan, never today's parent.
-WITH matches AS (
-  SELECT attempt.id, attempt.organization_id, attempt.project_id, attempt.new_plan_id, attempt.after_values,
-         MIN(wallet.id) AS custody_wallet_id
-  FROM payment_recurring_payment_update_attempts attempt
-  JOIN payment_subscription_plans plan
-    ON plan.id = attempt.new_plan_id
-   AND plan.organization_id = attempt.organization_id
-   AND plan.project_id = attempt.project_id
-  JOIN recurring_catchup_wallet_scope wallet
-    ON wallet.organization_id = plan.organization_id
-   AND wallet.project_id = plan.project_id
-   AND wallet.wallet_id = plan.owner_wallet_id
-   AND wallet.public_key = plan.owner_address
-   AND (plan.owner_custody_wallet_id IS NULL OR plan.owner_custody_wallet_id = wallet.id)
-  WHERE attempt.mode = 'replacement'
-    AND attempt.new_source_custody_wallet_id IS NULL
-    AND (attempt.after_values ->> 'sourceCustodyWalletId' IS NULL
-         OR attempt.after_values ->> 'sourceCustodyWalletId' = wallet.id)
-  GROUP BY attempt.id, attempt.organization_id, attempt.project_id, attempt.new_plan_id, attempt.after_values
-  HAVING COUNT(*) = 1
-)
-UPDATE payment_recurring_payment_update_attempts attempt
-SET new_source_custody_wallet_id = matches.custody_wallet_id
-FROM matches
-WHERE attempt.id = matches.id
-  AND attempt.organization_id = matches.organization_id
-  AND attempt.project_id = matches.project_id
-  AND attempt.mode = 'replacement'
-  AND attempt.new_source_custody_wallet_id IS NULL
-  AND attempt.new_plan_id = matches.new_plan_id
-  AND attempt.after_values = matches.after_values;
 
 DROP VIEW recurring_catchup_wallet_scope;
 COMMIT;
