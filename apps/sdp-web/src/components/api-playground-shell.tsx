@@ -1,5 +1,6 @@
 "use client";
 
+import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types";
 import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
@@ -446,19 +447,37 @@ function parseUnsettledSend(raw: string): UnsettledSend | null {
 /**
  * The key for a Send of a write: the unsettled one when this is its retry,
  * otherwise a new one that replaces it. Returns the stored entry too, so the
- * answer settles only the entry this Send claimed.
+ * answer settles only the entry this Send claimed, and whether storage kept it.
  */
-function keyForSend(request: string): { key: string; entry: string } {
+function keyForSend(request: string): { key: string; entry: string; persisted: boolean } {
   const digest = storageFingerprint(request);
   const mint = () => JSON.stringify({ request: digest, key: crypto.randomUUID() });
-  const kept = playgroundRetryKeys.claim(UNSETTLED_SEND, mint).key;
-  const unsettled = parseUnsettledSend(kept);
-  if (unsettled?.request === digest) return { key: unsettled.key, entry: kept };
-  playgroundRetryKeys.release(UNSETTLED_SEND, kept);
-  const entry = playgroundRetryKeys.claim(UNSETTLED_SEND, mint).key;
-  const minted = parseUnsettledSend(entry);
+  const kept = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
+  const unsettled = parseUnsettledSend(kept.key);
+  if (unsettled?.request === digest) {
+    return { key: unsettled.key, entry: kept.key, persisted: kept.persisted };
+  }
+  playgroundRetryKeys.release(UNSETTLED_SEND, kept.key);
+  const claimed = playgroundRetryKeys.claim(UNSETTLED_SEND, mint);
+  const minted = parseUnsettledSend(claimed.key);
   if (minted === null) throw new Error("playground retry key: minted an unreadable entry");
-  return { key: minted.key, entry };
+  return { key: minted.key, entry: claimed.key, persisted: claimed.persisted };
+}
+
+const MONEY_ROUTE_PATTERNS = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
+  const [method, path] = route.split(" ");
+  const pattern = path
+    .split("/")
+    .map((segment) =>
+      segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    );
+  return { method, pattern: new RegExp(`^${pattern.join("/")}$`) };
+});
+
+/** Whether a Send moves money (`IDEMPOTENCY_REQUIRED_ROUTES`), so its key must survive a reload. */
+function isMoneyRouteRequest(method: ApiPlaygroundMethod, resolvedPath: string): boolean {
+  const path = resolvedPath.split("?")[0] ?? resolvedPath;
+  return MONEY_ROUTE_PATTERNS.some((route) => route.method === method && route.pattern.test(path));
 }
 
 interface ExecutePlaygroundRequestOptions {
@@ -515,15 +534,25 @@ async function executePlaygroundRequest({
     return;
   }
 
-  const startedAt = Date.now();
-  setIsExecuting(true);
-
   // Each Send is a new call with a new key, unless it retries one that settled
   // nothing ({@link playgroundRetryKeys}). The proxy forwards it as
-  // Idempotency-Key, which the money routes require.
+  // Idempotency-Key, which the money routes require. A money route whose key
+  // the browser would not keep is not sent, as the dashboard's own forms
+  // refuse it: a reload would lose the key and the retry could pay twice.
   const sendRequest = JSON.stringify([apiKeyId, activeEndpoint.method, resolvedPath, requestBody]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
+  if (
+    claimed !== undefined &&
+    !claimed.persisted &&
+    isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
+  ) {
+    onExecutionError(t("Shared.idempotency.keyNotPersisted"));
+    return;
+  }
   const idempotencyKey = claimed?.key;
+
+  const startedAt = Date.now();
+  setIsExecuting(true);
 
   try {
     const proxyResponse = await dashboardRequest("/api/playground/execute", {
