@@ -8,6 +8,7 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
+  RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -955,11 +956,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND idempotency_key = ?
-              AND status <> 'failed'
+              AND status = ANY(?::text[])
             ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
-        .bind(input.organizationId, input.projectId, input.idempotencyKey)
+        .bind(input.organizationId, input.projectId, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
         .first<Record<string, unknown>>();
 
       return row ? mapActivationAttemptRow(row) : null;
@@ -1085,11 +1088,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND project_id = ?
               AND operation = ?
               AND idempotency_key = ?
-              AND status <> 'failed'
+              AND status = ANY(?::text[])
             ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
-        .bind(input.organizationId, input.projectId, input.operation, input.idempotencyKey)
+        .bind(input.organizationId, input.projectId, input.operation, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
         .first<Record<string, unknown>>();
 
       return row ? mapLifecycleAttemptRow(row) : null;
@@ -1274,11 +1279,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND idempotency_key = ?
-              AND status <> 'failed'
+              AND status = ANY(?::text[])
             ORDER BY created_at DESC, id DESC
             LIMIT 1`
         )
-        .bind(input.organizationId, input.projectId, input.idempotencyKey)
+        .bind(input.organizationId, input.projectId, input.idempotencyKey, [
+          ...RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+        ])
         .first<Record<string, unknown>>();
 
       return row ? mapUpdateAttemptRow(row) : null;

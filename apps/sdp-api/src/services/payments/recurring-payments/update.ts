@@ -185,9 +185,20 @@ function sameStringSet(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value) => right.includes(value));
 }
 
+/** One snapshot field: an amount by value ("30" and "30.0" are one amount), the rest as stored. */
+function sameSnapshotValue(key: string, left: unknown, right: unknown): boolean {
+  if (key === "amount" && typeof left === "string" && typeof right === "string") {
+    return normalizeDecimalString(left) === normalizeDecimalString(right);
+  }
+  return left === right;
+}
+
 function sameFlatRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
   const keys = Object.keys(left);
-  return sameStringSet(keys, Object.keys(right)) && keys.every((key) => left[key] === right[key]);
+  return (
+    sameStringSet(keys, Object.keys(right)) &&
+    keys.every((key) => sameSnapshotValue(key, left[key], right[key]))
+  );
 }
 
 function updateAttemptMatchesRequest(

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENCY_KEY_PATTERN,
+  type IdempotencyKeyHeaders,
+} from "@/lib/idempotency";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
@@ -168,7 +172,9 @@ export async function POST(request: Request) {
       return failureResponse(trace, 403, "API key is not available for the selected project");
     }
 
-    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+    const headers: { Authorization: string } & Partial<IdempotencyKeyHeaders> = {
+      Authorization: `Bearer ${apiKey}`,
+    };
     if (method !== "GET" && idempotencyKey) {
       headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
     }

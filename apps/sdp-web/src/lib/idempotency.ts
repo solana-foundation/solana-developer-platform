@@ -7,6 +7,9 @@ export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 /** The key sdp-api accepts: 1-255 printable ASCII characters (`idempotency-key.ts` in sdp-api). */
 export const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7e]{1,255}$/;
 
+/** The one header a keyed request adds. */
+export type IdempotencyKeyHeaders = Record<typeof IDEMPOTENCY_KEY_HEADER, string>;
+
 /** A browser-minted key as a server action receives it, parsed at that boundary. */
 const actionIdempotencyKeySchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN);
 
@@ -20,7 +23,7 @@ const actionIdempotencyKeySchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN);
  */
 export function actionIdempotencyHeaders(
   key: FormDataEntryValue | null | undefined
-): Record<string, string> | undefined {
+): IdempotencyKeyHeaders | undefined {
   const parsed = actionIdempotencyKeySchema.safeParse(key);
   if (!parsed.success) return undefined;
   return { [IDEMPOTENCY_KEY_HEADER]: parsed.data };
