@@ -98,8 +98,7 @@ function readJsonRpcFetch(
  * @returns True when the request URL's host is a loopback address.
  */
 function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
-  const requestUrl =
-    typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url);
+  const requestUrl = input instanceof Request ? new URL(input.url) : new URL(input);
   return LOOPBACK_HOSTNAMES.has(requestUrl.hostname);
 }
 

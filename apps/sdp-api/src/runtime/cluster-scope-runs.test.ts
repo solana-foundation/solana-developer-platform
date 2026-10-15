@@ -1,4 +1,4 @@
-import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
+import { type ClusterScope, currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { CLUSTER_BY_SDP_ENVIRONMENT, SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { runInEachClusterScope } from "./cluster-scope-runs";
@@ -52,5 +52,22 @@ describe("runInEachClusterScope", () => {
         expect.objectContaining({ message: `${environment} run failed` })
       ),
     });
+  });
+
+  it("settles every run before rejecting with the scope conflict an open scope causes", async () => {
+    const started: SdpEnvironment[] = [];
+
+    await expect(
+      runInClusterScope({ projectId: "prj_conflicting_scope", environment: "sandbox" }, () =>
+        runInEachClusterScope(async () => {
+          started.push(currentClusterScope().environment);
+        })
+      )
+    ).rejects.toMatchObject({
+      errors: SDP_ENVIRONMENTS.map(() =>
+        expect.objectContaining({ code: "CLUSTER_SCOPE_CONFLICT" })
+      ),
+    });
+    expect(started).toEqual([]);
   });
 });

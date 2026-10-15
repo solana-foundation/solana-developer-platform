@@ -2668,7 +2668,7 @@ describe("payment transfer batches", () => {
             getSignatureStatusesMock.mockResolvedValueOnce([
               { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
             ]);
-            await runInEachClusterScope(() => trackPendingTransfers(env));
+            await trackPendingTransfers(env);
           }
           return repository.recomputeTransferBatchStatus(input);
         },
