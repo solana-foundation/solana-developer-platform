@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToReadableStream } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as activityPanels from "./payments-activity-panels";
 import { PaymentsCommandCenter } from "./payments-command-center.redesign";
 
 vi.mock("@/lib/sdp-api", () => ({ requestProjectId: async () => "prj_test_sandbox" }));
@@ -8,28 +12,19 @@ vi.mock("@/i18n/server", () => ({
   getRequestLocale: async () => "en",
 }));
 vi.mock("@/flags/ramps", () => ({ getEnabledRampProviders: async () => [] }));
-vi.mock("@/lib/provider-availability", () => ({ fetchProviderAvailability: async () => null }));
-vi.mock("@/lib/request-tracing", () => ({
-  createTimedTrace: () => ({ step: (_name: string, run: () => unknown) => run(), log: () => {} }),
-}));
-vi.mock("./payments-activity-panels", () => ({
-  PaymentsActivityPanels: ({
-    transfers,
-    batches,
-  }: {
-    transfers: React.ReactNode;
-    batches: React.ReactNode;
-  }) => (
-    <>
-      {transfers}
-      {batches}
-    </>
-  ),
-}));
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("command center wallet identity", () => {
   it("joins exact pins and keeps the previous labels for unresolved or unavailable wallets", async () => {
+    const panels = vi.spyOn(activityPanels, "PaymentsActivityPanels");
     const request = vi.fn(async (path: string) => {
+      if (path === "/v1/organizations/org/provider-access") {
+        return Response.json({ data: { providers: { compliance: {}, ramps: {} } } });
+      }
       if (path.startsWith("/v1/payments/transfers?")) {
         return Response.json({
           data: [
@@ -116,9 +111,19 @@ describe("command center wallet identity", () => {
     expect(markup).not.toContain("provider-alias");
     expect(markup).toContain("search=unresolved");
     expect(markup).toContain("search=unavailable");
-    expect(markup).toContain("DashboardPayments.activityKind.batch");
     expect(markup).not.toContain("DashboardPayments.activityKind.transfer · saved-source");
     expect(markup).not.toContain("DashboardPayments.activityKind.deposit · saved-…ient");
-    expect(markup).not.toContain("DashboardPayments.activityKind.batch · saved-…urce");
+
+    expect(panels).toHaveBeenCalledOnce();
+    const { container } = render(
+      <activityPanels.PaymentsActivityPanels {...panels.mock.calls[0][0]} />
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "DashboardPayments.commandCenter.batches" }));
+    expect(container.textContent).toContain("DashboardPayments.activityKind.batch");
+    expect(container.textContent).not.toContain("Wallet A");
+    expect(container.textContent).not.toContain("provider-alias");
+    expect(container.textContent).not.toContain(
+      "DashboardPayments.activityKind.batch · saved-…urce"
+    );
   });
 });

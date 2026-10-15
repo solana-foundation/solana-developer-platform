@@ -1,6 +1,8 @@
 /* biome-ignore-all lint/security/noSecrets: Public Solana fixture account; no private keys. */
 import { expect, type Page, test } from "@playwright/test";
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import { Client } from "pg";
+import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getClerkBearerToken } from "../support/auth-session";
 import {
@@ -13,6 +15,21 @@ import {
 import { bootstrapWalletIdentityFixtures } from "../support/payments-wallet-identity";
 
 const TIMEOUT = 120_000;
+const sourceWalletSelectorSchema = z.object({ sourceCustodyWalletId: z.string() });
+// Keep extra wire fields visible to the retired-field absence assertions below.
+const transferSchema = z
+  .object({
+    id: z.string(),
+    custodyWalletId: z.string().nullable(),
+    status: z.enum(PAYMENT_TRANSFER_STATUSES),
+  })
+  .passthrough();
+const transferResultSchema = z.object({ transfer: transferSchema });
+const transferListSchema = z.array(transferSchema.pick({ id: true, custodyWalletId: true }));
+const batchResultSchema = z.object({
+  batch: z.object({ id: z.string(), sourceCustodyWalletId: z.string() }).passthrough(),
+  transfers: z.array(transferSchema),
+});
 
 test.describe
   .serial("Payments exact custody identity through browser and local API", () => {
@@ -87,11 +104,20 @@ test.describe
         { projectId, walletId: alias.id }
       );
       expect(balance.status).toBe(200);
-      expect(balance.body.data.walletBalances).toMatchObject({
+      const balanceBody = z
+        .object({
+          data: z.object({
+            walletBalances: z
+              .object({ custodyWalletId: z.string(), address: z.string() })
+              .passthrough(),
+          }),
+        })
+        .parse(balance.body);
+      expect(balanceBody.data.walletBalances).toMatchObject({
         custodyWalletId: alias.id,
         address: alias.publicKey,
       });
-      expect(balance.body.data.walletBalances).not.toHaveProperty("walletId");
+      expect(balanceBody.data.walletBalances).not.toHaveProperty("walletId");
       const legacyBalanceStatus = await page.evaluate(
         async ({ projectId, walletId }) => {
           const response = await fetch(`/api/dashboard/payments/wallets/${walletId}/balances`, {
@@ -207,22 +233,24 @@ test.describe
       );
       await page.getByRole("button", { name: "Send transfer", exact: true }).click();
       const response = await result;
-      expect(response.request().postDataJSON()).toMatchObject({ sourceCustodyWalletId: wallet.id });
+      expect(sourceWalletSelectorSchema.parse(response.request().postDataJSON())).toMatchObject({
+        sourceCustodyWalletId: wallet.id,
+      });
       expect(response.status()).toBe(200);
-      const submitted = (await response.json()).data;
+      const submitted = z.object({ data: transferResultSchema }).parse(await response.json()).data;
       transferIds.add(submitted.transfer.id);
       expect(submitted.transfer).toMatchObject({ custodyWalletId: wallet.id, status: "confirmed" });
       expect(submitted.transfer).not.toHaveProperty("providerWalletId");
       await expect(
         page.getByRole("heading", { name: "Transfer submitted", exact: true })
       ).toBeVisible();
-      const detail = await api.get<{ transfer: { id: string; custodyWalletId: string } }>(
-        `/v1/payments/transfers/${submitted.transfer.id}`
+      const detail = transferResultSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfers/${submitted.transfer.id}`)
       );
       expect(detail.transfer.custodyWalletId).toBe(wallet.id);
       expect(detail.transfer).not.toHaveProperty("providerWalletId");
-      const before = await api.get<Array<{ id: string }>>(
-        `/v1/payments/transfers?custodyWalletId=${alias.id}`
+      const before = transferListSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
       );
       await db.query("UPDATE custody_wallets SET status = 'inactive' WHERE id = $1", [alias.id]);
       try {
@@ -234,8 +262,8 @@ test.describe
             amount: "0.01",
           })
         ).rejects.toThrow("(404)");
-        const after = await api.get<Array<{ id: string }>>(
-          `/v1/payments/transfers?custodyWalletId=${alias.id}`
+        const after = transferListSchema.parse(
+          await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
         );
         expect(after.map((transfer) => transfer.id)).toEqual(before.map((transfer) => transfer.id));
       } finally {
@@ -262,7 +290,9 @@ test.describe
       await page.getByRole("button", { name: "Review payments", exact: true }).click();
       const estimate = await estimateResult;
       expect(estimate.status()).toBe(200);
-      expect(estimate.request().postDataJSON()).toMatchObject({ sourceCustodyWalletId: wallet.id });
+      expect(sourceWalletSelectorSchema.parse(estimate.request().postDataJSON())).toMatchObject({
+        sourceCustodyWalletId: wallet.id,
+      });
       const createResult = page.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
@@ -271,8 +301,17 @@ test.describe
       await page.getByRole("button", { name: "Send batch", exact: true }).click();
       const created = await createResult;
       expect(created.status()).toBe(200);
-      expect(created.request().postDataJSON()).toMatchObject({ sourceCustodyWalletId: wallet.id });
-      const result = (await created.json()).data;
+      expect(sourceWalletSelectorSchema.parse(created.request().postDataJSON())).toMatchObject({
+        sourceCustodyWalletId: wallet.id,
+      });
+      const result = z
+        .object({
+          data: batchResultSchema.extend({
+            batch: batchResultSchema.shape.batch.extend({ status: z.literal("processing") }),
+            recipients: z.array(z.object({ destination: z.string(), amount: z.string() })),
+          }),
+        })
+        .parse(await created.json()).data;
       batchIds.add(result.batch.id);
       for (const transfer of result.transfers) transferIds.add(transfer.id);
       expect(result.batch).toMatchObject({
@@ -288,10 +327,9 @@ test.describe
           expect.objectContaining({ destination: destinationAddress, amount: "0.01" }),
         ])
       );
-      const saved = await api.get<{
-        batch: { sourceCustodyWalletId: string };
-        transfers: Array<{ custodyWalletId: string }>;
-      }>(`/v1/payments/transfer-batches/${result.batch.id}`);
+      const saved = batchResultSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfer-batches/${result.batch.id}`)
+      );
       expect(saved.batch.sourceCustodyWalletId).toBe(wallet.id);
       expect(saved.batch).not.toHaveProperty("sourceProviderWalletId");
       expect(saved.transfers.length).toBeGreaterThan(0);
@@ -328,7 +366,20 @@ test.describe
         }
       );
       expect(quoteResult.status).toBe(200);
-      const { quote, transferId } = quoteResult.body.data;
+      const { quote, transferId } = z
+        .object({
+          data: z.object({
+            transferId: z.string(),
+            quote: z.object({
+              provider: z.literal("moonpay"),
+              id: z.string(),
+              deliveryMode: z.literal("hosted"),
+              status: z.enum(PAYMENT_TRANSFER_STATUSES),
+              hostedUrl: z.url(),
+            }),
+          }),
+        })
+        .parse(quoteResult.body).data;
       transferIds.add(transferId);
       expect(quote).toMatchObject({
         provider: "moonpay",
@@ -342,8 +393,8 @@ test.describe
       expect(hostedUrl.searchParams.get("refundWalletAddress")).toBe(alias.publicKey);
       expect(hostedUrl.searchParams.get("baseCurrencyAmount")).toBe("0.01");
       expect(hostedUrl.searchParams.has("signature")).toBe(true);
-      const saved = await api.get<{ transfer: { custodyWalletId: string; status: string } }>(
-        `/v1/payments/transfers/${transferId}`
+      const saved = transferResultSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfers/${transferId}`)
       );
       expect(saved.transfer).toMatchObject({ custodyWalletId: alias.id, status: "pending" });
       expect(saved.transfer).not.toHaveProperty("providerWalletId");
@@ -376,13 +427,13 @@ test.describe
               headers: { "Content-Type": "application/json", "x-project-id": projectId },
               body: JSON.stringify({ transferId }),
             });
-            return { status: response.status, body: await response.json() };
+            return response.status;
           },
           { projectId, transferId }
         );
-        expect(cancelled.status).toBe(200);
-        const continued = await api.get<{ transfer: { custodyWalletId: string; status: string } }>(
-          `/v1/payments/transfers/${transferId}`
+        expect(cancelled).toBe(200);
+        const continued = transferResultSchema.parse(
+          await api.get<unknown>(`/v1/payments/transfers/${transferId}`)
         );
         expect(continued.transfer).toMatchObject({
           custodyWalletId: alias.id,
@@ -436,16 +487,22 @@ test.describe
         { projectId, transferId: legacyId }
       );
       expect(legacyBrowserDetail.status).toBe(200);
-      expect(legacyBrowserDetail.body.data.transfer).toMatchObject({
+      const legacyDetailBody = z
+        .object({
+          data: transferResultSchema.extend({
+            transfer: transferSchema.extend({ signature: z.string() }),
+          }),
+        })
+        .parse(legacyBrowserDetail.body);
+      expect(legacyDetailBody.data.transfer).toMatchObject({
         id: legacyId,
         custodyWalletId: null,
         signature: "retained-e2e-legacy-signature",
       });
-      expect(legacyBrowserDetail.body.data.transfer).not.toHaveProperty("providerWalletId");
-      const legacyHistory =
-        await api.get<Array<{ id: string; custodyWalletId: string | null }>>(
-          "/v1/payments/transfers"
-        );
+      expect(legacyDetailBody.data.transfer).not.toHaveProperty("providerWalletId");
+      const legacyHistory = transferListSchema.parse(
+        await api.get<unknown>("/v1/payments/transfers")
+      );
       expect(legacyHistory).toEqual(
         expect.arrayContaining([expect.objectContaining({ id: legacyId, custodyWalletId: null })])
       );
@@ -466,8 +523,8 @@ test.describe
       await expect(
         page.getByRole("link", { name: "Open the wallet", exact: true })
       ).toHaveAttribute("href", projectHref(projectId, `/dashboard/wallets/${alias.id}`));
-      const exactHistory = await api.get<Array<{ id: string }>>(
-        `/v1/payments/transfers?custodyWalletId=${alias.id}`
+      const exactHistory = transferListSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
       );
       expect(exactHistory).toEqual(
         expect.arrayContaining([
@@ -475,8 +532,8 @@ test.describe
           expect.objectContaining({ id: failedId }),
         ])
       );
-      const otherHistory = await api.get<Array<{ id: string }>>(
-        `/v1/payments/transfers?custodyWalletId=${wallet.id}`
+      const otherHistory = transferListSchema.parse(
+        await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${wallet.id}`)
       );
       expect(otherHistory.map((transfer) => transfer.id)).not.toContain(transferId);
       expect(otherHistory.map((transfer) => transfer.id)).not.toContain(failedId);

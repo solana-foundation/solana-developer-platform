@@ -25,6 +25,7 @@ import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import app from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
+import { onrampQuoteResponseSchema } from "@/openapi/schemas/payments";
 import { noopObservability } from "@/runtime/observability";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -2579,6 +2580,10 @@ describe("Payments routes — ramps", () => {
   describe("ramp session and destination binding", () => {
     installStripeTestEnv();
 
+    const sessionResponseSchema = z.object({
+      data: onrampQuoteResponseSchema.pick({ transferId: true }),
+    });
+
     /** Answers a session create the way Stripe does, echoing the request's locked terms. */
     function stripeSessionResponse(sessionId: string) {
       return async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -2640,7 +2645,7 @@ describe("Payments routes — ramps", () => {
 
       const created = await createStripeOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
-      const initial: { data: { transferId: string } } = await created.json();
+      const initial = sessionResponseSchema.parse(await created.json());
 
       await getDb(env)
         .prepare(
@@ -2670,7 +2675,7 @@ describe("Payments routes — ramps", () => {
       try {
         const created = await createStripeOnrampQuote(counterpartyId, "25");
         expect(created.status).toBe(200);
-        const initial: { data: { transferId: string } } = await created.json();
+        const initial = sessionResponseSchema.parse(await created.json());
         await getDb(env)
           .prepare("UPDATE payment_transfers SET direction = 'outbound' WHERE id = ?")
           .bind(initial.data.transferId)
@@ -2723,7 +2728,7 @@ describe("Payments routes — ramps", () => {
       try {
         const created = await createStripeOnrampQuote(counterpartyId, "25");
         expect(created.status).toBe(200);
-        const initial: { data: { transferId: string } } = await created.json();
+        const initial = sessionResponseSchema.parse(await created.json());
         await getDb(env)
           .prepare(`UPDATE payment_transfers SET ${field} = ? WHERE id = ?`)
           .bind(value, initial.data.transferId)
