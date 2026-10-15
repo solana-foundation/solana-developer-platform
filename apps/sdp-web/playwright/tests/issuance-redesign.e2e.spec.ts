@@ -166,7 +166,7 @@ test.describe
       lastActivity = Date.now();
     });
 
-    test.beforeEach(async (_fixtures, testInfo) => {
+    test.beforeEach(async ({ page: _page }, testInfo) => {
       await waitForFreshRateWindow(lastActivity, testInfo);
     });
 
