@@ -36,12 +36,14 @@ describe("claimMovementKey", () => {
     expect(store.has("deposit")).toBe(false);
   });
 
-  it("refuses to send under a kept key it cannot rewrite, and keeps that key", () => {
+  // Jina (#2333): a persisted key whose rewrite failed refused the unchanged
+  // retry, though the key it needed was already in storage.
+  it("sends a retry under its persisted key after storage starts refusing writes", () => {
     const kept = store.claim("deposit").key;
     refuseWrites();
 
-    expect(claimMovementKey(store, "deposit")).toBeNull();
-    vi.restoreAllMocks();
-    expect(store.claim("deposit").key).toBe(kept);
+    expect(claimMovementKey(store, "deposit")).toBe(kept);
+    // A new movement's key cannot be kept, so it is still not sent.
+    expect(claimMovementKey(store, "withdrawal")).toBeNull();
   });
 });
