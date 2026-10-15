@@ -9,15 +9,16 @@ const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "p
 
 /**
  * The Idempotency-Key migrations (HOO-1918) re-run over themselves. The runner
- * records a migration by its file name, and 0133-0135 were first applied in
- * dev as 0129-0131 before main took those numbers: there the renamed files run
- * again over the columns, indexes and constraint they already made.
+ * records a migration by its file name, and these files were renumbered more
+ * than once as main took their numbers (dev applied them under earlier names):
+ * there a renamed file runs again over the columns, indexes and constraint it
+ * already made.
  */
 const RERUNNABLE = [
-  "0128_idempotency_keys.sql",
-  "0133_recurring_payment_idempotency.sql",
-  "0134_recurring_attempt_idempotency_keys.sql",
-  "0135_custody_wallet_idempotency.sql",
+  "0133_idempotency_keys.sql",
+  "0134_recurring_payment_idempotency.sql",
+  "0135_recurring_attempt_idempotency_keys.sql",
+  "0136_custody_wallet_idempotency.sql",
 ] as const;
 
 describe("Idempotency-Key migrations", () => {

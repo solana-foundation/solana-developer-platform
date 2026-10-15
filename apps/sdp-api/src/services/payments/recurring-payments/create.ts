@@ -29,7 +29,7 @@ export async function createRecurringPayment(input: {
   firstCollectionAt: string | null;
   metadataUri: string | null;
   createdBy: string | null;
-  /** Recorded on the row, the schedule's recovery point (HOO-1918, migration 0133). */
+  /** Recorded on the row, the schedule's recovery point (HOO-1918, migration 0134). */
   idempotency: RecurringPaymentIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const [tokenMint, destination] = await Promise.all([

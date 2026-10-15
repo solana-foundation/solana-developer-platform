@@ -140,7 +140,7 @@ answered from.
 Custody wallet creation (`POST /v1/wallets`) moves no money but creates a provider wallet before its
 row, so it has no row to write first and stays `serverErrors: "store"`. A keyed create derives a
 request id from the key, scoped by organization, project and credential (the raw key never reaches
-a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0135). A
+a provider), and records it with the fingerprint on the `custody_wallets` row (migration 0136). A
 retry the key cannot answer (a takeover, or past 24 hours) is answered from that row by
 `replayFromRecord` without calling the provider; another request on the same key is 422. That
 replay returns the wallet as it is now (its current label and status), not as the first response
