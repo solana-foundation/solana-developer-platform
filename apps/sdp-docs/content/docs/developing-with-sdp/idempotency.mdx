@@ -72,7 +72,7 @@ An organization that has been deleted or has lost production access is refused b
 
 A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
 
-When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key, which resumes from the last step SDP recorded. If the interruption came after a step was sent but before SDP recorded it, the retry can fail instead of finishing; read the schedule with `GET` before editing it again.
+When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key. Until the interrupted attempt is 15 minutes old, that retry gets `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`; after that, it resumes from the last step SDP recorded. If the interruption came after a step was sent but before SDP recorded it, the retry can fail instead of finishing; read the schedule with `GET` before editing it again.
 
 ## Retention
 
