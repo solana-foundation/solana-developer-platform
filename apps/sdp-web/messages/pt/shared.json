@@ -382,6 +382,7 @@
     "rpcActiveUnavailable": "Este deployment não possui mais um endpoint para este provedor, então o tráfego de RPC está sendo redirecionado para outro.",
     "rampMoonpayDescription": "On-ramp e off-ramp de moeda fiduciária por cartão e banco.",
     "rampLightsparkDescription": "Rails de liquidação fiduciária pela Lightning Network.",
+    "rampBvnkDescription": "Pagamentos empresariais entre moeda fiduciária e stablecoins.",
     "rampMoneygramDescription": "Transferências em dinheiro e por banco pela rede MoneyGram.",
     "rampCoinbaseDescription": "On-ramp e off-ramp de moeda fiduciária por contas Coinbase.",
     "rampMuralDescription": "Rails de pagamentos e faturamento em stablecoin.",
