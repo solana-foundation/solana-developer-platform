@@ -576,6 +576,19 @@ jobs:
           node .github/scripts/verify-managed-reconciliation-cadence.mjs \
             "${JOB}" "${REGION}" "${PROJECT_ID}"
 
+          # The quick rollback returns to the build this one replaces, unless a
+          # breaking migration means that build can no longer run on the schema.
+          # Recorded before traffic moves, so a failed switch or restore still
+          # leaves the right target.
+          if [[ -z "${BREAKING_MIGRATIONS}" && "${PREVIOUS_TRAFFIC}" =~ ^([a-z0-9-]+)=100$ ]]; then
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --update-labels "sdp_prod_previous_revision=${BASH_REMATCH[1]}"
+          else
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
+          fi
+
           gcloud run services update-traffic "${SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" \
             --to-revisions "${CANDIDATE_REVISION}=100"
@@ -598,17 +611,6 @@ jobs:
             fi
             sleep 10
           done
-
-          # The quick rollback returns to the build this one replaced, unless a
-          # breaking migration means that build can no longer run on the schema.
-          if [[ -z "${BREAKING_MIGRATIONS}" && "${PREVIOUS_TRAFFIC}" =~ ^([a-z0-9-]+)=100$ ]]; then
-            gcloud run jobs update "${MIGRATE_JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" \
-              --update-labels "sdp_prod_previous_revision=${BASH_REMATCH[1]}"
-          else
-            gcloud run jobs update "${MIGRATE_JOB}" \
-              --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
-          fi
 
           gcloud run jobs update "${JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"

@@ -165,7 +165,7 @@ The production deploy workflow:
 5. Captures the current service traffic, cron image and worker image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
 7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready and the instance has working egress. A fresh instance reports `checks.egress: "pending"` (503) until it can reach Clerk, which is also its Cloud Run startup probe.
-8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, records the revision it replaced for the quick rollback, and updates `sdp-prod-api-public-cron` and `sdp-prod-worker` to the same digest.
+8. Records the revision it is replacing for the quick rollback, sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-api-public-cron` and `sdp-prod-worker` to the same digest.
 9. Runs the production canary, up to three times. Three failures in a row hold production on the new revision (see [Production Rollback](#production-rollback)).
 10. In `release-web`, confirms `/health/ready` still reports the promoted revision and posts the `sdp-web production gate` status for the commit.
 

@@ -1138,7 +1138,29 @@ test("each promotion records the build it replaced, and a breaking migration ret
   const cron = recorded.calls.findIndex((call) =>
     call.includes("jobs update sdp-prod-api-public-cron")
   );
-  assert.ok(switched < labelled && labelled < cron);
+  assert.ok(labelled < switched && switched < cron);
+
+  // The switch lands but the new revision never answers: the target must already be set.
+  const unhealthy = runStep(promoteStep, {
+    env: {
+      ...promoteEnv,
+      PREVIOUS_TRAFFIC: "sdp-prod-api-public-00041-old=100",
+      BREAKING_MIGRATIONS: "",
+    },
+    stubs: {
+      node: "exit 0",
+      gcloud: "exit 0",
+      curl: `printf '%s' '${healthy.replace("00042-new", "00041-old")}'`,
+    },
+  });
+  assert.notEqual(unhealthy.code, 0);
+  assert.match(
+    unhealthy.out,
+    /Canonical production traffic did not reach sdp-prod-api-public-00042-new/
+  );
+  assert.deepEqual(labelCalls(unhealthy), [
+    `gcloud run jobs update sdp-prod-api-public-migrate ${scope} --update-labels sdp_prod_previous_revision=sdp-prod-api-public-00041-old`,
+  ]);
 
   for (const env of [
     {
