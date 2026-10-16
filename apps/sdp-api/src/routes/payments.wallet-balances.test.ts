@@ -1,3 +1,4 @@
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -41,7 +42,11 @@ describe("Payments wallet balance identity", () => {
           custodyWalletId: TEST_CUSTODY_WALLET_ID,
           walletId: TEST_WALLET_ID,
           balances: expect.arrayContaining([
-            expect.objectContaining({ token: "SOL", amount: "4200000000", uiAmount: "4.2" }),
+            expect.objectContaining({
+              token: WELL_KNOWN_TOKENS.SOL.symbol,
+              amount: "4200000000",
+              uiAmount: "4.2",
+            }),
           ]),
         },
       },

@@ -135,7 +135,7 @@ function harnessParts() {
     settle: vi.fn().mockResolvedValue(0),
     syncPolicy: vi.fn().mockResolvedValue(undefined),
   };
-  const provider: FeePaymentPort = {
+  const provider = {
     providerId: "kora",
     getFeePayer: vi.fn().mockResolvedValue(FEE_PAYER),
     getSponsorshipConfiguration: vi.fn().mockResolvedValue({
@@ -146,7 +146,7 @@ function harnessParts() {
     }),
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
-  };
+  } satisfies FeePaymentPort;
   const providerForActor = vi.fn().mockReturnValue(provider);
   const readAdmissionFacts = readMoneyAdmissionFacts.mockReset().mockResolvedValue(ACTIVE_SANDBOX);
   return { provider, repository, budgetRedis, providerForActor, readAdmissionFacts };
@@ -493,7 +493,6 @@ describe("BudgetedFeePayment", () => {
       continuationScope(persistAccountingIdentity)
     );
     repository.findReservationEvidence.mockResolvedValueOnce([recorded]);
-    if (!provider.getSponsorshipConfiguration) throw new Error("configuration fixture missing");
     vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValue({
       signerAddress: assertValidAddress(getBase58Codec().decode(new Uint8Array(32).fill(8))),
       maxAllowedLamports: 1_000_000n,
@@ -520,7 +519,6 @@ describe("BudgetedFeePayment", () => {
         )
     );
     const { feePayment, provider, repository } = harness();
-    if (!provider.getSponsorshipConfiguration) throw new Error("configuration fixture missing");
     vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValue({
       signerAddress: feePayer,
       maxAllowedLamports: 1_000_000n,

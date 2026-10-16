@@ -109,7 +109,6 @@ type AdmissionResult = {
   settlement: AdmissionSettlement | null;
   feePayer: Address;
   requested: Transaction;
-  provider?: FeePaymentPort;
 };
 type DurableAdmission =
   | { kind: "owned" | "replay"; result: AdmissionResult }
@@ -385,7 +384,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signed: Uint8Array;
     try {
-      signed = await (reservation.provider ?? this.provider).signAsFeePayer(transaction);
+      signed = await reservation.provider.signAsFeePayer(transaction);
     } catch (error) {
       if (isStructuredProviderRejection(error)) {
         // Kora answered with a policy verdict, so nothing was signed and the
@@ -448,7 +447,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signedTransaction: Uint8Array;
     try {
-      signedTransaction = await (reservation.provider ?? this.provider).signAsFeePayer(transaction);
+      signedTransaction = await reservation.provider.signAsFeePayer(transaction);
     } catch (error) {
       await this.markAmbiguous(reservation, error);
       throw error;
@@ -543,7 +542,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signature: Signature;
     try {
-      signature = await (reservation.provider ?? this.provider).signAndSend(transaction);
+      signature = await reservation.provider.signAndSend(transaction);
     } catch (error) {
       if (isDeterministicProviderRejection(error)) {
         await this.releaseDeterministic(reservation, error);
@@ -586,7 +585,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private async admit(
     transaction: Uint8Array,
     operation: AdmissionOperation
-  ): Promise<AdmissionResult> {
+  ): Promise<AdmissionResult & { provider: FeePaymentPort }> {
     const continuation = this.scope.continuity
       ? await this.resolveAccountingContinuity(transaction)
       : null;
@@ -616,7 +615,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         : (durableReservation?.attempt ?? 1);
     const admitted =
       durableReplay ?? (await this.admitAgainstCurrentPolicy(context, operation, attempt));
-    admitted.provider = provider;
     if (this.scope.continuity) {
       try {
         await this.scope.continuity.persistAccountingIdentity({
@@ -636,7 +634,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         throw error;
       }
     }
-    return admitted;
+    return { ...admitted, provider };
   }
 
   private async resolveAccountingContinuity(transaction?: Uint8Array): Promise<{
@@ -1233,9 +1231,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     );
   }
 
-  private async releaseDuplicateSignature(
-    reservation: Awaited<ReturnType<BudgetedFeePayment["admit"]>>
-  ): Promise<void> {
+  private async releaseDuplicateSignature(reservation: AdmissionResult): Promise<void> {
     await this.releaseDeterministic(
       reservation,
       new FeePaymentError("Transaction already sponsored under another reservation", "RATE_LIMITED")
@@ -1243,7 +1239,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async releaseDeterministic(
-    reservation: Awaited<ReturnType<BudgetedFeePayment["admit"]>>,
+    reservation: AdmissionResult,
     error: unknown,
     boundary: "before_submission" | "after_submission" = "before_submission"
   ): Promise<void> {

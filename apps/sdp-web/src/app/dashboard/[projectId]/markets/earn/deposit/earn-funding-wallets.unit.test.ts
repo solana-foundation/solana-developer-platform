@@ -104,7 +104,11 @@ describe("live funding wallet balances", () => {
     ["missing address", { custodyWalletId: "cwlt_requested", balances: [] }],
     [
       "malformed balance",
-      { custodyWalletId: "cwlt_requested", address: "address", balances: [{ token: "SOL" }] },
+      {
+        custodyWalletId: "cwlt_requested",
+        address: "address",
+        balances: [{ token: WELL_KNOWN_TOKENS.SOL.symbol }],
+      },
     ],
   ])("rejects a live balance response with %s", async (_condition, walletBalances) => {
     stubResponse({ data: { walletBalances } });

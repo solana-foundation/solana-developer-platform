@@ -946,13 +946,14 @@ describe("payment transfer batches", () => {
         .prepare(`INSERT INTO payment_transfer_batches
           (id, organization_id, project_id, source_custody_wallet_id,
            source_wallet_id, source_address, token, created_at)
-          VALUES ('xbatch_exact_authorized', ?, ?, ?, ?, ?, 'SOL', '2026-10-12T00:00:00.000Z')`)
+          VALUES ('xbatch_exact_authorized', ?, ?, ?, ?, ?, ?, '2026-10-12T00:00:00.000Z')`)
         .bind(
           TEST_ORG.id,
           TEST_PROJECT.id,
           TEST_CUSTODY_WALLET_ID,
           TEST_WALLET_ID,
-          TEST_SOLANA_ADDRESSES.wallet1
+          TEST_SOLANA_ADDRESSES.wallet1,
+          WELL_KNOWN_TOKENS.SOL.symbol
         ),
       getDb(env)
         .prepare(
