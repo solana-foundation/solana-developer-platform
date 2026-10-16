@@ -1,4 +1,6 @@
+import type { ApiKeyStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
@@ -24,7 +26,7 @@ let headers: Record<string, string>;
 
 interface KeyRow {
   id: string;
-  status: string;
+  status: ApiKeyStatus;
   grants: string[];
   allowed_ips: string | null;
   expires_at: string | null;
@@ -114,7 +116,8 @@ async function untilWaitingOn(fragment: string): Promise<void> {
           AND position($1 in query) > 0`,
       [fragment]
     );
-    if ((waiting?.count ?? 0) > 0) return;
+    if (!waiting) throw new Error("COUNT(*) returned no row");
+    if (waiting.count > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`No statement containing ${fragment} started waiting on a lock`);
@@ -286,9 +289,9 @@ describe("API key lifecycle", () => {
       const response = await rotate(TARGET_KEY_ID, 168);
 
       expect(response.status).toBe(201);
-      const body = (await response.json()) as {
-        data: { previousKey: { rotationDeadline: string } };
-      };
+      const body = z
+        .object({ data: z.object({ previousKey: z.object({ rotationDeadline: z.string() }) }) })
+        .parse(await response.json());
       expect(body.data.previousKey.rotationDeadline).toBe(deadline);
       expect((await readKey(TARGET_KEY_ID))?.rotation_deadline).toBe(deadline);
     });
@@ -389,7 +392,9 @@ describe("API key lifecycle", () => {
         env
       );
       expect(created.status).toBe(201);
-      const { data } = (await created.json()) as { data: { apiKey: { id: string } } };
+      const { data } = z
+        .object({ data: z.object({ apiKey: z.object({ id: z.string() }) }) })
+        .parse(await created.json());
       expect((await rotate(data.apiKey.id)).status).toBe(201);
       expect((await revoke(data.apiKey.id)).status).toBe(200);
 

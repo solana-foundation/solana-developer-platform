@@ -7,10 +7,19 @@ import {
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
 } from "@sdp/types";
+import { z } from "zod";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
+
+/** The link read's envelope, parsed: its token is a bearer credential (APE-849). */
+const paymentRequestLinkResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    publicToken: z.string().min(1),
+  }) satisfies z.ZodType<PaymentRequestLink>,
+});
 
 export interface PaymentRequestTokenOption {
   mintAddress: string;
@@ -286,7 +295,7 @@ export async function fetchPaymentRequestLinkToken(
     const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}/link`);
     if (response.status === 403) return { ok: true, publicToken: null };
     if (!response.ok) return { ok: false, error: await response.text() };
-    const json = (await response.json()) as { data: PaymentRequestLink };
+    const json = paymentRequestLinkResponseSchema.parse(await response.json());
     return { ok: true, publicToken: json.data.publicToken };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : undefined };

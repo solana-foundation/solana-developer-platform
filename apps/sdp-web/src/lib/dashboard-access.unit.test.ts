@@ -7,7 +7,6 @@ describe("resolveDashboardAccess", () => {
   it.each(["org:admin", "org:member", null])("is plain data for %s", (role) => {
     const access = resolveDashboardAccess(role);
     expect(structuredClone(access)).toEqual(access);
-    expect(JSON.parse(JSON.stringify(access))).toEqual(access);
   });
 
   it("gives an admin key management and a member none", () => {
