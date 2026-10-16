@@ -9,7 +9,10 @@ import {
   type PaymentSubscriptionCollectionAttempt,
   type PaymentsDashboardWallet,
   type PaymentTransferSummary,
+  RAMP_PROVIDERS,
+  type RampProviderId,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
+  UNIFIED_TRANSACTION_MODULES,
   type UnifiedTransaction,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -24,17 +27,17 @@ import { GET as transactionsGET } from "@/app/api/dashboard/payments/transaction
 import { GET as transfersGET } from "@/app/api/dashboard/payments/transfers/route";
 import { GET as aggregateGET } from "@/app/api/dashboard/wallets/aggregate/route";
 import { GET as walletsGET } from "@/app/api/dashboard/wallets/route";
-import CounterpartyDetailRoute from "@/app/dashboard/payments/counterparty/[counterpartyId]/page";
+import CounterpartyDetailRoute from "@/app/dashboard/[projectId]/payments/counterparty/[counterpartyId]/page";
 import {
   fetchCounterparties,
   fetchCounterparty,
-} from "@/app/dashboard/payments/counterparty/counterparty-page.data";
-import CounterpartyPage from "@/app/dashboard/payments/counterparty/page";
+} from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import CounterpartyPage from "@/app/dashboard/[projectId]/payments/counterparty/page";
 import {
   normalizeAggregateBalances,
   resolveTotalBalance,
   selectTopAggregateBalanceRows,
-} from "@/app/dashboard/payments/payments-overview.utils";
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   fetchDashboardPaymentTransfers,
   fetchIssuedTokensByMint,
@@ -44,8 +47,8 @@ import {
   fetchPaymentTransfers,
   fetchTransferBatches,
   fetchTransferBatchRecipients,
-} from "@/app/dashboard/payments/payments-page.data";
-import { summarizeBatch } from "@/app/dashboard/payments/payments-presentation";
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { summarizeBatch } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
   fetchAllCounterparties,
   fetchBatchRecipients,
@@ -53,24 +56,24 @@ import {
   fetchTransfers,
   fetchWalletAggregate,
   fetchWallets,
-} from "@/app/dashboard/payments/payments-workspace.data";
-import RecurringPaymentDetailRoute from "@/app/dashboard/payments/recurring/[recurringPaymentId]/page";
-import RecurringPaymentsPage from "@/app/dashboard/payments/recurring/page";
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import RecurringPaymentDetailRoute from "@/app/dashboard/[projectId]/payments/recurring/[recurringPaymentId]/page";
+import RecurringPaymentsPage from "@/app/dashboard/[projectId]/payments/recurring/page";
 import {
   fetchRecurringPaymentCollectionAttempts,
   fetchRecurringPayments,
   getRecurringPayment,
   listRecurringPayments,
-} from "@/app/dashboard/payments/recurring/recurring-payments.data.redesign";
-import PaymentRequestDetailRoute from "@/app/dashboard/payments/requests/[requestId]/page";
-import PaymentRequestsPage from "@/app/dashboard/payments/requests/page";
-import { fetchPaymentRequests } from "@/app/dashboard/payments/requests/payment-requests-page.data";
-import TransactionsPage from "@/app/dashboard/payments/transactions/page";
+} from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data.redesign";
+import PaymentRequestDetailRoute from "@/app/dashboard/[projectId]/payments/requests/[requestId]/page";
+import PaymentRequestsPage from "@/app/dashboard/[projectId]/payments/requests/page";
+import { fetchPaymentRequests } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
+import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
 import {
   fetchTransactionsPageFromDashboard,
   transactionsApiQuery,
-} from "@/app/dashboard/payments/transactions/transactions-page.data.redesign";
-import { parseTransactionFilters } from "@/app/dashboard/payments/transactions/transactions-query.redesign";
+} from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data.redesign";
+import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { paymentsDemoBody } from "./demo-fixtures";
 
@@ -82,28 +85,40 @@ import { paymentsDemoBody } from "./demo-fixtures";
 
 // The pages render on the new design, with the Demo switch on; the flags themselves read Vercel
 // and the request.
-vi.mock("@/flags", () => ({
-  newDesign: async () => true,
-  newDesignActivity: async () => true,
-  newDesignContacts: async () => true,
-  newDesignPayDeposit: async () => true,
-  newDesignWallets: async () => true,
-  newDesignIssuance: async () => true,
-  newDesignOverview: async () => true,
-  paymentsDemoMode: async () => true,
-}));
+// Every ramp provider on, as the flags leave them with all of them promoted.
+vi.mock("@/flags/ramps", async () => {
+  const { RAMP_PROVIDERS } = await import("@sdp/types");
+  return {
+    getEnabledRampProviders: async () => RAMP_PROVIDERS,
+    getOfferedRampProviders: async () => RAMP_PROVIDERS,
+    isRampsEnabled: async () => true,
+  };
+});
+// Every dashboard flag on, whichever ones the pages and getDashboardFlags read.
+vi.mock(
+  "@/flags",
+  () =>
+    new Proxy(
+      {},
+      {
+        has: () => true,
+        get: (_target, name) =>
+          name === "then" || name === "__esModule" ? undefined : async () => true,
+      }
+    )
+);
 
 const harness = vi.hoisted(() => {
   const state = {
     now: new Date("2026-09-25T12:00:00.000Z"),
     unhandled: [] as string[],
   };
-  type DemoBody = (path: string, now?: Date) => unknown;
+  type DemoBody = (path: string, rampProviders: readonly RampProviderId[], now?: Date) => unknown;
   let demoBody: DemoBody | undefined;
 
   async function request(path: string, _init?: RequestInit): Promise<Response> {
     demoBody ??= (await import("./demo-fixtures")).paymentsDemoBody;
-    const body = demoBody(path, state.now);
+    const body = demoBody(path, RAMP_PROVIDERS, state.now);
     if (body === undefined) {
       state.unhandled.push(path);
       return Response.json({ error: { message: `No demo body for ${path}` } }, { status: 404 });
@@ -152,24 +167,42 @@ vi.mock("@/i18n/server", () => ({
 }));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 // The screens themselves are client components; the tests read the props the pages hand them.
-vi.mock("@/app/dashboard/payments/counterparty/counterparty-workspace.redesign", () => ({
-  CounterpartyWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/payments/counterparty/counterparty-detail-workspace.redesign", () => ({
-  CounterpartyDetailWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/payments/requests/payment-requests-workspace.redesign", () => ({
-  PaymentRequestsWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/payments/recurring/recurring-payments-workspace.redesign", () => ({
-  RecurringPaymentsWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/payments/recurring/recurring-payment-detail-workspace.redesign", () => ({
-  RecurringPaymentDetailWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/payments/transactions/transactions-workspace.redesign", () => ({
-  TransactionsWorkspace: () => null,
-}));
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/counterparty/counterparty-workspace.redesign",
+  () => ({
+    CounterpartyWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace.redesign",
+  () => ({
+    CounterpartyDetailWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/requests/payment-requests-workspace.redesign",
+  () => ({
+    PaymentRequestsWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/recurring/recurring-payments-workspace.redesign",
+  () => ({
+    RecurringPaymentsWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace.redesign",
+  () => ({
+    RecurringPaymentDetailWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/dashboard/[projectId]/payments/transactions/transactions-workspace.redesign",
+  () => ({
+    TransactionsWorkspace: () => null,
+  })
+);
 
 const NOW = harness.state.now;
 const t = ((key: string) => key) as Parameters<typeof fetchRecurringPayments>[1];
@@ -222,7 +255,7 @@ function propsOf<T>(element: unknown): T {
 }
 
 function demoData<T>(path: string, now: Date = NOW): T {
-  const body = paymentsDemoBody(path, now) as { data: T } | undefined;
+  const body = paymentsDemoBody(path, RAMP_PROVIDERS, now) as { data: T } | undefined;
   if (body === undefined) throw new Error(`No demo body for ${path}`);
   return body.data;
 }
@@ -252,6 +285,8 @@ beforeEach(() => {
   harness.state.now = NOW;
   harness.state.unhandled.length = 0;
   vi.stubGlobal("fetch", dashboardRouteFetch);
+  // The client fetchers send the project in the tab's URL.
+  vi.stubGlobal("window", { location: { pathname: "/dashboard/prj_test_sandbox/payments" } });
 });
 
 afterEach(() => {
@@ -281,7 +316,7 @@ describe("paymentsDemoBody pass-through", () => {
     "/v1/issuance/tokens/tok_1",
     "/health",
   ])("lets %s through to the real API", (path) => {
-    expect(paymentsDemoBody(path, NOW)).toBeUndefined();
+    expect(paymentsDemoBody(path, RAMP_PROVIDERS, NOW)).toBeUndefined();
   });
 });
 
@@ -335,7 +370,9 @@ describe("demo world", () => {
       if (transfer.signature) expect(transfer.signature).toMatch(BASE58_SIGNATURE);
       if (transfer.source) expect(transfer.source).toMatch(BASE58_ADDRESS);
       if (transfer.destination) expect(transfer.destination).toMatch(BASE58_ADDRESS);
-      expect(paymentsDemoBody(`/v1/payments/transfers/${transfer.id}`, NOW)).toEqual({
+      expect(
+        paymentsDemoBody(`/v1/payments/transfers/${transfer.id}`, RAMP_PROVIDERS, NOW)
+      ).toEqual({
         data: { transfer },
       });
     }
@@ -523,7 +560,7 @@ describe("Transactions", () => {
   });
 
   it("pages with cursors and filters through the dashboard route", async () => {
-    const filters = parseTransactionFilters({ pageSize: "10" });
+    const filters = parseTransactionFilters({ pageSize: "10" }, UNIFIED_TRANSACTION_MODULES);
     const first = await fetchTransactionsPageFromDashboard(transactionsApiQuery(filters));
     expect(first.transactions).toHaveLength(10);
     expect(first.nextCursor).not.toBeNull();
@@ -536,18 +573,25 @@ describe("Transactions", () => {
 
     const [target] = first.transactions;
     const searched = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(parseTransactionFilters({ search: target?.id ?? "" }))
+      transactionsApiQuery(
+        parseTransactionFilters({ search: target?.id ?? "" }, UNIFIED_TRANSACTION_MODULES)
+      )
     );
     expect(searched.transactions.map((row) => row.id)).toEqual([target?.id]);
 
     const failed = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(parseTransactionFilters({ module: "payments", status: "failed" }))
+      transactionsApiQuery(
+        parseTransactionFilters(
+          { module: "payments", status: "failed" },
+          UNIFIED_TRANSACTION_MODULES
+        )
+      )
     );
     expect(failed.transactions.length).toBeGreaterThan(0);
     expect(failed.transactions.every((row) => row.status === "failed")).toBe(true);
 
     const earn = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(parseTransactionFilters({ module: "earn" }))
+      transactionsApiQuery(parseTransactionFilters({ module: "earn" }, UNIFIED_TRANSACTION_MODULES))
     );
     expect(earn).toEqual({ transactions: [], nextCursor: null });
   });
@@ -605,13 +649,8 @@ describe("Contacts", () => {
         data: ListCounterpartyProviderAccountsResponse;
       }>(`/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`);
       expect(providerAccounts.ok).toBe(true);
-      const rows = providerAccounts.ok ? providerAccounts.data.data.accounts : [];
-      // Every demo contact has a payout account, so the page's tables all have rows.
-      expect(rows).toHaveLength(1);
-      for (const row of rows) {
-        expect(row).toMatchObject({ kind: "payout_account", status: "active" });
-        expect(row.accountNumberLast4).toMatch(/^\d{4}$/);
-      }
+      // No provider holds an account for a demo contact.
+      expect(providerAccounts.ok && providerAccounts.data.data.accounts).toEqual([]);
     }
   );
 });

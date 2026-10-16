@@ -10,7 +10,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps** — integrate fiat on/off-ramps via MoonPay, Lightspark, BVNK, MoneyGram, Coinbase, Mural, or Stripe
+- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, Coinbase, or Stripe
 - **Earn:** discover yield strategies and build self-custodial deposit or withdrawal transactions
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 
@@ -96,8 +96,9 @@ authenticated.
    # Postgres and Redis (runs in the background)
    pnpm db:postgres:up
 
-   # Optional: local Kora, only when FEE_PAYMENT_PROVIDER=kora
-   pnpm kora:up
+   # Optional: local devnet + mainnet-fork Kora; writes the API's Kora env
+   # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
+   pnpm kora:local:up
 
    # API with team/Doppler configuration (keep this process running)
    pnpm dev:api
@@ -130,8 +131,11 @@ FEE_PAYMENT_PROVIDER=native
 FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 ```
 
-Kora is a fee-payment provider, not a signing provider. To use local Kora,
-set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL=http://127.0.0.1:8080`
+Kora is a fee-payment provider, not a signing provider. `pnpm dev:kora` starts
+the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
+Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
+via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
+use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and `KORA_RPC_URL`
 instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
@@ -145,6 +149,31 @@ logs the resolved anonymous Earn environment from `ENVIRONMENT`; verify that
 event before exposing a non-production deployment. Outside Cloud Run, forwarded
 client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
 behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
+
+### Release Channel (which modules run)
+
+`SDP_RELEASE_CHANNEL` is required. It sets the least mature module stage a
+deployment runs: `experimental` (every module), `beta` or `stable`. Each
+module's stage lives in `packages/sdp-types/src/release-channels.ts`; see
+[ADR 0005](../../docs/decisions/0005-release-channels.md). The API, its jobs and
+the dashboard all read it and refuse to start without it.
+
+**Run locally on stable:** set `SDP_RELEASE_CHANNEL=stable` in
+`apps/sdp-api/.env.local` (the example file has the line) and restart `pnpm dev`.
+The root `pnpm dev` loads that file for both the API and the dashboard, and it
+beats Doppler. Check with `curl -s localhost:8787/health`, which reports
+`releaseChannel`.
+
+- Without the line, Doppler `dev` (and the personal and CI configs that inherit
+  from it) supplies `experimental`; `pnpm -C apps/sdp-api dev` alone defaults to
+  `experimental` too.
+- One run without editing the file, when the file does not set it:
+  `DOPPLER_PRESERVE_ENV=SDP_RELEASE_CHANNEL SDP_RELEASE_CHANNEL=stable pnpm dev`.
+  A plain shell value is ignored, because Doppler sets the key.
+- Docker Compose: `SDP_RELEASE_CHANNEL=stable docker compose up` (both compose
+  files default to `experimental`).
+- Modules outside the channel answer 403 "The <module> module is not available
+  in this release channel." and are hidden in the dashboard.
 
 ### Optional: Custody Integrations
 
@@ -235,8 +264,8 @@ CHAINALYSIS_API_KEY=your_key
 ELLIPTIC_API_TOKEN=your_token
 
 # Fiat ramps
-MOONPAY_API_KEY=pk_...
-MOONPAY_SECRET_KEY=sk_...
+MOONPAY_SANDBOX_API_KEY=pk_test_...
+MOONPAY_SANDBOX_SECRET_KEY=sk_test_...
 
 ```
 
@@ -260,7 +289,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:up`)
+- Running Kora instance (`pnpm kora:local:up`, then `KORA_RPC_URL=http://127.0.0.1:18081`)
 - Funded Solana devnet account
 
 ## Database Migrations
@@ -310,7 +339,7 @@ Migration-free merges deploy production without a stop. Because a rollback only 
 schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
-outside the migrations directory.
+outside the migrations directory except test files.
 
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and
@@ -336,8 +365,7 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 
 The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
 
-- Relevant pushes to `main` deploy stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`.
-- A merged `chore(main): release X.Y.Z` release commit deploys the tagged image to production.
+- Every push to `main` deploys stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`; release commits deploy the same way.
 - Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
 Stage deploys and merge deploys to production update and execute the migration

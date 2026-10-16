@@ -68,7 +68,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
   it("onboarded actor creates a key and uses it to issue, mint, and transfer", {
     timeout: 240000,
   }, async () => {
-    const walletsRes = await adminRequest("/v1/wallets?includeAllProviders=true");
+    const walletsRes = await adminRequest("/v1/wallets");
     expect(walletsRes.status).toBe(200);
     const walletsBody = (await walletsRes.json()) as WalletListResponse;
 

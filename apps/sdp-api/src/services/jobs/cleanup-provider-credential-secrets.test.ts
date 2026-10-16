@@ -36,17 +36,18 @@ async function insertCredential(params: {
   await getDb(env)
     .prepare(
       `INSERT INTO provider_credentials (
-         id, organization_id, provider, label, scope, source, storage_backend,
+         id, organization_id, project_id, provider, label, scope, source, storage_backend,
          secret_ref, secret_version_ref, encrypted_secret_payload, status,
          rotated_from_provider_credential_id, secret_retention_expires_at,
          deactivated_at, created_by, created_at, secret_next_scan_at
        ) VALUES (
-         ?, ?, 'privy', 'Privy', 'organization', 'stored', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz
+         ?, ?, ?, 'privy', 'Privy', 'project', 'stored', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz
        )`
     )
     .bind(
       params.id,
       ORGANIZATION_ID,
+      PROJECT_ID,
       backend,
       gcp ? `projects/p/secrets/sdp-provider-credentials-${params.id}` : null,
       gcp && status !== "creating"
@@ -97,9 +98,9 @@ async function insertConnection(id: string, credentialId: string): Promise<void>
       `INSERT INTO custody_connections (
          id, organization_id, project_id, provider, scope, provider_credential_id,
          provider_credential_scope_key, status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, '__organization__', 'pending', ?)`
+       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
     )
-    .bind(id, ORGANIZATION_ID, PROJECT_ID, credentialId, USER_ID)
+    .bind(id, ORGANIZATION_ID, PROJECT_ID, credentialId, PROJECT_ID, USER_ID)
     .run();
 }
 
@@ -310,21 +311,7 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
       id: "pcred_still_referenced",
       retentionExpiresAt: "2020-01-01T00:00:00.000Z",
     });
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope, provider_credential_id,
-           provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, '__organization__', 'pending', ?)`
-      )
-      .bind(
-        "conn_credential_cleanup",
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        "pcred_still_referenced",
-        USER_ID
-      )
-      .run();
+    await insertConnection("conn_credential_cleanup", "pcred_still_referenced");
 
     await expect(cleanupRetiredProviderCredentialSecrets(env)).resolves.toEqual({
       cleaned: 0,
@@ -384,7 +371,7 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
         organizationId: ORGANIZATION_ID,
         currentId,
         predecessorId,
-        predecessorScopeKey: "__organization__",
+        predecessorScopeKey: PROJECT_ID,
         expectedConnectionIds: [connectionId],
       });
       expect(changed).toBe(true);
@@ -447,7 +434,7 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
           organizationId: ORGANIZATION_ID,
           currentId,
           predecessorId,
-          predecessorScopeKey: "__organization__",
+          predecessorScopeKey: PROJECT_ID,
           expectedConnectionIds: [connectionId],
         });
         if (!changed) throw new Error("Rollback is no longer eligible");

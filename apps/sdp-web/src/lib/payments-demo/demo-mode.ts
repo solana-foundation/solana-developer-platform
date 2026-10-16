@@ -2,16 +2,18 @@ import {
   COMPLIANCE_PROVIDERS,
   CUSTODY_PROVIDERS,
   EARN_PROVIDERS,
-  ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type ProviderAvailabilityEntry,
+  // biome-ignore lint/style/noRestrictedImports: the keys of the availability record only; which ones are on comes from the channel-capped flags
   RAMP_PROVIDERS,
+  type RampProviderId,
 } from "@sdp/types";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
+import { parseDashboardPathname } from "../dashboard-project-path";
 import { designModuleForPath } from "../design-modules";
-import { PROJECT_COOKIE_NAME } from "../project-cookie";
-import { isDemoPath, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
+import { PROJECT_HEADER_NAME } from "../project-cookie";
+import { isDemoPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { type DemoAnswer, demoFlowRead, demoWrite } from "./demo-handlers";
 import { applyDemoOps } from "./demo-replay";
@@ -44,18 +46,24 @@ const LOOKUP_WRITES = new Set(["places"]);
  * the demo cookie names. A page carries its own path (the proxy stamps `x-sdp-pathname`); a
  * dashboard API route counts only when such a page called it (its Referer). Everything else, the API
  * playground included, keeps real data. An organization-level read has no project of its own,
- * so it is judged by the project the dashboard has selected.
+ * so it is judged by the project of the request (its URL's or its header's).
  */
 const demoRequested = cache(async (projectId: string | null): Promise<boolean> => {
   try {
     const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
-    const project = projectId ?? cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
+    const project = projectId ?? headerStore.get(PROJECT_HEADER_NAME);
     if (!project || cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value !== project) {
       return false;
     }
+    // Page paths carry the project segment; the demo's route tables are written without it.
     const pathname = headerStore.get("x-sdp-pathname");
+    const ownPage = pathname ? parseDashboardPathname(pathname).dashboardPath : null;
     const referer = pathname?.startsWith("/api/dashboard/") ? headerStore.get("referer") : null;
-    const page = isDemoPath(pathname) ? pathname : referer ? new URL(referer).pathname : null;
+    const page = isDemoPath(ownPage)
+      ? ownPage
+      : referer
+        ? parseDashboardPathname(new URL(referer).pathname).dashboardPath
+        : null;
     if (!page || !isDemoPath(page)) {
       return false;
     }
@@ -79,6 +87,34 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
 
 function respond({ status, body }: DemoAnswer): Response {
   return status === 204 ? new Response(null, { status }) : Response.json(body, { status });
+}
+
+/**
+ * Whether the calling tab says it is showing demo mode. Only the dashboard's own routes count:
+ * the API playground keeps real data in the demo, so its writes are never held back.
+ */
+async function tabShowsDemo(): Promise<boolean> {
+  try {
+    const headerStore = await headers();
+    return (
+      headerStore.get(TAB_DEMO_HEADER_NAME) === "1" &&
+      headerStore.get("x-sdp-pathname")?.startsWith("/api/dashboard/") === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function demoWasTurnedOff(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "payments_demo_off",
+        message: "Demo mode was turned off in another tab. Reload this page to carry on.",
+      },
+    },
+    { status: 409 }
+  );
 }
 
 function notInDemo(): Response {
@@ -114,6 +150,11 @@ function parseBody(body: RequestInit["body"]): unknown {
 }
 
 const PROVIDER_ON: ProviderAvailabilityEntry = { entitled: true, configured: true, enabled: true };
+const PROVIDER_OFF: ProviderAvailabilityEntry = {
+  entitled: false,
+  configured: false,
+  enabled: false,
+};
 
 function allOn<T extends string>(providers: readonly T[]): Record<T, ProviderAvailabilityEntry> {
   return Object.fromEntries(providers.map((provider) => [provider, PROVIDER_ON])) as Record<
@@ -122,27 +163,36 @@ function allOn<T extends string>(providers: readonly T[]): Record<T, ProviderAva
   >;
 }
 
-/** Every provider on, for when the organization's own answer can't be read. */
-function demoProviderAvailability(): OrganizationProviderAvailabilityResponse {
+/** Every provider on, but ramp providers only the ones the dashboard offers. */
+function demoProviderAvailability(
+  rampProviders: readonly RampProviderId[]
+): OrganizationProviderAvailabilityResponse {
   return {
     tier: "enterprise",
     providers: {
       custody: allOn(CUSTODY_PROVIDERS),
-      rpc: allOn(ORGANIZATION_RPC_PROVIDERS),
       compliance: allOn(COMPLIANCE_PROVIDERS),
-      ramps: allOn(RAMP_PROVIDERS),
+      ramps: Object.fromEntries(
+        RAMP_PROVIDERS.map((provider) => [
+          provider,
+          rampProviders.includes(provider) ? PROVIDER_ON : PROVIDER_OFF,
+        ])
+      ) as Record<RampProviderId, ProviderAvailabilityEntry>,
       earn: allOn(EARN_PROVIDERS),
     },
   };
 }
 
 /**
- * The organization's providers as the demo offers them: every ramp provider and address
- * screening on, whatever the plan, so every flow can be walked to its end. The rest is the
+ * The organization's providers as the demo offers them: every ramp provider the dashboard
+ * offers and address screening on, whatever the plan, so every flow can be walked to its end. The rest is the
  * organization's real answer, or everything on when the API can't be reached.
  */
-async function demoProviderAccess(upstream: () => Promise<Response>): Promise<Response> {
-  const fallback = demoProviderAvailability();
+async function demoProviderAccess(
+  upstream: () => Promise<Response>,
+  rampProviders: readonly RampProviderId[]
+): Promise<Response> {
+  const fallback = demoProviderAvailability(rampProviders);
   let json: { data?: Partial<OrganizationProviderAvailabilityResponse> } = {};
   try {
     const response = await upstream();
@@ -169,22 +219,32 @@ export async function paymentsDemoResponse(
   body: RequestInit["body"],
   upstream: () => Promise<Response>
 ): Promise<Response | null> {
-  if (!(await demoRequested(projectId))) {
-    return isDemoOnlyPath(path) ? onlyInDemo() : null;
-  }
   const parts = demoPathParts(path);
   const verb = method.toUpperCase();
+  if (!(await demoRequested(projectId))) {
+    if (isDemoOnlyPath(path)) return onlyInDemo();
+    // A tab still showing the demo after another turned it off must not write for real.
+    const resource = parts?.segments[0] ?? "";
+    if (verb !== "GET" && DEMO_RESOURCES.has(resource) && (await tabShowsDemo())) {
+      return demoWasTurnedOff();
+    }
+    return null;
+  }
   if (parts === undefined) {
     return verb === "GET" ? null : notInDemo();
   }
   const [resource = ""] = parts.segments;
   const now = new Date();
-  const ops = await readDemoOps();
-  const world = applyDemoOps(buildWorld(now), ops, now);
+  // The flags are imported here, not at the top, for the same reason as in demoRequested.
+  const [ops, rampProviders] = await Promise.all([
+    readDemoOps(),
+    import("@/flags/ramps").then(({ getEnabledRampProviders }) => getEnabledRampProviders()),
+  ]);
+  const world = applyDemoOps(buildWorld(now, rampProviders), ops, now);
 
   if (verb === "GET") {
     if (resource === "organizations" && parts.segments[2] === "provider-access") {
-      return demoProviderAccess(upstream);
+      return demoProviderAccess(upstream, rampProviders);
     }
     if (resource === "issuance") {
       const answer = issuanceRead(world.issuance, parts.segments.slice(1), parts.params);
@@ -221,5 +281,5 @@ export async function paymentsDemoResponse(
     return respond(result.answer(world));
   }
   const nextOps = await appendDemoOps(...result.ops);
-  return respond(result.answer(applyDemoOps(buildWorld(now), nextOps, now)));
+  return respond(result.answer(applyDemoOps(buildWorld(now, rampProviders), nextOps, now)));
 }

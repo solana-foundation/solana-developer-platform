@@ -11,21 +11,16 @@ import type {
   EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  type EarnProviderId,
-  earnDepositStyle,
-  earnWithdrawSlippageFloor,
-} from "@sdp/types/provider-access";
+import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import {
-  assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -38,13 +33,11 @@ import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultWithdrawalFingerprint,
-  resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import {
@@ -61,22 +54,13 @@ import {
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { resolveVaultBalanceReadContext } from "@/services/earn/vault-balance-read-context";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import { checkVaultExposure, vaultExposureBlockingIssue } from "@/services/earn/vault-exposure";
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
-import {
-  approvedWalletOperationId,
-  beginApprovedWalletOperationEffect,
-  runApprovedWalletOperationEffectTransaction,
-} from "@/services/policy/approved-operation-replay";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import {
   earnRuntime,
@@ -95,22 +79,20 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import {
-  assertDepositFloorPresent,
-  assertStrategyDepositable,
-  assertVaultDepositAdmissible,
-  assertVaultDepositEnvironmentOpen,
-} from "./admission";
+import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
   concludeEarnDepositAuditOnError,
   recordEarnWithdrawalAudit,
 } from "./movement-audit";
-import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
-import { closeEmptyHydratedPositions, hydrateVaultPositions } from "./vault-position-hydration";
+import {
+  closeEmptyHydratedPositions,
+  hydrateVaultPositions,
+  markVaultPositionRowsRead,
+} from "./vault-position-hydration";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -129,45 +111,24 @@ import { closeEmptyHydratedPositions, hydrateVaultPositions } from "./vault-posi
  * `minSharesOut` floor from this quote, so the floor tracks the live share
  * rate instead of assuming one.
  *
- * A READ that takes the deposit's own money-in gates: the quote exists only
- * to open a NEW position, so surfacing, admission, and environment capability
- * always apply. Entitlement applies only when a credential supplies an
- * organization. There is no wallet, policy gate, persistence, or idempotency
+ * A READ that takes the deposit's own money-in gates through
+ * `assertVaultDepositAdmissible`, the function both deposit builds call: the
+ * quote exists only to open a NEW position, so surfacing, admission, and
+ * environment capability always apply, and an authenticated caller takes the
+ * project provider rule (an anonymous caller has no project for it to decide
+ * from). There is no wallet, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const auth = getOptionalAuth(c);
   // The row names the shelf: a tenant caller must own it, an anonymous caller
   // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
-    );
-  }
-  if (!isEarnProviderId(strategy.provider)) {
-    throw providerNotConfigured(
-      `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-  const provider = strategy.provider;
-
-  assertVaultDepositEnvironmentOpen(environment, provider);
-  assertEarnProviderSurfaced(provider);
-  if (auth) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      auth.organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
-  }
-  assertStrategyDepositable(strategy, environment);
+  // No amount: the preview reports the cap below as a blocking issue instead
+  // of throwing it.
+  const provider = await assertVaultDepositAdmissible(c, strategy, undefined, { environment });
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
   // blocking issue here, ADR 0004 "previews are the contract"), but only after
   // the same gates the deposit takes and before the provider is asked: a
@@ -219,16 +180,13 @@ export async function createEarnVaultDepositPreview(
 export async function createEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
 ) {
-  const { body: parsedData, resolved } = getPolicyGateContext<
+  const { body: parsedData, resolved } = getRequestGateContext<
     EarnVaultDepositBody,
     EarnVaultDepositResolved
   >(c);
   const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
     resolved;
   const requestId = resolved.requestId;
-  if (requestId === null) {
-    throw internalError("Vault deposit execution reached the handler without an idempotency key");
-  }
 
   // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
   const auditIntent = await beginEarnDepositAudit(
@@ -252,30 +210,23 @@ export async function createEarnVaultDeposit(
 
   let result: Awaited<ReturnType<typeof depositIntoVault>>;
   try {
-    result = await depositIntoVault(
-      c.env,
-      {
-        organizationId: auth.organizationId,
-        projectId,
-        environment,
-        provider,
-        providerReference: strategy.provider_reference,
-        wallet,
-        tokenMint,
-        shareMint,
-        label: strategy.name,
-        amount: parsedData.amount,
-        requestId,
-        minSharesOut: parsedData.minSharesOut,
-        ...(resolved.swap === null ? {} : { swap: resolved.swap }),
-        userId: auth.userId ?? null,
-        apiKeyId: auth.apiKeyId ?? null,
-      },
-      {
-        runIntentTransaction: (mutation) =>
-          runApprovedWalletOperationEffectTransaction(c, mutation),
-      }
-    );
+    result = await depositIntoVault(c.env, {
+      organizationId: auth.organizationId,
+      projectId,
+      environment,
+      provider,
+      providerReference: strategy.provider_reference,
+      wallet,
+      tokenMint,
+      shareMint,
+      label: strategy.name,
+      amount: parsedData.amount,
+      requestId,
+      minSharesOut: parsedData.minSharesOut,
+      ...(resolved.swap === null ? {} : { swap: resolved.swap }),
+      userId: auth.userId ?? null,
+      apiKeyId: auth.apiKeyId ?? null,
+    });
   } catch (error) {
     // A 4xx is a definitive pre-broadcast refusal: close the intent instead
     // of paging verification over it. Anything else stays UNRESOLVED (the
@@ -284,21 +235,6 @@ export async function createEarnVaultDeposit(
     throw error;
   }
 
-  if (result.replayed && approvedWalletOperationId(c)) {
-    // Sequential replays do not pass through the insert transaction, so fence
-    // the approved operation before returning their durable outcome. A legacy
-    // unsigned row must fail closed instead of becoming a completed approval.
-    await beginApprovedWalletOperationEffect(c);
-    if (!result.movement.signature || result.movement.status === "failed") {
-      throw conflict(
-        "Approved vault deposit execution is incomplete and requires manual reconciliation"
-      );
-    }
-  }
-
-  // The approved-operation fence above deliberately leaves the intent
-  // unresolved when it throws: that outcome is genuinely ambiguous, and
-  // verification paging it for reconciliation is the point.
   await completeEarnDepositAudit(c, auditIntent, {
     resourceId: result.movement.id,
     metadata: {
@@ -352,34 +288,28 @@ interface EarnVaultDepositResolved {
   provider: EarnProviderId;
   tokenMint: string;
   shareMint: string;
-  requestId: string | null;
+  requestId: string;
   idempotencyFingerprint: string;
   /** Swap-funded deposit: pay in `sourceTokenMint`, swap, then deposit. */
   swap: { sourceTokenMint: string; slippageBps: number } | null;
 }
 
 /**
- * Parse and resolve a vault deposit into its wallet-operation policy candidate.
+ * Parse and resolve a vault deposit for the request gate.
  *
- * Everything the handler needs is resolved HERE, before the gate enforces, for
- * one reason: policy has to be decided from trusted, fully-resolved context —
- * the real custody wallet, the real amount, the real target — and it has to be
- * decided BEFORE `createOrgSigner` is reached. A gate that ran on the raw body
- * could be argued out of a denial by a caller who names a wallet it does not
- * hold; a gate that ran after resolution but inside the handler would already
- * have touched custody.
+ * Everything the handler needs is resolved HERE, before the handler runs, so
+ * the wallet binding, the strategy admission and the swap normalization are all
+ * decided BEFORE `createOrgSignerForCustodyWallet` is reached.
  */
-export async function extractEarnVaultDepositPolicyCandidate(
+export async function extractEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
-): Promise<PolicyGateExtraction> {
-  // The raw body (cached by `validateBody`'s read) is carried verbatim into
-  // the policy envelope's rawPayload; the retired body `requestId` is rejected
-  // by the schema itself, so it can never reach here.
-  const rawBody: Record<string, unknown> = await c.req.json();
+): Promise<RequestGateExtraction> {
+  // The retired body `requestId` is rejected by the schema itself, so it can
+  // never reach here.
   const body = c.req.valid("json");
 
-  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
-  if (requestId === null && !isDryRunRequest(c)) {
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId === undefined) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault deposits`);
   }
   const environment = resolveSdpEnvironment(c);
@@ -388,7 +318,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   // Resolve the strategy first: the caller names a catalogue row, never a raw
@@ -458,8 +387,7 @@ export async function extractEarnVaultDepositPolicyCandidate(
   // door out.
   const provider = await assertVaultDepositAdmissible(c, strategy, body.amount);
 
-  // Swap funding, normalized before the gate so policy decides on what
-  // actually leaves the wallet. A source equal to the vault's own token is a
+  // Swap funding, normalized before the handler runs. A source equal to the vault's own token is a
   // no-op (null), and an unsupported mint is refused here, before any
   // custody-shaped work.
   const swap = resolveDepositSwapRequest(body, environment, tokenMint);
@@ -505,92 +433,16 @@ export async function extractEarnVaultDepositPolicyCandidate(
     }),
   };
 
-  return {
-    candidate: {
-      organizationId: auth.organizationId,
-      projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: auth.apiKeyId ?? null,
-      actor: walletOperationActorFromAuth(auth),
-      source: "earn_vault_deposit",
-      // `program`, not `payment`: this is an interaction with an on-chain
-      // program, and no funds leave the org — the shares come back to the same
-      // custody wallet. Family rules are opt-in (a rule listing no families
-      // matches everything), so wallet deny rules, amount limits and approval
-      // requirements still apply; only a rule that explicitly enumerates
-      // families would need `program` added to it.
-      operationFamily: "program",
-      operationType: "earn_vault_deposit",
-      // What is actually MOVING OUT of the wallet: the deposit token from the
-      // catalogue row ordinarily, or the swap's source token for a swap-funded
-      // deposit — an asset-scoped rule ("never move USDT") must see the token
-      // the wallet pays with, not the one the vault eventually receives.
-      asset: swap === null ? tokenMint : swap.sourceTokenMint,
-      amount: body.amount,
-      // The vault account, which is emphatically NOT a payable address —
-      // funds sent to it directly are destroyed. It is carried because a
-      // destination-scoped rule still needs to name the thing being deposited
-      // into, and it is the only stable identifier for that.
-      destination: strategy.provider_reference,
-      context: {
-        provider,
-        strategyId: strategy.id,
-        strategyName: strategy.name,
-        hostCluster: strategy.host_cluster,
-        environment,
-        depositStyle: "vault_direct",
-        minSharesOut: body.minSharesOut ?? null,
-        // The swap leg, stated for approvers: a swap-funded deposit spends
-        // `asset` above and deposits `depositTokenMint` into the vault.
-        swap:
-          swap === null
-            ? null
-            : {
-                sourceTokenMint: swap.sourceTokenMint,
-                slippageBps: swap.slippageBps,
-                depositTokenMint: tokenMint,
-              },
-      },
-      providerExtensions: {},
-    },
-    legs: [],
-    body,
-    resolved,
-    rawPayload: {
-      ...rawBody,
-      idempotencyFingerprint: resolved.idempotencyFingerprint,
-    },
-    idempotencyKey: requestId,
-  };
+  return { body, resolved };
 }
 
 /** Check custody execution separately from Earn strategy availability. */
 export async function admitEarnVaultRuntimeExecution(
   c: AppContext,
-  extraction: PolicyGateExtraction
+  extraction: RequestGateExtraction
 ): Promise<void> {
   // SAFETY: wired only beside the two vault extractors, which authorize this exact wallet.
   const resolved = extraction.resolved as EarnVaultDepositResolved | EarnVaultWithdrawalResolved;
-  // Approved requests cannot take the gate's replay response: policy resume and
-  // the handler's effect fence still apply. Skip only this new admission check
-  // when the service will return its own recorded movement without signing.
-  if (approvedWalletOperationId(c) && resolved.requestId !== null) {
-    const requestId = resolved.requestId;
-    const repo = createPostgresEarnMovementsRepository(getDb(c.env));
-    const movement = await resolveIdempotencyReplay(
-      () =>
-        repo.findVaultMovementByRequestId({
-          organizationId: resolved.auth.organizationId,
-          requestId,
-        }),
-      resolved.idempotencyFingerprint
-    );
-    if (movement) {
-      assertMovementIsOwnReplay(movement, resolved);
-      return;
-    }
-  }
   await createSigningService(c.env).admitRuntimeExecution(
     resolved.auth.organizationId,
     resolved.projectId,
@@ -598,16 +450,12 @@ export async function admitEarnVaultRuntimeExecution(
   );
 }
 
-/** Resolve both durable movement replays and pre-execution policy replays. */
+/** Resolve a durable movement replay for the request's Idempotency-Key. */
 export async function findEarnVaultDepositIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
-  // An approval executor must pass through policy resume and the handler's
-  // effect fence, even when the domain movement was already recorded.
-  if (approvedWalletOperationId(c)) return null;
-
   const resolved = extraction.resolved as EarnVaultDepositResolved;
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
   const movement = await repo.findVaultMovementByRequestId({
@@ -619,9 +467,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     // keyed on `(organization_id, request_id)` — migration 0059's unique index —
     // so a key first used in a SIBLING project resolves that project's movement.
     // Returning it would both answer the wrong deposit and hand over its amount
-    // and signature. Reachable because organization-level custody configs give
-    // two projects the same `custody_wallets` row, so the rest of the request can
-    // legitimately match.
+    // and signature. Reachable because the key is unique per organization, not
+    // per project, so the rest of the request can legitimately match.
     //
     // Answered as the fingerprint conflict it is: the key really has been used by
     // a different request. The caller chose the key, so learning that its own key
@@ -651,13 +498,6 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     );
   }
 
-  await throwOnPriorEarnPolicyOperation(c, {
-    organizationId: resolved.auth.organizationId,
-    scope: { kind: "project", projectId: resolved.projectId },
-    idempotencyKey,
-    idempotencyFingerprint: resolved.idempotencyFingerprint,
-    operationNoun: "vault deposit",
-  });
   return null;
 }
 
@@ -717,7 +557,6 @@ export async function listReadableEarnVaultWallets(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
@@ -740,11 +579,10 @@ export async function listReadableEarnVaultWallets(
 /**
  * PROJECT boundary for a recorded movement.
  *
- * Wallet scope alone does not close this. Custody configs may be
- * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
- * those to every project in the org — so a sibling project's deposit signed by a
- * shared org wallet passes the wallet check, and without this it would hand over
- * that deposit's amount, signature and failure reason.
+ * Wallet scope alone does not close this: the wallet check says the caller may
+ * use the wallet, not that the movement belongs to the caller's project, and
+ * without this it would hand over another project's amount, signature and
+ * failure reason.
  *
  * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
  * wallet alone, and the asymmetry is the point: a POSITION is a holding the
@@ -758,7 +596,7 @@ export async function listReadableEarnVaultWallets(
  * of `ON DELETE SET NULL` (migration 0059) — the insert requires a real project
  * id — so a null means the owning project was DELETED. Treating that as
  * readable-by-anyone was a hole: it handed a deleted project's deposits to every
- * sibling project that shares an org-level wallet, which is exactly the leak
+ * sibling project with access to the wallet, which is exactly the leak
  * this guard exists to close. The row survives for forensics in the database;
  * it is simply no longer addressable through a project-scoped API, and there is
  * no caller who legitimately needs a deleted project's deposit. Nothing about
@@ -797,9 +635,9 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  *   environment  — a sandbox-scoped key must not read a production movement.
  *                  The row carries its own environment, so this is a
  *                  comparison, not a second query.
- *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
- *                  because an organization-level custody config is handed to
- *                  every project in the org. An EXACT match: a null
+ *   project      — see `isMovementInProject`. Wallet scope does NOT imply it:
+ *                  a wallet check says the caller may use the wallet, not which
+ *                  project recorded the movement. An EXACT match: a null
  *                  `project_id` means the project was deleted, not that the row
  *                  is public.
  *   direction    — a withdrawal is not a deposit. The column is the only thing
@@ -927,12 +765,8 @@ function toEarnVaultDepositRecord(movement: EarnMovementRow): EarnVaultDepositRe
  * ledger; this is the same answer for vault deposits, and it is what lets the
  * dashboard stop keeping its own per-tab watch list.
  *
- * It also closes the APPROVAL-GATED hole. A policy hold returns an
- * `approvalRequestId` and NO `movementId`, because no movement exists until
- * someone approves — but the approval executor replays the caller's original
- * `Idempotency-Key`, so the movement it eventually creates carries it. Passing
- * `?requestId=` therefore finds a deposit that did not exist when it was
- * requested. The key is caller-chosen, short keys are legal, and it is even
+ * `?requestId=` finds the deposit recorded under a caller's
+ * `Idempotency-Key` when the original response was lost. The key is caller-chosen, short keys are legal, and it is even
  * published on chain in the deposit memo — so it is emphatically NOT treated as
  * a capability: this route re-applies every scoping rule the detail route
  * applies, and a guessed key can only surface a deposit the caller could
@@ -1100,6 +934,13 @@ export async function listEarnVaultPositions(c: AppContext) {
   // spaces this translates between.
   const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
   const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  const balanceReadContext = await resolveVaultBalanceReadContext(c.env, {
+    movementIds: query.afterMovementIds?.split(",") ?? [],
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    custodyWalletIds,
+  });
   if (custodyWalletIds.length === 0) {
     return success(c, { positions: [], hasMore: false, nextCursor: null });
   }
@@ -1112,6 +953,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     limit: query.limit,
     before,
   });
+  const rowsReadAt = markVaultPositionRowsRead();
   const hasMore = page.hasMore;
   // Normalised once, so the instrument columns are proven non-null here rather
   // than at each of the six places below that would otherwise have to coerce
@@ -1138,7 +980,11 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
       };
     }),
-    { ownerKind: "custody" }
+    {
+      ownerKind: "custody",
+      minimumSlotByPositionId: balanceReadContext?.minimumSlotByPositionId,
+      rowsReadAt,
+    }
   );
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -1160,6 +1006,12 @@ export async function listEarnVaultPositions(c: AppContext) {
   const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
 
   return success(c, {
+    balanceReadContext: balanceReadContext
+      ? {
+          afterMovementIds: balanceReadContext.afterMovementIds,
+          minimumSlot: balanceReadContext.minimumSlot,
+        }
+      : undefined,
     positions: rows.map((row) => {
       const hydrated = live.get(row.id);
       return {
@@ -1198,13 +1050,13 @@ interface EarnVaultWithdrawalResolved {
   auth: ApiKeyContext;
   projectId: string;
   environment: SdpEnvironment;
-  requestId: string | null;
+  requestId: string;
   idempotencyFingerprint: string;
 }
 
 /**
- * Parse and resolve a vault withdrawal into its wallet-operation policy
- * candidate — the same trusted-context-before-the-gate rule as the deposit's.
+ * Parse and resolve a vault withdrawal for the request gate — the same
+ * resolve-before-the-handler rule as the deposit's.
  *
  * WHAT IS DELIBERATELY MISSING is the point (ADR 0002 exit safety, "money out
  * beats money off"): no surfacing gate, no entitlement gate, no availability
@@ -1215,18 +1067,15 @@ interface EarnVaultWithdrawalResolved {
  * every environment a position exists in. The only refusals left are the ones
  * that protect the org itself: the position must belong to the caller's org
  * and environment (404), the key binding must carry a write scope for the
- * signing wallet, and custody runtime admission precedes the org's wallet policy. A shared
- * organization-level custody wallet intentionally lets sibling projects exit
- * the same org-owned position, matching the deposit route's wallet boundary.
+ * signing wallet, and custody runtime admission precedes signing.
  */
-export async function extractEarnVaultWithdrawalPolicyCandidate(
+export async function extractEarnVaultWithdrawal(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
-): Promise<PolicyGateExtraction> {
-  const rawBody: Record<string, unknown> = await c.req.json();
+): Promise<RequestGateExtraction> {
   const body = c.req.valid("json");
 
-  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
-  if (requestId === null && !isDryRunRequest(c)) {
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId === undefined) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault withdrawals`);
   }
   const environment = resolveSdpEnvironment(c);
@@ -1256,7 +1105,6 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
   assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
@@ -1278,44 +1126,7 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
     }),
   };
 
-  return {
-    candidate: {
-      organizationId: auth.organizationId,
-      projectId,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      apiKeyId: auth.apiKeyId ?? null,
-      actor: walletOperationActorFromAuth(auth),
-      source: "earn_vault_withdrawal",
-      // Same family as the deposit: an interaction with an on-chain program,
-      // with the proceeds returning to the same custody wallet.
-      operationFamily: "program",
-      operationType: "earn_vault_withdrawal",
-      // The SHARE mint: it is the asset this operation actually moves out of
-      // the wallet (the deposit token comes back IN), so an asset-scoped rule
-      // sees what is being spent.
-      asset: position.shareMint,
-      amount: body.shares,
-      // The vault account — the instrument the shares are redeemed against.
-      destination: position.vaultAddress,
-      context: {
-        provider: position.provider,
-        positionId: position.id,
-        tokenMint: position.tokenMint,
-        environment,
-        depositStyle: "vault_direct",
-      },
-      providerExtensions: {},
-    },
-    legs: [],
-    body,
-    resolved,
-    rawPayload: {
-      ...rawBody,
-      idempotencyFingerprint: resolved.idempotencyFingerprint,
-    },
-    idempotencyKey: requestId,
-  };
+  return { body, resolved };
 }
 
 /**
@@ -1325,7 +1136,7 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
  * OpenAPI description already state). Not an admission gate — a caller-fixable
  * 400, derived from the exit preview, so it can never trap a position.
  *
- * Runs as a `beforeEnforce` hook, NOT in the extractor: the gate resolves a
+ * Runs as an `admit` hook, NOT in the extractor: the gate resolves a
  * completed idempotency replay before this, so an exact retry of a recorded
  * floor-less withdrawal returns its recorded outcome even if the provider's
  * floor policy later flipped to non-null. The check only ever admits genuinely
@@ -1333,9 +1144,9 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
  */
 export async function assertEarnVaultWithdrawalFloor(
   c: AppContext,
-  extraction: PolicyGateExtraction
+  extraction: RequestGateExtraction
 ): Promise<void> {
-  // SAFETY: wired only beside extractEarnVaultWithdrawalPolicyCandidate in index.ts.
+  // SAFETY: wired only beside extractEarnVaultWithdrawal in index.ts.
   const { position } = extraction.resolved as EarnVaultWithdrawalResolved;
   const body = extraction.body as EarnVaultWithdrawalBody;
   const floor =
@@ -1349,16 +1160,12 @@ export async function assertEarnVaultWithdrawalFloor(
   }
 }
 
-/** Resolve both durable withdrawal-group replays and pre-execution policy replays. */
+/** Resolve a durable withdrawal replay for the request's Idempotency-Key. */
 export async function findEarnVaultWithdrawalIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
-  // An approval executor must pass through policy resume and the handler's
-  // effect fence, even when the domain movements were already recorded.
-  if (approvedWalletOperationId(c)) return null;
-
   const resolved = extraction.resolved as EarnVaultWithdrawalResolved;
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
   const movement = await repo.findVaultMovementByRequestId({
@@ -1390,13 +1197,6 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
     );
   }
 
-  await throwOnPriorEarnPolicyOperation(c, {
-    organizationId: resolved.auth.organizationId,
-    scope: { kind: "project", projectId: resolved.projectId },
-    idempotencyKey,
-    idempotencyFingerprint: resolved.idempotencyFingerprint,
-    operationNoun: "vault withdrawal",
-  });
   return null;
 }
 
@@ -1474,51 +1274,29 @@ export async function createEarnVaultWithdrawalPreview(
 export async function createEarnVaultWithdrawal(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
 ) {
-  const { body: parsedData, resolved } = getPolicyGateContext<
+  const { body: parsedData, resolved } = getRequestGateContext<
     EarnVaultWithdrawalBody,
     EarnVaultWithdrawalResolved
   >(c);
   const { position, wallet, auth, projectId, environment } = resolved;
   const requestId = resolved.requestId;
-  if (requestId === null) {
-    throw internalError(
-      "Vault withdrawal execution reached the handler without an idempotency key"
-    );
-  }
 
-  const result = await withdrawFromVault(
-    c.env,
-    {
-      organizationId: auth.organizationId,
-      projectId,
-      environment,
-      provider: position.provider,
-      positionId: position.id,
-      vaultAddress: position.vaultAddress,
-      tokenMint: position.tokenMint,
-      shareMint: position.shareMint,
-      wallet,
-      shares: parsedData.shares,
-      minAmountOut: parsedData.minAmountOut,
-      requestId,
-      userId: auth.userId ?? null,
-      apiKeyId: auth.apiKeyId ?? null,
-    },
-    {
-      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
-    }
-  );
-
-  if (result.replayed && approvedWalletOperationId(c)) {
-    // Sequential replays do not pass through the insert transaction, so fence
-    // the approved operation before returning its durable outcome.
-    await beginApprovedWalletOperationEffect(c);
-    if (!result.movement.signature || result.movement.status === "failed") {
-      throw conflict(
-        "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
-      );
-    }
-  }
+  const result = await withdrawFromVault(c.env, {
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    provider: position.provider,
+    positionId: position.id,
+    vaultAddress: position.vaultAddress,
+    tokenMint: position.tokenMint,
+    shareMint: position.shareMint,
+    wallet,
+    shares: parsedData.shares,
+    minAmountOut: parsedData.minAmountOut,
+    requestId,
+    userId: auth.userId ?? null,
+    apiKeyId: auth.apiKeyId ?? null,
+  });
 
   // Best-effort and post-effect (PRO-1866): a fail-closed audit write here
   // would be a new way for an exit to 5xx, the exact shape ADR 0002 exit
@@ -1638,8 +1416,7 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
 /**
  * GET /v1/earn/vault-withdrawals - this workspace's recorded withdrawals,
  * newest first: the deposits list's mirror, with the same discovery duty
- * (`?requestId=` finds a movement, including one an approval executor
- * created after the original request was parked) and the same recovery filter
+ * (`?requestId=` finds a movement by its `Idempotency-Key`) and the same recovery filter
  * (`?settled=false`). Wire statuses are the ledger's own — `settled` here
  * means the LEDGER's terminal set, where `confirmed` is still in flight.
  */

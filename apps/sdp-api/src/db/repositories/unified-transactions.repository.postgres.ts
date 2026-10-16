@@ -54,6 +54,12 @@ export function createPostgresUnifiedTransactionsRepository(
       const values: unknown[] = [input.organizationId];
       clauses.push(`module IN (${buildInClause(input.modules.length)})`);
       values.push(...input.modules);
+      if (input.excludedRampProviders.length > 0) {
+        clauses.push(
+          `NOT (module = 'payments' AND EXISTS (SELECT 1 FROM payment_transfers pt WHERE pt.id = unified_transactions.module_id AND pt.provider IN (${buildInClause(input.excludedRampProviders.length)})))`
+        );
+        values.push(...input.excludedRampProviders);
+      }
       if (input.projectId !== null) {
         clauses.push("project_id IS NOT DISTINCT FROM ?");
         values.push(input.projectId);

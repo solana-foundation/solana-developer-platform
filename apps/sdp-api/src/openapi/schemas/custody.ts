@@ -1,11 +1,11 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types";
 import {
-  approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
-  createWalletSchema as createWalletSchemaBase,
+  connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
+  createManagedWalletSchema as createManagedWalletSchemaBase,
   deleteWalletSchema as deleteWalletSchemaBase,
   initializeSigningSchema as initializeSigningSchemaBase,
-  setDefaultWalletSchema as setDefaultWalletSchemaBase,
+  managedWalletOwnerSchema as managedWalletOwnerSchemaBase,
   signerCheckSchema as signerCheckSchemaBase,
-  switchSigningSchema as switchSigningSchemaBase,
   updateWalletSchema as updateWalletSchemaBase,
 } from "../../routes/custody/schemas";
 import {
@@ -22,12 +22,6 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
     "Initialize wallet signing provider for the project resolved from the request context.",
 });
 
-export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
-  description:
-    "Switch the active wallet signing target by provider or exact Custody Connection ID for the project resolved from the request context.",
-  example: { provider: "privy" },
-});
-
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
     "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Clerk-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
@@ -35,66 +29,70 @@ export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
 });
 
 export const orgCustodyProviderSchema = z
-  .enum([
-    "local",
-    "fireblocks",
-    "privy",
-    "coinbase_cdp",
-    "para",
-    "turnkey",
-    "dfns",
-    "ibm_haven",
-    "anchorage",
-  ])
+  .enum(CUSTODY_PROVIDERS)
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
-export const createCustodyWalletRequestSchema = createWalletSchemaBase
+const managedWalletOwnerOpenApiSchema = managedWalletOwnerSchemaBase
+  .omit({ connectionId: true })
   .extend({
-    connectionId: withOpenApi(createWalletSchemaBase.shape.connectionId, {
+    provider: orgCustodyProviderSchema.openapi({
       description:
-        "Optional exact Custody Connection target. When present, it is authoritative and provider is only a consistency assertion.",
-    }),
-    provider: orgCustodyProviderSchema.optional().openapi({
-      description:
-        "Optional provider target. With connectionId it must match that Connection; otherwise the effective/provider-only target is resolved for the scope.",
+        "Provider whose Managed config owns the new wallet. A project holds one active config per provider.",
       example: "privy",
     }),
-    label: withOpenApi(createWalletSchemaBase.shape.label, {
-      description: "Optional label for the new wallet.",
-      example: "Mint authority wallet",
-    }),
-    purpose: withOpenApi(createWalletSchemaBase.shape.purpose, {
-      description: "Optional semantic purpose for the wallet.",
-      example: "mint_authority",
-    }),
-    setDefault: withOpenApi(createWalletSchemaBase.shape.setDefault, {
-      description: "Set this wallet as the default signer for the active wallet signing config.",
-      example: true,
-    }),
-  })
-  .openapi({
-    description: "Create wallet request body.",
-    example: {
-      provider: "privy",
-      label: "Mint authority wallet",
-      purpose: "mint_authority",
-      setDefault: true,
-    },
   });
 
-export const setDefaultWalletRequestSchema = setDefaultWalletSchemaBase
+const connectionWalletOwnerOpenApiSchema = connectionWalletOwnerSchemaBase
+  .omit({ provider: true })
   .extend({
-    provider: orgCustodyProviderSchema.optional().openapi({
-      description:
-        "Optional consistency assertion for the Provider of the wallet resolved by walletId.",
-      example: "privy",
+    connectionId: withOpenApi(connectionWalletOwnerSchemaBase.shape.connectionId, {
+      description: "Custody Connection (BYOK) that owns the new wallet.",
+      example: "cconn_123",
     }),
-    walletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID to set as the default for its exact owning target.",
-      example: "privy_wallet_123",
-    }),
-  })
-  .openapi({ description: "Set default wallet request body." });
+  });
+
+export const custodyWalletOwnerRequestSchema = z
+  .union([
+    managedWalletOwnerOpenApiSchema.meta({ not: { required: ["connectionId"] } }),
+    connectionWalletOwnerOpenApiSchema.meta({ not: { required: ["provider"] } }),
+  ])
+  .openapi({
+    description:
+      "The provider account a new wallet lives under: exactly one of provider (the project's Managed config for that provider) or connectionId (a Custody Connection).",
+    example: { connectionId: "cconn_123" },
+  });
+
+const walletCreationFieldsOpenApi = {
+  label: withOpenApi(createManagedWalletSchemaBase.shape.label, {
+    description: "Optional label for the new wallet.",
+    example: "Mint authority wallet",
+  }),
+  purpose: withOpenApi(createManagedWalletSchemaBase.shape.purpose, {
+    description: "Optional semantic purpose for the wallet.",
+    example: "mint_authority",
+  }),
+};
+
+export const createCustodyWalletRequestSchema = z
+  .union([
+    managedWalletOwnerOpenApiSchema
+      .extend(walletCreationFieldsOpenApi)
+      .meta({ not: { required: ["connectionId"] } })
+      .openapi({ description: "Create a wallet under the project's Managed config for provider." }),
+    connectionWalletOwnerOpenApiSchema
+      .extend(walletCreationFieldsOpenApi)
+      .meta({ not: { required: ["provider"] } })
+      .openapi({ description: "Create a wallet under a Custody Connection." }),
+  ])
+  .openapi({
+    description:
+      "Create wallet request body. Names exactly one owner: provider (Managed config) or connectionId (Custody Connection); a body naming both, or neither, is rejected with 400.",
+    example: {
+      provider: "privy",
+      label: "Treasury wallet",
+      purpose: "transfer",
+    },
+  });
 
 export const deleteWalletRequestSchema = deleteWalletSchemaBase
   .extend({
@@ -134,32 +132,6 @@ export const initializeSigningResponseSchema = z
   })
   .openapi({ description: "Wallet signing initialization result." });
 
-export const switchSigningResponseSchema = z
-  .union([
-    initializeSigningResponseSchema,
-    z.object({
-      connectionId: z.string().openapi({
-        description: "Selected Custody Connection ID.",
-        example: "cconn_example",
-      }),
-      publicKey: solanaAddressSchema.openapi({
-        description: "Public key of the Connection's default wallet.",
-      }),
-      walletId: walletIdParamSchema.openapi({
-        description: "Provider wallet ID of the Connection's default wallet.",
-        example: "privy_wallet_123",
-      }),
-    }),
-  ])
-  .openapi({
-    description: "Wallet signing switch result.",
-    example: {
-      connectionId: "cconn_example",
-      publicKey: "So11111111111111111111111111111111111111112",
-      walletId: "privy_wallet_123",
-    },
-  });
-
 const custodyWalletOwnerConstraint = {
   oneOf: [
     {
@@ -177,7 +149,6 @@ const custodyWalletExample = {
   id: "cw_example",
   custodyConfigId: "cfg_example",
   provider: "privy",
-  isDefaultProvider: true,
   isRuntimeExecutionAllowed: true,
   walletId: "privy_wallet_123",
   publicKey: "So11111111111111111111111111111111111111112",
@@ -198,11 +169,6 @@ const custodyWalletBaseSchema = z.object({
     example: "cconn_example",
   }),
   provider: orgCustodyProviderSchema.optional(),
-  isDefaultProvider: z.boolean().optional().openapi({
-    description:
-      "Whether this wallet's exact Config or Connection owner is the effective custody target for the requested scope.",
-    example: true,
-  }),
   isRuntimeExecutionAllowed: z.boolean().openapi({
     description:
       "Whether SDP currently permits attempting runtime execution through this wallet's owner. This is request-time admission, not Provider health or a success guarantee.",
@@ -368,12 +334,6 @@ const orgCustodyConfigBaseSchema = z.object({
     .nullable()
     .openapi({ description: "Optional project scope for this config." }),
   provider: orgCustodyProviderSchema,
-  publicKey: solanaAddressSchema.openapi({
-    description: "Public key associated with the current default wallet.",
-  }),
-  defaultWalletId: walletIdParamSchema
-    .nullable()
-    .openapi({ description: "Default provider wallet ID." }),
   status: z.enum(["active", "inactive"]).openapi({
     description: "Config status.",
     example: "active",
@@ -381,70 +341,13 @@ const orgCustodyConfigBaseSchema = z.object({
   createdAt: isoDateTimeSchema,
 });
 
-export const orgCustodyConfigSchema = orgCustodyConfigBaseSchema.openapi({
-  description: "Wallet signing configuration details.",
-});
-
-export const custodyConfigResponseSchema = z
-  .object({
-    config: orgCustodyConfigSchema,
-  })
-  .openapi({ description: "Wallet signing configuration response payload." });
-
 export const custodyConfigsResponseSchema = z
   .object({
     configs: z
-      .array(
-        orgCustodyConfigBaseSchema.extend({
-          isDefault: z.boolean().openapi({
-            description:
-              "Whether this configuration is currently the default provider for the scope.",
-            example: true,
-          }),
-        })
-      )
+      .array(orgCustodyConfigBaseSchema)
       .openapi({ description: "Active wallet signing configurations for the requested scope." }),
-    defaultConfigId: z.string().nullable().openapi({
-      description: "Resolved default custody configuration ID for the requested scope.",
-      example: "cfg_example",
-    }),
   })
   .openapi({ description: "Wallet signing configurations response payload." });
-
-export const switchProviderOptionsResponseSchema = z
-  .object({
-    providers: z.array(
-      z.object({
-        provider: orgCustodyProviderSchema,
-        hasReusableWallet: z.boolean().openapi({
-          description: "Whether an existing wallet can be reused for this provider.",
-          example: true,
-        }),
-        needsWalletLabel: z.boolean().openapi({
-          description: "Whether the switch flow should prompt for a wallet label.",
-          example: false,
-        }),
-        isActive: z.boolean().openapi({
-          description: "Whether this provider is currently active for the requested scope.",
-          example: true,
-        }),
-        isDefault: z.boolean().openapi({
-          description: "Whether this provider is the current default for the requested scope.",
-          example: false,
-        }),
-      })
-    ),
-  })
-  .openapi({ description: "Provider switch options with activity/default metadata." });
-
-export const setDefaultWalletResponseSchema = z
-  .object({
-    defaultWalletId: walletIdParamSchema.openapi({
-      description: "Wallet ID set as default.",
-      example: "privy_wallet_123",
-    }),
-  })
-  .openapi({ description: "Set default wallet response payload." });
 
 export const deleteWalletResponseSchema = z
   .object({
@@ -464,145 +367,6 @@ export const custodyPublicKeyResponseSchema = z
     publicKey: solanaAddressSchema,
   })
   .openapi({ description: "Wallet public key response payload." });
-
-const walletOperationStatusSchema = z
-  .enum([
-    "created",
-    "evaluated",
-    "pending_approval",
-    "executing",
-    "completed",
-    "failed",
-    "canceled",
-  ])
-  .openapi({ description: "Current wallet operation status.", example: "pending_approval" });
-
-const policyDecisionSchema = z
-  .enum([
-    "allow",
-    "deny",
-    "approval_required",
-    "provider_approval_required",
-    "review",
-    "not_evaluated",
-  ])
-  .openapi({ description: "Policy decision for this operation.", example: "approval_required" });
-
-const walletApprovalRequestSchema = z
-  .object({
-    id: z.string().openapi({ description: "Approval request ID.", example: "appr_example" }),
-    organizationId: z.string().openapi({ description: "Owning organization ID." }),
-    projectId: projectIdParamSchema
-      .nullable()
-      .openapi({ description: "Project scope for this approval request." }),
-    walletOperationId: z.string().openapi({ description: "Associated wallet operation ID." }),
-    approvalGroupId: z.string().nullable().openapi({
-      description: "Approval group used for this request, when configured.",
-    }),
-    status: withOpenApi(approvalRequestStatusSchemaBase, {
-      description: "Approval request status.",
-      example: "pending",
-    }),
-    provider: z.string().nullable().openapi({
-      description: "External approval provider, when applicable.",
-      example: "fireblocks",
-    }),
-    providerReference: z.string().nullable().openapi({
-      description: "External provider reference, when applicable.",
-      example: "fb_tx_123",
-    }),
-    requestedBy: z.string().nullable().openapi({ description: "Requester user or API key ID." }),
-    resolvedBy: z.string().nullable().openapi({ description: "Resolver user or API key ID." }),
-    expiresAt: isoDateTimeSchema.nullable(),
-    resolvedAt: isoDateTimeSchema.nullable(),
-    createdAt: isoDateTimeSchema,
-    updatedAt: isoDateTimeSchema,
-    wallet: z
-      .object({
-        custodyWalletId: z.string().openapi({ description: "Internal custody wallet row ID." }),
-        walletId: walletIdParamSchema,
-        publicKey: solanaAddressSchema,
-        label: z.string().nullable().openapi({ description: "Wallet label." }),
-      })
-      .nullable()
-      .openapi({ description: "Wallet metadata when the custody wallet still exists." }),
-    operation: z
-      .object({
-        id: z.string().openapi({ description: "Wallet operation ID." }),
-        custodyWalletId: z.string().nullable().openapi({
-          description: "Internal custody wallet row ID used by the operation.",
-        }),
-        walletId: walletIdParamSchema,
-        apiKeyId: z.string().nullable().openapi({ description: "API key that requested it." }),
-        source: z.string().openapi({ description: "Operation source.", example: "api" }),
-        operationFamily: z.string().openapi({
-          description:
-            "Normalized wallet operation family. Historical rows may carry retired families.",
-          example: "payment",
-        }),
-        operationType: z.string().openapi({
-          description: "Normalized wallet operation type. Historical rows may carry retired types.",
-          example: "payment_transfer_execute",
-        }),
-        asset: z.string().nullable().openapi({ description: "Asset symbol or mint." }),
-        amount: z.string().nullable().openapi({ description: "Operation amount." }),
-        destination: z.string().nullable().openapi({ description: "Destination or counterparty." }),
-        status: walletOperationStatusSchema,
-        executionStartedAt: isoDateTimeSchema.nullable().openapi({
-          description: "When execution was claimed after approval.",
-        }),
-        executionCompletedAt: isoDateTimeSchema.nullable().openapi({
-          description: "When approved execution reached a terminal state.",
-        }),
-        executionError: z.string().nullable().openapi({
-          description: "Execution failure message when the operation status is failed.",
-        }),
-        createdAt: isoDateTimeSchema,
-        updatedAt: isoDateTimeSchema,
-      })
-      .openapi({ description: "Wallet operation awaiting approval." }),
-    policyEvaluation: z
-      .object({
-        id: z.string().openapi({ description: "Policy evaluation ID." }),
-        decision: policyDecisionSchema,
-        reasonCode: z.string().nullable().openapi({
-          description: "Stable reason code explaining the decision.",
-          example: "wallet_policy_match",
-        }),
-        reason: z.string().nullable().openapi({ description: "Human-readable reason." }),
-        matchedRules: z
-          .array(z.record(z.string(), z.unknown()))
-          .openapi({ description: "Policy rules that matched this operation." }),
-        requiresApproval: z.boolean().openapi({
-          description: "Whether the evaluation required approval.",
-          example: true,
-        }),
-        evaluatedAt: isoDateTimeSchema,
-      })
-      .nullable()
-      .openapi({ description: "Latest policy evaluation linked to this approval request." }),
-    viewerIsRequester: z.boolean().openapi({
-      description:
-        "Whether the caller raised this request, directly or through an API key they created. Such a caller can cancel the request but cannot approve or reject it.",
-    }),
-    viewerCanDecide: z.boolean().openapi({
-      description:
-        "Whether the caller may approve or reject this request: not its requester, and an active approver in its approval group, or an organization admin when it has no group.",
-    }),
-  })
-  .openapi({ description: "Wallet approval request summary." });
-
-export const walletApprovalRequestsResponseSchema = z
-  .object({
-    approvalRequests: z.array(walletApprovalRequestSchema),
-  })
-  .openapi({ description: "Wallet approval request list response payload." });
-
-export const walletApprovalRequestResponseSchema = z
-  .object({
-    approvalRequest: walletApprovalRequestSchema,
-  })
-  .openapi({ description: "Wallet approval request response payload." });
 
 export const signerCheckResponseSchema = z
   .object({

@@ -1,0 +1,89 @@
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import {
+  formatCurrencyAmount,
+  resolveAggregateBalanceDisplayToken,
+  resolveTotalBalance,
+} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import type { ComboboxOption } from "@/components/ui/combobox";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
+type IssuedTokenSymbolsByMint = Record<string, string>;
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+interface ResolveWalletAssetOptionsConfig {
+  hideUnresolvedMints?: boolean;
+}
+
+function shouldHideUnresolvedMintLabel(
+  balance: Pick<WalletBalance, "token" | "mint">,
+  displayToken: string,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint
+): boolean {
+  const mint = balance.mint.trim();
+  if (issuedTokenSymbolsByMint[mint]?.trim()) {
+    return false;
+  }
+  return displayToken.trim().toUpperCase() === mint.toUpperCase();
+}
+
+export function findWalletBalanceForToken(
+  wallet: PaymentsDashboardWallet | null,
+  token: string
+): WalletBalance | null {
+  return wallet?.balances?.find((balance) => balance.token === token) ?? null;
+}
+
+export function walletBalanceAssetOptions(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  t: Translate,
+  options: Pick<ResolveWalletAssetOptionsConfig, "hideUnresolvedMints"> = {}
+): ComboboxOption[] {
+  const seen = new Set<string>();
+  const assetOptions: ComboboxOption[] = [];
+
+  for (const balance of wallet?.balances ?? []) {
+    const mint = balance.mint.trim();
+    const label = resolveAggregateBalanceDisplayToken(balance, issuedTokenSymbolsByMint);
+    if (
+      !mint ||
+      seen.has(mint) ||
+      (options.hideUnresolvedMints &&
+        shouldHideUnresolvedMintLabel(balance, label, issuedTokenSymbolsByMint))
+    ) {
+      continue;
+    }
+
+    seen.add(mint);
+    assetOptions.push({
+      value: mint,
+      label,
+      description: t("DashboardPayments.ramps.balanceAvailable", { amount: balance.uiAmount }),
+    });
+  }
+
+  return assetOptions;
+}
+
+export function walletComboboxOptions(
+  wallets: PaymentsDashboardWallet[],
+  signingUnavailableLabel?: string,
+  { disableRestricted = false }: { disableRestricted?: boolean } = {}
+): ComboboxOption[] {
+  return wallets.map((wallet) => {
+    const restricted = wallet.isRuntimeExecutionAllowed !== true;
+    const total = resolveTotalBalance(wallet.balances ?? []);
+    return {
+      value: wallet.id,
+      label: wallet.label ?? wallet.publicKey,
+      description: total !== null ? formatCurrencyAmount(total) : undefined,
+      ...(signingUnavailableLabel && restricted
+        ? { badge: signingUnavailableLabel, badgeVariant: "warning" as const }
+        : {}),
+      // A signing flow cannot use a restricted wallet, so its picker does not let
+      // the user select it; receiving and drafts still can, so they leave it open.
+      ...(disableRestricted && restricted ? { disabled: true } : {}),
+    };
+  });
+}

@@ -541,7 +541,7 @@ export class SponsorshipBudgetRepository {
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
          excludeReservationId ? " AND id <> ?" : ""
-}`,
+       }`,
       params
     );
     return {

@@ -15,9 +15,8 @@
  * off-chain and gateway `getTransaction` is Operator-only, so we can't observe
  * it. The UI surfaces the credit via the channel-balance read.
  *
- * The reconciler resolves the project's CURRENT RPC connection each tick, so
- * provider changes and credential rotations apply to in-flight intents. The
- * audit context on each deposit is never consulted here.
+ * The reconciler builds the project's RPC client on SDP's managed pool each
+ * tick. The audit context on each deposit is never consulted here.
  * All status transitions are compare-and-swap (`expectedStatus`) so a concurrent
  * worker can't regress state.
  */

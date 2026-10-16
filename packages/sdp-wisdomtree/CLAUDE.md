@@ -85,7 +85,14 @@ registry and credential-scoped product shelf SDP checks. A moderator B2B2C
 credential requires an explicit, durable mapping from an SDP organization to
 the correct Connect child-organization GUID. No such mapping exists today, so
 the integration does not guess a child organization and does not claim
-moderator-mode support.
+moderator-mode support. The `/me` GUID is cached on the bearer-token entry (same
+credential digest, same lifetime); wallet status, products and on-receipt
+wallets stay live on every call.
+
+Builds read every account they can name up front in one `getAccounts` request
+(deposit: mint, owner fund ATA, on-receipt USDC ATA; redemption: mint,
+on-receipt fund ATA, ExtraAccountMetaList, owner fund ATA). Hook resolution
+reads through that snapshot and fetches any other seed account once.
 
 ## Build-time mint verification
 

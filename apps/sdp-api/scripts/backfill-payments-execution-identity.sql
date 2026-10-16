@@ -20,8 +20,7 @@ SELECT
     wallet.wallet_id,
     wallet.public_key,
     config.organization_id,
-    config.project_id,
-    'config'::TEXT AS owner_kind
+    config.project_id
 FROM custody_wallets wallet
 JOIN custody_configs config ON config.id = wallet.custody_config_id
 UNION ALL
@@ -30,8 +29,7 @@ SELECT
     wallet.wallet_id,
     wallet.public_key,
     connection.organization_id,
-    connection.project_id,
-    'connection'::TEXT AS owner_kind
+    connection.project_id
 FROM custody_wallets wallet
 JOIN custody_connections connection ON connection.id = wallet.custody_connection_id;
 
@@ -40,12 +38,7 @@ WITH unique_matches AS (
     FROM payment_transfers transfer
     JOIN k3_payments_wallet_scope wallet
       ON wallet.organization_id = transfer.organization_id
-     AND (
-          (wallet.owner_kind = 'config'
-           AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
-          OR
-          (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id)
-     )
+     AND wallet.project_id = transfer.project_id
      AND wallet.wallet_id = transfer.wallet_id
      AND wallet.public_key = CASE
           WHEN transfer.direction = 'inbound' THEN transfer.destination_address
@@ -66,12 +59,7 @@ WITH unique_matches AS (
     FROM payment_transfer_batches batch
     JOIN k3_payments_wallet_scope wallet
       ON wallet.organization_id = batch.organization_id
-     AND (
-          (wallet.owner_kind = 'config'
-           AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
-          OR
-          (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id)
-     )
+     AND wallet.project_id = batch.project_id
      AND wallet.wallet_id = batch.source_wallet_id
      AND wallet.public_key = batch.source_address
     WHERE batch.source_custody_wallet_id IS NULL
@@ -89,12 +77,7 @@ WITH unique_matches AS (
     FROM payment_requests request
     JOIN k3_payments_wallet_scope wallet
       ON wallet.organization_id = request.organization_id
-     AND (
-          (wallet.owner_kind = 'config'
-           AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
-          OR
-          (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id)
-     )
+     AND wallet.project_id = request.project_id
      AND wallet.wallet_id = request.wallet_id
      AND wallet.public_key = request.destination_address
     WHERE request.custody_wallet_id IS NULL

@@ -2,9 +2,25 @@
  * Health route tests
  */
 
+import {
+  EGRESS_READINESS_SERVES_TRAFFIC,
+  EGRESS_READINESS_STATES,
+  type EgressReadiness,
+  SDP_RAMP_PROVIDER_STAGES,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import { createApp } from "@/app";
 import app from "@/index";
+import { noopObservability } from "@/runtime/observability";
 import { env } from "@/test/helpers/env";
+
+function appWithEgress(readiness: EgressReadiness) {
+  return createApp({
+    observability: noopObservability,
+    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    egressReadiness: () => readiness,
+  });
+}
 
 describe("Health routes", () => {
   describe("GET /health", () => {
@@ -17,11 +33,13 @@ describe("Health routes", () => {
         status: string;
         version: string;
         environment: string;
+        releaseChannel: string;
         timestamp: string;
       };
       expect(body.status).toBe("ok");
       expect(body.version).toBe("v1");
       expect(body.environment).toBe("development");
+      expect(body.releaseChannel).toBe("experimental");
       expect(body.timestamp).toBeDefined();
     });
   });
@@ -52,5 +70,34 @@ describe("Health routes", () => {
         checks: { database: "ok", redis: "error" },
       });
     });
+
+    it("omits the egress check where nothing gates on egress", async () => {
+      const res = await app.request("/health/ready", {}, env);
+
+      await expect(res.json()).resolves.not.toHaveProperty("checks.egress");
+    });
+
+    it("keeps a fresh instance out of rotation while egress is pending", async () => {
+      const res = await appWithEgress("pending").request("/health/ready", {}, env);
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({
+        status: "not_ready",
+        checks: { database: "ok", redis: "ok", egress: "pending" },
+      });
+    });
+
+    it.each(EGRESS_READINESS_STATES.filter((state) => EGRESS_READINESS_SERVES_TRAFFIC[state]))(
+      "reports ready once egress is %s",
+      async (egress) => {
+        const res = await appWithEgress(egress).request("/health/ready", {}, env);
+
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toMatchObject({
+          status: "ready",
+          checks: { database: "ok", redis: "ok", egress },
+        });
+      }
+    );
   });
 });

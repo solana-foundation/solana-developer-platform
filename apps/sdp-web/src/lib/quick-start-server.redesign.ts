@@ -1,9 +1,23 @@
-import type { ListApiKeysResponse } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types";
 import { cache } from "react";
-import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import { z } from "zod";
 import type { QuickStartStatus } from "./dashboard-quick-start.redesign";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import { createOrgSdpApiClient, listSdpProjects } from "./sdp-api";
+
+// Only the fields the guide reads: the rest of each response is not its business.
+const onboardingStatusSchema = z.object({
+  linked: z.boolean(),
+  setup: z
+    .object({
+      canManage: z.boolean(),
+      custodyProviders: z.array(z.enum(CUSTODY_PROVIDERS)),
+    })
+    .nullish(),
+});
+const apiKeysSchema = z.object({
+  apiKeys: z.array(z.object({ lastUsedAt: z.string().nullable() })),
+});
 
 function latestTimestamp(values: readonly (string | null)[]): string | null {
   let latest: string | null = null;
@@ -21,9 +35,9 @@ export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | n
   try {
     const client = await createOrgSdpApiClient();
     const signal = AbortSignal.timeout(10_000);
-    const status = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status", {
-      signal,
-    });
+    const status = onboardingStatusSchema.parse(
+      await client.fetch<unknown>("/v1/onboarding/status", { signal })
+    );
     if (!status.linked || !status.setup?.canManage) return null;
 
     // A first call can come from a key in any project, not only the default sandbox.
@@ -31,10 +45,12 @@ export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | n
     if (projects.length === 0) return null;
     const keys = await Promise.allSettled(
       projects.map((project) =>
-        client.fetch<ListApiKeysResponse>("/v1/api-keys", {
-          headers: { [PROJECT_HEADER_NAME]: project.id },
-          signal,
-        })
+        client
+          .fetch<unknown>("/v1/api-keys", {
+            headers: { [PROJECT_HEADER_NAME]: project.id },
+            signal,
+          })
+          .then((body) => apiKeysSchema.parse(body))
       )
     );
     const apiKeys = keys.flatMap((result) =>
@@ -43,8 +59,7 @@ export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | n
     if (apiKeys.length === 0 && keys.some((result) => result.status === "rejected")) return null;
 
     return {
-      rpcProvider: status.setup.rpcProvider,
-      custodyProvider: status.setup.custodyProvider,
+      custodyProvider: status.setup.custodyProviders[0] ?? null,
       apiKeyCount: apiKeys.length,
       lastCallAt: latestTimestamp(apiKeys.map((key) => key.lastUsedAt)),
     };

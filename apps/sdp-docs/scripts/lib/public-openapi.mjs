@@ -5,9 +5,10 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "projects",
   "issuance",
   "payments",
-  "policies",
   "compliance",
   "asset-profiles",
+  // A family renders only when the OpenAPI document for the build's release
+  // channel carries it (SDP_RELEASE_CHANNEL; see createPublicOpenApiDocument).
   // "earn" returns with EARN_PUBLIC_SURFACE_PUBLISHED (apps/sdp-api/src/openapi/spec.ts), PRO-2038.
 ]);
 

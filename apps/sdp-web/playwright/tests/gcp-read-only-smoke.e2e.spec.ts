@@ -6,14 +6,16 @@ import type {
   Project,
   TokenTransactionListItem,
 } from "@sdp/types";
+import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
-} from "../../src/app/dashboard/payments/payments-overview.utils";
+} from "../../src/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
-import { createLocalApiClient } from "../support/local-api-client";
-import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
+import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
+import { fetchApiReleaseChannel, isModuleServed } from "../support/release-channel";
 
 interface ReadOnlyFixture {
   issuanceTransactions: TokenTransactionListItem[];
@@ -86,10 +88,7 @@ async function assertExactIdentityAndProject(page: Page, fixture: ReadOnlyFixtur
     )
     .toBe(env.clerkOrgId);
 
-  const projectCookie = (await page.context().cookies()).find(
-    (cookie) => cookie.name === "sdp_selected_project_id"
-  );
-  expect(projectCookie?.value).toBe(fixture.project.id);
+  expect(parseDashboardPathname(new URL(page.url()).pathname).projectId).toBe(fixture.project.id);
   await expect(page.getByText(fixture.project.name, { exact: true }).first()).toBeVisible();
 }
 
@@ -114,6 +113,14 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       "https://api-preview.solana.com",
     ]).toContain(env.sdpApiBaseUrl);
 
+    // Issuance answers 403 outside its release channel (stage on `beta`), so it is
+    // read and required only where the API serves it.
+    const issuanceServed = isModuleServed(
+      await fetchApiReleaseChannel(env.sdpApiBaseUrl),
+      "issuance"
+    );
+    const readIssuanceTransactions = async (api: LocalApiClient, path: string) =>
+      issuanceServed ? api.get<TokenTransactionListItem[]>(path) : [];
     fixture = await provisionWithAdminSession(browser, async (session) => {
       expect(session.identity.email).toBe(env.clerkTestEmail);
       expect(session.identity.organizationId).toBe(env.clerkOrgId);
@@ -131,7 +138,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       const api = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken, project.id);
       const walletsPath = `/v1/wallets?${new URLSearchParams({
         includeBalances: "true",
-        includeAllProviders: "true",
         view: "summary",
       })}`;
       const issuancePath = `/v1/issuance/transactions?${new URLSearchParams({
@@ -144,7 +150,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       })}`;
       const [walletData, issuanceTransactions, transfers] = await Promise.all([
         api.get<{ wallets: PaymentsDashboardWallet[] }>(walletsPath),
-        api.get<TokenTransactionListItem[]>(issuancePath),
+        readIssuanceTransactions(api, issuancePath),
         api.get<PaymentTransferSummary[]>(transfersPath),
       ]);
       const firstTransfer = transfers[0];
@@ -194,10 +200,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       ).toBeGreaterThan(0);
       if (!RESEEDED_STAGE) {
         expect(
-          resolvedFixture.issuanceTransactions.length,
-          "home activity needs a real issuance transaction"
-        ).toBeGreaterThan(0);
-        expect(
           resolvedFixture.transfers.length,
           "payments needs a real transfer fixture"
         ).toBeGreaterThan(0);
@@ -215,10 +217,12 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       );
       return resolvedFixture;
     });
-  });
-
-  test.beforeEach(async ({ page }) => {
-    await seedProjectCookie(page, fixture.project.id);
+    if (issuanceServed && !RESEEDED_STAGE) {
+      expect(
+        fixture.issuanceTransactions.length,
+        "home activity needs a real issuance transaction"
+      ).toBeGreaterThan(0);
+    }
   });
 
   test("home loads one combined activity request", async ({ page }) => {
@@ -233,16 +237,21 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       (response) => new URL(response.url()).pathname === "/api/dashboard/home/activity"
     );
 
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard");
     expect((await activityResponse).status()).toBe(200);
-    // Before its first wallet an organization sees the wallet prompt instead of the list.
-    const activitySection = page.locator('[data-overview-section="activity"]');
+    // The stage serves the Overview or the previous Home, whichever its flags say, and before its
+    // first wallet an organization sees the wallet prompt instead of the list.
+    const overviewActivity = page.locator('[data-overview-section="activity"]');
+    const legacyActivity = page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.getByText("Recent transactions", { exact: true }) });
     const firstWalletPrompt = page.getByRole("heading", { name: "Start with a wallet" });
-    await expect(activitySection.or(firstWalletPrompt).first()).toBeVisible();
-    if (await activitySection.isVisible()) {
-      await expect(activitySection.getByText("Recent activity", { exact: true })).toBeVisible();
-      const firstActivityRow = activitySection.locator("tbody tr").first();
-      const emptyActivity = activitySection.getByText(
+    await expect(overviewActivity.or(legacyActivity).or(firstWalletPrompt).first()).toBeVisible();
+    const activity = (await overviewActivity.isVisible()) ? overviewActivity : legacyActivity;
+    if (await activity.isVisible()) {
+      await expect(activity.getByText(/^Recent (activity|transactions)$/)).toBeVisible();
+      const firstActivityRow = activity.locator("tbody tr").first();
+      const emptyActivity = activity.getByText(
         /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
       );
       await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
@@ -268,7 +277,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       }
     });
 
-    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/payments");
     await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
     await proveDashboardHydrated(page, fixture.project.name);
     await assertExactIdentityAndProject(page, fixture);
@@ -280,16 +289,26 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     const drillDownWallet = fixture.populatedWallet ?? fixture.wallets[0];
     const capture = capturePageFailures(page);
 
-    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/wallets");
     const walletCard = page
       .locator("article")
       .filter({ hasText: drillDownWallet.publicKey })
       .first();
-    await walletCard.getByRole("link", { name: "Manage" }).click();
+    // The card's link says "Open <wallet>" with new-design-wallets on and "Manage" with it off.
+    await walletCard.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
 
-    await expect(page).toHaveURL(/\/dashboard\/wallets\/./, { timeout: 20_000 });
-    const walletIdentity = drillDownWallet.label ?? drillDownWallet.publicKey;
-    await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(
+      projectHref(
+        fixture.project.id,
+        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.walletId)}`
+      ),
+      { timeout: 20_000 }
+    );
+    // Both designs head the page with the wallet's label, or "Untitled wallet" without one.
+    const walletHeading = drillDownWallet.label?.trim() || "Untitled wallet";
+    await expect(
+      page.getByRole("heading", { name: walletHeading, exact: true }).first()
+    ).toBeVisible({ timeout: 20_000 });
     await assertExactIdentityAndProject(page, fixture);
     capture.assertClean();
   });
@@ -319,7 +338,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       );
     });
 
-    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/wallets");
     expect((await balancesResponse).status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1, name: "Wallets" })).toBeVisible();
     await expect(

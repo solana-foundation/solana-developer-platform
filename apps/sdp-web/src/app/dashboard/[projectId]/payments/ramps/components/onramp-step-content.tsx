@@ -1,0 +1,216 @@
+"use client";
+
+import { isTerminalRampTransferStatus } from "@sdp/types";
+import { DollarSignIcon } from "lucide-react";
+import { useTranslations } from "@/i18n/provider";
+import { hasEnabledRampProvider } from "@/lib/provider-availability";
+import type { OnrampWizard } from "../hooks/use-onramp-wizard";
+import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
+import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
+import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
+import { ManualInstructionsQuote } from "./manual-instructions-quote";
+import { MemoStepContent } from "./memo-step-content";
+import { MoonpayRampFrame } from "./moonpay-ramp-frame";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
+import { RampCompleteScreen } from "./ramp-complete-screen";
+import { RampOnboardingPanel } from "./ramp-onboarding-panel";
+import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
+import { RampQuoteError } from "./ramp-quote-error";
+import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { RampStatusPanel } from "./ramp-status-panel";
+import { RequirementsFields } from "./requirements-fields";
+import { StripeOnrampFrame } from "./stripe-onramp-frame";
+
+/**
+ * Renders content for the active onramp wizard step.
+ *
+ * @param props - The active onramp wizard state.
+ * @returns The active onramp step content.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every onramp stage in one component while each branch stays simple.
+export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
+  const t = useTranslations();
+  const {
+    currentStepId,
+    enabledRampProviders,
+    rampProviderAccess,
+    selectedCounterparty,
+    fields,
+    setField,
+    selectProvider,
+    liveWallets,
+    walletsLoading,
+    selectedWallet,
+    selectedRampPair,
+    onboarding,
+    isAdvancing,
+    retryOnboarding,
+    pendingAgreements,
+    acceptedAgreements,
+    toggleAgreement,
+    quote,
+    transferStatus,
+    quoteSimulationLoading,
+    quoteSimulationSucceeded,
+    simulateCurrentQuote,
+    handlePairChange,
+    requirementFields,
+    collectedData,
+    setCollectedField,
+    requirementsBlocker,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
+    memoRows,
+    setMemoRows,
+  } = wizard;
+
+  if (currentStepId === "MEMO") {
+    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
+  }
+
+  if (currentStepId === "DEPOSIT") {
+    if (!hasEnabledRampProvider(rampProviderAccess)) {
+      return (
+        <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
+          {t("DashboardPayments.ramps.noDepositProviders")}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <RampPairProviderSelector
+          direction="onramp"
+          enabledRampProviders={enabledRampProviders}
+          rampProviderAccess={rampProviderAccess}
+          selectedCounterparty={selectedCounterparty}
+          wallets={liveWallets}
+          walletsLoading={walletsLoading}
+          selectedWallet={selectedWallet}
+          showWallet={true}
+          selectedPair={selectedRampPair}
+          selectedProvider={fields.provider}
+          amount={fields.amount}
+          onAmountChange={(value) => setField("amount", value)}
+          onAmountBlur={() => {}}
+          onWalletChange={(walletId) => setField("walletId", walletId)}
+          onPairChange={handlePairChange}
+          onProviderSelect={selectProvider}
+        />
+        {requirementsBlocker ? (
+          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+            {requirementsBlocker}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (currentStepId === "REQUIREMENTS") {
+    // Native fieldset[disabled] freezes every nested input and combobox trigger
+    // while the advance POST is in flight, so mid-flight edits can't desync the
+    // form from what the provider was sent.
+    return pendingAgreements !== null ? (
+      <BvnkAgreementConsent
+        agreements={pendingAgreements}
+        acceptedAgreements={acceptedAgreements}
+        onToggle={toggleAgreement}
+        disabled={isAdvancing}
+      />
+    ) : onboarding !== null &&
+      hasOnboardingLifecycle(onboarding.provider) &&
+      isOnboardingPanelStatus(onboarding) ? (
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+    ) : (
+      <fieldset disabled={isAdvancing} className="min-w-0">
+        <RequirementsFields
+          fields={requirementFields}
+          values={collectedData}
+          onChange={setCollectedField}
+        />
+      </fieldset>
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && !quote && quoteCreationError) {
+    return (
+      <RampQuoteError
+        error={quoteCreationError}
+        retrying={quoteCreationRetrying}
+        onRetry={() => void retryQuoteCreation()}
+      />
+    );
+  }
+
+  if (
+    currentStepId === "PROVIDER" &&
+    onboarding &&
+    !quote &&
+    hasOnboardingLifecycle(onboarding.provider) &&
+    isOnboardingPanelStatus(onboarding)
+  ) {
+    return (
+      <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && quote && wizard.showCompleteScreen) {
+    if (transferStatus === undefined) {
+      return <RampQuoteSkeleton />;
+    }
+    return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  if (currentStepId === "PROVIDER" && quote?.provider === "stripe") {
+    return (
+      <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
+    return (
+      <div className="space-y-6">
+        {quote.provider === "coinbase" ? (
+          <>
+            <CoinbaseQuoteSummary quote={quote} />
+            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+          </>
+        ) : (
+          <MoonpayRampFrame
+            title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
+            src={quote.hostedUrl}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (currentStepId === "PROVIDER" && quote?.deliveryMode === "manual_instructions") {
+    if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
+      return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
+    }
+
+    const labels = simulateActionLabels(quote.provider, t);
+    const simulateAction = labels
+      ? {
+          loading: quoteSimulationLoading,
+          succeeded: quoteSimulationSucceeded,
+          onClick: () => void simulateCurrentQuote(),
+          icon: <DollarSignIcon />,
+          idleLabel: labels.idle,
+          busyLabel: labels.busy,
+          doneLabel: labels.done,
+        }
+      : undefined;
+    return (
+      <ManualInstructionsQuote
+        amount={fields.amount.trim()}
+        instructions={quote.paymentInstructions}
+        action={simulateAction}
+      />
+    );
+  }
+
+  return <RampQuoteSkeleton />;
+}

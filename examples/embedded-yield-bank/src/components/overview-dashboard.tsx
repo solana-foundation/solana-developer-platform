@@ -553,9 +553,11 @@ function ActivityRow({
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">
         <span className="text-sm font-medium tabular-nums">
-          {movement.tokenAmount === null
-            ? "—"
-            : formatAmount(movement.tokenAmount, symbol)}
+          {movement.tokenAmount !== null
+            ? formatAmount(movement.tokenAmount, symbol)
+            : movement.requestedTokenAmount !== undefined
+              ? `${formatAmount(movement.requestedTokenAmount, symbol)} requested`
+              : "—"}
         </span>
         <a
           href={`https://explorer.solana.com/tx/${movement.signature}${
@@ -578,7 +580,7 @@ function MovementStatus({ movement }: { movement: YieldMovement }) {
     return (
       <Badge variant="outline" className="status-success">
         <span className="status-dot" />
-        Settled
+        Done
       </Badge>
     );
   }

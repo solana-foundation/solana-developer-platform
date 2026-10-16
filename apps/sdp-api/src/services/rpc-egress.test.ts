@@ -1,46 +1,150 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { isTransientRpcError } from "@sdp/rpc";
 import { confirmTransaction, createRpcFromTransport } from "@sdp/rpc/solana";
-import type { Signature } from "@solana/kit";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { EgressBlockedError } from "@/services/guarded-egress";
-import { checkResolvedRpcTargetConnection } from "@/services/provider-setup-registry";
-import {
-  createRpcTransportForTarget,
-  fetchRpcRelayTarget,
-  RELAY_MAX_RESPONSE_BYTES,
-  relayGuardInit,
-} from "@/services/rpc-egress";
+import { signature } from "@solana/kit";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as guardedEgress from "@/services/guarded-egress";
+import { createCustomerRpcTransport } from "@/services/rpc-egress";
 
-/**
- * Both directions matter. A guard that refused everything would pass a
- * blocklist test and take local development and the Surfpool suites down with
- * it, so each path is asserted to reach a private address when the target is
- * platform-owned and to refuse when it is tenant-owned.
- */
-let server: Server;
-let origin: string;
-const scriptedStatuses: number[] = [];
+const payload = { jsonrpc: "2.0", id: "probe", method: "getVersion", params: [] };
 
-beforeAll(async () => {
-  server = createServer((req, res) => {
-    const status = req.url?.match(/^\/status\/(\d{3})$/);
-    if (status) {
-      res.writeHead(Number(status[1]));
-      res.end();
-      return;
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("createCustomerRpcTransport", () => {
+  it("refuses an endpoint whose host resolves inward", async () => {
+    const transport = createCustomerRpcTransport("https://localhost:8899/");
+
+    await expect(transport({ payload })).rejects.toBeInstanceOf(guardedEgress.EgressBlockedError);
+  });
+
+  it("refuses a plaintext endpoint", async () => {
+    const transport = createCustomerRpcTransport("http://rpc.example.com/");
+
+    await expect(transport({ payload })).rejects.toBeInstanceOf(guardedEgress.EgressBlockedError);
+  });
+
+  it("posts through the guard with the redirect, size and time bounds", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockResolvedValue(
+        jsonResponse({ jsonrpc: "2.0", id: "probe", result: { "solana-core": "0.0.0" } })
+      );
+    const transport = createCustomerRpcTransport("https://rpc.example.com/v2/key_synthetic");
+
+    const response = await transport<{ result: { "solana-core": string } }>({ payload });
+
+    expect(response.result["solana-core"]).toBe("0.0.0");
+    expect(guardedFetch).toHaveBeenCalledTimes(1);
+    expect(guardedFetch).toHaveBeenCalledWith("https://rpc.example.com/v2/key_synthetic", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(payload),
+      signal: expect.any(AbortSignal),
+      maxRedirects: 3,
+      maxResponseBytes: 10 * 1024 * 1024,
+      rejectOversizeResponse: true,
+    });
+  });
+
+  it("bounds each request to 30 seconds", async () => {
+    vi.spyOn(guardedEgress, "guardedFetch").mockResolvedValue(
+      jsonResponse({ jsonrpc: "2.0", id: "probe", result: null })
+    );
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+    await transport({ payload });
+
+    expect(timeout).toHaveBeenCalledWith(30_000);
+  });
+
+  it("keeps the time bound when the caller supplies a signal", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockResolvedValue(jsonResponse({ jsonrpc: "2.0", id: "probe", result: null }));
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort());
+    const controller = new AbortController();
+    const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+    await transport({ payload, signal: controller.signal });
+
+    const [, init] = guardedFetch.mock.calls[0];
+    expect(init.signal).not.toBe(controller.signal);
+    expect(controller.signal.aborted).toBe(false);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).toMatchObject({ aborted: true });
+  });
+
+  it("follows the caller's cancellation", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockResolvedValue(jsonResponse({ jsonrpc: "2.0", id: "probe", result: null }));
+    const controller = new AbortController();
+    const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+    await transport({ payload, signal: controller.signal });
+    const [, init] = guardedFetch.mock.calls[0];
+    controller.abort();
+
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).toMatchObject({ aborted: true });
+  });
+
+  it("surfaces an oversize answer as the guard's error", async () => {
+    vi.spyOn(guardedEgress, "guardedFetch").mockRejectedValue(
+      new guardedEgress.EgressResponseTooLargeError("rpc.example.com")
+    );
+    const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+    await expect(transport({ payload })).rejects.toBeInstanceOf(
+      guardedEgress.EgressResponseTooLargeError
+    );
+  });
+
+  it.each([408, 429, 500, 502, 503, 504])(
+    "classifies an upstream HTTP %i as transient",
+    async (status) => {
+      vi.spyOn(guardedEgress, "guardedFetch").mockResolvedValue(new Response(null, { status }));
+      const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+      const outcome = transport({ payload });
+
+      await expect(outcome).rejects.toThrow(`RPC request failed with HTTP ${status}`);
+      await expect(outcome).rejects.toSatisfy(isTransientRpcError);
     }
-    if (req.url === "/scripted") {
-      const next = scriptedStatuses.shift();
-      if (next !== undefined) {
-        res.writeHead(next);
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
+  );
+
+  it.each([400, 401, 403, 404])(
+    "does not classify an upstream HTTP %i as transient",
+    async (status) => {
+      vi.spyOn(guardedEgress, "guardedFetch").mockResolvedValue(new Response(null, { status }));
+      const transport = createCustomerRpcTransport("https://rpc.example.com/");
+
+      const outcome = transport({ payload });
+
+      await expect(outcome).rejects.toThrow(`RPC request failed with HTTP ${status}`);
+      await expect(outcome).rejects.toSatisfy((error: unknown) => !isTransientRpcError(error));
+    }
+  );
+
+  it("keeps polling a confirmation through upstream 429 and 503 answers", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValue(
+        jsonResponse({
           jsonrpc: "2.0",
           id: "0",
           result: {
@@ -49,189 +153,17 @@ beforeAll(async () => {
           },
         })
       );
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ jsonrpc: "2.0", id: "probe", result: { "solana-core": "0.0.0" } }));
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-describe("fetchRpcRelayTarget", () => {
-  it("relays a platform target to a private address", async () => {
-    // The platform rail has to keep working against a local validator.
-    const upstream = await fetchRpcRelayTarget(
-      { endpoint: origin },
-      { headers: { "Content-Type": "application/json" }, body: "{}" }
-    );
-
-    expect(upstream.status).toBe(200);
-  });
-
-  it("refuses a custom target whose host resolves inward", async () => {
-    // `custom` is the project's own stored endpoint, validated only as a URL
-    // when it is written and carrying no connectionId. It is as much a
-    // customer-supplied host as a BYOK connection.
-    await expect(
-      fetchRpcRelayTarget(
-        {
-          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
-          providerId: "custom",
-        },
-        { headers: { "Content-Type": "application/json" }, body: "{}" }
-      )
-    ).rejects.toBeInstanceOf(EgressBlockedError);
-  });
-
-  it("refuses a tenant target whose host resolves inward", async () => {
-    // Same destination, only the connectionId differs, which is the whole
-    // rule: a target a customer supplied does not get to name an internal
-    // address by way of a name that resolves to one.
-    await expect(
-      fetchRpcRelayTarget(
-        {
-          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
-          connectionId: "rconn_test",
-        },
-        { headers: { "Content-Type": "application/json" }, body: "{}" }
-      )
-    ).rejects.toBeInstanceOf(EgressBlockedError);
-  });
-});
-
-describe("createRpcTransportForTarget", () => {
-  const payload = { jsonrpc: "2.0", id: "probe", method: "getVersion", params: [] };
-
-  it("runs a platform Solana transport through the relay executor", async () => {
-    const transport = createRpcTransportForTarget({ endpoint: origin });
-
-    const response = await transport<{ result: { "solana-core": string } }>({ payload });
-
-    expect(response.result["solana-core"]).toBe("0.0.0");
-  });
-
-  it("guards customer endpoints used by the Solana transport", async () => {
-    const transport = createRpcTransportForTarget({
-      endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
-      connectionId: "rconn_test",
-    });
-
-    await expect(transport({ payload })).rejects.toBeInstanceOf(EgressBlockedError);
-  });
-
-  it.each([408, 429, 500, 502, 503, 504])(
-    "classifies an upstream HTTP %i as transient",
-    async (status) => {
-      const transport = createRpcTransportForTarget({ endpoint: `${origin}/status/${status}` });
-
-      const error = await transport({ payload }).catch((caught: unknown) => caught);
-
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe(`RPC request failed with HTTP ${status}`);
-      expect(isTransientRpcError(error)).toBe(true);
-    }
-  );
-
-  it.each([400, 401, 403, 404])(
-    "does not classify an upstream HTTP %i as transient",
-    async (status) => {
-      const transport = createRpcTransportForTarget({ endpoint: `${origin}/status/${status}` });
-
-      const error = await transport({ payload }).catch((caught: unknown) => caught);
-
-      expect((error as Error).message).toBe(`RPC request failed with HTTP ${status}`);
-      expect(isTransientRpcError(error)).toBe(false);
-    }
-  );
-
-  it("keeps polling a confirmation through upstream 429 and 503 answers", async () => {
-    scriptedStatuses.push(429, 503);
-    const rpc = createRpcFromTransport(
-      createRpcTransportForTarget({ endpoint: `${origin}/scripted` })
-    );
+    const rpc = createRpcFromTransport(createCustomerRpcTransport("https://rpc.example.com/"));
 
     const confirmation = await confirmTransaction(
       rpc,
-      "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW" as Signature,
+      signature(
+        "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+      ),
       { timeoutMs: 5_000, pollIntervalMs: 1 }
     );
 
     expect(confirmation.confirmationStatus).toBe("confirmed");
-    expect(scriptedStatuses).toEqual([]);
-  });
-});
-
-describe("checkResolvedRpcTargetConnection", () => {
-  const base = {
-    providerId: "helius" as const,
-    projectId: null,
-    endpointLabel: "local",
-    headers: {},
-    selectionMode: "organization_provider" as const,
-  };
-
-  it("probes a platform target at a private address", async () => {
-    // A managed provider's endpoint comes from deployment config, which is
-    // what local development and the Surfpool suites rely on.
-    const { upstream } = await checkResolvedRpcTargetConnection({
-      target: { ...base, endpoint: origin },
-    });
-
-    expect(upstream.status).toBe(200);
-  });
-
-  it("refuses to probe the project's own custom endpoint when it resolves inward", async () => {
-    await expect(
-      checkResolvedRpcTargetConnection({
-        target: {
-          ...base,
-          providerId: "custom",
-          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
-          selectionMode: "project_custom_provider",
-        },
-      })
-    ).rejects.toBeInstanceOf(EgressBlockedError);
-  });
-
-  it("refuses to probe a tenant target that resolves inward", async () => {
-    // POST /v1/rpc/test resolves tenant connections, so this path reaches a
-    // customer endpoint whenever one is active.
-    await expect(
-      checkResolvedRpcTargetConnection({
-        target: {
-          ...base,
-          endpoint: `https://localhost:${(server.address() as AddressInfo).port}/`,
-          connectionId: "rconn_test",
-        },
-      })
-    ).rejects.toBeInstanceOf(EgressBlockedError);
-  });
-});
-
-describe("customer egress limits", () => {
-  it("bounds redirects, response size and time on the relay path", () => {
-    const init = relayGuardInit({ headers: {}, body: "{}" });
-
-    expect(init.maxRedirects).toBe(3);
-    expect(init.maxResponseBytes).toBe(RELAY_MAX_RESPONSE_BYTES);
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-  });
-
-  it("keeps the time bound even when the caller supplies a signal", () => {
-    // The Kit transport path always passes a signal; if that replaced the
-    // ceiling instead of joining it, the 30s bound would never apply there.
-    const controller = new AbortController();
-    const init = relayGuardInit({ headers: {}, body: "{}", signal: controller.signal });
-
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.signal).not.toBe(controller.signal);
-    expect(init.signal?.aborted).toBe(false);
-    controller.abort();
-    expect(init.signal?.aborted).toBe(true);
+    expect(guardedFetch).toHaveBeenCalledTimes(3);
   });
 });

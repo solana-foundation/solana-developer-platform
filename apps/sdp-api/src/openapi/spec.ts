@@ -1,7 +1,21 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
-import { DEFAULT_SDP_API_URL } from "@sdp/types";
+import {
+  DEFAULT_SDP_API_URL,
+  OPERATION_FAMILIES,
+  OPERATION_FAMILY_BY_TYPE,
+  OPERATION_TYPES,
+  type OperationFamily,
+  type OperationType,
+  RAMP_PROVIDERS,
+  type RampProviderId,
+  SDP_MODULES,
+  SDP_RELEASE_CHANNELS,
+  type SdpModule,
+  type SdpReleaseChannel,
+} from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
+import { routeOwnerOf } from "@/routes/route-modules";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
@@ -16,11 +30,15 @@ import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
-import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
 import { registerTransactionsPaths } from "./paths/transactions";
+import {
+  isValuePublished,
+  pruneUnpublishedValues,
+  publishedModules,
+} from "./release-channel-values";
 
 const EARN_TAG_DESCRIPTION =
   "Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.";
@@ -35,18 +53,14 @@ const OPENAPI_TAG = {
     description: "Wallet signing provider configuration and wallet management.",
   },
   PROJECTS: { name: "Projects", description: "Project and project member management." },
-  RPC: { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
+  RPC: { name: "RPC", description: "Managed Solana RPC relay." },
   ISSUANCE: {
     name: "Issuance",
     description: "Token issuance, allowlists, and lifecycle operations.",
   },
   PAYMENTS: {
     name: "Payments",
-    description: "Wallet balances, transfer execution, policies, and ramps.",
-  },
-  POLICIES: {
-    name: "Policies",
-    description: "Wallet and API-key policy-control inventory.",
+    description: "Wallet balances, transfers, and payment flows.",
   },
   PRIVATE_CHANNELS: {
     name: "Private Channels",
@@ -82,20 +96,62 @@ const OPENAPI_TAG = {
 
 /**
  * Whether the public OpenAPI document carries the Earn family. Everything
- * partner-facing derives from that document: api.solana.com/openapi.json and
+ * partner-facing derives from that document, built per release channel: api.solana.com/openapi.json and
  * Swagger UI, the generated API reference, the Postman collection, the
  * playground catalog and the AI discovery files. Held false until launch
  * (PRO-2038): Earn is feature-complete but not announced, so partners must not
- * discover it yet. The internal document and the runtime are unaffected.
+ * discover it yet. The internal document and the runtime are unaffected, except
+ * project provider availability, which omits Earn entries to match this document.
  * Flipping this back is a PRO-1872 security sign-off PR (routes/earn/CLAUDE.md,
  * "Public OpenAPI promotion"); spec.test.ts pins both states.
  */
 export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
 
 export type PublicOpenApiDocumentOptions = {
+  /**
+   * The deployment's release channel. The document publishes only routes whose
+   * module runs in it, so a deployment never documents a route it refuses with
+   * 403: production (`stable`) documents less than dev (`experimental`). A
+   * narrower filter on top of `publishEarn`, never a way around it: Earn is
+   * published only when both allow it.
+   */
+  releaseChannel: SdpReleaseChannel;
   /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
   publishEarn?: boolean;
 };
+
+/**
+ * Drops every route whose owning module (routes/route-modules.ts) is outside the
+ * release channel. A public route with no owner throws, so a new family cannot
+ * reach the public document without being filed under a module first.
+ */
+function keepRoutesInReleaseChannel(registry: OpenAPIRegistry, releaseChannel: SdpReleaseChannel) {
+  const modules: readonly string[] = SDP_RELEASE_CHANNELS[releaseChannel];
+  return registry.definitions.filter((definition) => {
+    if (definition.type !== "route") return true;
+    const owner = routeOwnerOf(definition.route.path);
+    if (owner === undefined) {
+      throw new Error(
+        `Public OpenAPI path ${definition.route.path} has no owning module in routes/route-modules.ts`
+      );
+    }
+    return owner === "core" || modules.includes(owner);
+  });
+}
+
+/** The public tags that at least one published operation uses, in declared order. */
+function usedTags(document: OpenAPIObject, tags: readonly { name: string }[]) {
+  const used = new Set(
+    Object.values(document.paths ?? {}).flatMap((item) =>
+      Object.values(item ?? {}).flatMap((operation) =>
+        typeof operation === "object" && operation !== null && "tags" in operation
+          ? ((operation as { tags?: string[] }).tags ?? [])
+          : []
+      )
+    )
+  );
+  return tags.filter((tag) => used.has(tag.name));
+}
 
 const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
@@ -104,7 +160,6 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.PROJECTS,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
-  OPENAPI_TAG.POLICIES,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
@@ -124,7 +179,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.RPC,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
-  OPENAPI_TAG.POLICIES,
   OPENAPI_TAG.PRIVATE_CHANNELS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
@@ -168,11 +222,10 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   if (publishEarn) {
     registerPublicEarnPaths(registry);
   }
-  registerProjectPaths(registry);
+  registerProjectPaths(registry, publishEarn);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
-  registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
@@ -186,12 +239,11 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);
-  registerProjectPaths(registry);
+  registerProjectPaths(registry, true);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
-  registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
@@ -203,9 +255,11 @@ function registerAllPaths(registry: OpenAPIRegistry) {
 function createDocument({
   publicOnly,
   publishEarn,
+  releaseChannel,
 }: {
   publicOnly: boolean;
   publishEarn: boolean;
+  releaseChannel?: SdpReleaseChannel;
 }): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
@@ -218,9 +272,13 @@ function createDocument({
     registerAllPaths(registry);
   }
 
-  const generator = new OpenApiGeneratorV3(registry.definitions);
+  const generator = new OpenApiGeneratorV3(
+    releaseChannel === undefined
+      ? registry.definitions
+      : keepRoutesInReleaseChannel(registry, releaseChannel)
+  );
 
-  return generator.generateDocument({
+  const document = generator.generateDocument({
     openapi: "3.0.3",
     info: {
       title: "Solana Developer Platform API",
@@ -241,17 +299,61 @@ function createDocument({
       },
     ],
   });
+  if (!publicOnly || releaseChannel === undefined) {
+    return document;
+  }
+  const published = pruneUnpublishedValues(document, releaseChannel, publishEarn);
+  published.tags = usedTags(published, published.tags ?? []);
+  return published;
 }
 
 export function createOpenApiDocument(): OpenAPIObject {
   return createDocument({ publicOnly: false, publishEarn: true });
 }
 
-export function createPublicOpenApiDocument(
-  options: PublicOpenApiDocumentOptions = {}
-): OpenAPIObject {
+export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOptions): OpenAPIObject {
+  const { releaseChannel } = options;
   return createDocument({
     publicOnly: true,
-    publishEarn: options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED,
+    publishEarn:
+      (options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED) &&
+      SDP_RELEASE_CHANNELS[releaseChannel].includes("earn"),
+    releaseChannel,
   });
+}
+
+/**
+ * What a release channel's public surfaces may name, for consumers that cannot
+ * load this package (the docs site's MDX pipeline): the modules and ramp
+ * providers the public document publishes, Earn's hold included, the API-key
+ * operation families and types it documents, and the full vocabularies to
+ * validate tags against.
+ */
+export type PublicSurfaceManifest = {
+  releaseChannel: SdpReleaseChannel;
+  modules: SdpModule[];
+  rampProviders: RampProviderId[];
+  allowedOperations: { family: OperationFamily; types: OperationType[] }[];
+  allModules: SdpModule[];
+  allRampProviders: RampProviderId[];
+};
+
+export function createPublicSurfaceManifest(
+  releaseChannel: SdpReleaseChannel
+): PublicSurfaceManifest {
+  const modules = publishedModules(releaseChannel, EARN_PUBLIC_SURFACE_PUBLISHED);
+  const published = (value: string) => isValuePublished(value, modules, releaseChannel);
+  return {
+    releaseChannel,
+    modules: SDP_MODULES.filter((module) => modules.has(module)),
+    rampProviders: RAMP_PROVIDERS.filter(published),
+    allowedOperations: OPERATION_FAMILIES.filter(published).map((family) => ({
+      family,
+      types: OPERATION_TYPES.filter(
+        (type) => OPERATION_FAMILY_BY_TYPE[type] === family && published(type)
+      ),
+    })),
+    allModules: [...SDP_MODULES],
+    allRampProviders: [...RAMP_PROVIDERS],
+  };
 }

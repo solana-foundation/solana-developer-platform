@@ -19,7 +19,22 @@ const nextConfig = {
     return [
       {
         source: "/docs/payments/wallet-policies",
-        destination: "/docs/wallet-operations/policies",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
+        permanent: true,
+      },
+      {
+        source: "/docs/wallet-operations/policies",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
+        permanent: true,
+      },
+      {
+        source: "/docs/reference/api/policies",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
+        permanent: true,
+      },
+      {
+        source: "/docs/reference/api/policies/:path*",
+        destination: "/docs/developing-with-sdp/manage-api-keys",
         permanent: true,
       },
       {

@@ -76,6 +76,7 @@ describe("rotateApiKey wallet-scope guard", () => {
       24,
       ["*"],
       null,
+      null,
       "pepper",
       ({ bindings }: { bindings: Array<{ walletId: string; permissions: string[] }> }) => {
         seen.push([...bindings].sort((a, b) => a.walletId.localeCompare(b.walletId)));
@@ -102,6 +103,7 @@ describe("rotateApiKey wallet-scope guard", () => {
         24,
         ["*"],
         null,
+        null,
         "pepper",
         () => {
           throw new Error("scope refused");
@@ -123,6 +125,7 @@ describe("rotateApiKey wallet-scope guard", () => {
       TEST_PROJECT.id,
       24,
       ["*"],
+      null,
       null,
       "pepper"
     );

@@ -1,3 +1,5 @@
+import type { SdpEnvironment } from "./api-keys";
+
 export const CUSTODY_PROVIDERS = [
   "local",
   "fireblocks",
@@ -15,20 +17,93 @@ export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
 
 /**
- * Every provider the catalog shows is built and runnable, so the status only
- * ever answers "what is my next step" — never "does this exist". The two
- * non-actionable states are deliberately distinct (HOO-772/775 and the
- * remove-signup-waitlist decision map): `request_access` is organization
- * access the SDP team grants, `not_configured` is environment availability —
- * the deployment does not hold that provider's credentials. Presenting one as
- * the other is how both prior vocabularies went wrong.
+ * Where a wallet's provider account comes from, fixed per wallet by its owner
+ * row: a custody config is `managed` (the deployment's own provider account),
+ * a custody connection is `byok` (a provider account the project supplied).
  */
-export const CUSTODY_PROVIDER_DISPLAY_STATUSES = [
-  "available",
-  "active",
-  "request_access",
-  "not_configured",
+export const CUSTODY_MODES = ["managed", "byok"] as const;
+export type CustodyMode = (typeof CUSTODY_MODES)[number];
+
+/** Providers with a BYOK runtime: the only ones a custody connection can name. */
+export const BYOK_CUSTODY_PROVIDERS = ["privy"] as const satisfies readonly CustodyProvider[];
+export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
+
+/**
+ * Whether `provider` has a BYOK runtime.
+ *
+ * @param provider - The custody provider to classify.
+ * @returns True when a custody connection may name `provider`.
+ */
+export function isByokCustodyProvider(provider: CustodyProvider): provider is ByokCustodyProvider {
+  return BYOK_CUSTODY_PROVIDERS.some((byokProvider) => byokProvider === provider);
+}
+
+/**
+ * Which custody modes a project may set up, by its environment. Production
+ * projects hold mainnet funds, so SDP's hosted deployment never holds their
+ * keys under its own provider accounts (ADR 0006).
+ */
+export const CUSTODY_MODES_BY_ENVIRONMENT = {
+  sandbox: ["managed", "byok"],
+  production: ["byok"],
+} as const satisfies Record<SdpEnvironment, readonly CustodyMode[]>;
+
+/**
+ * Whether a project in `environment` may set up `mode` custody.
+ *
+ * @param environment - The project's environment.
+ * @param mode - The custody mode being set up.
+ * @returns True when `CUSTODY_MODES_BY_ENVIRONMENT` lists `mode` for `environment`.
+ */
+export function isCustodyModeAllowedInEnvironment(
+  environment: SdpEnvironment,
+  mode: CustodyMode
+): boolean {
+  const allowedModes: readonly CustodyMode[] = CUSTODY_MODES_BY_ENVIRONMENT[environment];
+  return allowedModes.includes(mode);
+}
+
+/**
+ * Why the custody setup rule refused a (provider, mode) pair for a project,
+ * carried as `details.reason` on its 403.
+ */
+export const CUSTODY_SETUP_REFUSAL_REASONS = [
+  "custody_provider_not_in_release_channel",
+  "custody_mode_not_allowed",
+  "provider_not_entitled",
 ] as const;
+export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[number];
+
+/**
+ * Why the staged-provider rule refused a ramps, compliance or Earn provider
+ * for a project, carried as `details.reason` on its 403: a policy outcome, not
+ * a fault.
+ */
+export const STAGED_PROVIDER_REFUSAL_REASONS = [
+  "provider_not_in_release_channel",
+  "provider_not_offered",
+  "provider_not_entitled",
+] as const;
+export type StagedProviderRefusalReason = (typeof STAGED_PROVIDER_REFUSAL_REASONS)[number];
+
+/**
+ * Whether `reason` is one of the staged-provider rule's refusal reasons.
+ *
+ * @param reason - A project provider refusal reason.
+ * @returns True for a `STAGED_PROVIDER_REFUSAL_REASONS` member.
+ */
+export function isStagedProviderRefusalReason(
+  reason: string
+): reason is StagedProviderRefusalReason {
+  return STAGED_PROVIDER_REFUSAL_REASONS.some((stagedReason) => stagedReason === reason);
+}
+
+/**
+ * A custody provider's status on a dashboard that lists only the providers the
+ * project can use: `active` once it is set up, `available` until then. A
+ * provider the project cannot use is hidden, never shown with a status.
+ */
+export const CUSTODY_PROVIDER_DISPLAY_STATUSES = ["available", "active"] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
 
 /**
@@ -166,12 +241,11 @@ export type CustodyProviderSetupField = CustodyProviderSetupFieldBase &
   CustodyProviderSetupFieldValueHandling;
 
 /**
- * How this provider's credentials come to exist: a self-service form, an
- * external request route, or none — the deployment supplies them via env.
+ * How this provider's credentials come to exist: a self-service form, or
+ * none — the deployment supplies them via env.
  */
 export type CustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly CustodyProviderSetupField[] }
-  | { mode: "request_access"; requestAccessUrl: string }
   | { mode: "none" };
 
 interface CustodyProviderCatalogEntryShape {
@@ -186,8 +260,22 @@ interface CustodyProviderCatalogEntryShape {
   storedCredentialSetup: CustodyProviderStoredCredentialSetup;
 }
 
+/**
+ * A BYOK custody provider takes self-service credentials by type, so the custody
+ * setup gate's release-channel check (which admits `byok` only for
+ * `BYOK_CUSTODY_PROVIDERS`) already implies self-service setup.
+ */
 type CustodyProviderCatalogByIdShape = {
-  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & { id: Provider };
+  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & {
+    id: Provider;
+  } & (Provider extends ByokCustodyProvider
+      ? {
+          storedCredentialSetup: Extract<
+            CustodyProviderStoredCredentialSetup,
+            { mode: "self_service" }
+          >;
+        }
+      : unknown);
 };
 
 const DEFAULT_CUSTODY_PROVIDER_USE_CASES = CUSTODY_PROVIDER_USE_CASES;
@@ -273,14 +361,7 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    // The one provider with an established external request route. The other
-    // manual providers get a CTA when the request-access endpoint with
-    // organization/provider attribution exists (decision-map.md #4) — not a
-    // recycled link whose audience we have not confirmed.
-    storedCredentialSetup: {
-      mode: "request_access",
-      requestAccessUrl: "https://solanafoundation.typeform.com/to/wShiq9SN",
-    },
+    storedCredentialSetup: { mode: "none" },
   },
   coinbase_cdp: {
     id: "coinbase_cdp",
@@ -386,9 +467,29 @@ export type CustodyWalletPurpose =
    * tokens around.
    */
   | "dvp_settlement_authority";
-/** Legacy Config lifecycle states; an absent Config is not a stored status. */
-export const CUSTODY_CONFIG_STATUSES = ["active", "inactive"] as const;
+/**
+ * Legacy Config lifecycle states; an absent Config is not a stored status. An
+ * `archived` Config is retired for good: it never resolves, never re-activates,
+ * and never arbitrates the per-scope provider uniqueness.
+ */
+export const CUSTODY_CONFIG_STATUSES = ["active", "inactive", "archived"] as const;
 export type CustodyConfigStatus = (typeof CUSTODY_CONFIG_STATUSES)[number];
+
+/** Whether each status keeps a Config eligible for provider lookup and re-activation. */
+export const CUSTODY_CONFIG_STATUS_UNARCHIVED = {
+  active: true,
+  inactive: true,
+  archived: false,
+} as const satisfies Record<CustodyConfigStatus, boolean>;
+
+/** Reports whether a Config in the given status can still be found by provider and re-activated. */
+export function isUnarchivedCustodyConfigStatus(status: CustodyConfigStatus): boolean {
+  return CUSTODY_CONFIG_STATUS_UNARCHIVED[status];
+}
+
+/** Config statuses a provider lookup may return; archived rows are skipped. */
+export const UNARCHIVED_CUSTODY_CONFIG_STATUSES: readonly CustodyConfigStatus[] =
+  CUSTODY_CONFIG_STATUSES.filter(isUnarchivedCustodyConfigStatus);
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {
@@ -509,42 +610,19 @@ export type InitializeSigningRequest =
   | InitializeAnchorageSigningRequest
   | InitializeUtilaSigningRequest;
 
-export interface SwitchFireblocksSigningRequest extends FireblocksCustodyOptions {
+/**
+ * The provider account a new custody wallet lives under: the project's Managed
+ * config for a provider, or a BYOK connection. Exactly one is named.
+ */
+export type CustodyWalletOwnerTarget =
+  | { provider: CustodyProvider; connectionId?: never }
+  | { connectionId: string; provider?: never };
+
+export type CreateWalletRequest = CustodyWalletOwnerTarget & {
   projectId?: string;
-}
-
-export interface SwitchConnectionSigningRequest {
-  connectionId: string;
-  provider?: CustodyProvider;
-}
-
-export type SwitchSigningRequest =
-  | SwitchConnectionSigningRequest
-  | InitializeLocalSigningRequest
-  | SwitchFireblocksSigningRequest
-  | InitializePrivySigningRequest
-  | InitializeCoinbaseCdpSigningRequest
-  | InitializeParaSigningRequest
-  | InitializeTurnkeySigningRequest
-  | InitializeDfnsSigningRequest
-  | InitializeIbmHavenSigningRequest
-  | InitializeAnchorageSigningRequest
-  | InitializeUtilaSigningRequest;
-
-export interface CreateWalletRequest {
-  projectId?: string;
-  connectionId?: string;
-  provider?: CustodyProvider;
   label?: string;
   purpose?: CustodyWalletPurpose;
-  setDefault?: boolean;
-}
-
-export interface SetDefaultWalletRequest {
-  projectId?: string;
-  provider?: CustodyProvider;
-  walletId: string;
-}
+};
 
 export interface DeleteWalletRequest {
   projectId?: string;
@@ -561,8 +639,6 @@ export interface CustodyConfigSummary {
   organizationId: string;
   projectId: string | null;
   provider: CustodyProvider;
-  publicKey: string;
-  defaultWalletId: string | null;
   status: CustodyConfigStatus;
   createdAt: string;
 }
@@ -574,7 +650,6 @@ export type CustodyWalletOwner =
 export type CustodyWalletSummary = CustodyWalletOwner & {
   id: string;
   provider?: CustodyProvider;
-  isDefaultProvider?: boolean;
   isRuntimeExecutionAllowed: boolean;
   walletId: string;
   publicKey: string;
@@ -613,22 +688,6 @@ export type CustodyWalletWithBalance = CustodyWalletMetadata & {
   balance: CustodyWalletBalance;
 };
 
-export interface CustodyConfigWithDefault extends CustodyConfigSummary {
-  isDefault: boolean;
-}
-
-export interface SwitchProviderOption {
-  provider: CustodyProvider;
-  hasReusableWallet: boolean;
-  needsWalletLabel: boolean;
-  isActive: boolean;
-  isDefault: boolean;
-}
-
-export interface CustodyConfigResponse {
-  config: CustodyConfigSummary;
-}
-
 export interface CustodyWalletResponse {
   wallet: CustodyWalletSummary;
 }
@@ -655,12 +714,7 @@ export interface CustodyWalletMetadataResponse {
 }
 
 export interface CustodyConfigsResponse {
-  configs: CustodyConfigWithDefault[];
-  defaultConfigId: string | null;
-}
-
-export interface SwitchProviderOptionsResponse {
-  providers: SwitchProviderOption[];
+  configs: CustodyConfigSummary[];
 }
 
 export interface DeleteWalletResponse {
@@ -673,14 +727,6 @@ export interface InitializeSigningResponse {
   publicKey: string;
   walletId: string;
 }
-
-export type SwitchSigningResponse =
-  | InitializeSigningResponse
-  | {
-      connectionId: string;
-      publicKey: string;
-      walletId: string;
-    };
 
 export interface SignerCheckResponse {
   walletId: string;

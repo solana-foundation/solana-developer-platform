@@ -50,8 +50,8 @@ packages/*
 !packages/sdp-custody
 !packages/sdp-redaction
 !packages/sdp-solana
-!packages/sdp-policy
 !packages/sdp-payments
+!packages/sdp-fee-payment
 !packages/sdp-issuance
 docs
 infra

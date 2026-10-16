@@ -8,9 +8,9 @@ import type { VaultDeadline } from "@/services/earn/vault-deadline";
  * (PRO-1741).
  *
  * REPORT-ONLY by design, in both directions. An unrecorded holding is
- * surfaced, never adopted into `earn_positions`: a custody wallet may be
- * shared by sibling projects through an organization-level config, so an
- * auto-created claim would have to guess attribution, and a scan that writes
+ * surfaced, never adopted into `earn_positions`: an unrecorded holding says
+ * nothing about which deposit or intent produced it, so an auto-created claim
+ * would have to guess attribution, and a scan that writes
  * money records fabricates claims the moment it has a bug. The reverse
  * finding never closes a row for the same reason — reporting is recoverable,
  * a wrong write is not.

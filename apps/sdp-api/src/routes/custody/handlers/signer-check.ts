@@ -1,7 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
-import { resolveRpcTarget } from "@sdp/rpc/relay";
-import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
-import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import { createClusterRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -18,21 +17,21 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
-import { createRpcTransportForTarget } from "@/services/rpc-egress";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
-import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
+import { resolveAuthenticatedSponsoredFeePayer } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -61,6 +60,7 @@ async function isValidWalletSignature(
 export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
   const body = c.req.valid("json");
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
 
   const resolvedWalletId = resolveApiKeySigningWalletId(auth, body.walletId, ["wallets:write"]);
   if (resolvedWalletId === null) {
@@ -77,23 +77,23 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     if (!wallet) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+    assertApiKeyCustodyWalletAccess(auth, wallet.id, ["wallets:write"]);
     // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
     const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
       kind: "wallet",
       organizationId: auth.organizationId,
-      projectId: auth.projectId ?? undefined,
+      projectId,
       walletId: resolvedWalletId,
     });
-    // A retained project Connection must not disappear into the org-Config inventory fallback.
+    // The legacy selector and the inventory must agree on the Connection; a mismatch is ambiguous ownership.
     if (target?.kind === "connection" && target.connectionId !== wallet.custodyConnectionId) {
       throw conflict("Custody wallet ownership is ambiguous");
     }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
-    // The exact signer repeats its runtime guard; a default change cannot select another wallet.
+    // The exact signer repeats its runtime guard against the same wallet row.
     await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
       auth.organizationId,
-      auth.projectId ?? undefined,
+      projectId,
       wallet.id
     );
 
@@ -102,30 +102,18 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // a signer check is diagnostics, and diagnostics must not be able to spend
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
-    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
-    const [signer, feePayer, rpcTarget] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
-      feePayment.getFeePayer(),
-      resolveRpcTarget({
-        env: c.env,
-        kv: c.var.kv,
-        db: getDb(c.env),
-        organizationId: auth.organizationId,
-        authProjectId: auth.projectId,
-        requestedProjectId: null,
-        // Deliberately no tenant connection lookup: signer check stays on the
-        // platform rail. It is API-key reachable and organization-wide, so
-        // routing it through the fail-closed resolver would let one mistyped
-        // key on an unrelated surface take this endpoint down for every
-        // caller. The blast radius of a bad tenant credential belongs to the
-        // RPC relay.
-      }),
+    const [signer, feePayer] = await Promise.all([
+      createOrgSignerForCustodyWallet(
+        c.env,
+        auth.organizationId,
+        projectId,
+        wallet.id,
+        "custody.signer_check"
+      ),
+      resolveAuthenticatedSponsoredFeePayer(c),
     ]);
 
-    // The `custom` provider endpoint is project-supplied and only URL-checked
-    // on write, so it goes through the guarded transport like the relay's
-    // (HOO-1560). Platform targets keep the ordinary fetch.
-    const rpc = createRpcFromTransport(createRpcTransportForTarget(rpcTarget));
+    const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 

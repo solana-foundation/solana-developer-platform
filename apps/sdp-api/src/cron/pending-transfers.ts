@@ -1,3 +1,4 @@
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 /**
  * Pending-transfers reconciliation entrypoint.
  *
@@ -11,7 +12,6 @@ import type { BackgroundRunner } from "@/runtime/background";
 import type { Observability } from "@/runtime/observability";
 import { reconcileBvnkOnrampPayouts } from "@/services/jobs/reconcile-bvnk-onramp-payouts";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
-import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import type { Env } from "@/types/env";
 
@@ -29,8 +29,7 @@ export function runPendingTransfersReconciliation(deps: PendingTransfersReconcil
     await Promise.all([
       trackPendingTransfers(deps.env),
       reconcileSponsorshipBudgets(deps.env),
-      replayRampWebhookEvents(deps.env),
-      reconcileBvnkOnrampPayouts(deps.env),
+      reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES),
     ]);
   };
 

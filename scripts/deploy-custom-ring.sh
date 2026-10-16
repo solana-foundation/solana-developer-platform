@@ -17,13 +17,18 @@ set -euo pipefail
 # init; a ring initialized outside custody can never be adopted by SDP.
 #
 # Usage:
-#   SDP_API_KEY=sk_... scripts/deploy-custom-ring.sh <ring-label>
+#   SDP_API_KEY=sk_... SDP_CUSTODY_PROVIDER=privy scripts/deploy-custom-ring.sh <ring-label>
 #
 # Environment:
 #   SDP_API_KEY             project API key with custody:admin, not
 #                           wallet-scoped (dashboard -> API keys). Required
 #                           unless CUSTODY_WALLET_ADDRESS is set.
 #   SDP_API_URL             default http://localhost:8787
+#   SDP_CUSTODY_PROVIDER    Managed custody provider to create the wallet
+#                           under (e.g. privy). Set exactly one of this or
+#                           SDP_CUSTODY_CONNECTION_ID when creating a wallet.
+#   SDP_CUSTODY_CONNECTION_ID
+#                           BYOK custody connection to create the wallet in.
 #   CUSTODY_WALLET_ADDRESS  reuse an existing custody wallet instead of
 #                           creating one (skips the API call entirely).
 #   WORK_DIR                default ~/.sdp-ring-deploy/<ring-label>
@@ -118,10 +123,23 @@ elif [ -s "$CUSTODY_CACHE" ]; then
   echo "reusing custody wallet from previous run: $CUSTODY_ADDRESS"
 else
   [ -n "${SDP_API_KEY:-}" ] || { echo "SDP_API_KEY is required (or set CUSTODY_WALLET_ADDRESS)" >&2; exit 1; }
+  if [ -n "${SDP_CUSTODY_PROVIDER:-}" ] && [ -n "${SDP_CUSTODY_CONNECTION_ID:-}" ]; then
+    echo "set only one of SDP_CUSTODY_PROVIDER (Managed) or SDP_CUSTODY_CONNECTION_ID (BYOK)" >&2
+    exit 1
+  elif [ -n "${SDP_CUSTODY_PROVIDER:-}" ]; then
+    wallet_request="$(jq -n --arg label "ring-authority-$RING_LABEL" --arg provider "$SDP_CUSTODY_PROVIDER" \
+      '{label: $label, provider: $provider}')"
+  elif [ -n "${SDP_CUSTODY_CONNECTION_ID:-}" ]; then
+    wallet_request="$(jq -n --arg label "ring-authority-$RING_LABEL" --arg connectionId "$SDP_CUSTODY_CONNECTION_ID" \
+      '{label: $label, connectionId: $connectionId}')"
+  else
+    echo "SDP_CUSTODY_PROVIDER (Managed) or SDP_CUSTODY_CONNECTION_ID (BYOK) is required to create the custody wallet" >&2
+    exit 1
+  fi
   response="$(curl -sS -w '\n%{http_code}' -X POST "$SDP_API_URL/v1/wallets" \
     -H "Authorization: Bearer $SDP_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"label\": \"ring-authority-$RING_LABEL\"}")"
+    -d "$wallet_request")"
   http_code="${response##*$'\n'}"
   body="${response%$'\n'*}"
   if [ "$http_code" != "201" ]; then

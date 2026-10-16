@@ -3,6 +3,7 @@
  */
 
 export * from "./advanced-settings";
+export * from "./allowed-operations";
 export * from "./api-keys";
 export * from "./asset-profiles";
 export * from "./audit";
@@ -13,21 +14,23 @@ export * from "./dvp";
 export * from "./earn";
 export * from "./generated/ramp.generated";
 export * from "./hastra-programs";
+export * from "./health";
 export * from "./helius-rings";
 export * from "./jupiter-lend-programs";
 export * from "./kamino-programs";
 export * from "./kyc";
+export * from "./movements";
+export * from "./organization-entitlements";
 export * from "./organizations";
 export * from "./pagination";
 export * from "./payment-rails";
 export * from "./payments";
 export * from "./permissions";
 export * from "./places";
-export * from "./policy";
 export * from "./private-channels";
 export * from "./projects";
 export * from "./provider-access";
-export * from "./rpc-connections";
+export * from "./release-channels";
 export * from "./site";
 export * from "./tokens";
 export * from "./unified-transactions";

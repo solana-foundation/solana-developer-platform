@@ -71,6 +71,8 @@ function runtimeDatabaseUrl(adminUrl: string): string {
 const providedEnv: Env = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
+  // Every module, so a test opts out of one by naming a stricter channel.
+  SDP_RELEASE_CHANNEL: "experimental",
   // Unit requests supply deterministic proxy headers rather than a socket.
   TRUST_PROXY_HEADERS: "true",
   DATABASE_URL: runtimeDatabaseUrl(adminDatabaseUrl),
@@ -93,3 +95,32 @@ export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
 };
+
+const MANAGED_RPC_ENV_KEYS = [
+  "SOLANA_RPC_URL",
+  "SOLANA_RPC_DEFAULT_PROVIDER",
+  "SOLANA_RPC_TRITON_URL",
+  "SOLANA_RPC_TRITON_API_KEY",
+  "SOLANA_RPC_HELIUS_URL",
+  "SOLANA_RPC_HELIUS_API_KEY",
+  "SOLANA_RPC_ALCHEMY_URL",
+  "SOLANA_RPC_ALCHEMY_API_KEY",
+  "SOLANA_RPC_QUICKNODE_URL",
+  "SOLANA_RPC_QUICKNODE_API_KEY",
+  "SOLANA_RPC_VALIDATIONCLOUD_URL",
+  "SOLANA_RPC_VALIDATIONCLOUD_API_KEY",
+  "SOLANA_RPC_NODIT_URL",
+  "SOLANA_RPC_NODIT_API_KEY",
+] as const satisfies readonly (keyof Env)[];
+
+/**
+ * Unset every managed RPC pool key on the shared test `env`, so a relay test
+ * configures exactly the providers it names.
+ *
+ * @returns Nothing; mutates `env` in place.
+ */
+export function resetManagedRpcEnv(): void {
+  for (const key of MANAGED_RPC_ENV_KEYS) {
+    env[key] = undefined;
+  }
+}

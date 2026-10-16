@@ -481,7 +481,7 @@ is "what this deployment can talk to", the former is "what we offer today".
 - **One declaration, three consumers, no provider ids anywhere else.**
   `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
   `POST /programs` refuses to open a new position with it
-  (`assertEarnProviderSurfaced`); the dashboard derives
+  (`assertProviderAvailable`, `provider_not_offered`); the dashboard derives
   `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
   the API rather than in the browser is deliberate — the API is the surface the
   dashboard *and* every partner integration read, and a client-side copy of a

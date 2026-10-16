@@ -164,9 +164,9 @@ describe("0091_dvp_per_side_parties", () => {
   it("backfills in-flight creator-leg funding into dvp_leg_funding_claims", async () => {
     const { organizationId, projectId } = await seedOrgProject(client, "backfill");
     await client.query(
-      `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-       VALUES ('cust_backfill', $1, 'local', 'x', 'active')`,
-      [organizationId]
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+       VALUES ('cust_backfill', $1, $2, 'local', 'x', 'active')`,
+      [organizationId, projectId]
     );
     await client.query(
       `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
@@ -301,11 +301,11 @@ describe("0091_dvp_per_side_parties", () => {
   });
 
   it("drops the six columns", async () => {
-    const { organizationId } = await seedOrgProject(client, "droptest");
+    const { organizationId, projectId } = await seedOrgProject(client, "droptest");
     await client.query(
-      `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-       VALUES ('cust_droptest', $1, 'local', 'x', 'active')`,
-      [organizationId]
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+       VALUES ('cust_droptest', $1, $2, 'local', 'x', 'active')`,
+      [organizationId, projectId]
     );
     await client.query(
       `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)

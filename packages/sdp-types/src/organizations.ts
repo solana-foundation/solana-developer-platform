@@ -2,6 +2,7 @@
  * Organization Types
  */
 
+import type { CustodyProvider } from "./custody";
 import type { OrganizationRole } from "./permissions";
 import type { OrganizationProviderOverrides } from "./provider-access";
 
@@ -10,6 +11,34 @@ export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
 export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
+
+/**
+ * Organization statuses whose credentials may authenticate (HOO-1955). A
+ * suspended or deleted organization is locked out of the API and dashboard
+ * entirely; money its jobs already committed still finishes, and production
+ * custody is BYOK, so funds stay reachable in the customer's own provider.
+ */
+export const ORGANIZATION_STATUSES_THAT_MAY_AUTHENTICATE = [
+  "active",
+] as const satisfies readonly OrganizationStatus[];
+
+/** Takes the raw column: an unknown status may not authenticate. */
+export function organizationStatusMayAuthenticate(status: string): boolean {
+  return ORGANIZATION_STATUSES_THAT_MAY_AUTHENTICATE.some((allowed) => allowed === status);
+}
+
+/**
+ * Organization statuses that may start new money movement (HOO-1955). A
+ * suspended or deleted organization starts nothing; exits still run.
+ */
+export const ORGANIZATION_STATUSES_THAT_MAY_START_MONEY = [
+  "active",
+] as const satisfies readonly OrganizationStatus[];
+
+/** Takes the raw column: an unknown status may not start money. */
+export function organizationStatusMayStartMoney(status: string): boolean {
+  return ORGANIZATION_STATUSES_THAT_MAY_START_MONEY.some((allowed) => allowed === status);
+}
 
 export type MemberStatus = "active" | "suspended" | "removed";
 
@@ -37,7 +66,6 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
-  rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];
@@ -49,8 +77,9 @@ export interface OrganizationSettings {
   providerOverrides?: OrganizationProviderOverrides;
   /**
    * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
-   * Clerk webhook sync; `true` unlocks selecting production projects in the
-   * dashboard.
+   * Clerk webhook sync. Without `true` the API refuses every production
+   * project (API keys, dashboard selection, approval replays) and the project
+   * list hides them.
    */
   enableProductionProject?: boolean;
   customRateLimits?: {
@@ -82,6 +111,20 @@ export function normalizeOrganizationTier(value: string | null | undefined): Org
   const legacyTier =
     LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES];
   return legacyTier ?? "individual";
+}
+
+/**
+ * An organization's onboarding progress. `custodyProviders` lists, in
+ * `CUSTODY_PROVIDERS` order, every provider with an active Managed config or an
+ * active BYOK connection in the default sandbox project.
+ */
+export interface OrganizationOnboardingSetup {
+  status: "not_started" | "in_progress" | "complete";
+  currentStep: "custody" | "complete";
+  custodyProviders: CustodyProvider[];
+  completedAt: string | null;
+  version: number;
+  canManage: boolean;
 }
 
 export interface User {

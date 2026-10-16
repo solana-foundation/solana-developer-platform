@@ -1,29 +1,18 @@
 import {
-  listRpcProviders,
   type ResolvedRpcTarget,
-  recordRpcRelayTelemetry,
   resolveRoundRobinRpcTargets,
   resolveRpcTarget,
 } from "@sdp/rpc/relay";
-import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequestQuery } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertFaucetDestinationsOwned } from "@/services/faucet-destination-guard";
-import { EgressResponseTooLargeError } from "@/services/guarded-egress";
-import {
-  checkResolvedRpcTargetConnection,
-  getProviderSetupDefinition,
-} from "@/services/provider-setup-registry";
-import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
-import { fetchRpcRelayTarget } from "@/services/rpc-egress";
-import type { Env } from "@/types/env";
-import { rpcProjectQuerySchema, type rpcRelayPayloadSchema } from "./schemas";
+import type { rpcRelayPayloadSchema } from "./schemas";
 
-type AppContext = Context<{ Bindings: Env }>;
+/** A stalled managed upstream must not hold the request open indefinitely. */
+const RELAY_TIMEOUT_MS = 30_000;
 
 function extractRpcMethodNames(payload: unknown): string[] {
   if (Array.isArray(payload)) {
@@ -41,12 +30,6 @@ function tryParseJson(value: string): unknown {
   }
 }
 
-function getTelemetryOrigin(c: AppContext): string | null {
-  return (
-    c.req.header("Origin") ?? c.req.header("X-Forwarded-Host") ?? c.req.header("User-Agent") ?? null
-  );
-}
-
 function isJsonRpcErrorResponse(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some((entry) => isJsonRpcErrorResponse(entry));
@@ -59,39 +42,23 @@ function shouldRoundRobinFaucetRequest(payload: unknown, methodNames: string[]):
   return !Array.isArray(payload) && methodNames.length === 1 && methodNames[0] === "requestAirdrop";
 }
 
-async function relayToTarget(
-  c: AppContext,
-  target: ResolvedRpcTarget,
-  payload: unknown,
-  methodNames: string[],
-  options: { recordJsonRpcErrorAsFailure?: boolean } = {}
-) {
-  const startedAt = Date.now();
-  const headers = {
-    "Content-Type": "application/json",
-    ...target.headers,
-  };
-
-  const upstream = await fetchRpcRelayTarget(target, {
-    headers,
+/**
+ * POST a JSON-RPC payload to a managed provider, bounded by the relay timeout.
+ *
+ * @param target - The managed provider to send to.
+ * @param payload - The validated JSON-RPC request or batch.
+ * @returns The upstream response and its body, parsed as JSON when it is JSON.
+ */
+async function relayToTarget(target: ResolvedRpcTarget, payload: unknown) {
+  const upstream = await fetch(target.endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
   });
 
   const rawBody = await upstream.text();
   const upstreamBody = rawBody ? tryParseJson(rawBody) : null;
-  const elapsedMs = Date.now() - startedAt;
-
-  await recordRpcRelayTelemetry(c.var.kv.cache, {
-    providerId: target.providerId,
-    connectionId: target.connectionId,
-    methodNames,
-    statusCode: upstream.status,
-    latencyMs: elapsedMs,
-    ok:
-      upstream.ok &&
-      (!options.recordJsonRpcErrorAsFailure || !isJsonRpcErrorResponse(upstreamBody)),
-    origin: getTelemetryOrigin(c),
-  });
 
   return { upstream, upstreamBody };
 }
@@ -105,8 +72,6 @@ function buildRelayResponse(
   return {
     provider: {
       id: target.providerId,
-      selectionMode: target.selectionMode,
-      projectId: target.projectId,
       endpoint: target.endpointLabel,
     },
     upstream: {
@@ -129,49 +94,18 @@ function isTimeoutError(error: unknown): boolean {
 // The caller can safely resend the same signed bytes on a timeout, but only
 // if it can tell "the upstream never answered" apart from "the upstream said
 // no" — hence distinct codes instead of one generic relay error.
-function toRelayError(error: unknown, fallback: string): AppError {
-  if (error instanceof EgressResponseTooLargeError) {
-    return new AppError("UPSTREAM_RESPONSE_TOO_LARGE", error.message);
-  }
+function toRelayError(error: unknown): AppError {
   if (isTimeoutError(error)) {
     return new AppError("SOLANA_RPC_TIMEOUT");
   }
-  return new AppError("SOLANA_RPC_ERROR", error instanceof Error ? error.message : fallback);
+  return new AppError(
+    "SOLANA_RPC_ERROR",
+    error instanceof Error ? error.message : "RPC relay request failed"
+  );
 }
-
-export const getRpcProviders = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
-
-  if (!queryParse.success) {
-    throw badRequestQuery({
-      errors: z.flattenError(queryParse.error).fieldErrors,
-    });
-  }
-
-  const response = await listRpcProviders({
-    env: c.env,
-    kv: c.var.kv,
-    db: getDb(c.env),
-    organizationId: auth.organizationId,
-    authProjectId: auth.projectId,
-    requestedProjectId: queryParse.data.projectId ?? null,
-    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
-  });
-
-  return success(c, response);
-};
 
 export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPayloadSchema>) => {
   const auth = getAuth(c);
-  const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
-
-  if (!queryParse.success) {
-    throw badRequestQuery({
-      errors: z.flattenError(queryParse.error).fieldErrors,
-    });
-  }
-
   const payload = c.req.valid("json");
 
   const methodNames = extractRpcMethodNames(payload);
@@ -182,25 +116,14 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
   await assertFaucetDestinationsOwned(getDb(c.env), auth.organizationId, payload);
 
   if (shouldRoundRobinFaucetRequest(payload, methodNames)) {
-    const targets = await resolveRoundRobinRpcTargets({
-      env: c.env,
-      kv: c.var.kv,
-      db: getDb(c.env),
-      organizationId: auth.organizationId,
-      authProjectId: auth.projectId,
-      requestedProjectId: queryParse.data.projectId ?? null,
-      connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
-    });
+    const targets = await resolveRoundRobinRpcTargets({ env: c.env, cache: c.var.kv.cache });
 
     let lastResponse: ReturnType<typeof buildRelayResponse> | null = null;
     let lastError: unknown = null;
 
     for (const target of targets) {
-      const startedAt = Date.now();
       try {
-        const { upstream, upstreamBody } = await relayToTarget(c, target, payload, methodNames, {
-          recordJsonRpcErrorAsFailure: true,
-        });
+        const { upstream, upstreamBody } = await relayToTarget(target, payload);
         const relayResponse = buildRelayResponse(target, upstream, upstreamBody, methodNames);
         if (upstream.ok && !isJsonRpcErrorResponse(upstreamBody)) {
           return success(c, relayResponse);
@@ -208,15 +131,6 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
         lastResponse = relayResponse;
       } catch (error) {
         lastError = error;
-        await recordRpcRelayTelemetry(c.var.kv.cache, {
-          providerId: target.providerId,
-          connectionId: target.connectionId,
-          methodNames,
-          statusCode: 0,
-          latencyMs: Date.now() - startedAt,
-          ok: false,
-          origin: getTelemetryOrigin(c),
-        }).catch(() => {});
       }
     }
 
@@ -224,102 +138,15 @@ export const relayRpcRequest = async (c: ValidatedBodyContext<typeof rpcRelayPay
       return success(c, lastResponse);
     }
 
-    throw toRelayError(lastError, "RPC relay request failed");
+    throw toRelayError(lastError);
   }
 
-  const target = await resolveRpcTarget({
-    env: c.env,
-    kv: c.var.kv,
-    db: getDb(c.env),
-    organizationId: auth.organizationId,
-    authProjectId: auth.projectId,
-    requestedProjectId: queryParse.data.projectId ?? null,
-    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
-  });
+  const target = await resolveRpcTarget({ env: c.env, cache: c.var.kv.cache });
 
-  const startedAt = Date.now();
   try {
-    const { upstream, upstreamBody } = await relayToTarget(c, target, payload, methodNames);
+    const { upstream, upstreamBody } = await relayToTarget(target, payload);
     return success(c, buildRelayResponse(target, upstream, upstreamBody, methodNames));
   } catch (error) {
-    await recordRpcRelayTelemetry(c.var.kv.cache, {
-      providerId: target.providerId,
-      connectionId: target.connectionId,
-      methodNames,
-      statusCode: 0,
-      latencyMs: Date.now() - startedAt,
-      ok: false,
-      origin: getTelemetryOrigin(c),
-    }).catch(() => {});
-
-    throw toRelayError(error, "RPC relay request failed");
-  }
-};
-
-export const testRpcConnection = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const queryParse = rpcProjectQuerySchema.safeParse(c.req.query());
-
-  if (!queryParse.success) {
-    throw badRequestQuery({
-      errors: z.flattenError(queryParse.error).fieldErrors,
-    });
-  }
-
-  const methodNames = ["getVersion"];
-  const target = await resolveRpcTarget({
-    env: c.env,
-    kv: c.var.kv,
-    db: getDb(c.env),
-    organizationId: auth.organizationId,
-    authProjectId: auth.projectId,
-    requestedProjectId: queryParse.data.projectId ?? null,
-    connections: createTenantRpcConnectionLookup(c.env, getDb(c.env)),
-  });
-
-  const startedAt = Date.now();
-  try {
-    const { upstream, upstreamBody, elapsedMs } =
-      target.providerId === "custom"
-        ? await checkResolvedRpcTargetConnection({ target })
-        : await getProviderSetupDefinition("rpc", target.providerId).checkConnection({ target });
-
-    await recordRpcRelayTelemetry(c.var.kv.cache, {
-      providerId: target.providerId,
-      connectionId: target.connectionId,
-      methodNames,
-      statusCode: upstream.status,
-      latencyMs: elapsedMs,
-      ok: upstream.ok,
-      origin: getTelemetryOrigin(c),
-    });
-
-    return success(c, {
-      provider: {
-        id: target.providerId,
-        selectionMode: target.selectionMode,
-        projectId: target.projectId,
-        endpoint: target.endpointLabel,
-      },
-      upstream: {
-        ok: upstream.ok,
-        status: upstream.status,
-        statusText: upstream.statusText,
-      },
-      methods: methodNames,
-      response: upstreamBody,
-    });
-  } catch (error) {
-    await recordRpcRelayTelemetry(c.var.kv.cache, {
-      providerId: target.providerId,
-      connectionId: target.connectionId,
-      methodNames,
-      statusCode: 0,
-      latencyMs: Date.now() - startedAt,
-      ok: false,
-      origin: getTelemetryOrigin(c),
-    }).catch(() => {});
-
-    throw toRelayError(error, "RPC connectivity test failed");
+    throw toRelayError(error);
   }
 };

@@ -2,7 +2,6 @@
 
 import { ArrowUpRight, ListChecks, X } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { AlertDialog, Dialog } from "radix-ui";
 import { type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +19,7 @@ import {
   setQuickStart,
   subscribeQuickStart,
 } from "@/lib/dashboard-quick-start";
+import { useDashboardPathname, useProjectHref } from "@/lib/use-dashboard-project";
 import styles from "./dashboard-quick-start.module.css";
 
 const serverSnapshot = () => null;
@@ -65,7 +65,8 @@ function StepAction({
   canCreateWallet: boolean;
 }) {
   const t = useTranslations();
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
+  const projectHref = useProjectHref();
   const current = stepCopy[step];
   if (pathname === current.href) {
     return (
@@ -79,7 +80,7 @@ function StepAction({
     <Button asChild className="w-full rounded-full">
       <Link
         onClick={onClose}
-        href={current.href}
+        href={step === "faucet" ? current.href : projectHref(current.href)}
         target={step === "faucet" ? "_blank" : undefined}
         rel={step === "faucet" ? "noopener noreferrer" : undefined}
       >
@@ -95,7 +96,6 @@ function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace
     workspace.initialQuickStartStep &&
       workspace.initialQuickStartStep !== "done" &&
       workspace.dashboardCacheScope.orgId &&
-      workspace.selectedProjectId &&
       workspace.sdpEnvironment === "sandbox" &&
       workspace.dashboardAccess.capabilities.canManageApiKeys
   );

@@ -1,18 +1,14 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import {
-  type PaymentsDashboardWallet,
-  SOL_MINT,
-  type Token,
-  type TokenTransaction,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet, Token, TokenTransaction } from "@sdp/types";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
-  bootstrapProjectForPage,
-  ensureLinkedOrg,
   getBootstrapApiBaseUrl,
-  resolvePlaywrightProjectId,
+  gotoProjectPage,
+  provisionLinkedOrgProjects,
+  provisionWithAdminSession,
 } from "../support/local-dashboard-bootstrap";
 
 interface TokenResponse {
@@ -144,12 +140,8 @@ function getActivityRow(
     .filter({ hasText: input.operationLabel });
 }
 
-async function bootstrapWalletRouteFixture(
-  browser: Browser,
-  page: Page,
-  input: { labelPrefix: string; withPolicy?: boolean }
-) {
-  return bootstrapProjectForPage(browser, page, async (session) => {
+async function bootstrapWalletRouteFixture(browser: Browser, input: { labelPrefix: string }) {
+  return provisionWithAdminSession(browser, async (session) => {
     const walletLabel = `${input.labelPrefix} ${Date.now().toString(36).toUpperCase()}`;
     const fixtures = await bootstrapLocalWalletFixtures({
       identity: session.identity,
@@ -164,27 +156,6 @@ async function bootstrapWalletRouteFixture(
       throw new Error("Failed to bootstrap wallet route fixture");
     }
 
-    if (input.withPolicy) {
-      const api = createLocalApiClient(
-        getBootstrapApiBaseUrl(),
-        session.getBearerToken,
-        fixtures.projectId
-      );
-      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
-        defaultAction: "allow",
-        rules: [
-          {
-            id: "per-transaction-limit",
-            kind: "amount",
-            max: "25",
-            assets: [SOL_MINT],
-            action: "allow",
-            name: "Per transaction limit",
-          },
-        ],
-      });
-    }
-
     return { projectId: fixtures.projectId, wallet, walletLabel };
   });
 }
@@ -193,7 +164,7 @@ test.describe
   .serial("dashboard wallets e2e", () => {
     test("bootstrapped Privy wallet appears in the wallets overview", async ({ browser, page }) => {
       const walletLabel = `Wallet Detail ${Date.now().toString(36).toUpperCase()}`;
-      const fixtures = await bootstrapProjectForPage(browser, page, (session) =>
+      const fixtures = await provisionWithAdminSession(browser, (session) =>
         bootstrapLocalWalletFixtures({
           identity: session.identity,
           bearerToken: session.getBearerToken,
@@ -209,8 +180,10 @@ test.describe
         throw new Error("Failed to bootstrap wallet detail fixture");
       }
 
-      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
-      await expect(page).toHaveURL(/\/dashboard\/wallets(?:\?.*)?$/);
+      await gotoProjectPage(page, fixtures.projectId, "/dashboard/wallets");
+      await expect(page).toHaveURL(
+        new RegExp(`${projectHref(fixtures.projectId, "/dashboard/wallets")}(?:\\?.*)?$`)
+      );
 
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
       await expect(walletCard).toBeVisible({
@@ -221,15 +194,15 @@ test.describe
     });
 
     test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
-      const { wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
+      const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Routes",
       });
 
       const encodedWalletId = encodeURIComponent(wallet.walletId);
-      const walletHref = `/dashboard/wallets/${encodedWalletId}`;
-      const custodyHref = `/dashboard/custody/${encodedWalletId}`;
+      const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
+      const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
-      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets");
       await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
         "data-wallet-panel",
         "overview",
@@ -281,26 +254,26 @@ test.describe
       );
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
       await walletCard.getByRole("link", { name: `Open ${walletLabel}` }).click();
-      await expect(page).toHaveURL(new RegExp(`${walletHref.replaceAll("/", "\\/")}$`));
+      await expect(page).toHaveURL(walletHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
 
       await page.goto(custodyHref, { waitUntil: "domcontentloaded" });
-      await expect(page).toHaveURL(new RegExp(`${custodyHref.replaceAll("/", "\\/")}$`));
+      await expect(page).toHaveURL(custodyHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
     });
 
     test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
-      const { walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
+      const { projectId, walletLabel } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Action Geometry",
       });
       await page.setViewportSize({ width: 1280, height: 500 });
       // The wallet's actions menu sits on its card in the Wallets list; the wallet's own page
       // spreads those actions across its tabs.
-      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets");
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
       await expect(walletCard).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
 
@@ -361,62 +334,13 @@ test.describe
       expect(await pageGeometry()).toEqual(mobileBaseline);
     });
 
-    test("wallet policy history opens the revision drawer", async ({ browser, page }) => {
-      const { wallet } = await bootstrapWalletRouteFixture(browser, page, {
-        labelPrefix: "Wallet Policy Routes",
-        withPolicy: true,
-      });
-
-      const walletHref = `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`;
-      const policyHref = `${walletHref}/policy`;
-      const auditHref = `${policyHref}/audit`;
-      const revisionTrigger = page.getByRole("button", { name: "Revision history" });
-      const drawer = page.getByRole("dialog", { name: "Revision history" });
-
-      await page.goto(policyHref, { waitUntil: "domcontentloaded" });
-      await expect(revisionTrigger).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
-
-      await revisionTrigger.click();
-      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
-      await expect(page).toHaveURL(/[?&]revision=/, { timeout: E2E_POLL_TIMEOUT_MS });
-      await expect(page).toHaveURL(new RegExp(`${policyHref.replaceAll("/", "\\/")}\\?`));
-
-      await page.keyboard.press("Escape");
-      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
-      await expect(page).not.toHaveURL(/[?&]revision=/);
-
-      await page.goto(`${policyHref}?revision=latest`, { waitUntil: "domcontentloaded" });
-      await expect(drawer).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
-      await page.keyboard.press("Escape");
-      await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
-
-      // The wallet's policy history opens from its Policy tab, beside the revisions (the
-      // previous design ignores the tab and shows the same link on the wallet's page).
-      const auditLink = page.getByRole("link", { name: "Policy audit", exact: true });
-      await page.goto(`${walletHref}?tab=policy`, { waitUntil: "domcontentloaded" });
-      await expect(auditLink).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
-      await expect(auditLink).toHaveAttribute("href", auditHref);
-      await auditLink.click();
-      await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
-      await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-    });
-
     test("wallet setup routes preserve provider selection and aliases", async ({
       browser,
       page,
     }, testInfo) => {
-      await bootstrapProjectForPage(browser, page, async (session) => {
-        await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-        const projectId = await resolvePlaywrightProjectId(
-          getBootstrapApiBaseUrl(),
-          session.getBearerToken
-        );
-        return { projectId };
-      });
+      const projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
 
-      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
@@ -458,6 +382,9 @@ test.describe
       await expect(nextButton).toBeEnabled();
       await nextButton.click();
       await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+      const custodyModeSelect = page.getByRole("combobox", { name: "Custody mode" });
+      await custodyModeSelect.click();
+      await page.getByRole("option", { name: "Managed", exact: true }).click();
       await expect(page.getByLabel("Wallet label")).toBeVisible();
 
       const detailsScreenshotPath = testInfo.outputPath("wallet-create-details-desktop.png");
@@ -471,17 +398,18 @@ test.describe
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible();
       await expect(privyProvider).toBeChecked();
       await cancelButton.click();
-      await expect(page).toHaveURL(/\/dashboard\/wallets$/);
+      await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"));
 
-      await page.goto("/dashboard/wallets/setup?provider=privy", {
-        waitUntil: "domcontentloaded",
-      });
-      await expect(page.getByLabel("Wallet label")).toBeVisible({
+      await gotoProjectPage(page, projectId, "/dashboard/wallets/setup?provider=privy");
+      await expect(custodyModeSelect).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
+      await custodyModeSelect.click();
+      await page.getByRole("option", { name: "Managed", exact: true }).click();
+      await expect(page.getByLabel("Wallet label")).toBeVisible();
 
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
@@ -505,7 +433,11 @@ test.describe
       });
       const mobileActionsAfterScroll = await setupActions.boundingBox();
       expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
-      const lastProvider = setupScrollRegion.getByRole("link", { name: /^Set up / }).last();
+      // Every provider the project can use is a choice in the list; the last one stays reachable.
+      const lastProvider = setupScrollRegion
+        .getByRole("radio")
+        .last()
+        .locator("xpath=ancestor::label");
       await expect(lastProvider).toBeVisible();
       const mobileScrollBox = await setupScrollRegion.boundingBox();
       const lastProviderBox = await lastProvider.boundingBox();
@@ -519,23 +451,14 @@ test.describe
         path: mobileScreenshotPath,
         contentType: "image/png",
       });
-
-      for (const switchHref of ["/dashboard/wallets/switch", "/dashboard/custody/switch"]) {
-        await page.goto(switchHref, { waitUntil: "domcontentloaded" });
-        await expect(page).toHaveURL(/\/dashboard\/wallets\/setup$/);
-        await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible({
-          timeout: E2E_POLL_TIMEOUT_MS,
-        });
-      }
     });
 
     test("wallet setup Enter advances without creating and final Enter creates once", async ({
       browser,
       page,
     }) => {
-      const { bearerToken, projectId } = await bootstrapProjectForPage(
+      const { bearerToken, projectId } = await provisionWithAdminSession(
         browser,
-        page,
         async (session) => {
           const fixtures = await bootstrapLocalWalletFixtures({
             identity: session.identity,
@@ -555,8 +478,7 @@ test.describe
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
       const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
       const countMatchingWallets = async () => {
-        // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
-        const { wallets } = await api.get<WalletsResponse>("/v1/wallets?includeAllProviders=true");
+        const { wallets } = await api.get<WalletsResponse>("/v1/wallets");
         return wallets.filter((wallet) => wallet.label === walletLabel).length;
       };
       expect(await countMatchingWallets()).toBe(0);
@@ -579,14 +501,14 @@ test.describe
       };
 
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       await advanceProviderWithEnter();
 
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.goto("/dashboard/wallets/setup", { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
@@ -598,7 +520,7 @@ test.describe
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
 
-      await expect(page).toHaveURL(/\/dashboard\/wallets$/, {
+      await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"), {
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       expect(serverActionRequestCount).toBe(1);
@@ -612,9 +534,8 @@ test.describe
     }) => {
       test.setTimeout(420_000);
 
-      const { deployedToken, wallet } = await bootstrapProjectForPage(
+      const { deployedToken, projectId, wallet } = await provisionWithAdminSession(
         browser,
-        page,
         async (session) => {
           const fixtures = await bootstrapLocalWalletFixtures({
             identity: session.identity,
@@ -682,7 +603,7 @@ test.describe
         }
       );
 
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      await gotoProjectPage(page, projectId, `/dashboard/wallets/${wallet.walletId}`);
       await page.locator("[data-wallet-activity-state]").scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
@@ -706,7 +627,7 @@ test.describe
     }) => {
       test.setTimeout(420_000);
 
-      const fixtures = await bootstrapProjectForPage(browser, page, (session) =>
+      const fixtures = await provisionWithAdminSession(browser, (session) =>
         bootstrapLocalWalletFixtures({
           identity: session.identity,
           bearerToken: session.getBearerToken,
@@ -768,9 +689,7 @@ test.describe
 
       // The wallet's page opens on Overview, whose recent activity reads the feed straight away;
       // the whole feed is on the Activity tab (`?tab=activity`). Both read the same window.
-      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
-        waitUntil: "domcontentloaded",
-      });
+      await gotoProjectPage(page, fixtures.projectId, `/dashboard/wallets/${wallet.walletId}`);
       await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });

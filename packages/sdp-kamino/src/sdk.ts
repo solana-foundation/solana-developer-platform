@@ -6,15 +6,26 @@ import {
   KVaultGlobalConfig,
   Reserve,
 } from "@kamino-finance/klend-sdk";
+import {
+  getFarmUserStatePDA,
+  getUserSharesInTokensStakedInFarm,
+} from "@kamino-finance/klend-sdk/dist/classes/farm_utils.js";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
-import type { Address, Instruction } from "@solana/kit";
-import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { type Address, address, getBase64Encoder, type Instruction } from "@solana/kit";
+import {
+  AccountState,
+  findAssociatedTokenPda,
+  getTokenDecoder,
+  getTokenSize,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 import Decimal from "decimal.js";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { vaultAssetIdentityFromState } from "./asset-identity";
+import { KAMINO_POSITION_READ_CONCURRENCY, mapSettledWithConcurrency } from "./concurrency";
 import { depositFloorUnsupported, invalidAmount, SdpKaminoError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
-import { loadVaultLookupTableAddresses } from "./lookup-table";
+import { configuredLookupTable, loadVaultLookupTableAddresses } from "./lookup-table";
 import { kaminoClusterConfig } from "./programs";
 import {
   deriveKaminoDepositQuote,
@@ -24,7 +35,7 @@ import {
   type KaminoWithdrawQuote,
   type KaminoWithdrawQuoteInput,
 } from "./quotes";
-import { createKaminoRpc } from "./rpc";
+import { createKaminoReadRpc, createKaminoRpc } from "./rpc";
 import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
 import type {
   KaminoDepositInput,
@@ -64,6 +75,8 @@ import {
 /** klend-sdk's kit-2 surface, as far as this module needs to name it. */
 // biome-ignore lint/suspicious/noExplicitAny: the kit-2 <-> kit-6.8 seam; see the header.
 type Kit2 = any;
+/** This repo's kit RPC, as `createKaminoRpc` and `createKaminoReadRpc` build it. */
+type KaminoRpc = ReturnType<typeof createKaminoRpc>;
 type AssertActive = () => void;
 const alwaysActive: AssertActive = () => undefined;
 
@@ -87,11 +100,13 @@ const alwaysActive: AssertActive = () => undefined;
  * function's correctness is a convention inside one call and that assertion is a
  * property of what we actually emit.
  */
-function createVaultClient(runtime: KaminoRuntime) {
-  const config = kaminoClusterConfig(runtime.cluster);
+function createVaultClient(
+  runtime: KaminoRuntime,
   // The transport deadline covers both our direct reads and every nested
   // reserve/farm/vault request klend-sdk performs with this same client.
-  const rpc = createKaminoRpc(runtime.rpcUrl) as Kit2;
+  rpc: Kit2 = createKaminoRpc(runtime.rpcUrl)
+) {
+  const config = kaminoClusterConfig(runtime.cluster);
 
   const client = new KaminoVaultClient(
     rpc,
@@ -108,15 +123,16 @@ function createVaultClient(runtime: KaminoRuntime) {
 async function bindVault(
   runtime: KaminoRuntime,
   vaultAddress: Address,
-  assertActive: AssertActive = alwaysActive
+  assertActive: AssertActive = alwaysActive,
+  reads: { rpc?: KaminoRpc; accounts?: BatchRpc } = {}
 ) {
   assertActive();
-  const { client, config, rpc } = createVaultClient(runtime);
+  const { client, config, rpc } = createVaultClient(runtime, reads.rpc);
 
   // The probe exists only to fetch state under the right program id; it is never
   // used to build anything.
   const probe = new KaminoVault(
-    rpc,
+    reads.accounts ?? rpc,
     vaultAddress as Kit2,
     undefined,
     config.kvaultProgramId as Kit2,
@@ -166,13 +182,14 @@ async function loadStateOnlyReserves(
   state: Kit2,
   rpc: Kit2,
   klendProgramId: Address,
-  slotDurationMs: number
+  slotDurationMs: number,
+  accounts: BatchRpc
 ): Promise<Kit2> {
   const reserveAddresses = client.getVaultReserves(state) as Address[];
   let reserveStates: Array<Kit2 | null>;
   try {
     reserveStates = await Reserve.fetchMultiple(
-      rpc,
+      accounts as Kit2,
       reserveAddresses as Kit2,
       klendProgramId as Kit2
     );
@@ -215,6 +232,173 @@ async function loadStateOnlyReserves(
       ];
     })
   );
+}
+
+/** Solana's `getMultipleAccounts` limit per request. */
+const MAX_ACCOUNTS_PER_REQUEST = 100;
+
+/** The one request a batch sends. */
+interface AccountsReader {
+  getMultipleAccounts(
+    addresses: readonly Address[],
+    config: { encoding: "base64" | "jsonParsed" }
+  ): { send(): Promise<unknown> };
+}
+
+interface BatchRequest<T> {
+  send(): Promise<{ context: { slot: bigint }; value: T }>;
+}
+
+/** The account reads klend-sdk's fetchers and kit's table loader send. */
+interface BatchRpc {
+  getAccountInfo(key: unknown, config?: { encoding?: unknown }): BatchRequest<object | null>;
+  getMultipleAccounts(
+    keys: readonly unknown[],
+    config?: { encoding?: unknown }
+  ): BatchRequest<Array<object | null>>;
+}
+
+/**
+ * Accounts read in one `getMultipleAccounts` per 100 addresses, served back as
+ * a read-only RPC so klend-sdk and kit decode exactly the bytes they would
+ * otherwise fetch one by one. A failed read rejects every account it carried;
+ * an address outside the batch, or base64 asked of a parsed account, fails
+ * closed.
+ */
+interface AccountBatch {
+  rpc: BatchRpc;
+  account(address: string): object | null;
+}
+
+function accountBatch(read: ReadonlyMap<string, object | null> | Error, slot = 0n): AccountBatch {
+  const account = (key: unknown): object | null => {
+    if (read instanceof Error) throw read;
+    const value = read.get(String(key));
+    if (value === undefined)
+      throw new Error(`Kamino read ${String(key)} outside its account batch`);
+    return value;
+  };
+  const served = (key: unknown, config: { encoding?: unknown } | undefined): object | null => {
+    const value = account(key);
+    if (value !== null && config?.encoding !== "jsonParsed" && base64Data(value) === undefined) {
+      throw new Error(`Kamino batched account ${String(key)} was not returned as base64`);
+    }
+    return value;
+  };
+  return {
+    account,
+    rpc: {
+      getAccountInfo: (key, config) => ({
+        send: async () => ({ context: { slot }, value: served(key, config) }),
+      }),
+      getMultipleAccounts: (keys, config) => ({
+        send: async () => ({ context: { slot }, value: keys.map((key) => served(key, config)) }),
+      }),
+    },
+  };
+}
+
+function failedBatch(cause: unknown): AccountBatch {
+  return accountBatch(cause instanceof Error ? cause : new Error(String(cause)));
+}
+
+function isObject(value: unknown): value is object {
+  return value !== null && typeof value === "object";
+}
+
+/** The payload of an account returned as base64, else undefined. */
+function base64Data(value: object): string | undefined {
+  const data: unknown = "data" in value ? value.data : undefined;
+  if (!Array.isArray(data)) return undefined;
+  const [payload, encoding]: unknown[] = data;
+  return encoding === "base64" && typeof payload === "string" ? payload : undefined;
+}
+
+function contextSlot(response: unknown): bigint {
+  const context = isObject(response) && "context" in response ? response.context : undefined;
+  const slot = isObject(context) && "slot" in context ? context.slot : undefined;
+  if (typeof slot !== "bigint" && typeof slot !== "number") {
+    throw new Error("Kamino getMultipleAccounts answered without a context slot");
+  }
+  return BigInt(slot);
+}
+
+/** Sorted and de-duplicated, so identical reads from concurrent owners are one request. */
+async function readAccountBatch(
+  rpc: AccountsReader,
+  addresses: readonly string[],
+  encoding: "base64" | "jsonParsed" = "base64"
+): Promise<AccountBatch> {
+  const unique = [...new Set(addresses)].sort();
+  const chunks: string[][] = [];
+  for (let start = 0; start < unique.length; start += MAX_ACCOUNTS_PER_REQUEST) {
+    chunks.push(unique.slice(start, start + MAX_ACCOUNTS_PER_REQUEST));
+  }
+  const responses = await Promise.all(
+    chunks.map((chunk) => rpc.getMultipleAccounts(chunk as Address[], { encoding }).send())
+  );
+  const read = new Map<string, object | null>();
+  let slot: bigint | undefined;
+  chunks.forEach((chunk, index) => {
+    const response: unknown = responses[index];
+    const values = isObject(response) && "value" in response ? response.value : undefined;
+    if (!Array.isArray(values) || values.length !== chunk.length) {
+      throw new Error("Kamino getMultipleAccounts answered a different number of accounts");
+    }
+    chunk.forEach((key, position) => {
+      const value: unknown = values[position];
+      if (value !== null && !isObject(value)) {
+        throw new Error(`Kamino getMultipleAccounts returned no account record for ${key}`);
+      }
+      read.set(key, value);
+    });
+    const observed = contextSlot(response);
+    slot = slot === undefined || observed < slot ? observed : slot;
+  });
+  return accountBatch(read, slot);
+}
+
+/** The allocated reserves `loadStateOnlyReserves` reads for this state. */
+function vaultReserves(
+  client: KaminoVaultClient,
+  state: Parameters<KaminoVaultClient["getVaultReserves"]>[0]
+): string[] {
+  return client.getVaultReserves(state).map(String);
+}
+
+async function kvaultGlobalConfigAddress(
+  config: ReturnType<typeof kaminoClusterConfig>
+): Promise<Address> {
+  return String(await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2)) as Address;
+}
+
+/** klend-sdk's `DEFAULT_PUBLIC_KEY`: an unset allocation slot or farm. */
+const DEFAULT_PUBLIC_KEY = "11111111111111111111111111111111";
+
+/** The farms `getUserSharesBalanceSingleVault` reads staked shares from, in its order. */
+function configuredFarms(state: { vaultFarm: unknown; firstLossCapitalFarm: unknown }): string[] {
+  return [state.vaultFarm, state.firstLossCapitalFarm]
+    .filter((farm) => farm !== DEFAULT_PUBLIC_KEY)
+    .map(String);
+}
+
+/**
+ * Whether `value` is an account `getTokenAccountsByOwner(owner, { mint })`
+ * lists: a 165-byte, initialized Token-program account of `mint` owned by
+ * `owner`.
+ */
+function listsAsShareAccount(value: object | null, owner: Address, mint: Address): boolean {
+  if (value === null) return false;
+  const data = base64Data(value);
+  if (data === undefined) {
+    throw new Error("Kamino share account was not returned as base64");
+  }
+  const program: unknown = "owner" in value ? value.owner : undefined;
+  if (String(program) !== TOKEN_PROGRAM_ADDRESS) return false;
+  const bytes = getBase64Encoder().encode(data);
+  if (bytes.length !== getTokenSize()) return false;
+  const token = getTokenDecoder().decode(bytes);
+  return token.state !== AccountState.Uninitialized && token.mint === mint && token.owner === owner;
 }
 
 /** Decimal strings are the boundary currency; `Decimal` never escapes this file. */
@@ -285,14 +469,14 @@ async function loadKvaultGlobalConfig(
   runtime: KaminoRuntime,
   vaultAddress: Address,
   config: ReturnType<typeof kaminoClusterConfig>,
-  rpc: Kit2
+  accounts: BatchRpc,
+  globalConfigAddress: Address
 ): Promise<Kit2> {
-  const globalConfigAddress = await getKvaultGlobalConfigPda(config.kvaultProgramId as Kit2);
   let globalConfig: Kit2;
   try {
     globalConfig = await KVaultGlobalConfig.fetch(
-      rpc,
-      globalConfigAddress,
+      accounts as Kit2,
+      globalConfigAddress as Kit2,
       config.kvaultProgramId as Kit2
     );
   } catch (cause) {
@@ -375,33 +559,30 @@ export async function buildKaminoDepositPlan(
   // Whether this deposit CREATES the share ATA decides who is owed its rent
   // back, and it cannot be inferred from the instructions: `createAtasIdempotent`
   // emits the same create either way and charges nothing when the account is
-  // already there. Only a chain read distinguishes them, so it happens here,
-  // concurrently with the reserve load rather than as an extra serial trip.
-  const [reserves, shareAccountsResponse, [shareAta]] = await Promise.all([
-    loadStateOnlyReserves(
-      runtime,
-      input.vault,
-      client,
-      state,
-      rpc,
-      config.klendProgramId,
-      config.slotDurationMs
-    ),
-    rpc
-      .getTokenAccountsByOwner(
-        input.owner.address,
-        { mint: assetIdentity.shareMint },
-        { encoding: "jsonParsed" }
-      )
-      .send(),
-    findAssociatedTokenPda({
-      owner: input.owner.address,
-      mint: assetIdentity.shareMint,
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
-    }),
-  ]);
-  const createsShareAccount = !parseShareTokenAccountBalances(shareAccountsResponse?.value).some(
-    (account) => account.address === shareAta
+  // already there. Only a chain read distinguishes them, so the ATA rides the
+  // reserve read rather than costing a request of its own.
+  const [shareAta] = await findAssociatedTokenPda({
+    owner: input.owner.address,
+    mint: assetIdentity.shareMint,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  });
+  const accounts = await readAccountBatch(rpc, [...vaultReserves(client, state), shareAta]).catch(
+    failedBatch
+  );
+  const reserves = await loadStateOnlyReserves(
+    runtime,
+    input.vault,
+    client,
+    state,
+    rpc,
+    config.klendProgramId,
+    config.slotDurationMs,
+    accounts.rpc
+  );
+  const createsShareAccount = !listsAsShareAccount(
+    accounts.account(shareAta),
+    input.owner.address,
+    assetIdentity.shareMint
   );
   assertActive();
 
@@ -489,10 +670,15 @@ export async function buildKaminoWithdrawPlan(
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
-  // These reads are independent and share one deadline-bounded RPC client.
-  // Keeping them concurrent removes several serial round trips from the exit
-  // path without weakening any of the validation below.
-  const [shareAccountsResponse, reserves, globalConfig, lookupTables] = await Promise.all([
+  // Two concurrent reads: the owner's share accounts, and one batch with the
+  // reserves, the global config and the lookup table. The batch is jsonParsed
+  // so the table comes back parsed for kit's loader, while accounts without an
+  // RPC parser come back as base64.
+  const globalConfigAddress = await kvaultGlobalConfigAddress(config);
+  const lookupTable = configuredLookupTable(
+    state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+  );
+  const [shareAccountsResponse, accounts] = await Promise.all([
     rpc
       .getTokenAccountsByOwner(
         input.owner.address,
@@ -500,6 +686,17 @@ export async function buildKaminoWithdrawPlan(
         { encoding: "jsonParsed" }
       )
       .send(),
+    readAccountBatch(
+      rpc,
+      [
+        ...vaultReserves(client, state),
+        globalConfigAddress,
+        ...(lookupTable === undefined ? [] : [lookupTable]),
+      ],
+      "jsonParsed"
+    ).catch(failedBatch),
+  ]);
+  const [reserves, globalConfig, lookupTables] = await Promise.all([
     loadStateOnlyReserves(
       runtime,
       input.vault,
@@ -507,12 +704,15 @@ export async function buildKaminoWithdrawPlan(
       state,
       rpc,
       config.klendProgramId,
-      config.slotDurationMs
+      config.slotDurationMs,
+      accounts.rpc
     ),
-    loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+    loadKvaultGlobalConfig(runtime, input.vault, config, accounts.rpc, globalConfigAddress),
+    // kit's own loader decodes the table from the batch: a structural relabel,
+    // since the batch answers the one read it sends.
     loadVaultLookupTableAddresses(
-      rpc as ReturnType<typeof createKaminoRpc>,
-      state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+      accounts.rpc as unknown as Parameters<typeof loadVaultLookupTableAddresses>[0],
+      lookupTable
     ),
   ]);
   assertActive();
@@ -535,8 +735,12 @@ export async function buildKaminoWithdrawPlan(
   // exposes no supported shares-state parameter. SDP position reads include
   // every owner token account, so consolidation temporarily replaces this
   // request-scoped client's method with the exact post-transfer ATA state the
-  // same transaction will observe. The runtime assertion and construction test
-  // intentionally fail an SDK upgrade that removes or renames this method.
+  // same transaction will observe. Without consolidation the ATA holds the
+  // whole request, and the override hands the SDK the ATA balance the
+  // share-account read above already returned, in the SDK's own arithmetic,
+  // instead of letting it read the ATA again. The runtime assertion and
+  // construction test intentionally fail an SDK upgrade that removes or
+  // renames this method.
   const sdkClient = client as Kit2;
   if (typeof sdkClient.getUserSharesState !== "function") {
     throw vaultUnreadable(
@@ -558,6 +762,17 @@ export async function buildKaminoWithdrawPlan(
       ataBalance: postConsolidationAta,
       farmBalance: new Decimal(0),
       totalShares,
+    });
+  } else {
+    const ataBalance = new Decimal(consolidation.postConsolidationAtaBaseUnits.toString()).div(
+      new Decimal(10).pow(state.sharesMintDecimals.toString())
+    );
+    const farmBalance = new Decimal(0);
+    sdkClient.getUserSharesState = async () => ({
+      userSharesAta: consolidation.shareAta,
+      ataBalance,
+      farmBalance,
+      totalShares: ataBalance.add(farmBalance),
     });
   }
   let bundle: Awaited<ReturnType<typeof vault.withdrawIxs>>;
@@ -681,7 +896,7 @@ export async function buildKaminoWithdrawPlan(
  * klend-sdk's bulk helper is safe only as a CANDIDATE INDEX. Its unstaked
  * balances pass through JSON `uiAmount` and it overwrites rather than sums
  * multiple token accounts. We therefore consume only the returned vault keys;
- * `readKaminoPosition` re-reads every candidate in exact base units below and
+ * `readKaminoPositions` re-reads every candidate in exact base units below and
  * is the sole source of balances returned to callers.
  */
 export async function discoverKaminoPositionVaults(
@@ -732,46 +947,206 @@ async function readUnstakedShareBaseUnits(
   return sumRawTokenAccountBaseUnits(response?.value);
 }
 
+interface BoundHolding {
+  vault: Address;
+  bound: Awaited<ReturnType<typeof bindVault>>;
+  farms: string[];
+  farmStates: string[];
+}
+
+interface ChainReads {
+  reserves: AccountBatch;
+  farmStates: AccountBatch;
+}
+
 /**
- * One wallet's holding in one vault, read live.
+ * One owner's holdings in a page of vaults, every value read live.
  *
- * `tokenValue` is shares × exchange rate. The rate read is allowed to fail
+ * Two round trips after the caller's page slot, for any number of vaults: the
+ * vault states in one batch, then the union of their reserves and the owner's
+ * farm user states in a second batch, alongside one share-account read per
+ * vault. Identical reads from owners hydrated together are one request
+ * (`createKaminoReadRpc`).
+ *
+ * UNSTAKED shares are counted here rather than taken from the SDK, and that is
+ * the whole point of the share-account read. `vault.getUserShares` sums its
+ * token accounts through `getTokenAccountAmount`, which returns
+ * `parsed.info.tokenAmount.uiAmount`, a JavaScript NUMBER: above 2^53 base
+ * units that has already lost value. `amount` on the same parsed account is
+ * the exact base-unit string, so this reads that and scales it by the share
+ * mint itself.
+ *
+ * STAKED shares come from klend-sdk's own farm reader, run over the batched
+ * user states for exactly the farms `getUserShares` visits; a vault with no
+ * configured farm has none.
+ *
+ * `tokenValue` is shares x exchange rate. The rate read is allowed to fail
  * independently of the share read: a position whose size is known but whose
- * value is not renders "—" for the value, which is the module rule everywhere
+ * value is not is shown without a value, which is the module rule everywhere
  * else in Earn and strictly better than a fabricated number.
+ *
+ * Results follow `vaults`, duplicates included, and each settles on its own.
  */
+export async function readKaminoPositions(
+  runtime: KaminoRuntime,
+  input: { vaults: readonly string[]; owner: Address; slot: bigint },
+  assertActive: AssertActive = alwaysActive
+): Promise<Array<PromiseSettledResult<KaminoPosition>>> {
+  assertActive();
+  const rpc = createKaminoReadRpc(runtime.rpcUrl);
+  const settled = new Map<string, PromiseSettledResult<KaminoPosition>>();
+  const vaults: Address[] = [];
+  for (const reference of new Set(input.vaults)) {
+    try {
+      vaults.push(address(reference));
+    } catch (reason) {
+      settled.set(reference, { status: "rejected", reason });
+    }
+  }
+
+  const vaultAccounts = await readAccountBatch(rpc, vaults).catch(failedBatch);
+  assertActive();
+  const holdings: BoundHolding[] = (
+    await Promise.all(
+      vaults.map(async (vault): Promise<BoundHolding[]> => {
+        try {
+          const bound = await bindVault(runtime, vault, assertActive, {
+            rpc,
+            accounts: vaultAccounts.rpc,
+          });
+          const farms = configuredFarms(bound.state);
+          const farmStates = await Promise.all(
+            farms.map(async (farm) =>
+              String(await getFarmUserStatePDA(rpc as Kit2, input.owner as Kit2, farm as Kit2))
+            )
+          );
+          return [{ vault, bound, farms, farmStates }];
+        } catch (reason) {
+          settled.set(vault, { status: "rejected", reason });
+          return [];
+        }
+      })
+    )
+  ).flat();
+
+  const [chains, shareReads] = await Promise.all([
+    readReservesAndFarmStates(rpc, holdings, assertActive),
+    mapSettledWithConcurrency(holdings, KAMINO_POSITION_READ_CONCURRENCY, assertActive, (holding) =>
+      readUnstakedShareBaseUnits(rpc, input.owner, holding.bound.assetIdentity.shareMint)
+    ),
+  ]);
+  assertActive();
+
+  await Promise.all(
+    holdings.map(async (holding, index) => {
+      try {
+        const value = await holdingFromReads(
+          runtime,
+          input,
+          holding,
+          chains[index],
+          shareReads[index]
+        );
+        settled.set(holding.vault, { status: "fulfilled", value });
+      } catch (reason) {
+        settled.set(holding.vault, { status: "rejected", reason });
+      }
+    })
+  );
+
+  return input.vaults.map(
+    (vault) =>
+      settled.get(vault) ?? {
+        status: "rejected",
+        reason: vaultUnreadable(vault as Address, runtime.cluster, "position was not read"),
+      }
+  );
+}
+
+/** One wallet's holding in one vault, read live; see `readKaminoPositions`. */
 export async function readKaminoPosition(
   runtime: KaminoRuntime,
   input: { vault: Address; owner: Address; slot: bigint },
   assertActive: AssertActive = alwaysActive
 ): Promise<KaminoPosition> {
-  const { client, vault, state, config, rpc, assetIdentity } = await bindVault(
+  const [result] = await readKaminoPositions(
     runtime,
-    input.vault,
+    { vaults: [input.vault], owner: input.owner, slot: input.slot },
     assertActive
   );
+  if (result?.status === "fulfilled") return result.value;
+  throw result?.reason ?? vaultUnreadable(input.vault, runtime.cluster, "position was not read");
+}
+
+/**
+ * Every holding's reserves and farm user states in one batch, answered per
+ * holding. Reserves only price a holding, so when that batch fails the farm
+ * user states are re-read alone and each vault's reserves on their own: a
+ * failed reserve read blanks only its own vault's value and never a share
+ * count, as when each was its own request.
+ */
+async function readReservesAndFarmStates(
+  rpc: AccountsReader,
+  holdings: readonly BoundHolding[],
+  assertActive: AssertActive
+): Promise<ChainReads[]> {
+  const reserves = holdings.map((holding) =>
+    vaultReserves(holding.bound.client, holding.bound.state)
+  );
+  const farmStates = holdings.flatMap((holding) => holding.farmStates);
+  try {
+    const batch = await readAccountBatch(rpc, [...reserves.flat(), ...farmStates]);
+    return holdings.map(() => ({ reserves: batch, farmStates: batch }));
+  } catch (cause) {
+    const [farmBatch, reserveReads] = await Promise.all([
+      farmStates.length === 0
+        ? failedBatch(cause)
+        : readAccountBatch(rpc, farmStates).catch(failedBatch),
+      mapSettledWithConcurrency(
+        reserves,
+        KAMINO_POSITION_READ_CONCURRENCY,
+        assertActive,
+        (addresses) => readAccountBatch(rpc, addresses)
+      ),
+    ]);
+    return reserveReads.map((read) => ({
+      reserves: read.status === "fulfilled" ? read.value : failedBatch(read.reason),
+      farmStates: farmBatch,
+    }));
+  }
+}
+
+async function holdingFromReads(
+  runtime: KaminoRuntime,
+  input: { owner: Address; slot: bigint },
+  holding: BoundHolding,
+  chain: ChainReads,
+  shareRead: PromiseSettledResult<bigint> | undefined
+): Promise<KaminoPosition> {
+  const { client, state, config, rpc, assetIdentity } = holding.bound;
   const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
 
-  // UNSTAKED shares are counted here rather than taken from the SDK, and that is
-  // the whole point of this block. `vault.getUserShares` sums its token accounts
-  // through `getTokenAccountAmount`, which returns
-  // `parsed.info.tokenAmount.uiAmount` — a JavaScript NUMBER. Above 2^53 base
-  // units that has already lost value, and no amount of `Decimal`-wrapping
-  // downstream can put it back. `amount` on the same parsed account is the exact
-  // base-unit string, so this reads that and scales it by the share mint itself.
-  //
-  // STAKED shares still come from the SDK: that half is derived from farm state
-  // as an exact `Decimal`, never through `uiAmount`, so re-implementing it would
-  // duplicate the farm lookup for no precision gain.
-  assertActive();
-  const staked = await vault.getUserShares(input.owner as Kit2);
-  assertActive();
-  const unstakedBase = await readUnstakedShareBaseUnits(rpc, input.owner, assetIdentity.shareMint);
-  assertActive();
+  // The farm loop of `getUserSharesBalanceSingleVault`, over the batched user states.
+  let stakedShares = new Decimal(0);
+  for (const farm of holding.farms) {
+    stakedShares = stakedShares.add(
+      await getUserSharesInTokensStakedInFarm(
+        chain.farmStates.rpc as Kit2,
+        input.owner as Kit2,
+        farm as Kit2,
+        state.sharesMintDecimals.toNumber()
+      )
+    );
+  }
+  if (shareRead === undefined) {
+    throw vaultUnreadable(holding.vault, runtime.cluster, "share accounts were not read");
+  }
+  if (shareRead.status === "rejected") throw shareRead.reason;
+  const unstakedBase = shareRead.value;
   const shares = requireNonNegativeFiniteDecimal(
     "total share balance",
     new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
-      requireNonNegativeFiniteDecimal("staked share balance", staked.stakedShares)
+      requireNonNegativeFiniteDecimal("staked share balance", stakedShares)
     )
   );
 
@@ -780,12 +1155,13 @@ export async function readKaminoPosition(
   try {
     const reserves = await loadStateOnlyReserves(
       runtime,
-      input.vault,
+      holding.vault,
       client,
       state,
       rpc,
       config.klendProgramId,
-      config.slotDurationMs
+      config.slotDurationMs,
+      chain.reserves.rpc
     );
     rawRate = await client.getTokensPerShareSingleVault(
       state,
@@ -796,7 +1172,6 @@ export async function readKaminoPosition(
   } catch {
     rawRate = undefined;
   }
-  assertActive();
   try {
     if (rawRate === undefined) throw new Error("vault exchange rate unavailable");
     const rate = requireNonNegativeFiniteDecimal("vault exchange rate", rawRate);
@@ -813,7 +1188,7 @@ export async function readKaminoPosition(
   }
 
   return {
-    vault: input.vault,
+    vault: holding.vault,
     owner: input.owner,
     cluster: config.cluster,
     shares: shares.toFixed(),
@@ -823,9 +1198,6 @@ export async function readKaminoPosition(
     sharesMint: assetIdentity.shareMint,
   };
 }
-
-/** klend-sdk's `DEFAULT_PUBLIC_KEY`: an allocation slot with no reserve. */
-const EMPTY_ALLOCATION_RESERVE = "11111111111111111111111111111111";
 
 /**
  * The pricing inputs `estimateSharesFromTokens` uses, replicated so the cap
@@ -845,7 +1217,7 @@ function observeDepositPricing(
   const allocations = (state.vaultAllocationStrategy ?? []) as Kit2[];
   const chargedReserves = allocations.filter(
     (allocation) =>
-      String(allocation.reserve) !== EMPTY_ALLOCATION_RESERVE &&
+      String(allocation.reserve) !== DEFAULT_PUBLIC_KEY &&
       bigintField("allocation weight", allocation.targetAllocationWeight) > 0n &&
       bigintField("allocation cap", allocation.tokenAllocationCap) > 0n
   ).length;
@@ -906,6 +1278,7 @@ export async function quoteKaminoDeposit(
   const amount = toDecimal(acceptedAmount, "amount");
 
   assertActive();
+  const accounts = await readAccountBatch(rpc, vaultReserves(client, state)).catch(failedBatch);
   const reserves = await loadStateOnlyReserves(
     runtime,
     input.vault,
@@ -913,7 +1286,8 @@ export async function quoteKaminoDeposit(
     state,
     rpc,
     config.klendProgramId,
-    config.slotDurationMs
+    config.slotDurationMs,
+    accounts.rpc
   );
   assertActive();
 
@@ -969,6 +1343,11 @@ export async function quoteKaminoWithdraw(
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
+  const globalConfigAddress = await kvaultGlobalConfigAddress(config);
+  const accounts = await readAccountBatch(rpc, [
+    ...vaultReserves(client, state),
+    globalConfigAddress,
+  ]).catch(failedBatch);
   const [reserves, globalConfig] = await Promise.all([
     loadStateOnlyReserves(
       runtime,
@@ -977,9 +1356,10 @@ export async function quoteKaminoWithdraw(
       state,
       rpc,
       config.klendProgramId,
-      config.slotDurationMs
+      config.slotDurationMs,
+      accounts.rpc
     ),
-    loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+    loadKvaultGlobalConfig(runtime, input.vault, config, accounts.rpc, globalConfigAddress),
   ]);
   assertActive();
   const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);

@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -55,7 +56,10 @@ async function seedKeyRow(
     .prepare(
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?)
+       ON CONFLICT (id) DO UPDATE SET
+         role = excluded.role, permissions = excluded.permissions,
+         status = excluded.status, expires_at = excluded.expires_at`
     )
     .bind(
       key.id,
@@ -113,13 +117,6 @@ describe("API key privilege guards", () => {
   async function reseedActor() {
     const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
     await seedCachedApiKey(env, writerHash, WRITER_CACHED);
-  }
-
-  // The per-key policy routes are role-gated, so the SELF-guard behind them
-  // is only reachable by an api_admin actor.
-  async function reseedAdminActor() {
-    const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, writerHash, { ...WRITER_CACHED, role: "api_admin" });
   }
 
   it("refuses to rotate a key whose permissions exceed the actor's", async () => {
@@ -234,22 +231,7 @@ describe("API key privilege guards", () => {
 
   it("lets a wallet-scoped key grant a wallet inside its own scope", async () => {
     const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES ('cust_privilege_scope', ?, ?, 'local', 'test-config',
-                 'sdp-custody-encryption-v1', 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_privilege_scope', 'cust_privilege_scope', 'wal_scope_own',
-                 'wal_scope_own_public_key', 'active')`
-      )
-      .run();
+    await seedOwnScopeWallet();
     await seedKeyRow(
       { id: "key_privilege_scoped2", raw: "sk_test_privilege_scoped2" },
       "api_developer",
@@ -298,6 +280,8 @@ describe("API key privilege guards", () => {
   });
 
   it("refuses a wallet-scoped key granting wider permissions on its own wallet", async () => {
+    // The key's own binding must resolve, or it holds nothing on the wallet.
+    await seedOwnScopeWallet();
     const scopedHash = await hashString("sk_test_privilege_scoped6", env.API_KEY_PEPPER);
     await seedCachedApiKey(env, scopedHash, {
       ...WRITER_CACHED,
@@ -391,7 +375,7 @@ describe("API key privilege guards", () => {
           name: "Provisioned escape",
           role: "api_readonly",
           walletScope: "selected",
-          provisionWallet: true,
+          provisionWallet: { provider: "privy" },
         }),
       },
       env
@@ -496,176 +480,31 @@ describe("API key privilege guards", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("being used for this request");
   });
-
-  it("clones the creator's policy foundation onto a key it mints", async () => {
-    await reseedActor();
-    const db = getDb(env);
-    const profileId = "akcp_creator_profile";
-    const revisionId = "akcpr_creator_revision";
-    await db
-      .prepare(
-        `INSERT INTO api_key_control_profiles (id, organization_id, project_id, api_key_id, name, status, created_by)
-         VALUES (?, ?, ?, ?, ?, 'active', ?)`
-      )
-      .bind(profileId, TEST_ORG.id, TEST_PROJECT.id, WRITER_KEY.id, "creator profile", TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO api_key_control_profile_revisions (id, profile_id, revision_number, rules, default_action, created_by)
-         VALUES (?, ?, 1, ?::jsonb, 'deny', ?)`
-      )
-      .bind(
-        revisionId,
-        profileId,
-        JSON.stringify([{ id: "cap-transfers", kind: "always", action: "deny" }]),
-        TEST_USER.id
-      )
-      .run();
-    await db
-      .prepare("UPDATE api_key_control_profiles SET active_revision_id = ? WHERE id = ?")
-      .bind(revisionId, profileId)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, binding_scope, api_key_control_profile_id)
-         VALUES (?, ?, 'all', ?)`
-      )
-      .bind("akwpol_creator_binding", WRITER_KEY.id, profileId)
-      .run();
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({
-          name: "policy-bound sibling",
-          role: "api_readonly",
-          permissions: ["tokens:read"],
-          walletScope: "all",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { data: { apiKey: { id: string } } };
-    const siblingId = body.data.apiKey.id;
-
-    // The sibling must be born under a copy of the creator's policy, not free
-    // of it — profile, active revision, rules, and binding all cloned.
-    const clonedProfile = await db
-      .prepare(`SELECT id, active_revision_id FROM api_key_control_profiles WHERE api_key_id = ?`)
-      .bind(siblingId)
-      .first<{ id: string; active_revision_id: string | null }>();
-    expect(clonedProfile).toBeTruthy();
-    expect(clonedProfile?.id).not.toBe(profileId);
-    expect(clonedProfile?.active_revision_id).toBeTruthy();
-    const clonedRevision = await db
-      .prepare(`SELECT rules, default_action FROM api_key_control_profile_revisions WHERE id = ?`)
-      .bind(clonedProfile?.active_revision_id)
-      .first<{ rules: unknown; default_action: string }>();
-    expect(clonedRevision?.default_action).toBe("deny");
-    const clonedBinding = await db
-      .prepare(
-        `SELECT api_key_control_profile_id FROM api_key_wallet_policy_bindings WHERE api_key_id = ?`
-      )
-      .bind(siblingId)
-      .first<{ api_key_control_profile_id: string | null }>();
-    expect(clonedBinding?.api_key_control_profile_id).toBe(clonedProfile?.id);
-  });
-
-  it.each([
-    ["PUT", "policy-bindings", { mode: "clear" }],
-    ["POST", "policy-profiles", { name: "sibling profile" }],
-    ["POST", "policy-profiles/prof_x/revisions", { rules: [], defaultAction: "allow" }],
-    ["POST", "policy-profiles/prof_x/revisions/rev_x/activate", undefined],
-  ] as const)(
-    "holds sibling per-key policy authoring to api_admin (%s /%s)",
-    async (method, path, body) => {
-      await seedKeyRow(READONLY_TARGET_KEY, "api_readonly", null);
-      await reseedActor();
-
-      const res = await app.request(
-        `/v1/api-keys/${READONLY_TARGET_KEY.id}/${path}`,
-        {
-          method,
-          headers: headers(),
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-      const responseBody = (await res.json()) as { error: { message: string } };
-      expect(responseBody.error.message).toContain("api_admin");
-    }
-  );
-
-  it("refuses a key replacing its own policy bindings", async () => {
-    await reseedAdminActor();
-    const res = await app.request(
-      `/v1/api-keys/${WRITER_KEY.id}/policy-bindings`,
-      {
-        method: "PUT",
-        headers: headers(),
-        body: JSON.stringify({ mode: "clear" }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("being used for this request");
-  });
-
-  it("refuses a key creating a control profile for itself", async () => {
-    await reseedAdminActor();
-    const res = await app.request(
-      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles`,
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ name: "self-authored profile" }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("being used for this request");
-  });
-
-  it("refuses a key writing a control-profile revision for itself", async () => {
-    await reseedAdminActor();
-    const res = await app.request(
-      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions`,
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ rules: [], defaultAction: "allow" }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("being used for this request");
-  });
-
-  it("refuses a key activating a control-profile revision for itself", async () => {
-    await reseedAdminActor();
-    const res = await app.request(
-      `/v1/api-keys/${WRITER_KEY.id}/policy-profiles/prof_self/revisions/rev_self/activate`,
-      {
-        method: "POST",
-        headers: headers(),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("being used for this request");
-  });
 });
+
+/** The custody wallet `wal_scope_own` names, so a binding to it resolves. */
+async function seedOwnScopeWallet(): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cust_privilege_scope",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "local",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_privilege_scope",
+        owner: { kind: "config", custodyConfigId: "cust_privilege_scope" },
+        walletId: "wal_scope_own",
+        publicKey: "wal_scope_own_public_key",
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
+}

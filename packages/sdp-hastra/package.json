@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@sdp/earn": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/web3.js": "1.98.4"

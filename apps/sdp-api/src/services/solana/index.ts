@@ -14,7 +14,4 @@ export {
 // Service factory (wires up Kora integration when configured)
 export { createToken2022Service } from "./factory";
 // Signer service
-export {
-  createOrgSigner,
-  createOrgSignerForCustodyWallet,
-} from "./signer";
+export { createOrgSignerForCustodyWallet } from "./signer";

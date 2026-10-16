@@ -1,7 +1,5 @@
-import { PERMISSIONS } from "@sdp/types";
+import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
 import {
-  apiKeyControlProfileCreateSchema as apiKeyControlProfileCreateSchemaBase,
-  apiKeyControlProfileRevisionCreateBaseSchema as apiKeyControlProfileRevisionCreateSchemaBase,
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
   apiKeyRotateSchema as apiKeyRotateSchemaBase,
   apiKeyUpdateSchema as apiKeyUpdateSchemaBase,
@@ -14,7 +12,7 @@ import {
   withOpenApi,
   z,
 } from "./base";
-import { policyRuleSchema } from "./payments";
+import { custodyWalletOwnerRequestSchema } from "./custody";
 
 export const apiKeyRoleSchema = z
   .enum(["api_admin", "api_developer", "api_readonly"])
@@ -33,6 +31,12 @@ export const apiKeyStatusSchema = z
   .enum(["active", "revoked", "expired", "deactivated"])
   .openapi({ description: "API key status.", example: "active" });
 
+export const allowedOperationSchema = z.enum(ALLOWED_OPERATIONS).openapi({
+  description:
+    "An operation family (privacy, payment, ramp, issuance, program) or a single operation type. A family entry covers every type in it.",
+  example: "payment",
+});
+
 export const permissionSchema = z.enum(PERMISSIONS).openapi({
   description: "Permission granted to the API key.",
   example: "tokens:write",
@@ -50,180 +54,6 @@ export const apiKeyWalletBindingSchema = z
     }),
   })
   .openapi({ description: "Wallet-level permission binding for an API key." });
-
-export const apiKeyWalletPolicyBindingSchema = z
-  .object({
-    id: z.string().openapi({
-      description: "API-key wallet policy binding ID.",
-      example: "akwpol_123",
-    }),
-    bindingScope: apiKeyWalletScopeSchema.openapi({
-      description: "Whether this policy binding applies to every wallet or one selected wallet.",
-    }),
-    walletId: z.string().nullable().openapi({
-      description: "Selected wallet ID when this binding is wallet-specific.",
-      example: "privy_wallet_123",
-    }),
-    custodyWalletId: z.string().nullable().openapi({
-      description: "Internal custody wallet row ID when this binding is wallet-specific.",
-      example: "cwlt_123",
-    }),
-    walletControlProfileId: z.string().nullable().openapi({
-      description: "Wallet control profile applied by this binding, if any.",
-      example: "wcp_123",
-    }),
-    walletControlProfileRevisionId: z.string().nullable().openapi({
-      description: "Active wallet control profile revision applied by this binding, if any.",
-      example: "wcpr_123",
-    }),
-    apiKeyControlProfileId: z.string().nullable().openapi({
-      description: "API-key control profile applied by this binding, if any.",
-      example: "akcp_123",
-    }),
-    apiKeyControlProfileRevisionId: z.string().nullable().openapi({
-      description: "Active API-key control profile revision applied by this binding, if any.",
-      example: "akcpr_123",
-    }),
-    createdAt: isoDateTimeSchema.openapi({
-      description: "Policy binding creation timestamp.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-    updatedAt: isoDateTimeSchema.openapi({
-      description: "Policy binding update timestamp.",
-      example: "2025-01-02T00:00:00.000Z",
-    }),
-  })
-  .openapi({ description: "Read-only policy binding summary for an API key wallet scope." });
-
-export const apiKeyPolicyRuleSchema = withOpenApi(policyRuleSchema, {
-  description: "Operation-level API-key policy rule.",
-  example: {
-    id: "deny-issuance",
-    kind: "operation_family",
-    family: "issuance",
-    action: "deny",
-  },
-});
-
-export const apiKeyControlProfileSchema = z
-  .object({
-    id: z.string().openapi({ description: "API-key control profile ID." }),
-    organizationId: z.string().openapi({ description: "Owning organization ID." }),
-    projectId: projectIdParamSchema.nullable().openapi({ description: "Owning project ID." }),
-    apiKeyId: apiKeyIdParamSchema,
-    name: z.string().openapi({ description: "Control profile name." }),
-    status: z.enum(["draft", "active", "disabled", "archived"]).openapi({
-      description: "Control profile status.",
-    }),
-    activeRevisionId: z.string().nullable().openapi({
-      description: "Currently active immutable revision ID.",
-    }),
-    createdBy: z.string().nullable().openapi({ description: "Profile author ID." }),
-    createdAt: isoDateTimeSchema,
-    updatedAt: isoDateTimeSchema,
-    activatedAt: isoDateTimeSchema.nullable(),
-    archivedAt: isoDateTimeSchema.nullable(),
-  })
-  .openapi({ description: "API-key control profile." });
-
-export const apiKeyControlProfileRevisionSchema = z
-  .object({
-    id: z.string().openapi({ description: "Immutable API-key control profile revision ID." }),
-    profileId: z.string().openapi({ description: "Parent control profile ID." }),
-    revisionNumber: z.number().int().positive().openapi({ description: "Revision number." }),
-    rules: z.array(apiKeyPolicyRuleSchema).openapi({ description: "Revision policy rules." }),
-    defaultAction: z.enum(["allow", "deny", "approval_required", "review"]).openapi({
-      description: "Decision used when no rule matches.",
-    }),
-    createdBy: z.string().nullable().openapi({ description: "Revision author ID." }),
-    createdAt: isoDateTimeSchema,
-    activatedAt: isoDateTimeSchema.nullable(),
-  })
-  .openapi({ description: "Immutable API-key control profile revision." });
-
-export const createApiKeyControlProfileRequestSchema = apiKeyControlProfileCreateSchemaBase
-  .extend({
-    name: withOpenApi(apiKeyControlProfileCreateSchemaBase.shape.name, {
-      description: "Human-readable name for the API-key control profile.",
-      example: "Treasury service controls",
-    }),
-  })
-  .openapi({ description: "Create an API-key control profile." });
-
-export const createApiKeyControlProfileRevisionRequestSchema =
-  apiKeyControlProfileRevisionCreateSchemaBase
-    .extend({
-      rules: z.array(apiKeyPolicyRuleSchema).max(100).openapi({
-        description: "Complete rule snapshot for the new immutable revision.",
-      }),
-      defaultAction: withOpenApi(apiKeyControlProfileRevisionCreateSchemaBase.shape.defaultAction, {
-        description: "Decision used when no rule matches.",
-        example: "deny",
-      }),
-    })
-    .openapi({ description: "Create a new immutable API-key control profile revision." });
-
-const writeSelectedApiKeyPolicyBindingSchema = z
-  .object({
-    bindingScope: z.literal("selected"),
-    walletId: z.string().openapi({ description: "Selected custody wallet ID." }),
-    walletControlProfileId: z.string().optional().openapi({
-      description: "Optional active wallet control profile for this wallet.",
-    }),
-    apiKeyControlProfileId: z.string().optional().openapi({
-      description: "Optional active API-key control profile for this wallet.",
-    }),
-  })
-  .refine(
-    (binding) => binding.walletControlProfileId || binding.apiKeyControlProfileId,
-    "Selected-wallet policy bindings must reference at least one control profile"
-  )
-  .openapi({
-    description:
-      "Selected-wallet policy binding replacement. At least one control profile ID is required.",
-  });
-
-const writeAllApiKeyPolicyBindingSchema = z
-  .object({
-    bindingScope: z.literal("all"),
-    apiKeyControlProfileId: z.string().openapi({
-      description: "Active API-key control profile shared by all wallets in key scope.",
-    }),
-  })
-  .openapi({ description: "All-wallet policy binding replacement." });
-
-export const writeApiKeyPolicyBindingsRequestSchema = z
-  .discriminatedUnion("mode", [
-    z.object({
-      mode: z.literal("replace"),
-      bindings: z
-        .array(z.union([writeAllApiKeyPolicyBindingSchema, writeSelectedApiKeyPolicyBindingSchema]))
-        .min(1)
-        .max(100),
-    }),
-    z.object({ mode: z.literal("clear") }),
-  ])
-  .openapi({
-    description:
-      "Explicitly replace the complete API-key policy binding set, or clear every policy binding.",
-  });
-
-export const apiKeyControlProfileResponseSchema = z.object({
-  profile: apiKeyControlProfileSchema,
-});
-
-export const apiKeyControlProfileRevisionResponseSchema = z.object({
-  revision: apiKeyControlProfileRevisionSchema,
-});
-
-export const apiKeyControlProfileActivationResponseSchema = z.object({
-  profile: apiKeyControlProfileSchema,
-  revision: apiKeyControlProfileRevisionSchema,
-});
-
-export const apiKeyPolicyBindingsResponseSchema = z.object({
-  policyBindings: z.array(apiKeyWalletPolicyBindingSchema),
-});
 
 export const apiKeyListItemSchema = z
   .object({
@@ -245,8 +75,10 @@ export const apiKeyListItemSchema = z
     walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
       description: "Wallet bindings and wallet-level permission sets for this API key.",
     }),
-    policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
-      description: "Policy binding summaries currently associated with this API key.",
+    allowedOperations: z.array(allowedOperationSchema).openapi({
+      description:
+        "Operation families and types this key may perform on the wallets it can access. An empty list places no restriction.",
+      example: ["payment", "ramp_offramp_quote"],
     }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
@@ -304,8 +136,10 @@ export const apiKeyDetailSchema = z
     walletBindings: z.array(apiKeyWalletBindingSchema).openapi({
       description: "Wallet bindings and wallet-level permission sets for this API key.",
     }),
-    policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
-      description: "Policy binding summaries currently associated with this API key.",
+    allowedOperations: z.array(allowedOperationSchema).openapi({
+      description:
+        "Operation families and types this key may perform on the wallets it can access. An empty list places no restriction.",
+      example: ["payment", "ramp_offramp_quote"],
     }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
@@ -430,6 +264,11 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Optional list of IPv4/IPv6 addresses or CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
     }),
+    allowedOperations: withOpenApi(apiKeyCreateSchemaBase.shape.allowedOperations, {
+      description:
+        "Optional operation families and types the key may perform. Omit or pass an empty list for no restriction. A key cannot grant operations outside its own list.",
+      example: ["payment", "ramp"],
+    }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
@@ -451,9 +290,9 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description:
         "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
-    provisionWallet: withOpenApi(apiKeyCreateSchemaBase.shape.provisionWallet, {
+    provisionWallet: withOpenApi(custodyWalletOwnerRequestSchema.optional(), {
       description:
-        "Set true to provision for the effective custody target, or provide a connectionId object to provision for an exact Custody Connection.",
+        "Provision a new wallet for this key under exactly one provider account: { provider } for the project's Managed config for that provider, or { connectionId } for a Custody Connection.",
       example: { connectionId: "cconn_123" },
     }),
     walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
@@ -472,8 +311,8 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       role: "api_developer",
       walletScope: "selected",
       provisionWallet: { connectionId: "cconn_123" },
-      walletLabel: "Mint authority wallet",
-      walletPurpose: "mint_authority",
+      walletLabel: "Treasury wallet",
+      walletPurpose: "transfer",
     },
   });
 
@@ -495,6 +334,11 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
       description: "Updated IPv4/IPv6 address or CIDR allowlist. Use null to clear.",
       example: ["203.0.113.0/24"],
+    }),
+    allowedOperations: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedOperations, {
+      description:
+        "Updated operation families and types the key may perform. Use null or an empty list to remove the restriction.",
+      example: ["issuance_mint_execute"],
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",

@@ -1,6 +1,6 @@
 "use client";
 
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -17,8 +17,8 @@ import { toast } from "sonner";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { type DesignModuleFlags, isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import {
@@ -33,6 +34,7 @@ import {
   PAYMENT_REQUESTS_HREF,
   PAYMENT_TRANSACTIONS_HREF,
 } from "@/lib/payments-routes";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -114,7 +116,7 @@ function DashboardHeaderDownloadAction({
   const download = async () => {
     setPending(true);
     try {
-      const response = await fetch(href);
+      const response = await dashboardRequest(href, { method: "GET" });
       if (!response.ok) {
         toast.error(
           t(
@@ -141,6 +143,8 @@ function DashboardHeaderDownloadAction({
   };
 
   return (
+    // The icon goes in the button's icon slot: as a child it would sit on its own line above the
+    // label, since the shared button wraps children in their own box.
     <Button
       type="button"
       variant={variant === "primary" ? "default" : "outline"}
@@ -149,12 +153,14 @@ function DashboardHeaderDownloadAction({
       disabled={pending}
       aria-busy={pending || undefined}
       onClick={() => void download()}
+      iconLeft={
+        pending ? (
+          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <DownloadIcon className="size-4" aria-hidden="true" />
+        )
+      }
     >
-      {pending ? (
-        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <DownloadIcon className="size-4" aria-hidden="true" />
-      )}
       {label}
     </Button>
   );
@@ -173,6 +179,7 @@ export function DashboardHeaderAction({
   action: DashboardHeaderActionConfig;
   search: string;
 }) {
+  const projectHref = useProjectHref();
   const Icon =
     action.icon === undefined
       ? null
@@ -181,12 +188,14 @@ export function DashboardHeaderAction({
         : action.icon === "arrow-down"
           ? ArrowDownIcon
           : DownloadIcon;
-  const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const target = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
   if (action.download) {
+    // The export route is an API path, not a dashboard page, so it takes no project segment.
     return (
-      <DashboardHeaderDownloadAction href={href} label={action.label} variant={action.variant} />
+      <DashboardHeaderDownloadAction href={target} label={action.label} variant={action.variant} />
     );
   }
+  const href = projectHref(target);
   return (
     <Button
       asChild
@@ -239,9 +248,10 @@ export function HeaderBackAction({
   label: string;
   compactOnMobile?: boolean;
 }) {
+  const projectHref = useProjectHref();
   return (
     <Link
-      href={href}
+      href={projectHref(href)}
       // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-1.5"
     >
@@ -844,35 +854,15 @@ function getMarketsRoutePageConfig(
 function getWalletRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  policiesEnabled: boolean,
   paymentsEnabled: boolean
 ): DashboardPageConfig | null {
-  const walletPolicyRouteMatch = pathname.match(
-    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
-  );
-  if (walletPolicyRouteMatch) {
-    const [, section, walletId] = walletPolicyRouteMatch;
-    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.walletControls"),
-      backHref: isPolicyEvaluationDetail
-        ? `/dashboard/${section}/${walletId}/policy/audit`
-        : `/dashboard/${section}/${walletId}`,
-      backLabel: isPolicyEvaluationDetail
-        ? t("Shared.dashboardShell.backToPolicyHistory")
-        : t("Shared.dashboardShell.backToWallet"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-
   const walletDetailMatch = pathname.match(/^\/dashboard\/(?:wallets|custody)\/([^/]+)\/?$/);
   const isWalletDetail =
-    walletDetailMatch !== null &&
-    !["setup", "connections", "switch"].includes(walletDetailMatch[1] ?? "");
+    walletDetailMatch !== null && !["setup", "connections"].includes(walletDetailMatch[1] ?? "");
   if (!isWalletDetail) return null;
 
   // The wallet names itself (and sets its provider mark and star) through DashboardPageTitle;
-  // "Wallet" holds the place until it does. Policy is a tab only where wallet policies are on.
+  // "Wallet" holds the place until it does.
   return {
     title: t("Shared.dashboardShell.wallet"),
     contentWidthClass: REFRESH_PAGE_WIDTH,
@@ -884,7 +874,6 @@ function getWalletRoutePageConfig(
       tabs: [
         { id: "overview", label: t("Shared.tabs.overview") },
         { id: "activity", label: t("Shared.tabs.activity") },
-        ...(policiesEnabled ? [{ id: "policy", label: t("Shared.tabs.policy") }] : []),
         { id: "settings", label: t("Shared.tabs.settings") },
       ],
       hideOnMobile: false,
@@ -926,30 +915,6 @@ function getAccessControlPageConfig(
       contentWidthClass: "max-w-none",
     });
   }
-  if (pathname === "/dashboard/approvals") {
-    return {
-      title: t("Shared.dashboardShell.approvals"),
-      headerTabs: {
-        tabs: [
-          { id: "pending", label: t("DashboardApprovals.pendingTab") },
-          { id: "history", label: t("DashboardApprovals.historyTab") },
-        ],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname.startsWith("/dashboard/approvals")) {
-    return {
-      title: t("Shared.dashboardShell.approvals"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/approvals",
-        label: t("Shared.dashboardShell.backToApprovals"),
-      },
-    };
-  }
-
   return null;
 }
 
@@ -1149,16 +1114,6 @@ function getWalletSectionPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return {
-      title: t("Shared.dashboardShell.activateProvider"),
-      contentWidthClass: "max-w-3xl",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
   return null;
 }
 
@@ -1288,7 +1243,8 @@ function getRefreshPaymentsPageConfig(
 function getLegacyDesignPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  transactionModules: readonly UnifiedTransactionModule[]
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return actionPageConfig({
@@ -1353,7 +1309,7 @@ function getLegacyDesignPageConfig(
       headerTabs: {
         tabs: [
           { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+          ...transactionModules.map((module) => ({
             id: module,
             label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
           })),
@@ -1415,24 +1371,6 @@ function getLegacyWalletRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  const walletPolicyRouteMatch = pathname.match(
-    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
-  );
-  if (walletPolicyRouteMatch) {
-    const [, section, walletId] = walletPolicyRouteMatch;
-    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.walletControls"),
-      backHref: isPolicyEvaluationDetail
-        ? `/dashboard/${section}/${walletId}/policy/audit`
-        : `/dashboard/${section}/${walletId}`,
-      backLabel: isPolicyEvaluationDetail
-        ? t("Shared.dashboardShell.backToPolicyHistory")
-        : t("Shared.dashboardShell.backToWallet"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-
   const isWalletDetail =
     (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
     (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
@@ -1476,16 +1414,6 @@ function getLegacyWalletSectionPageConfig(
     return {
       title: t("Shared.dashboardShell.connections"),
       contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
-  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return {
-      title: t("Shared.dashboardShell.activateProvider"),
-      contentWidthClass: "max-w-3xl",
       backAction: {
         href: "/dashboard/wallets",
         label: t("Shared.dashboardShell.backToWallets"),
@@ -1546,9 +1474,10 @@ export function getDashboardPageConfig(
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
   privateChannelsEnabled: boolean,
-  custodyEnabled = true,
+  // Transactions tabs, from `enabledTransactionModules`.
+  transactionModules: readonly UnifiedTransactionModule[],
+  _custodyEnabled = true,
   paymentsEnabled = true,
-  policiesEnabled = true,
   newDesign = true,
   newDesignModules?: DesignModuleFlags
 ): DashboardPageConfig {
@@ -1560,32 +1489,16 @@ export function getDashboardPageConfig(
   if (accessControlPageConfig) return accessControlPageConfig;
   const homePageConfig = getHomePageConfig(pathname, t, overviewNewDesign);
   if (homePageConfig) return homePageConfig;
-  // Every Wallets page's header follows the Wallets module, its policy and audit pages included.
+  // Every Wallets page's header follows the Wallets module.
   const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
   const walletSectionPageConfig = walletsNewDesign
     ? getWalletSectionPageConfig(pathname, t)
     : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
   const walletRoutePageConfig = walletsNewDesign
-    ? getWalletRoutePageConfig(pathname, t, policiesEnabled, paymentsEnabled)
+    ? getWalletRoutePageConfig(pathname, t, paymentsEnabled)
     : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
-  if (pathname === "/dashboard/policies") {
-    return {
-      title: t("Shared.dashboardShell.policies"),
-      headerTabs: {
-        tabs: custodyEnabled
-          ? [
-              { id: "all", label: t("DashboardPolicies.all") },
-              { id: "wallets", label: t("DashboardPolicies.wallets") },
-              { id: "api_keys", label: t("DashboardPolicies.apiKeys") },
-            ]
-          : [{ id: "api_keys", label: t("DashboardPolicies.apiKeys") }],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
   const issuanceRoutePageConfig = isDesignModuleOn({ newDesign, newDesignModules }, "issuance")
     ? getIssuanceRoutePageConfig(pathname, t)
     : getLegacyIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
@@ -1593,7 +1506,7 @@ export function getDashboardPageConfig(
   // A Payments page no design module has redesigned keeps the previous design's header under
   // NEW DESIGN too.
   const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
+    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
     : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
@@ -1666,7 +1579,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
-    // the members table and the RPC form are label/value rows, and letting them span
+    // the members table rows are label/value pairs, and letting them span
     // an ultrawide display pushes each value far from its label.
     return {
       title: t("Shared.dashboardShell.settings"),

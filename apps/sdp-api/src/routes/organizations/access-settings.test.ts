@@ -11,7 +11,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+import { clearKVStores, seedApiKeyRowFor, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const ORGANIZATION_ID = TEST_CACHED_API_KEY.organizationId;
 
@@ -31,6 +31,11 @@ async function seedOrganization(settings: OrganizationSettings | null): Promise<
       settings === null ? null : JSON.stringify(settings)
     )
     .run();
+  // The cached key is seeded before the organization exists; its row needs it.
+  await seedApiKeyRowFor(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...TEST_CACHED_API_KEY,
+    permissions: ["*"],
+  });
 }
 
 async function writeRawSettings(settings: string): Promise<void> {
@@ -327,14 +332,14 @@ describe("Organization access settings", () => {
       });
       expect(res.status).toBe(200);
     });
-    it("reads no restriction from settings that will not parse", async () => {
+    it("fails loudly with a 500 on settings that will not parse", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await writeRawSettings("{not json");
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
       });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
     });
     it("ignores an allowlist that was recorded before the setting was enforced", async () => {
       await seedOrganization(null);

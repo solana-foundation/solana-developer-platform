@@ -34,6 +34,11 @@
       "import": "./src/api-keys.ts",
       "default": "./src/api-keys.ts"
     },
+    "./earn-wire": {
+      "types": "./src/earn-wire.ts",
+      "import": "./src/earn-wire.ts",
+      "default": "./src/earn-wire.ts"
+    },
     "./earn": {
       "types": "./src/earn.ts",
       "import": "./src/earn.ts",
@@ -89,6 +94,11 @@
       "import": "./src/provider-access.ts",
       "default": "./src/provider-access.ts"
     },
+    "./release-channels": {
+      "types": "./src/release-channels.ts",
+      "import": "./src/release-channels.ts",
+      "default": "./src/release-channels.ts"
+    },
     "./ramp-requirements": {
       "types": "./src/ramp-requirements.ts",
       "import": "./src/ramp-requirements.ts",
@@ -98,11 +108,6 @@
       "types": "./src/ramp-destinations.ts",
       "import": "./src/ramp-destinations.ts",
       "default": "./src/ramp-destinations.ts"
-    },
-    "./ramp-resolution": {
-      "types": "./src/ramp-resolution.ts",
-      "import": "./src/ramp-resolution.ts",
-      "default": "./src/ramp-resolution.ts"
     },
     "./generated/ramp": {
       "types": "./src/generated/ramp.generated.ts",

@@ -35,11 +35,14 @@ export function encodeDemoOps(ops: readonly DemoOp[]): string[] {
   // Past either budget the oldest actions go first; the replay tolerates what they referred to.
   let kept = [...ops];
   let json = JSON.stringify(kept);
+  // The budget is in bytes, as the read counts them: names and memos can be multi-byte text.
+  let jsonBytes = Buffer.byteLength(json, "utf8");
   // The JSON budget is cut in proportion, so a long log isn't deflated once per action dropped.
-  while (json.length > MAX_DECODED_LENGTH && kept.length > 0) {
-    const keep = Math.floor((kept.length * MAX_DECODED_LENGTH) / json.length);
+  while (jsonBytes > MAX_DECODED_LENGTH && kept.length > 0) {
+    const keep = Math.floor((kept.length * MAX_DECODED_LENGTH) / jsonBytes);
     kept = kept.slice(kept.length - Math.min(keep, kept.length - 1));
     json = JSON.stringify(kept);
+    jsonBytes = Buffer.byteLength(json, "utf8");
   }
   let encoded = deflateRawSync(json).toString("base64url");
   while (encoded.length > MAX_ENCODED_LENGTH && kept.length > 0) {

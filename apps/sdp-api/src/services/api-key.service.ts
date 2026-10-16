@@ -1,3 +1,4 @@
+import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp/types";
 /**
  * API Key Service
  *
@@ -7,19 +8,21 @@
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
 import type {
+  AllowedOperation,
   ApiKeyEnvironment,
   ApiKeyRole,
   ApiKeyStatus,
   ApiKeyWalletScope,
   Permission,
 } from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import type { ApiKeyWalletPolicyBindingRow } from "@/db/repositories";
-import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
+import {
+  assertGrantableAllowedOperations,
+  assertGrantableApiKeyPermissions,
+} from "./api-key-scope.service";
 import { parseApiKeyWalletPermissionsColumn } from "./api-key-wallets.service";
 
 export interface ApiKeyListItem {
@@ -32,6 +35,8 @@ export interface ApiKeyListItem {
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
+  /** Operation families/types the key may perform. Empty means unrestricted. */
+  allowedOperations: AllowedOperation[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -58,6 +63,9 @@ export interface CreateApiKeyInput {
   role: ApiKeyRole;
   permissions?: Permission[] | null;
   allowedIps?: string[] | null;
+  allowedOperations?: AllowedOperation[] | null;
+  /** The creating key's own list; null for a dashboard actor or an unrestricted key. */
+  actorAllowedOperations: AllowedOperation[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
@@ -70,9 +78,11 @@ export interface UpdateApiKeyInput {
   actorPermissions: Permission[];
   actorApiKeyRole: string | null;
   currentRole: ApiKeyRole;
+  actorAllowedOperations: AllowedOperation[] | null;
   name?: string;
   description?: string | null;
   allowedIps?: string[] | null;
+  allowedOperations?: AllowedOperation[] | null;
   expiresAt?: string | null;
   permissions?: Permission[] | null;
   signingWallet?: { walletId: string | null };
@@ -147,6 +157,7 @@ interface ApiKeyListRow {
   status: ApiKeyStatus;
   wallet_scope: ApiKeyWalletScope;
   signing_wallet_id: string | null;
+  allowed_operations: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -159,6 +170,21 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
   signing_wallet_id: string | null;
   rotated_from: string | null;
   rotation_deadline: string | null;
+}
+
+/** Column form of an Allowed Operations list: NULL when unrestricted. */
+function serializeAllowedOperationsColumn(
+  allowedOperations: AllowedOperation[] | null | undefined
+): string | null {
+  if (!allowedOperations || allowedOperations.length === 0) {
+    return null;
+  }
+  return JSON.stringify(normalizeAllowedOperations(allowedOperations));
+}
+
+/** API form of the column: an empty list when unrestricted. */
+export function parseAllowedOperationsColumn(value: string | null): AllowedOperation[] {
+  return upgradeStoredAllowedOperations(parseOptionalPostgresJson<string[]>(value) ?? []);
 }
 
 function stringifyJsonb(value: unknown, fallback: unknown): string {
@@ -179,6 +205,7 @@ type RotationTargetRow = {
   environment: ApiKeyEnvironment;
   project_id: string;
   allowed_ips: string | null;
+  allowed_operations: string | null;
   signing_wallet_id: string | null;
   created_by: string;
   expires_at: string | null;
@@ -254,7 +281,8 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.signing_wallet_id, ak.last_used_at, ak.expires_at, ak.created_at
+                ak.signing_wallet_id, ak.allowed_operations, ak.last_used_at, ak.expires_at,
+                ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
@@ -287,7 +315,8 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.last_used_at, ak.expires_at, ak.rotated_from, ak.rotation_deadline, ak.created_at
+                ak.allowed_operations, ak.last_used_at, ak.expires_at, ak.rotated_from,
+                ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?`
@@ -318,11 +347,22 @@ export class ApiKeyService {
       input.permissions,
       input.actorApiKeyRole
     );
+    assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
 
+    // The organization must still be active, and the share lock holds that
+    // until this transaction commits: a concurrent deletion's
+    // `UPDATE organizations` waits for it, and its key revocation then sees
+    // (and revokes) the key inserted here. Without it, a create racing a
+    // deletion commits an active key under a deleted organization (APE-358).
+    // FOR KEY SHARE would not do: it does not conflict with a non-key update.
     const project = await this.db
       .prepare(
-        `SELECT environment FROM projects
-         WHERE id = ? AND organization_id = ? AND status = 'active'`
+        `SELECT p.environment
+           FROM projects p
+           JOIN organizations o ON o.id = p.organization_id
+          WHERE p.id = ? AND p.organization_id = ? AND p.status = 'active'
+            AND o.status = 'active'
+          FOR SHARE OF o`
       )
       .bind(input.projectId, input.organizationId)
       .first<{ environment: ApiKeyEnvironment }>();
@@ -363,8 +403,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, expires_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, expires_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           keyId,
@@ -378,6 +418,7 @@ export class ApiKeyService {
           input.role,
           input.permissions ? JSON.stringify(input.permissions) : null,
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
+          serializeAllowedOperationsColumn(input.allowedOperations),
           input.signingWalletId ?? null,
           input.expiresAt ?? null
         )
@@ -398,15 +439,6 @@ export class ApiKeyService {
       }
 
       throw error;
-    }
-
-    // A key created BY a key inherits its creator's policy foundation, the
-    // same way rotation clones it: otherwise a policy-bound key could mint a
-    // sibling born free of the per-key rules that govern the creator and act
-    // through it. Runs on the caller's transactional client, so the key and
-    // its cloned policy commit together.
-    if (input.createdByKeyId) {
-      await this.cloneApiKeyPolicyFoundation(this.db, input.createdByKeyId, keyId);
     }
 
     return {
@@ -432,6 +464,9 @@ export class ApiKeyService {
         input.actorApiKeyRole
       );
     }
+    if (input.allowedOperations !== undefined) {
+      assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
+    }
 
     const updates: string[] = [];
     const values: (string | null)[] = [];
@@ -451,6 +486,10 @@ export class ApiKeyService {
     if (input.expiresAt !== undefined) {
       updates.push("expires_at = ?");
       values.push(input.expiresAt);
+    }
+    if (input.allowedOperations !== undefined) {
+      updates.push("allowed_operations = ?");
+      values.push(serializeAllowedOperationsColumn(input.allowedOperations));
     }
     if (input.permissions !== undefined) {
       updates.push("permissions = ?");
@@ -481,6 +520,7 @@ export class ApiKeyService {
     gracePeriodHours: number,
     actorPermissions: Permission[],
     actorApiKeyRole: string | null,
+    actorAllowedOperations: AllowedOperation[] | null,
     pepper?: string,
     guardTargetWalletScope?: (target: {
       signingWalletId: string | null;
@@ -491,8 +531,8 @@ export class ApiKeyService {
     const existing = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by,
-                ak.expires_at
+                p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+                ak.signing_wallet_id, ak.created_by, ak.expires_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?
@@ -510,6 +550,10 @@ export class ApiKeyService {
       existing.role,
       existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions),
       actorApiKeyRole
+    );
+    assertGrantableAllowedOperations(
+      actorAllowedOperations,
+      parseAllowedOperationsColumn(existing.allowed_operations)
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
@@ -553,15 +597,19 @@ export class ApiKeyService {
         // Everything the clone copies is judged and read on the rows this
         // transaction sees, not on what the caller read before the lock: a
         // permissions, IP, expiry or binding change committed in that
-        // window would otherwise be cloned unchecked.
+        // window would otherwise be cloned unchecked. The organization share
+        // lock is createApiKey's: a replacement can't commit under an
+        // organization a concurrent deletion has already revoked (APE-358).
         const target = await tx.queryOne<RotationTargetRow>(
           `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                  p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id,
-                  ak.created_by, ak.expires_at
+                  p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+                  ak.signing_wallet_id, ak.created_by, ak.expires_at
            FROM api_keys ak
            JOIN projects p ON p.id = ak.project_id
+           JOIN organizations o ON o.id = ak.organization_id
            WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
-             AND ak.status = 'active'`,
+             AND ak.status = 'active' AND o.status = 'active'
+           FOR SHARE OF o`,
           [keyId, organizationId, projectId]
         );
         if (!target) {
@@ -574,6 +622,10 @@ export class ApiKeyService {
           target.role,
           target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions),
           actorApiKeyRole
+        );
+        assertGrantableAllowedOperations(
+          actorAllowedOperations,
+          parseAllowedOperationsColumn(target.allowed_operations)
         );
 
         const signingWalletId = target.signing_wallet_id;
@@ -593,8 +645,8 @@ export class ApiKeyService {
           .prepare(
             `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, rotated_from, status, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
           )
           .bind(
             newKeyId,
@@ -608,6 +660,7 @@ export class ApiKeyService {
             target.role,
             target.permissions,
             target.allowed_ips,
+            target.allowed_operations,
             signingWalletId,
             keyId,
             target.expires_at
@@ -642,8 +695,6 @@ export class ApiKeyService {
             )
             .run();
         }
-
-        await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
       },
       // The caller owns the post-commit cache refresh (it holds the KV
       // handle) and must never fail the response over it, so nothing runs
@@ -771,159 +822,10 @@ export class ApiKeyService {
       status: row.status,
       walletScope: row.wallet_scope,
       signingWalletId: row.signing_wallet_id,
+      allowedOperations: parseAllowedOperationsColumn(row.allowed_operations),
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
       createdAt: row.created_at,
     };
-  }
-
-  private async cloneApiKeyPolicyFoundation(
-    db: DatabaseExecutor,
-    sourceApiKeyId: string,
-    targetApiKeyId: string
-  ): Promise<void> {
-    const profileRows = await db
-      .prepare(
-        `SELECT *
-         FROM api_key_control_profiles
-         WHERE api_key_id = ?
-         ORDER BY created_at ASC`
-      )
-      .bind(sourceApiKeyId)
-      .all<Record<string, unknown>>();
-
-    const profileIdMap = new Map<string, string>();
-    const revisionIdMap = new Map<string, string>();
-
-    for (const profile of profileRows.results) {
-      const sourceProfileId = profile.id as string;
-      const targetProfileId = `akcp_${crypto.randomUUID()}`;
-      profileIdMap.set(sourceProfileId, targetProfileId);
-
-      await db
-        .prepare(
-          `INSERT INTO api_key_control_profiles (
-             id,
-             organization_id,
-             project_id,
-             api_key_id,
-             name,
-             status,
-             created_by,
-             activated_at,
-             archived_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          targetProfileId,
-          profile.organization_id,
-          profile.project_id,
-          targetApiKeyId,
-          profile.name,
-          profile.status,
-          profile.created_by ?? null,
-          profile.activated_at ?? null,
-          profile.archived_at ?? null
-        )
-        .run();
-
-      const revisionRows = await db
-        .prepare(
-          `SELECT *
-           FROM api_key_control_profile_revisions
-           WHERE profile_id = ?
-           ORDER BY revision_number ASC`
-        )
-        .bind(sourceProfileId)
-        .all<Record<string, unknown>>();
-
-      for (const revision of revisionRows.results) {
-        const sourceRevisionId = revision.id as string;
-        const targetRevisionId = `akcpr_${crypto.randomUUID()}`;
-        revisionIdMap.set(sourceRevisionId, targetRevisionId);
-
-        await db
-          .prepare(
-            `INSERT INTO api_key_control_profile_revisions (
-               id,
-               profile_id,
-               revision_number,
-               rules,
-               default_action,
-               created_by,
-               activated_at
-             ) VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)`
-          )
-          .bind(
-            targetRevisionId,
-            targetProfileId,
-            revision.revision_number,
-            stringifyJsonb(revision.rules, []),
-            revision.default_action,
-            revision.created_by ?? null,
-            revision.activated_at ?? null
-          )
-          .run();
-      }
-
-      await db
-        .prepare(
-          `UPDATE api_key_control_profiles
-           SET active_revision_id = ?,
-               updated_at = sdp_iso_now()
-           WHERE id = ?`
-        )
-        .bind(
-          profile.active_revision_id
-            ? (revisionIdMap.get(profile.active_revision_id as string) ?? null)
-            : null,
-          targetProfileId
-        )
-        .run();
-    }
-
-    const bindingRows = await db
-      .prepare(
-        `SELECT *
-         FROM api_key_wallet_policy_bindings
-         WHERE api_key_id = ?
-         ORDER BY created_at ASC`
-      )
-      .bind(sourceApiKeyId)
-      .all<ApiKeyWalletPolicyBindingRow>();
-
-    for (const binding of bindingRows.results) {
-      let apiKeyControlProfileId: string | null = null;
-      if (binding.api_key_control_profile_id !== null) {
-        const mappedProfileId = profileIdMap.get(binding.api_key_control_profile_id);
-        if (mappedProfileId === undefined) {
-          throw internalError("Failed to clone API key policy binding profile");
-        }
-        apiKeyControlProfileId = mappedProfileId;
-      }
-
-      await db
-        .prepare(
-          `INSERT INTO api_key_wallet_policy_bindings (
-             id,
-             api_key_id,
-             binding_scope,
-             wallet_id,
-             custody_wallet_id,
-             wallet_control_profile_id,
-             api_key_control_profile_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          `akwpol_${crypto.randomUUID()}`,
-          targetApiKeyId,
-          binding.binding_scope,
-          binding.wallet_id,
-          binding.custody_wallet_id,
-          binding.wallet_control_profile_id,
-          apiKeyControlProfileId
-        )
-        .run();
-    }
   }
 }

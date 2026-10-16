@@ -9,6 +9,7 @@ import { DashboardHeaderAction, type DashboardHeaderActionConfig } from "./dashb
 const toastMock = vi.hoisted(() => ({ error: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast: toastMock }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const exportAction: DashboardHeaderActionConfig = {
   label: "Download CSV",
@@ -56,7 +57,8 @@ describe("DashboardHeaderAction downloads", () => {
       )
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/dashboard/payments/transactions/export?status=succeeded"
+      "/api/dashboard/payments/transactions/export?status=succeeded",
+      expect.objectContaining({ method: "GET" })
     );
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });

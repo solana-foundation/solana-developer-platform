@@ -144,6 +144,31 @@ beforeEach(async () => {
 });
 
 describe("withdrawFromVault", () => {
+  it("records three back-to-back same-amount withdraws as separate intents", async () => {
+    const memos: string[] = [];
+    signVaultPlan.mockImplementation(async (_env, execution) => {
+      memos.push(
+        Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
+      );
+      return {
+        bytes: new Uint8Array([memos.length]),
+        signature: `back_to_back_${memos.length}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+    const ids = new Set<string>();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const request = input({ requestId: `same-terms-${attempt}` });
+      const result = await withdrawFromVault(env, request);
+      expect(result.replayed).toBe(false);
+      ids.add(result.movement.id);
+      expect((await withdrawFromVault(env, request)).replayed).toBe(true);
+    }
+    expect(ids.size).toBe(3);
+    expect(new Set(memos).size).toBe(3);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(3);
+  });
+
   it("records one signed movement before broadcasting it", async () => {
     let recordedAtBroadcast: Record<string, unknown> | null = null;
     broadcastVaultTransaction.mockImplementation(async () => {
@@ -177,6 +202,42 @@ describe("withdrawFromVault", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     // Exit safety: an exit replay must answer during a paymaster outage.
     expect(resolveVaultSponsorship).not.toHaveBeenCalled();
+  });
+
+  it("broadcasts exactly once when identical requests race with different signatures", async () => {
+    let releaseBuilds: (() => void) | undefined;
+    const bothBuilding = new Promise<void>((resolve) => {
+      releaseBuilds = resolve;
+    });
+    let buildCount = 0;
+    buildVaultWithdrawal.mockImplementation(async () => {
+      buildCount += 1;
+      if (buildCount === 2) releaseBuilds?.();
+      await bothBuilding;
+      return plan();
+    });
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_identical_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const results = await Promise.all([
+      withdrawFromVault(env, input()),
+      withdrawFromVault(env, input()),
+    ]);
+
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(new Set(results.map((result) => result.movement.id))).toHaveProperty("size", 1);
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM earn_movements WHERE direction = 'withdrawal'")
+      .first<{ count: number | string }>();
+    expect(Number(rows?.count)).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("rejects the same requestId with a different payload", async () => {
@@ -308,7 +369,7 @@ describe("withdrawFromVault — the exit slippage floor", () => {
       plan({ accepted: { shares: "10", minAmountOut: "9.9" } })
     );
     await expect(withdrawFromVault(env, input({ requestId: crypto.randomUUID() }))).rejects.toThrow(
-      "does not match the policy-approved slippage floor"
+      "does not match the requested slippage floor"
     );
 
     // Matching floor signs and records it.

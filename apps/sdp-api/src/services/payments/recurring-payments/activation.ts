@@ -564,6 +564,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
+    movement: "recurring.activate",
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -610,6 +611,13 @@ export async function activateRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
+  /**
+   * Money admission (HOO-1955), run once, and only when the plan or the
+   * authorization still has to be signed. A refusal fails the attempt and
+   * returns the row to `pending_activation`, keeping any stored signatures so
+   * a later activation confirms or adopts them instead of signing again.
+   */
+  admitStart: () => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -689,6 +697,9 @@ export async function activateRecurringPayment(input: {
   );
 
   try {
+    if (!planCreationSignature || !authorizationSignature) {
+      await input.admitStart();
+    }
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
@@ -696,7 +707,8 @@ export async function activateRecurringPayment(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.activate"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -763,6 +775,7 @@ export async function activateRecurringPayment(input: {
         }
       );
       planCreationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -879,6 +892,7 @@ export async function activateRecurringPayment(input: {
         { commitment: "confirmed" }
       );
       const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+        movement: "recurring.activate",
         organizationId: input.organizationId,
         projectId: input.projectId,
         actor: { type: "wallet", id: input.sourceWallet.walletId },
@@ -919,6 +933,7 @@ export async function activateRecurringPayment(input: {
         tokenMint: mint,
       });
       authorizationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

@@ -1,124 +1,61 @@
-/**
- * Where RPC traffic leaves the process.
- *
- * The question each egress path has to answer is whether the endpoint came
- * from a customer or from deployment config, because only the first can be
- * pointed anywhere. Two resolutions carry a customer-supplied endpoint:
- *
- *   * a tenant BYOK connection, which sets `connectionId`
- *   * the `custom` provider, whose endpoint is `projects.settings.rpcEndpoint`
- *     and is validated only as a URL when it is written
- *
- * Platform targets keep the ordinary fetch: they come from deployment config
- * and are legitimately private in local development and in the Surfpool suites.
- */
 import { RpcHttpStatusError } from "@sdp/rpc/errors";
 import type { RpcTransport } from "@solana/kit";
-import { type GuardedFetchInit, guardedFetch } from "@/services/guarded-egress";
+import { guardedFetch } from "@/services/guarded-egress";
 
 /**
- * The relay followed redirects before the guard existed, and a provider
- * answering on a canonical or regional host is ordinary. Each hop is resolved
- * through the guard again, so following is bounded rather than trusted.
+ * A provider answering on a canonical or regional host is ordinary. Each hop
+ * is resolved through the guard again, so following is bounded rather than
+ * trusted.
  */
-const RELAY_MAX_REDIRECTS = 3;
+const CUSTOMER_RPC_MAX_REDIRECTS = 3;
 
 /**
- * Upper bound on what the relay buffers back from a customer endpoint. Sized
- * for the largest ordinary answers (`getProgramAccounts`, a full block) with
- * room to spare; a hostile endpoint cannot stream unbounded bytes into the
- * process.
+ * Upper bound on what is buffered back from a customer endpoint. Sized for the
+ * largest ordinary answers (`getProgramAccounts`, a full block) with room to
+ * spare; a hostile endpoint cannot stream unbounded bytes into the process.
  */
-export const RELAY_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+const CUSTOMER_RPC_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 
-/** How long a customer endpoint gets to answer when the caller sets no signal. */
-export const RELAY_TIMEOUT_MS = 30_000;
+/** How long a customer endpoint gets to answer. */
+const CUSTOMER_RPC_TIMEOUT_MS = 30_000;
 
-export interface RpcEgressTarget {
-  endpoint: string;
-  /** Set only for tenant-owned connections. */
-  connectionId?: string;
-  /** `custom` is the project's own stored endpoint. */
-  providerId?: string;
-}
-
-export interface RpcEgressInit {
-  headers: Record<string, string>;
-  body: string;
-  signal?: AbortSignal;
-}
-
-/** Whether the endpoint came from a customer and so has to be address-checked. */
-export function isCustomerSuppliedTarget(target: RpcEgressTarget): boolean {
-  return Boolean(target.connectionId) || target.providerId === "custom";
-}
-
-/**
- * POST a JSON-RPC payload to a resolved target. Identical to the fetch the
- * relay made before, except that a customer-supplied target resolves under the
- * guard on every hop.
- */
 /**
  * The time bound joins the caller's signal rather than yielding to it: the
- * Kit transport path always supplies one, and a caller's cancellation must
- * not disable the ceiling.
+ * Kit transport always supplies one, and a caller's cancellation must not
+ * disable the ceiling.
+ *
+ * @param signal - The caller's abort signal, when it supplied one.
+ * @returns A signal that aborts on the caller's signal or the timeout, whichever fires first.
  */
 function boundedSignal(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(RELAY_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(CUSTOMER_RPC_TIMEOUT_MS);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-/** The guarded init for a customer-supplied relay target, limits applied. */
-export function relayGuardInit(init: RpcEgressInit): GuardedFetchInit {
-  return {
-    method: "POST",
-    headers: init.headers,
-    body: init.body,
-    signal: boundedSignal(init.signal),
-    maxRedirects: RELAY_MAX_REDIRECTS,
-    maxResponseBytes: RELAY_MAX_RESPONSE_BYTES,
-    rejectOversizeResponse: true,
-  };
-}
-
-export async function fetchRpcRelayTarget(
-  target: RpcEgressTarget,
-  init: RpcEgressInit
-): Promise<Response> {
-  if (isCustomerSuppliedTarget(target)) {
-    return guardedFetch(target.endpoint, relayGuardInit(init));
-  }
-
-  // A managed provider is trusted with its response, not with the caller's
-  // time: a stalled upstream must not hold the request open indefinitely.
-  return fetch(target.endpoint, {
-    method: "POST",
-    headers: init.headers,
-    body: init.body,
-    signal: boundedSignal(init.signal),
-  });
-}
-
 /**
- * Adapt the canonical relay egress executor to a Solana Kit transport.
- * Customer/BYOK targets therefore receive the same DNS and redirect guards as
- * `/v1/rpc`, while managed platform targets keep their existing direct path.
+ * A Solana Kit transport for a customer-supplied RPC URL. Every request is
+ * DNS-checked at connect time and re-guarded on each redirect hop, because the
+ * customer can point the URL anywhere.
+ *
+ * @param endpointUrl - The customer's RPC URL.
+ * @returns A Kit transport that posts through the egress guard.
  */
-export function createRpcTransportForTarget(
-  target: RpcEgressTarget & { headers?: Record<string, string> }
-): RpcTransport {
+export function createCustomerRpcTransport(endpointUrl: string): RpcTransport {
   return async function rpcTransport<TResponse>({
     payload,
     signal,
   }: Parameters<RpcTransport>[0]): Promise<TResponse> {
-    const upstream = await fetchRpcRelayTarget(target, {
+    const upstream = await guardedFetch(endpointUrl, {
+      method: "POST",
       headers: {
-        ...target.headers,
         Accept: "application/json",
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify(payload),
-      signal,
+      signal: boundedSignal(signal),
+      maxRedirects: CUSTOMER_RPC_MAX_REDIRECTS,
+      maxResponseBytes: CUSTOMER_RPC_MAX_RESPONSE_BYTES,
+      rejectOversizeResponse: true,
     });
 
     if (!upstream.ok) {

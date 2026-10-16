@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { tokenMarkInitial } from "@/app/dashboard/issuance/issuance-token-fields";
+import { tokenMarkInitial } from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
 import { cn } from "@/lib/utils";
 
 /**

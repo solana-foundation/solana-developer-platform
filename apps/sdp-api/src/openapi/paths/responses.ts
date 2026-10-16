@@ -5,11 +5,7 @@ import {
   addressScreeningResponseSchema,
   allowlistEntriesResponseSchema,
   allowlistEntrySchema,
-  apiKeyControlProfileActivationResponseSchema,
-  apiKeyControlProfileResponseSchema,
-  apiKeyControlProfileRevisionResponseSchema,
   apiKeyDetailSchema,
-  apiKeyPolicyBindingsResponseSchema,
   apiKeyResponseSchema,
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
@@ -17,7 +13,6 @@ import {
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
-  custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
   custodyWalletByIdResponseSchema,
@@ -65,7 +60,6 @@ import {
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
   paymentSubscriptionResponseSchema,
-  policyControlInventoryResponseSchema,
   prepareBurnResponseSchema,
   prepareDeployMetadataResponseSchema,
   prepareDeployResponseSchema,
@@ -78,14 +72,13 @@ import {
   prepareSeizeResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
+  projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
-  rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
-  switchProviderOptionsResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
@@ -99,13 +92,7 @@ import {
   transferBatchSchema,
   transferResponseSchema,
   transferSchema,
-  walletApprovalRequestResponseSchema,
-  walletApprovalRequestsResponseSchema,
   walletBalancesResponseSchema,
-  walletControlProfileRevisionHistorySchema,
-  walletPolicyEvaluationDetailSchema,
-  walletPolicyEvaluationResponseSchema,
-  walletPolicyResponseSchema,
 } from "../schemas";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
@@ -119,19 +106,6 @@ export const apiKeyDetailResponse = successResponseSchema(apiKeyDetailSchema);
 export const apiKeyCreateResponse = successResponseSchema(apiKeyResponseSchema);
 export const apiKeyRotateResponse = successResponseSchema(rotateApiKeyResponseSchema);
 export const apiKeyRevokeResponse = successResponseSchema(revokeApiKeyResponseSchema);
-export const apiKeyControlProfileResponse = successResponseSchema(
-  apiKeyControlProfileResponseSchema
-);
-export const apiKeyControlProfileRevisionResponse = successResponseSchema(
-  apiKeyControlProfileRevisionResponseSchema
-);
-export const apiKeyControlProfileActivationResponse = successResponseSchema(
-  apiKeyControlProfileActivationResponseSchema
-);
-export const apiKeyPolicyBindingsResponse = successResponseSchema(
-  apiKeyPolicyBindingsResponseSchema
-);
-
 export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
 export const assetProfileFieldOptionsResponse = successResponseSchema(
   assetProfileFieldOptionsResponseSchema
@@ -167,7 +141,15 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
-export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSchema);
+/**
+ * The project provider availability envelope, with or without the Earn family.
+ *
+ * @param publishEarn - Whether the document carries the Earn family.
+ * @returns The success envelope around `projectProviderAvailabilityResponseSchema(publishEarn)`.
+ */
+export function projectProviderAvailabilityResponse(publishEarn: boolean) {
+  return successResponseSchema(projectProviderAvailabilityResponseSchema(publishEarn));
+}
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
@@ -261,7 +243,6 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
@@ -271,15 +252,6 @@ export const custodyWalletAggregateResponse = successResponseSchema(
 export const custodyWalletByIdResponse = successResponseSchema(custodyWalletByIdResponseSchema);
 export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
-export const custodySwitchOptionsResponse = successResponseSchema(
-  switchProviderOptionsResponseSchema
-);
-export const walletApprovalRequestResponse = successResponseSchema(
-  walletApprovalRequestResponseSchema
-);
-export const walletApprovalRequestsResponse = successResponseSchema(
-  walletApprovalRequestsResponseSchema
-);
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 
 export const allowlistEntriesResponse = successResponseSchema(allowlistEntriesResponseSchema);
@@ -293,19 +265,6 @@ export const listTemplatesResponse = successResponseSchema(listTemplatesResponse
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
 export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
-export const walletPolicyResponse = successResponseSchema(walletPolicyResponseSchema);
-export const policyControlInventoryResponse = successResponseSchema(
-  policyControlInventoryResponseSchema
-);
-export const walletControlProfileRevisionHistoryResponse = successResponseSchema(
-  walletControlProfileRevisionHistorySchema
-);
-export const walletPolicyEvaluationListResponse = paginatedResponseSchema(
-  walletPolicyEvaluationDetailSchema
-);
-export const walletPolicyEvaluationResponse = successResponseSchema(
-  walletPolicyEvaluationResponseSchema
-);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
 export const transferBatchResponse = successResponseSchema(transferBatchResponseSchema);

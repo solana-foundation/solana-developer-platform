@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ListChecks,
-  MinusIcon,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, ListChecks, MinusIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -28,13 +21,11 @@ import {
   type QuickStartStatus,
   type QuickStartStep,
   type QuickStartStepState,
-  type RpcProbeResult,
   resumeQuickStart,
   setQuickStartCollapsed,
   skipQuickStartStep,
 } from "@/lib/dashboard-quick-start.redesign";
-import { rpcProviderLabel } from "@/lib/rpc-providers";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import { useQuickStart } from "./use-quick-start";
 
@@ -102,64 +93,12 @@ function stepCopy(
     t: Translate;
     locale: string;
     now: number;
-    cluster: string;
     status: QuickStartStatus;
-    probe: RpcProbeResult | null;
     storageKey: string;
     skippedAt: string | undefined;
   }
 ): StepCopy {
-  const { t, locale, now, cluster, status, probe, storageKey, skippedAt } = context;
-  if (step.id === "rpc") {
-    const ownProvider = status.rpcProvider !== null && status.rpcProvider !== "default";
-    const provider = ownProvider
-      ? rpcProviderLabel(status.rpcProvider ?? "")
-      : t("Shared.quickStart.rpcManaged");
-    const values = { provider, cluster };
-    const action = {
-      label: t(
-        ownProvider ? "Shared.quickStart.rpcChangeProvider" : "Shared.quickStart.rpcOwnProvider"
-      ),
-      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.rpc,
-    };
-    const base = { title: t("Shared.quickStart.rpcTitle"), href: action.href, actions: [action] };
-    if (step.state === "done" && probe) {
-      return {
-        ...base,
-        description: t("Shared.quickStart.rpcDoneDescription", {
-          ...values,
-          when: formatSince(probe.checkedAt, locale, now, "long"),
-        }),
-        meta: t("Shared.quickStart.rpcDoneMeta", {
-          status: probe.status ?? 200,
-          when: formatSince(probe.checkedAt, locale, now, "narrow"),
-        }),
-      };
-    }
-    if (step.state === "failing" && probe) {
-      return {
-        ...base,
-        description: t("Shared.quickStart.rpcFailingDescription", {
-          ...values,
-          status: probe.status ?? "",
-        }),
-        meta: t("Shared.quickStart.rpcFailingMeta", { status: probe.status ?? "" }),
-      };
-    }
-    if (step.state === "pending") {
-      return {
-        ...base,
-        description: t("Shared.quickStart.rpcUnknownDescription", values),
-        meta: t("Shared.quickStart.rpcUnknownMeta"),
-      };
-    }
-    return {
-      ...base,
-      description: t("Shared.quickStart.rpcCheckingDescription", values),
-      meta: t("Shared.quickStart.rpcCheckingMeta"),
-    };
-  }
-
+  const { t, locale, now, status, storageKey, skippedAt } = context;
   if (step.id === "custody") {
     const connect = {
       label: t("Shared.quickStart.custodyConnect"),
@@ -237,41 +176,46 @@ function stepCopy(
 function useStepCopies(quickStart: ReturnType<typeof useQuickStart>): StepCopy[] {
   const t = useTranslations();
   const locale = useLocale();
-  const cluster = useSolanaCluster();
   const now = useNow(15_000);
-  const { status, probe, storageKey, prefs, steps } = quickStart;
+  const projectHref = useProjectHref();
+  const { status, storageKey, prefs, steps } = quickStart;
   if (!status) return [];
-  return steps.map((step) =>
-    stepCopy(step, {
-      t,
-      locale,
-      now,
-      cluster,
-      status,
-      probe,
-      storageKey,
-      skippedAt: prefs.skipped.custody,
-    })
-  );
+  return steps
+    .map((step) =>
+      stepCopy(step, {
+        t,
+        locale,
+        now,
+        status,
+        storageKey,
+        skippedAt: prefs.skipped.custody,
+      })
+    )
+    .map((copy) => ({
+      ...copy,
+      href: projectHref(copy.href),
+      actions: copy.actions.map((action) =>
+        action.href ? { ...action, href: projectHref(action.href) } : action
+      ),
+    }));
 }
 
 /**
- * A step's state as a 20px mark: a filled tick when done, a filled dash when skipped, a dashed
- * ring while waiting on the person, a turning ring while the first probe is out, and a filled
- * cross when the node answered with an error.
+ * A step's state as a 20px mark: a filled tick when done, a filled dash when skipped, and a
+ * dashed ring while waiting on the person.
  */
 function StepMark({ state, size = "md" }: { state: QuickStartStepState; size?: "sm" | "md" }) {
   const box = size === "md" ? "size-5" : "size-4";
   const glyph = size === "md" ? "size-3" : "size-2.5";
-  if (state === "done" || state === "skipped" || state === "failing") {
-    const Icon = state === "done" ? CheckIcon : state === "skipped" ? MinusIcon : XIcon;
+  if (state === "done" || state === "skipped") {
+    const Icon = state === "done" ? CheckIcon : MinusIcon;
     return (
       <span
         aria-hidden="true"
         className={cn(
           "flex shrink-0 items-center justify-center rounded-full text-on-primary",
           box,
-          state === "done" ? "bg-success" : state === "skipped" ? "bg-tertiary" : "bg-error"
+          state === "done" ? "bg-success" : "bg-tertiary"
         )}
       >
         <Icon className={glyph} strokeWidth={3} />
@@ -281,13 +225,7 @@ function StepMark({ state, size = "md" }: { state: QuickStartStepState; size?: "
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        "shrink-0 rounded-full border-[1.5px] border-tertiary",
-        box,
-        state === "checking"
-          ? "animate-spin border-t-transparent motion-reduce:animate-none"
-          : "border-dashed"
-      )}
+      className={cn("shrink-0 rounded-full border-[0.0938rem] border-dashed border-tertiary", box)}
     />
   );
 }
@@ -296,21 +234,21 @@ function stateLabel(t: Translate, state: QuickStartStepState): string {
   return t(`Shared.quickStart.state.${state}`);
 }
 
-/** Three 22px bars, one per step, filled by what each step has reached. */
+/** How full each step's bar reads, by what the step has reached. */
+const PROGRESS_BAR_FILL = {
+  done: "bg-success",
+  skipped: "bg-tertiary",
+  pending: "bg-primary/15",
+} as const satisfies Record<QuickStartStepState, string>;
+
+/** Two 22px bars, one per step, filled by what each step has reached. */
 function ProgressBars({ steps }: { steps: readonly QuickStartStep[] }) {
   return (
     <span aria-hidden="true" className="flex items-center gap-1">
       {steps.map((step) => (
         <span
           key={step.id}
-          className={cn(
-            "h-[3px] w-[22px] rounded-full",
-            step.state === "done"
-              ? "bg-success"
-              : step.state === "skipped"
-                ? "bg-tertiary"
-                : "bg-primary/15"
-          )}
+          className={cn("h-0.75 w-5.5 rounded-full", PROGRESS_BAR_FILL[step.state])}
         />
       ))}
     </span>
@@ -339,7 +277,7 @@ function StepActionControl({ action }: { action: StepAction }) {
 }
 
 /**
- * The Overview's quick start: a framed list of the three setup signals, each with where it
+ * The Overview's quick start: a framed list of the two setup signals, each with where it
  * stands and the one thing to do next. A solid rule joins a done step to the next, a dashed one
  * everything still open.
  */
@@ -431,7 +369,7 @@ function OverviewQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
                   <span
                     aria-hidden="true"
                     className={cn(
-                      "absolute top-6 bottom-[-28px] left-[9.5px] w-px",
+                      "absolute top-6 -bottom-7 left-[0.5938rem] w-px",
                       step.state === "done"
                         ? "bg-success/45"
                         : "bg-[repeating-linear-gradient(to_bottom,var(--emph-l)_0_3px,transparent_3px_6px)] opacity-70"
@@ -448,7 +386,7 @@ function OverviewQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
 }
 
 /**
- * The same three steps at the foot of the sidebar, so setup stays in reach from every page.
+ * The same two steps at the foot of the sidebar, so setup stays in reach from every page.
  * Each row goes where its step is done; the header folds the card to one line.
  */
 function SidebarQuickStart({
@@ -464,11 +402,12 @@ function SidebarQuickStart({
   const settled = countSettledQuickStartSteps(steps);
   const progress = t("Shared.quickStart.progressCount", { settled, total: TOTAL_STEPS });
   const label = `${t("Shared.quickStart.sidebarTitle")} · ${progress}`;
+  const projectHref = useProjectHref();
 
   if (collapsedRail) {
     return (
       <Link
-        href={DASHBOARD_SIDE_NAV_HREFS.home}
+        href={projectHref(DASHBOARD_SIDE_NAV_HREFS.home)}
         aria-label={label}
         title={label}
         data-quick-start-sidebar
@@ -556,20 +495,23 @@ function SidebarQuickStart({
 function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQuickStart> }) {
   const t = useTranslations();
   const router = useRouter();
+  const projectHref = useProjectHref();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { eligible, complete, prefs, steps, storageKey } = quickStart;
+  const { eligible, complete, prefs, status, steps, storageKey } = quickStart;
   const settled = countSettledQuickStartSteps(steps);
   let description: string;
   if (sdpEnvironment !== "sandbox") {
     description = t("Shared.quickStart.newDesign.settingsSandbox");
-  } else if (!eligible) {
+  } else if (!eligible || (status === null && !prefs.dismissed)) {
+    // Unknown is not new: until the status reads, there is no guide to open. A dismissed guide is
+    // not reading it at all, so bringing it back is what starts the read.
     description = t("Shared.quickStart.settingsUnavailable");
   } else if (complete) {
     description = t("Shared.quickStart.settingsComplete");
   } else {
     description = t("Shared.quickStart.settingsProgress", { settled, total: TOTAL_STEPS });
   }
-  const canOpen = eligible && !complete;
+  const canOpen = eligible && (status !== null || prefs.dismissed) && !complete;
   return (
     <Card id="onboarding" className="scroll-mt-6">
       <CardHeader>
@@ -588,7 +530,7 @@ function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
             variant="secondary"
             onClick={() => {
               if (prefs.dismissed) resumeQuickStart(storageKey);
-              router.push(DASHBOARD_SIDE_NAV_HREFS.home);
+              router.push(projectHref(DASHBOARD_SIDE_NAV_HREFS.home));
             }}
           >
             {t(

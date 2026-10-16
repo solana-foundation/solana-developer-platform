@@ -14,7 +14,6 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -217,7 +216,6 @@ export async function executeChunk(params: {
     }
   }
 
-  await beginApprovedWalletOperationEffect(c);
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
   try {
     await submitSponsoredTransaction({

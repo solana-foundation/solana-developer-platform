@@ -9,6 +9,7 @@ import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recur
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -20,11 +21,9 @@ import {
   resumeRecurringPayment as resumeRecurringPaymentRecord,
   updateRecurringPayment as updateRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
-  assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   assertPaymentWalletReadAccess,
   type ResolvedScope,
@@ -97,7 +96,6 @@ export const createRecurringPayment = async (
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(c);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const recurringPayment = await createRecurringPaymentRecord({
     env: c.env,
@@ -112,8 +110,6 @@ export const createRecurringPayment = async (
     firstCollectionAt: body.firstCollectionAt === undefined ? null : body.firstCollectionAt,
     metadataUri: body.metadataUri === undefined ? null : body.metadataUri,
     createdBy: await resolveCreatorUserId(c),
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -153,14 +149,12 @@ export const updateRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
   const nextSourceWallet =
     body.sourceCustodyWalletId && body.sourceCustodyWalletId !== sourceWallet.id
       ? resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId)
       : undefined;
   if (nextSourceWallet) {
     assertPaymentWalletExactAccess(c, nextSourceWallet.id, ["payments:write"]);
-    await assertFreshPaymentWalletAccess(c, nextSourceWallet, ["payments:write"]);
   }
 
   const updated = await updateRecurringPaymentRecord({
@@ -172,8 +166,6 @@ export const updateRecurringPayment = async (
     recurringPayment,
     request: body,
     createdBy: await resolveCreatorUserId(c),
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -211,7 +203,6 @@ export const activateRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const activated = await activateRecurringPaymentRecord({
     env: c.env,
@@ -220,6 +211,12 @@ export const activateRecurringPayment = async (
     sourceWallet,
     recurringPayment,
     createdBy: await resolveCreatorUserId(c),
+    admitStart: () =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", movement: "recurring.activate", subjectId: recurringPayment.id }
+      ),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
@@ -255,7 +252,6 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const updated =
     operation === "cancel"
@@ -272,6 +268,16 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
+          admitStart: () =>
+            assertMoneyStartAdmitted(
+              c.env,
+              { organizationId: auth.organizationId, projectId },
+              {
+                surface: "http",
+                movement: "recurring.resume",
+                subjectId: recurringPayment.id,
+              }
+            ),
         });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -315,7 +321,6 @@ export const collectRecurringPayment = async (
   const scope = await resolveScope(c, recurringPayment.source_custody_wallet_id);
   const sourceWallet = resolvePinnedRecurringSourceWallet(scope, recurringPayment);
   assertPaymentWalletExactAccess(c, sourceWallet.id, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,
@@ -325,6 +330,12 @@ export const collectRecurringPayment = async (
     recurringPayment,
     initiatedByKeyId: auth.authType === "api_key" ? auth.id : null,
     collectionSource: "manual",
+    admitStart: () =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", movement: "recurring.collect", subjectId: recurringPayment.id }
+      ),
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),

@@ -40,7 +40,7 @@ export type ProvisionedProviderWallet = {
 type WalletCreateContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;
   orgId: string;
-  projectId: string | undefined;
+  projectId: string;
   params: {
     label?: string;
   };
@@ -114,7 +114,7 @@ const providerWalletLifecycleRegistry = {
       const provisioned = await withProvisioningError("Coinbase CDP", () =>
         provisionCoinbaseCdpAccount(env, {
           orgId,
-          projectId: projectId ?? null,
+          projectId,
           walletSeed: crypto.randomUUID(),
           network: parsed.network ?? env.COINBASE_CDP_NETWORK,
           accountPolicy: parsed.accountPolicy,

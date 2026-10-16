@@ -131,31 +131,15 @@ export function summarizeSavings(
   };
 }
 
-/**
- * Expected value still owned by the customer while shares sit in queue
- * escrow. Creating and closed-or-unknown requests stay unvalued because adding
- * either would guess whether the wallet shares or asset payout already count.
- */
+/** Queued quotes describe expected payout, not an observed current asset value. */
 export function queuedWithdrawalValue(
   requests: readonly YieldWithdrawalRequest[]
 ): string | undefined {
-  if (
-    requests.some(
-      (request) =>
-        request.status === "creating" || request.status === "closedOrUnknown"
-    )
-  ) {
-    return undefined;
-  }
-  return addDecimals(
-    requests
-      .filter((request) =>
-        ["pending", "fulfillable", "expiredCancelable", "cancelling"].includes(
-          request.status
-        )
-      )
-      .map((request) => request.quotedAssets)
-  );
+  return requests.some(
+    (request) => !["fulfilled", "cancelled", "failed"].includes(request.status)
+  )
+    ? undefined
+    : "0";
 }
 
 /** Refuse stale or out-of-range queue choices before asking SDP to build. */

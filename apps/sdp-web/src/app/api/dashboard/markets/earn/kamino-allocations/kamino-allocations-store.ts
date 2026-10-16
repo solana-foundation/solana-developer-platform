@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import {
   type KaminoVaultAllocations,
   kaminoVaultAllocationsSchema,
-} from "@/app/dashboard/markets/treasury-solutions/kamino-allocations-schema";
+} from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 /**

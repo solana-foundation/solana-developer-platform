@@ -382,16 +382,11 @@ export class AuditService {
     // invisible to org-scoped queries.
     const auth = c.get("apiKey");
     const clerk = c.get("clerk");
-    const replayActor = c.get("approvedOperationActor");
     const requestId = c.get("requestId");
 
     const organizationId =
-      entry.organizationId ||
-      auth?.organizationId ||
-      clerk?.organizationId ||
-      replayActor?.organizationId ||
-      null;
-    const userId = entry.userId || clerk?.userId || replayActor?.userId || null;
+      entry.organizationId || auth?.organizationId || clerk?.organizationId || null;
+    const userId = entry.userId || clerk?.userId || null;
     const apiKeyId = entry.apiKeyId || auth?.id || null;
 
     const ipAddress = getClientIp(c);

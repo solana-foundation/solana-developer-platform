@@ -1,10 +1,12 @@
-import type { CustodySetupStatusResponse } from "@sdp/types";
+import { CUSTODY_CONNECTION_LIFECYCLES, type CustodySetupStatusResponse } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -112,8 +114,8 @@ async function seedLegacyConfig(provider: string, configId: string): Promise<voi
   await getDb(env)
     .prepare(
       `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       configId,
@@ -122,7 +124,6 @@ async function seedLegacyConfig(provider: string, configId: string): Promise<voi
       provider,
       "test-config",
       "sdp-custody-encryption-v1",
-      null,
       "active"
     )
     .run();
@@ -265,10 +266,7 @@ describe("internal custody providers", () => {
     expect(status.providers.length).toBeGreaterThanOrEqual(10);
   });
 
-  it("reports every provider with a reachable config, not only the scope default", async () => {
-    // Signing targeted at a specific provider resolves through that provider's
-    // config regardless of which one is the scope default; default-ness is the
-    // configs resource's fact, not this endpoint's.
+  it("reports every provider with a reachable config", async () => {
     await seedLegacyConfig("privy", "cust_cfg_setup_status_multi_privy");
     await seedLegacyConfig("para", "cust_cfg_setup_status_multi_para");
 
@@ -345,29 +343,74 @@ describe("internal custody providers", () => {
     expect(privy?.effectiveTargetType).toBe("none");
   });
 
-  it("counts an inherited organization config as installed for a project", async () => {
-    // Signing falls back to the organization scope when a project has no config
-    // of its own, so the project is installed even though it owns no row.
+  it("reports a project with no configs as uninstalled while other projects have a config and a connection", async () => {
+    const otherProjectId = `${TEST_PROJECT.id}_production`;
+    const otherOrganizationId = "org_setup_status_other";
+    const otherOrganizationSandboxProjectId = "prj_setup_status_other_sandbox";
     await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind(
-        "cust_cfg_setup_status_org_scope",
-        TEST_ORG.id,
-        null,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
+        otherOrganizationId,
+        "Setup Status Other Org",
+        "setup-status-other",
+        "enterprise",
         "active"
       )
       .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: otherOrganizationId,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: otherOrganizationSandboxProjectId,
+        production: "prj_setup_status_other_production",
+      },
+    });
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cust_cfg_setup_status_other_project",
+          organizationId: otherOrganizationId,
+          projectId: otherOrganizationSandboxProjectId,
+          provider: "privy",
+          configEncrypted: "test-config",
+          status: "active",
+        },
+      ],
+      wallets: [],
+    });
+    await getDb(env).transaction((tx) =>
+      seedTestPrivyConnection(tx, {
+        organizationId: TEST_ORG.id,
+        projectId: otherProjectId,
+        connectionId: "ccon_setup_status_other_project",
+        credentialId: "pcred_setup_status_other_project",
+        createdBy: TEST_USER.id,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+        providerAccountFingerprint: "sha256:setup-status-other-project",
+        lastCheckStatus: "success",
+        wallets: [
+          {
+            id: "cwlt_setup_status_other_project",
+            walletId: "privy_setup_status_other_project",
+            publicKey: "public_setup_status_other_project",
+            label: null,
+            purpose: null,
+            status: "active",
+          },
+        ],
+        defaultCustodyWalletId: "cwlt_setup_status_other_project",
+      })
+    );
 
-    const privy = statusFor(await fetchSetupStatus(), "privy");
-    expect(privy?.hasLegacyConfig).toBe(true);
-    expect(privy?.effectiveTargetType).toBe("config");
+    expect(statusFor(await fetchSetupStatus(), "privy")).toEqual({
+      provider: "privy",
+      hasLegacyConfig: false,
+      effectiveTargetType: "none",
+      connectionCounts: Object.fromEntries(
+        CUSTODY_CONNECTION_LIFECYCLES.map((lifecycle) => [lifecycle, 0])
+      ),
+    });
   });
 
   it("creates nothing while reading", async () => {
@@ -413,22 +456,28 @@ describe("internal custody providers", () => {
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
       .bind("org_setup_status_other", "Other", "other-setup-status", "standard", "active")
       .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cust_cfg_setup_status_other",
-        "org_setup_status_other",
-        null,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "active"
-      )
-      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: "org_setup_status_other",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: "prj_setup_status_other",
+        production: "prj_setup_status_other_production",
+      },
+    });
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cust_cfg_setup_status_other",
+          organizationId: "org_setup_status_other",
+          projectId: "prj_setup_status_other",
+          provider: "privy",
+          configEncrypted: "test-config",
+          status: "active",
+        },
+      ],
+      wallets: [],
+    });
 
     const privy = statusFor(await fetchSetupStatus(), "privy");
     expect(privy?.hasLegacyConfig).toBe(false);

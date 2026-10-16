@@ -7,8 +7,8 @@
 // alone: the process can die between the write and the compensating destroy
 // (worker loss), and the destroy itself can fail (timeout, outage). So the
 // destroy is a durable obligation in `secret_retirements` plus a sweeper
-// (`services/jobs/retire-orphaned-secrets.ts`), shared by every consumer — BYOK
-// RPC connections and Privy provider credentials. `source_id` is a nullable
+// (`services/jobs/retire-orphaned-secrets.ts`), shared by every consumer
+// (today, Privy provider credentials). `source_id` is a nullable
 // trace column with no foreign key, and the sweeper resolves the store per row
 // from `storage_backend`.
 //
@@ -34,7 +34,7 @@ import type { Env } from "@/types/env";
 
 /** Where the version came from, for logs and the queue's trace columns. */
 export interface SecretRetirementContext {
-  /** Log label, e.g. "rpc_connection" or "privy". */
+  /** Log label, e.g. "privy". */
   provider: string;
   orgId: string | null;
   /**

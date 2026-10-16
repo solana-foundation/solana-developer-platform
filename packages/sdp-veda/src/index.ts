@@ -74,7 +74,9 @@ export {
   readVedaQueuedWithdrawalRequests,
   readVedaWithdrawalOptions,
   resetVedaCompatibilityCache,
+  resetVedaReadCaches,
   VEDA_COMPATIBILITY_TTL_MS,
+  VEDA_READ_CACHE_TTL_MS,
 } from "./sdk";
 export type {
   VedaAcceptedAmounts,

@@ -6,16 +6,16 @@
  */
 
 import type {
+  AllowedOperation,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   Permission,
-  WalletOperationHumanActorType,
 } from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
-export type AuthType = "api_key" | "clerk" | "approved_operation";
+export type AuthType = "api_key" | "clerk";
 
 interface AuthContextBase {
   id: string;
@@ -24,6 +24,8 @@ interface AuthContextBase {
   role: string;
   permissions: Permission[];
   environment: string;
+  /** Operation families/types the key may perform; null or [] is unrestricted. Always null for non-key actors. */
+  allowedOperations?: AllowedOperation[] | null;
   walletScope?: ApiKeyWalletScope | null;
   signingWalletId: string | null;
   signingWalletIds: string[];
@@ -32,19 +34,12 @@ interface AuthContextBase {
 
 /**
  * Normalized auth context returned by getAuth(), discriminated on authType:
- * API key requests always carry apiKeyId; Clerk requests and approved-operation
- * replays always carry userId.
+ * API key requests always carry apiKeyId; Clerk requests always carry userId.
  */
 export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
     | { authType: "clerk"; apiKeyId: null; userId: string }
-    | {
-        authType: "approved_operation";
-        apiKeyId: null;
-        userId: string;
-        storedActorType: WalletOperationHumanActorType;
-      }
   );
 
 export interface ClerkAuthContext {
@@ -80,6 +75,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       role: apiKey.role,
       permissions: apiKey.permissions,
       environment: apiKey.environment,
+      allowedOperations: apiKey.allowedOperations ?? null,
       walletScope:
         apiKey.walletScope ??
         ((apiKey.walletBindings?.length ?? 0) > 0 || apiKey.signingWalletId ? "selected" : "all"),
@@ -103,32 +99,13 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       role: clerk.role,
       permissions: clerk.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
+      allowedOperations: null,
       walletScope: null,
       signingWalletId: null,
       signingWalletIds: [],
       walletBindings: [],
       authType: "clerk",
       userId: clerk.userId,
-      apiKeyId: null,
-    };
-  }
-
-  const replayActor = c.get("approvedOperationActor");
-  if (replayActor) {
-    return {
-      id: replayActor.userId,
-      organizationId: replayActor.organizationId,
-      projectId,
-      role: "approved_operation",
-      permissions: replayActor.permissions,
-      environment: c.get("projectEnvironment") ?? "dashboard",
-      walletScope: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
-      authType: "approved_operation",
-      userId: replayActor.userId,
-      storedActorType: replayActor.storedActorType,
       apiKeyId: null,
     };
   }
@@ -163,12 +140,28 @@ export function requireProjectId(c: Context<{ Bindings: Env }>): string {
 }
 
 /**
+ * Get the project ID from an already-resolved auth context. For helpers that
+ * hold only `auth` (no request context) on a project-scoped route; the
+ * projectContextMiddleware has already rejected requests without one.
+ *
+ * @param auth - The normalized auth context for the request.
+ * @returns The project the request is scoped to.
+ * @throws AppError BAD_REQUEST if the auth context carries no project scope.
+ */
+export function requireAuthProjectId(auth: ApiKeyContext): string {
+  if (!auth.projectId) {
+    throw badRequest("Project scope is required");
+  }
+  return auth.projectId;
+}
+
+/**
  * Whether a dashboard identity may manage organization-wide credentials.
  *
  * Clerk contexts carry both the normalized organization role and its derived
  * permissions; accepting either admin representation keeps capability hints
- * aligned with the authenticated membership. API keys and approved-operation
- * replays are deliberately excluded from credential-administration surfaces.
+ * aligned with the authenticated membership. API keys are deliberately excluded
+ * from credential-administration surfaces.
  */
 export function canManageOrganizationCredentials(auth: ApiKeyContext): boolean {
   if (auth.authType !== "clerk") return false;

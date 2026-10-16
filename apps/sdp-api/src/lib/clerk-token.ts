@@ -1,6 +1,8 @@
 import type { Context } from "hono";
-import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
-import { internalError } from "@/lib/errors";
+import { createRemoteJWKSet, errors, type JWTPayload, type JWTVerifyGetKey, jwtVerify } from "jose";
+import { z } from "zod";
+import { AppError, internalError, serviceUnavailable } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 export interface ClerkJwtPayload extends JWTPayload {
@@ -47,16 +49,69 @@ export function resolveClerkOrganizationClaims(payload: ClerkJwtPayload): ClerkO
   };
 }
 
-const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+/**
+ * Clerk's signing keys could not be fetched, so the token was never checked.
+ * That says nothing about the credential, which is why callers answer 503.
+ */
+export class ClerkKeysUnavailableError extends Error {
+  constructor(options: { cause: unknown }) {
+    super("Clerk signing keys unavailable", options);
+    this.name = "ClerkKeysUnavailableError";
+  }
+}
 
-function getJwks(jwksUrl: string) {
-  const cached = jwksCache.get(jwksUrl);
+/**
+ * jose reports every verdict on a token with its own error subclasses. A
+ * rejected fetch (network, DNS, TLS), a timeout, a non-200 or unparseable
+ * response (the generic JOSEError) and a malformed key set mean the keys were
+ * never read.
+ */
+export function isSigningKeyFetchFailure(cause: unknown): boolean {
+  if (!(cause instanceof errors.JOSEError)) {
+    return true;
+  }
+  return (
+    cause instanceof errors.JWKSTimeout ||
+    cause instanceof errors.JWKSInvalid ||
+    cause.code === errors.JOSEError.code
+  );
+}
+
+interface ClerkSigningKeys {
+  keys: ReturnType<typeof createRemoteJWKSet>;
+  resolveKey: JWTVerifyGetKey;
+}
+
+const signingKeysCache = new Map<string, ClerkSigningKeys>();
+
+function getSigningKeys(jwksUrl: string): ClerkSigningKeys {
+  const cached = signingKeysCache.get(jwksUrl);
   if (cached) {
     return cached;
   }
-  const jwks = createRemoteJWKSet(new URL(jwksUrl));
-  jwksCache.set(jwksUrl, jwks);
-  return jwks;
+  const keys = createRemoteJWKSet(new URL(jwksUrl));
+  const signingKeys: ClerkSigningKeys = {
+    keys,
+    resolveKey: async (protectedHeader, token) => {
+      try {
+        return await keys(protectedHeader, token);
+      } catch (error) {
+        throw isSigningKeyFetchFailure(error)
+          ? new ClerkKeysUnavailableError({ cause: error })
+          : error;
+      }
+    },
+  };
+  signingKeysCache.set(jwksUrl, signingKeys);
+  return signingKeys;
+}
+
+/**
+ * Fetches Clerk's signing keys into the cache every verification reads, so a
+ * successful call also proves this instance can reach the internet.
+ */
+export async function warmClerkSigningKeys(env: Env): Promise<void> {
+  await getSigningKeys(resolveClerkConfig(env).jwksUrl).keys.reload();
 }
 
 export function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -133,9 +188,8 @@ const CLERK_CLOCK_TOLERANCE_SECONDS = 5;
  */
 export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtPayload> {
   const config = resolveClerkConfig(env);
-  const jwks = getJwks(config.jwksUrl);
 
-  const { payload } = await jwtVerify(token, jwks, {
+  const { payload } = await jwtVerify(token, getSigningKeys(config.jwksUrl).resolveKey, {
     issuer: config.issuer,
     clockTolerance: CLERK_CLOCK_TOLERANCE_SECONDS,
   });
@@ -155,4 +209,57 @@ export async function verifyClerkJwtForRequest(
   const payload = await verifyClerkJwt(token, c.env);
   c.set("verifiedClerkJwt", { token, payload });
   return payload;
+}
+
+const SIGNING_KEYS_RETRY_AFTER_SECONDS = 2;
+const ERROR_CHAIN_MAX_DEPTH = 4;
+const errorCodeSchema = z.object({ code: z.string() });
+
+/**
+ * undici reports every transport failure as `TypeError: fetch failed` and puts
+ * the reason (connect timeout, DNS, refused or reset socket) in `cause`; Node's
+ * happy-eyeballs connect wraps one failed attempt per address in an
+ * AggregateError.
+ */
+function describeErrorChain(cause: unknown): Array<{ name: string; code: string | null }> {
+  const chain: Array<{ name: string; code: string | null }> = [];
+  let current = cause;
+  while (current instanceof Error && chain.length < ERROR_CHAIN_MAX_DEPTH) {
+    const coded = errorCodeSchema.safeParse(current);
+    chain.push({ name: current.name, code: coded.success ? coded.data.code : null });
+    current = current instanceof AggregateError ? current.errors[0] : current.cause;
+  }
+  return chain;
+}
+
+/**
+ * Verifies the bearer token an auth middleware was handed. A token that fails
+ * verification is 401. Unreachable signing keys are a retryable 503 instead:
+ * the dashboard reads a 401 as lost access.
+ *
+ * @throws AppError `UNAUTHORIZED` for a token that fails verification, or
+ *   `SERVICE_UNAVAILABLE` with `Retry-After` when the keys cannot be fetched.
+ */
+export async function verifyClerkSessionToken(
+  c: Context<{ Bindings: Env }>,
+  token: string
+): Promise<ClerkJwtPayload> {
+  try {
+    return await verifyClerkJwtForRequest(c, token);
+  } catch (error) {
+    if (error instanceof ClerkKeysUnavailableError) {
+      getLogger().warn(
+        {
+          event: "sdp_api_clerk_signing_keys_unavailable",
+          error_chain: describeErrorChain(error.cause),
+        },
+        "Clerk signing keys unavailable"
+      );
+      c.header("Retry-After", String(SIGNING_KEYS_RETRY_AFTER_SECONDS));
+      throw serviceUnavailable("Authentication is temporarily unavailable");
+    }
+    throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

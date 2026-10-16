@@ -104,8 +104,7 @@ async function seedAuth(): Promise<void> {
       ),
   ]);
 
-  // Policy enforcement requires the operation's wallet to be an active
-  // custody wallet owned by the tenant.
+  // The Rings wallet links to an active custody wallet owned by the tenant.
   await db.batch([
     db
       .prepare(
@@ -368,7 +367,7 @@ describe("Helius Rings routes", () => {
       gatewayOverride.current = gateway;
     });
 
-    it("prepares an operation through real policy and fails honestly at the port", async () => {
+    it("prepares an operation and fails honestly at the port", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
@@ -386,8 +385,7 @@ describe("Helius Rings routes", () => {
         };
       };
 
-      // Default policy is implicit allow, so the operation advances to the
-      // configured gateway and records its domain failure.
+      // The operation advances to the configured gateway and records its domain failure.
       expect(body.data.operation.state).toBe("failed");
       expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
         code: "config_error",
@@ -452,6 +450,88 @@ describe("Helius Rings routes", () => {
       );
       const listBody = (await list.json()) as { data: { operations: Array<{ id: string }> } };
       expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("judges prepare, retry and execute against the key's allowed operations", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-allowed-ops",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const paymentsOnlyKey = { id: "key_hr_payments_only", raw: "sk_test_helius_rings_pay" };
+      await seedCachedApiKey(env, await hashString(paymentsOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: paymentsOnlyKey.id,
+        allowedOperations: ["payment"],
+      });
+      const restricted = (path: string, body: unknown) =>
+        app.request(
+          path,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${paymentsOnlyKey.raw}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+      const refusedCode = async (res: Response) =>
+        ((await res.json()) as { error: { code: string } }).error.code;
+
+      const prepared = await restricted("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-allowed-ops-prepare",
+      });
+      expect(prepared.status).toBe(403);
+      expect(await refusedCode(prepared)).toBe("OPERATION_NOT_ALLOWED");
+
+      const retried = await restricted(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
+        { clientNonce: "route-nonce-allowed-ops-retry" }
+      );
+      expect(retried.status).toBe(403);
+      expect(await refusedCode(retried)).toBe("OPERATION_NOT_ALLOWED");
+
+      const executed = await restricted(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        {}
+      );
+      expect(executed.status).toBe(403);
+      expect(await refusedCode(executed)).toBe("OPERATION_NOT_ALLOWED");
+
+      // A key whose list names the Rings family goes through to the normal path.
+      const privacyKey = { id: "key_hr_privacy_family", raw: "sk_test_helius_rings_privacy" };
+      await seedCachedApiKey(env, await hashString(privacyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: privacyKey.id,
+        allowedOperations: ["privacy"],
+      });
+      const allowedRetry = await app.request(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${privacyKey.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ clientNonce: "route-nonce-allowed-ops-retry-ok" }),
+        },
+        env
+      );
+      expect(allowedRetry.status).toBe(201);
     });
 
     it("execute is a no-op on a terminal operation", async () => {
@@ -641,8 +721,7 @@ describe("Helius Rings routes", () => {
         };
         expect(body.data.operation.opType).toBe("ring_exit");
         expect(body.data.operation.ringProgramId).toBe(RING_PROGRAM);
-        // Default policy is implicit allow, so the operation advances to the
-        // port call, where the describe's gateway records its config_error.
+        // The operation advances to the port call, where the describe's gateway records its config_error.
         expect(body.data.operation.state).toBe("failed");
         expect(body.data.operation.failure).toMatchObject({ code: "config_error" });
       });

@@ -1,8 +1,9 @@
-import type { RampExternalAccountDetails } from "@sdp/payments/ramps/types";
 import {
   BVNK_CUSTOMER_LINK_STAGE,
   type BvnkCounterpartyProviderCustomerLink,
   type CounterpartyProviderAccount,
+  type GenericCounterpartyProviderCustomerLink,
+  isRetiredRampProviderId,
   type ListCounterpartyProviderAccountsResponse,
   type ProviderWalletBalance,
 } from "@sdp/types";
@@ -16,7 +17,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { rampRuntime } from "@/routes/payments/context";
-import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
+import { loadRampListingAdmission } from "@/routes/payments/ramps/admission";
 import type { AppContext } from "../counterparties/context";
 import { getCounterpartiesRepository } from "../counterparties/context";
 import { readBvnkFundingWalletBalances } from "./bvnk-funding-wallet-balances";
@@ -27,7 +28,7 @@ import {
 } from "./schemas";
 
 /**
- * Lists parent-scoped provider accounts with just-in-time provider enrichment.
+ * Lists parent-scoped provider accounts, with live BVNK funding-wallet balances.
  *
  * @param c - Authenticated request context.
  * @returns Provider-account rows in the standard success envelope.
@@ -45,6 +46,8 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(query.error) });
   }
 
+  const admits = await loadRampListingAdmission(c, query.data.provider);
+
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
@@ -54,19 +57,19 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  const rows = await getCounterpartyProviderAccountsRepository(c).listProviderAccounts({
-    organizationId: auth.organizationId,
-    projectId,
-    counterpartyId: counterparty.id,
-    ...query.data,
-  });
-  const runtime = rampRuntime(c);
-  const enriched = await enrichCounterpartyProviderAccounts(
-    runtime,
-    rows.filter((row) => row.kind === "payout_account")
-  );
+  // Accounts at a provider outside the release channel, not surfaced, or not
+  // entitled are neither listed nor enriched: that provider is off completely.
+  // A retired provider's accounts are history, so they still list, as stored.
+  const rows = (
+    await getCounterpartyProviderAccountsRepository(c).listProviderAccounts({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: counterparty.id,
+      ...query.data,
+    })
+  ).filter((row) => isRetiredRampProviderId(row.provider) || admits(row.provider));
   const walletBalances = await readBvnkFundingWalletBalances(
-    runtime,
+    rampRuntime(c),
     rows.filter((row) => row.kind === "funding_wallet")
   );
 
@@ -92,7 +95,7 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       accounts.push(baseProviderAccount(customerLink, customerLink));
     }
     for (const row of payoutRows) {
-      accounts.push(mapProviderAccount(row, enriched, customerLink));
+      accounts.push(mapPayoutAccount(row, customerLink));
     }
     for (const row of fundingWalletRows) {
       accounts.push(mapFundingWalletAccount(row, walletBalances, customerLink));
@@ -130,35 +133,20 @@ function baseProviderAccount(
 }
 
 /**
- * Projects a payout-account row with its JIT provider details: the provider's
- * own status replaces the stored one and the bank facts ride along.
+ * Projects a stored payout-account row; its corridor columns must be present.
  *
  * @param row - Parent-scoped payout-account row.
- * @param enriched - Sanitized provider details indexed by row id.
  * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
  * @returns Public provider-account response row.
  */
-function mapProviderAccount(
+function mapPayoutAccount(
   row: CounterpartyProviderAccountRow,
-  enriched: ReadonlyMap<string, RampExternalAccountDetails>,
   customerLink: CounterpartyProviderAccountRow | undefined
 ): CounterpartyProviderAccount {
   if (row.fiat_currency === null || row.destination_country === null) {
     throw internalError("External provider-account row is missing corridor data.");
   }
-  const result = baseProviderAccount(row, customerLink);
-  const detail = enriched.get(row.id);
-  if (detail !== undefined) {
-    result.providerStatus = detail.providerStatus;
-    if (detail.bankName !== undefined) {
-      result.bankName = detail.bankName;
-    }
-    if (detail.accountNumberLast4 !== undefined) {
-      result.accountNumberLast4 = detail.accountNumberLast4;
-    }
-    result.paymentRails = detail.paymentRails;
-  }
-  return result;
+  return baseProviderAccount(row, customerLink);
 }
 
 /**
@@ -191,9 +179,10 @@ function mapFundingWalletAccount(
 /**
  * Maps a customer-link row into the public customer-link shape, dispatching
  * per provider so BVNK's pre-customer session metadata gets its own stage
- * mapping while every other provider maps from the row columns directly.
- * The provider cases mirror RAMP_PROVIDERS, so a provider added there without
- * a case here fails the exhaustive default at compile time.
+ * mapping while every other provider, retired ones included, maps from the
+ * row columns directly. The provider cases mirror RAMP_PROVIDERS, so a
+ * provider added there without a case here fails the exhaustive default at
+ * compile time.
  *
  * @param row - Parent-scoped customer-link row.
  * @returns Public customer-link object.
@@ -205,24 +194,31 @@ function mapCustomerLink(
     case "bvnk":
       return mapBvnkCustomerLink(row);
     case "moonpay":
-    case "lightspark":
-    case "moneygram":
     case "coinbase":
-    case "mural":
     case "stripe":
-      return {
-        provider: row.provider,
-        id: row.id,
-        providerCustomerReference: row.provider_customer_reference,
-        status: row.status,
-        providerStatus: row.provider_status,
-        createdAt: row.created_at,
-      };
+      return mapGenericCustomerLink(row, row.provider);
     default: {
+      if (isRetiredRampProviderId(row.provider)) {
+        return mapGenericCustomerLink(row, row.provider);
+      }
       const exhaustive: never = row.provider;
       throw internalError(`Unhandled ramp provider: ${String(exhaustive)}`);
     }
   }
+}
+
+function mapGenericCustomerLink(
+  row: CounterpartyProviderAccountRow,
+  provider: GenericCounterpartyProviderCustomerLink["provider"]
+): GenericCounterpartyProviderCustomerLink {
+  return {
+    provider,
+    id: row.id,
+    providerCustomerReference: row.provider_customer_reference,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
 }
 
 /**

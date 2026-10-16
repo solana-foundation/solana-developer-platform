@@ -691,7 +691,7 @@ Nothing else. Three consumers read it and none of them names a provider:
 | Surface | Effect |
 |---|---|
 | `GET /v1/earn/strategies` (list + detail) | Rows hidden. The list filters in SQL (`providers: SURFACED_EARN_PROVIDERS`) so `total` and the page window describe what the caller can see; the detail route 404s via `isHiddenStrategy`. |
-| `POST /v1/earn/programs` | 403 `"… is not currently offered."` (`assertEarnProviderSurfaced`), refused before the provider is called. |
+| `POST /v1/earn/programs` | 403 `"… is not currently offered."` (`assertProviderAvailable`, `details.reason: "provider_not_offered"`), refused before the provider is called. |
 | Dashboard | `EARN_PROGRAM_CREATION_ENABLED` drops the onboarding CTA, "Add strategy", "Change strategy", and the `/deposit` route itself. |
 
 ### What un-surfacing must never do

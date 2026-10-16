@@ -4,7 +4,6 @@ import {
   ArrowLeftRightIcon,
   ArrowUpRightIcon,
   BlocksIcon,
-  CircleCheckBigIcon,
   CircleDotDashedIcon,
   CoinsIcon,
   FileTextIcon,
@@ -46,7 +45,6 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badge?: number;
   external?: boolean;
   children?: SubNavItem[];
   /** Marks the children as a collapsible disclosure group (chevron + persisted open state). */
@@ -199,7 +197,7 @@ export function getIntegrationActions(
   t: ReturnType<typeof useTranslations>,
   options: Pick<
     Parameters<typeof getNavSections>[1],
-    "custodyEnabled" | "paymentsEnabled" | "policiesEnabled" | "privateChannelsEnabled"
+    "complianceEnabled" | "custodyEnabled" | "privateChannelsEnabled" | "rampsEnabled"
   >
 ): SubNavItem[] {
   return [
@@ -212,12 +210,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    {
-      label: t("Shared.integrations.rpcTitle"),
-      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.rpc,
-      icon: CircleDotDashedIcon,
-    },
-    ...(options.paymentsEnabled
+    ...(options.rampsEnabled
       ? [
           {
             label: t("Shared.integrations.rampsTitle"),
@@ -226,7 +219,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    ...(options.policiesEnabled
+    ...(options.complianceEnabled
       ? [
           {
             label: t("Shared.integrations.complianceTitle"),
@@ -250,7 +243,7 @@ export function getIntegrationActions(
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
-    canReadApprovals: boolean;
+    complianceEnabled: boolean;
     custodyEnabled: boolean;
     dvpEnabled: boolean;
     earnEnabled: boolean;
@@ -258,8 +251,6 @@ export function getNavSections(
     issuanceEnabled: boolean;
     marketsEnabled: boolean;
     paymentsEnabled: boolean;
-    pendingApprovalCount: number | null;
-    policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
     /** Wallets pinned from the Wallets page, listed under Wallets in the order they were pinned. */
     walletFavorites?: SubNavItem[];
@@ -267,6 +258,7 @@ export function getNavSections(
     newDesign?: boolean;
     /** Each design module's own flag: a redesigned area's labels follow it. */
     newDesignModules?: DesignModuleFlags;
+    rampsEnabled: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
@@ -352,15 +344,6 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        ...(options.policiesEnabled
-          ? [
-              {
-                label: t("Shared.dashboardShell.policies"),
-                href: DASHBOARD_SIDE_NAV_HREFS.policies,
-                icon: ShieldCheckIcon,
-              },
-            ]
-          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
@@ -368,16 +351,6 @@ export function getNavSections(
           children: integrationActions,
           subnavKey: "integrations" as const,
         },
-        ...(options.policiesEnabled && options.canReadApprovals
-          ? [
-              {
-                label: t("Shared.dashboardShell.approvals"),
-                href: DASHBOARD_SIDE_NAV_HREFS.approvals,
-                icon: CircleCheckBigIcon,
-                ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
-              },
-            ]
-          : []),
       ],
     },
   ];

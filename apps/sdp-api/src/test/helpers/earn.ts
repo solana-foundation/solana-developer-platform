@@ -105,7 +105,8 @@ export async function seedEarnApiKey(
   await getDb(env)
     .prepare(`INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', ?, 'active')`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', ?, 'active')
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`)
     .bind(
       key.id,
       tenant.org.id,
@@ -119,3 +120,15 @@ export async function seedEarnApiKey(
     .run();
   return { id: key.id, raw, prefix: raw.slice(0, 11), permissions: key.permissions };
 }
+
+/** Deployment flags under which `isEarnEnabled` admits Earn: Markets and Earn both on. */
+export const EARN_ENABLED_FLAGS = {
+  MARKETS_ENABLED: "true",
+  EARN_ENABLED: "true",
+} as const satisfies Partial<Env>;
+
+/** Each Earn gating flag switched off while the other stays on. */
+export const EARN_FLAG_OFF_CASES = [
+  { flag: "MARKETS_ENABLED", flags: { ...EARN_ENABLED_FLAGS, MARKETS_ENABLED: undefined } },
+  { flag: "EARN_ENABLED", flags: { ...EARN_ENABLED_FLAGS, EARN_ENABLED: undefined } },
+] as const satisfies readonly { flag: keyof typeof EARN_ENABLED_FLAGS; flags: Partial<Env> }[];

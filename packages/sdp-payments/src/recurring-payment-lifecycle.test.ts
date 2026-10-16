@@ -5,6 +5,7 @@ import {
   decideRecurringPaymentActivationTransition,
   decideRecurringPaymentLifecycleTransition,
   decideRecurringPaymentUpdateTransition,
+  firstRecurringPaymentDueAfter,
   getRecurringPaymentLifecycleStatuses,
   getRecurringPaymentOperationStaleBefore,
   hasRecurringPaymentAdvancedPastDueAt,
@@ -128,6 +129,26 @@ describe("recurring payment schedule decisions", () => {
     assert.equal(getRecurringPaymentOperationStaleBefore(NOW), STALE);
     assert.equal(isRecurringPaymentOperationStale({ updatedAt: STALE, nowIso: NOW }), true);
     assert.equal(isRecurringPaymentOperationStale({ updatedAt: FRESH, nowIso: NOW }), false);
+  });
+
+  it("skips to the first boundary after now without catching up elapsed periods", () => {
+    const dueAt = "2026-07-01T10:00:00.000Z";
+    // Exactly due: the next boundary, one period on.
+    assert.equal(
+      firstRecurringPaymentDueAfter(dueAt, 24, new Date(dueAt)),
+      "2026-07-02T10:00:00.000Z"
+    );
+    // Three and a half periods late: lands after now, never at or before it.
+    assert.equal(
+      firstRecurringPaymentDueAfter(dueAt, 24, new Date("2026-07-04T22:00:00.000Z")),
+      "2026-07-05T10:00:00.000Z"
+    );
+    // On a boundary: that boundary has elapsed, so the next one.
+    assert.equal(
+      firstRecurringPaymentDueAfter(dueAt, 24, new Date("2026-07-03T10:00:00.000Z")),
+      "2026-07-04T10:00:00.000Z"
+    );
+    assert.throws(() => firstRecurringPaymentDueAfter(dueAt, 0, new Date(dueAt)));
   });
 
   it("calculates collection cadence without accepting an earlier requested due time", () => {

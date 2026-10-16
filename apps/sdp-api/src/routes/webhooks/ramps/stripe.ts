@@ -1,6 +1,7 @@
 import { readRecord, readString } from "@sdp/payments/json";
 import type { RampSettlementEvent, RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types";
+import { z } from "zod";
 import { AppError, badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
@@ -15,15 +16,52 @@ const STRIPE_SESSION_STATUS = {
   rejected: "failed",
 } as const satisfies Record<string, RampSettlementEvent["kind"]>;
 
+type DeliveredAssetRail = NonNullable<
+  Extract<RampSettlementEvent, { kind: "settled" }>["deliveredAssetRail"]
+>;
+
+/** The rail each Stripe destination currency settles on, on Solana. */
+const STRIPE_SOLANA_RAILS = {
+  usdc: "usdc.solana",
+  sol: "sol.solana",
+} as const satisfies Record<string, DeliveredAssetRail>;
+
+function isStripeSolanaCurrency(currency: string): currency is keyof typeof STRIPE_SOLANA_RAILS {
+  return Object.hasOwn(STRIPE_SOLANA_RAILS, currency);
+}
+
+/** The rail a completed Stripe session delivered, or null for an asset SDP does not sell on Solana. */
+function stripeDeliveredAssetRail(currency: string, network: string): DeliveredAssetRail | null {
+  if (network !== "solana" || !isStripeSolanaCurrency(currency)) {
+    return null;
+  }
+  return STRIPE_SOLANA_RAILS[currency];
+}
+
+/** The one field every Stripe event carries that says which mode it ran in. */
+const stripeEventModeSchema = z.object({ livemode: z.boolean() });
+
 interface StripeSignatureHeader {
   timestamp: string;
   signatures: string[];
 }
 
-function readStripeWebhookSecret(env: Record<string, string | undefined>): string {
-  const secret = env.STRIPE_WEBHOOK_SECRET?.trim();
+/**
+ * The secret that signs `environment`'s Stripe events. SDP holds the sandbox
+ * secret only: production projects bring their own Stripe account (HOO-1943).
+ */
+function readStripeWebhookSecret(
+  env: Record<string, string | undefined>,
+  environment: SdpEnvironment
+): string {
+  if (environment === "production") {
+    throw providerNotConfigured("Stripe webhooks are not configured for production.");
+  }
+  const secret = env.STRIPE_SANDBOX_WEBHOOK_SECRET?.trim();
   if (!secret) {
-    throw providerNotConfigured("Stripe webhook secret is not configured (STRIPE_WEBHOOK_SECRET).");
+    throw providerNotConfigured(
+      "Stripe sandbox webhook secret is not configured (STRIPE_SANDBOX_WEBHOOK_SECRET)."
+    );
   }
   return secret;
 }
@@ -90,8 +128,13 @@ async function verifyStripeSignatures(input: {
 export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSettlementEvent> {
   readonly provider = "stripe";
 
-  async verify({ env, headers, rawBody }: RampWebhookValidationContext): Promise<unknown> {
-    const secret = readStripeWebhookSecret(env);
+  async verify({
+    env,
+    environment,
+    headers,
+    rawBody,
+  }: RampWebhookValidationContext): Promise<unknown> {
+    const secret = readStripeWebhookSecret(env, environment);
     const signatureHeader = headers.get("stripe-signature")?.trim();
     if (!signatureHeader) {
       throw unauthorized("Stripe webhook is missing the Stripe-Signature header");
@@ -110,11 +153,23 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
       signatures: parsed.signatures,
     });
 
+    let payload: unknown;
     try {
-      return JSON.parse(rawBody);
+      payload = JSON.parse(rawBody);
     } catch {
       throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
     }
+    const mode = stripeEventModeSchema.safeParse(payload);
+    if (!mode.success) {
+      throw badRequest("Stripe webhook is missing livemode", { provider: this.provider });
+    }
+    if (mode.data.livemode !== (environment === "production")) {
+      throw badRequest(
+        `Stripe ${mode.data.livemode ? "live" : "test"} event sent to the ${environment} webhook`,
+        { provider: this.provider }
+      );
+    }
+    return payload;
   }
 
   parse(payload: unknown): RampSettlementEvent {
@@ -163,6 +218,18 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
     }
     if (kind === "settled") {
       const transactionDetails = readRecord(session.transaction_details);
+      const currency = transactionDetails
+        ? readString(transactionDetails.destination_currency)
+        : undefined;
+      const network = transactionDetails
+        ? readString(transactionDetails.destination_network)
+        : undefined;
+      if (currency === undefined || network === undefined) {
+        throw badRequest(
+          `Stripe "${type}" webhook is missing the completed session's destination currency or network`,
+          { provider: this.provider }
+        );
+      }
       const receivedAmount = transactionDetails
         ? readString(transactionDetails.destination_amount)
         : undefined;
@@ -170,6 +237,7 @@ export class StripeWebhookProcessor implements WebhookProcessor<unknown, RampSet
         provider: this.provider,
         kind,
         reference,
+        deliveredAssetRail: stripeDeliveredAssetRail(currency, network),
         ...(receivedAmount ? { receivedAmount } : {}),
       };
     }

@@ -107,7 +107,7 @@ export function createPostgresPrivateChannelReferenceRepository(
                   JOIN custody_configs cc ON cc.id = w.custody_config_id
                   CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
                  WHERE cc.organization_id = ?
-                   AND (cc.project_id IS NULL OR cc.project_id = ?)
+                   AND cc.project_id = ?
                    ${selectedWalletClause}`,
           binds:
             walletScope.scope === "all"

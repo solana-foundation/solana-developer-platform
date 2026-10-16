@@ -74,7 +74,6 @@ describe("coinbase account provisioning", () => {
     await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
     await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, orgId: "org_other" });
     await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: "proj_2" });
-    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, projectId: null });
     await provisionCoinbaseCdpAccount(createCoinbaseEnv({ COINBASE_CDP_NETWORK: "solana" }), base);
     await provisionCoinbaseCdpAccount(
       createCoinbaseEnv({ COINBASE_CDP_ACCOUNT_NAMESPACE: "staging" }),

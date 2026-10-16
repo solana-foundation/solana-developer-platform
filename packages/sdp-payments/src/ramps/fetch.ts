@@ -1,5 +1,6 @@
 import { scrubTelemetryString } from "@sdp/redaction";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import { z } from "zod";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 
 export interface ProviderRequestInit<TBody> {
@@ -15,76 +16,160 @@ export interface ProviderResponse {
   parsed: unknown;
 }
 
-function serializeProviderBody(body: unknown): BodyInit | undefined {
-  if (body === undefined) {
-    return undefined;
+/** How long one provider call may take, request and response body together. */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Ramp provider bodies are small JSON documents; a larger one is refused. */
+export const PROVIDER_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+class ProviderResponseTooLargeError extends Error {}
+
+/** Reads the body as text, refusing it once it passes the byte cap. */
+async function readProviderBody(response: Response): Promise<string> {
+  if (response.body === null) {
+    return "";
   }
-  if (typeof body === "string") {
-    return body;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    received += value.byteLength;
+    if (received > PROVIDER_MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new ProviderResponseTooLargeError();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+function isProviderTimeout(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === "TimeoutError";
+}
+
+function providerReadFailure(provider: RampProviderId, cause: unknown): string {
+  if (cause instanceof ProviderResponseTooLargeError) {
+    return `${provider} returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`;
+  }
+  if (isProviderTimeout(cause)) {
+    return `The ${provider} API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`;
+  }
+  return `Failed to read the ${provider} API response`;
+}
+
+/** The body to send and the Content-Type it needs; fetch types a form body itself. */
+function serializeProviderBody<TBody>(body: TBody | undefined): {
+  body: BodyInit | undefined;
+  contentType: string | undefined;
+} {
+  if (body === undefined) {
+    return { body: undefined, contentType: undefined };
   }
   if (body instanceof URLSearchParams) {
-    return body;
+    return { body, contentType: undefined };
   }
-  return JSON.stringify(body);
-}
-
-export function classifyProviderStatus(status: number): SdpPaymentsErrorCode {
-  if (status === 409) return "CONFLICT";
-  if (status === 429) return "RATE_LIMITED";
-  if (status >= 500) return "PROVIDER_UNAVAILABLE";
-  return "BAD_REQUEST";
+  return { body: JSON.stringify(body), contentType: "application/json" };
 }
 
 /**
- * Whether a provider call failed with a response that proves the provider
- * received the request and refused it, so the requested action was never
- * created. Only a 4xx other than 408 and 409 carries that proof: a transport
- * failure, a client timeout, or a 408 may have landed after the provider
- * processed the request, a 409 typically means an earlier request with the
- * same key already went through, and a 5xx may have committed before failing,
- * so all of those stay ambiguous and callers must not undo a once-only claim
- * on them.
+ * What a failed provider call proves about its side effect. `rejected`: the
+ * provider answered and refused, so nothing was created and only changed input
+ * can succeed. `unknown`: the action may have happened (a transport failure, a
+ * timeout, 408, 409, 5xx, or a success SDP could not read), so a caller
+ * resolves it through a webhook or a status read and never resends blind.
+ */
+export type ProviderCallOutcome = "rejected" | "unknown";
+
+/**
+ * The public code and the outcome a non-2xx provider status proves. 401 and
+ * 403 refuse SDP's credentials, never the caller's request. A 408 may have
+ * landed after the provider acted, and a 409 typically means an earlier
+ * request with the same key went through, so both stay unknown.
+ *
+ * @param status - HTTP status the provider answered with.
+ * @returns The error code for the caller and what the status proves.
+ */
+export function classifyProviderFailure(status: number): {
+  code: SdpPaymentsErrorCode;
+  outcome: ProviderCallOutcome;
+} {
+  if (status === 401 || status === 403) {
+    return { code: "PROVIDER_NOT_CONFIGURED", outcome: "rejected" };
+  }
+  if (status === 408) return { code: "PROVIDER_UNAVAILABLE", outcome: "unknown" };
+  if (status === 409) return { code: "CONFLICT", outcome: "unknown" };
+  if (status === 429) return { code: "RATE_LIMITED", outcome: "rejected" };
+  if (status >= 400 && status < 500) return { code: "BAD_REQUEST", outcome: "rejected" };
+  return { code: "PROVIDER_UNAVAILABLE", outcome: "unknown" };
+}
+
+/**
+ * Whether a provider call failed with an answer that proves the provider
+ * refused it, so the requested action was never created. Only the provider
+ * HTTP layer records an outcome; an error without one is unknown, so callers
+ * never undo a once-only claim on it.
  *
  * @param error - The value thrown by a provider client call.
- * @returns True when the error carries a 4xx `providerStatus` other than 408 and 409.
+ * @returns True when the error records a `rejected` outcome.
  */
 export function isDefinitiveProviderRejection(error: unknown): boolean {
-  if (!(error instanceof SdpPaymentsError) || error.details === undefined) {
-    return false;
-  }
-  const status = error.details.providerStatus;
-  return (
-    typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 409
-  );
+  return error instanceof SdpPaymentsError && error.details?.outcome === "rejected";
 }
 
 /**
+ * The structure of a transport failure, for operators: its error name and the
+ * system code underneath (ECONNRESET, ENOTFOUND, UND_ERR_*), never its message,
+ * which can carry the request URL and MoonPay's signed `apiKey` query.
+ */
+function transportDiagnostics(cause: unknown): Record<string, unknown> {
+  if (!(cause instanceof Error)) {
+    return { transportError: typeof cause };
+  }
+  const inner = cause.cause;
+  const code =
+    typeof inner === "object" && inner !== null && "code" in inner && typeof inner.code === "string"
+      ? inner.code
+      : undefined;
+  return code === undefined
+    ? { transportError: cause.name }
+    : { transportError: cause.name, transportCode: code };
+}
+
+/** One message field of a provider error body: non-blank text, else absent. */
+const providerErrorText = z.string().regex(/\S/).optional().catch(undefined);
+
+/**
+ * Parses a provider error body down to its message, scrubbed: a nested
+ * `error.message`, then `message`, `reason`, or Coinbase/CDP's `errorMessage`.
  * Ramp providers validate the counterparty fields we submit and echo them back
  * in the failure ("email jane@doe.test is already registered", "phone must be
- * E.164"). That message becomes an `SdpPaymentsError` that is both logged and
- * returned, so it is scrubbed at the one place every provider's error passes
- * through — the wording stays actionable, the identifier does not survive.
+ * E.164"), so the identifier never survives, only the wording. A body that is
+ * not an object, or carries none of these as text, parses to undefined.
  */
-export function extractProviderErrorMessage(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== "object") return fallback;
-  const record = payload as {
-    error?: { message?: unknown };
-    message?: unknown;
-    reason?: unknown;
-    // Coinbase/CDP shape: { errorMessage, errorType }.
-    errorMessage?: unknown;
-  };
-  const message = record.error?.message ?? record.message ?? record.reason ?? record.errorMessage;
-  return typeof message === "string" && message.trim() ? scrubTelemetryString(message) : fallback;
-}
+export const providerErrorMessageSchema = z
+  .object({
+    error: z.object({ message: providerErrorText }).optional().catch(undefined),
+    message: providerErrorText,
+    reason: providerErrorText,
+    errorMessage: providerErrorText,
+  })
+  .transform((body) => {
+    const message = body.error?.message ?? body.message ?? body.reason ?? body.errorMessage;
+    return message === undefined ? undefined : scrubTelemetryString(message);
+  })
+  .catch(undefined);
 
 /**
  * Performs a provider HTTP request and returns the raw response plus its
- * parsed JSON body. The optional `signal` is forwarded to the underlying
- * fetch call; the fetch covers the request and, for the undici/Node runtime,
- * the response body read (a supplied signal is the only fence a hung body
- * read needs). A non-JSON body yields `parsed: undefined` rather than a parse
- * failure.
+ * parsed JSON body. Every call is fenced by PROVIDER_REQUEST_TIMEOUT_MS,
+ * which covers the request and the body read, so a stalled provider cannot
+ * hold a request open; a caller's own `signal` can only cut it shorter. A
+ * body over PROVIDER_MAX_RESPONSE_BYTES is refused. A non-JSON body yields
+ * `parsed: undefined` rather than a parse failure.
  *
  * @param provider - Ramp provider id, used in errors and telemetry.
  * @param url - Request URL.
@@ -96,28 +181,51 @@ export async function providerFetch<TBody = never>(
   url: string,
   init: ProviderRequestInit<TBody>
 ): Promise<ProviderResponse> {
+  const signals = [AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS)];
+  if (init.signal !== undefined) {
+    signals.push(init.signal);
+  }
+  const { body, contentType } = serializeProviderBody(init.body);
+  const headers = new Headers({ Accept: "application/json" });
+  if (contentType !== undefined) {
+    headers.set("Content-Type", contentType);
+  }
+  new Headers(init.headers).forEach((value, name) => {
+    headers.set(name, value);
+  });
   let response: Response;
   try {
     response = await fetch(url, {
       method: init.method,
-      headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
-      body: serializeProviderBody(init.body),
-      signal: init.signal,
+      headers,
+      body,
+      signal: AbortSignal.any(signals),
     });
-  } catch {
-    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", `Failed to reach the ${provider} API`, {
-      provider,
-    });
+  } catch (cause) {
+    throw new SdpPaymentsError(
+      "PROVIDER_UNAVAILABLE",
+      isProviderTimeout(cause)
+        ? `The ${provider} API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`
+        : `Failed to reach the ${provider} API`,
+      { provider, outcome: "unknown" },
+      transportDiagnostics(cause)
+    );
   }
 
   let raw: string;
   try {
-    raw = await response.text();
-  } catch {
+    raw = await readProviderBody(response);
+  } catch (cause) {
+    // The status line already arrived: a success may have acted, and a refusal
+    // still proves what its status proves, readable body or not.
+    const failure: { code: SdpPaymentsErrorCode; outcome: ProviderCallOutcome } = response.ok
+      ? { code: "PROVIDER_RESPONSE_INVALID", outcome: "unknown" }
+      : classifyProviderFailure(response.status);
     throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
-      `Failed to read the ${provider} API response`,
-      { provider }
+      failure.code,
+      providerReadFailure(provider, cause),
+      { provider, providerStatus: response.status, outcome: failure.outcome },
+      transportDiagnostics(cause)
     );
   }
 
@@ -131,33 +239,62 @@ export async function providerFetch<TBody = never>(
   return { response, raw, parsed };
 }
 
-export async function providerFetchJson<TResponse, TBody = never>(
+/**
+ * Performs a provider request and validates its JSON body against `schema`.
+ * A non-2xx answer becomes the classified error. A success that is not JSON,
+ * or does not match the schema, is PROVIDER_RESPONSE_INVALID with an unknown
+ * outcome: the provider acted, SDP just cannot read what it did. A schema
+ * requires exactly the fields the adapter reads, so a mismatch names a field
+ * the adapter could not have used, and its issue paths ride in diagnostics.
+ *
+ * @param provider - Ramp provider id, used in errors and telemetry.
+ * @param url - Request URL.
+ * @param init - Method, headers, body, and optional abort signal.
+ * @param schema - The fields the adapter reads from the response.
+ * @returns The validated response body.
+ */
+export async function providerFetchJson<TSchema extends z.ZodType, TBody = never>(
   provider: RampProviderId,
   url: string,
-  init: ProviderRequestInit<TBody>
-): Promise<TResponse> {
+  init: ProviderRequestInit<TBody>,
+  schema: TSchema
+): Promise<z.output<TSchema>> {
   const { response, parsed } = await providerFetch(provider, url, init);
 
   if (!response.ok) {
+    // The provider's own wording is for operators, never for the caller: it
+    // rides in diagnostics, which are logged and not serialized.
+    const providerMessage = providerErrorMessageSchema.parse(parsed);
+    const { code, outcome } = classifyProviderFailure(response.status);
     throw new SdpPaymentsError(
-      classifyProviderStatus(response.status),
-      extractProviderErrorMessage(
-        parsed,
-        `${provider} request failed with status ${response.status}`
-      ),
-      { provider, providerStatus: response.status }
+      code,
+      `${provider} request failed with status ${response.status}`,
+      { provider, providerStatus: response.status, outcome },
+      providerMessage === undefined ? undefined : { providerMessage }
     );
   }
 
   if (parsed === undefined) {
     throw new SdpPaymentsError(
-      "PROVIDER_UNAVAILABLE",
+      "PROVIDER_RESPONSE_INVALID",
       `${provider} returned an unparseable response`,
-      {
-        provider,
-      }
+      { provider, outcome: "unknown" }
     );
   }
 
-  return parsed as TResponse;
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    throw new SdpPaymentsError(
+      "PROVIDER_RESPONSE_INVALID",
+      `${provider} returned an unexpected response`,
+      { provider, outcome: "unknown" },
+      {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.map(String).join("."),
+          code: issue.code,
+        })),
+      }
+    );
+  }
+  return result.data;
 }

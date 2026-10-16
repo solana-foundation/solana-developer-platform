@@ -4,9 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const STRIPE_CONTEXT = {
   env: {
-    STRIPE_SECRET_KEY: "sk_test_secret",
-    STRIPE_PUBLISHABLE_KEY: "pk_test_pub",
-    STRIPE_WEBHOOK_SECRET: "whsec_test",
+    STRIPE_SANDBOX_SECRET_KEY: "sk_test_secret",
+    STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_pub",
   },
   mode: "sandbox",
 } as const;
@@ -18,14 +17,22 @@ function jsonResponse(body: Record<string, unknown>): Response {
   });
 }
 
-function sessionResponse(overrides?: Record<string, unknown>): Response {
-  const body = {
+/** A session that echoes the default `onrampInput` locked to `currency`, as Stripe returns it. */
+function sessionResponse(currency = "usdc"): Response {
+  return jsonResponse({
     id: "cos_123",
     client_secret: "cos_123_secret_abc",
     status: "initialized",
     redirect_url: "https://crypto.link.com?session_hash=xyz",
-  };
-  return jsonResponse(overrides ? { ...body, ...overrides } : body);
+    transaction_details: {
+      destination_currencies: [currency],
+      destination_networks: ["solana"],
+      lock_wallet_address: true,
+      source_amount: "100.00",
+      source_currency: "usd",
+      wallet_addresses: { solana: "WALLET123" },
+    },
+  });
 }
 
 function quotesResponse(overrides?: Record<string, unknown>): Response {
@@ -122,7 +129,8 @@ describe("StripeRampClient", () => {
     expect(body.get("source_amount")).toBe("100");
     expect(body.get("destination_currency")).toBe("usdc");
     expect(body.get("destination_network")).toBe("solana");
-    expect(body.getAll("destination_currencies[]")).toEqual(["usdc", "sol"]);
+    expect(body.getAll("destination_currencies[]")).toEqual(["usdc"]);
+    expect(body.getAll("destination_networks[]")).toEqual(["solana"]);
     expect(body.get("customer_ip_address")).toBe("8.8.8.8");
     expect(body.get("customer_information[email]")).toBe("john@doe.com");
     expect(body.get("customer_information[dob][year]")).toBe("1990");
@@ -139,15 +147,17 @@ describe("StripeRampClient", () => {
     });
   });
 
-  it("maps sol.solana to Stripe's sol destination", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(sessionResponse());
+  it("maps sol.solana to Stripe's sol destination and locks it", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(sessionResponse("sol"));
 
     await new StripeRampClient().createOnrampQuote(
       STRIPE_CONTEXT,
       onrampInput({ assetRail: "sol.solana", stripeCustomerInfo: undefined })
     );
 
-    expect(readStripeBody(requireFetchInit(fetchSpy)).get("destination_currency")).toBe("sol");
+    const body = readStripeBody(requireFetchInit(fetchSpy));
+    expect(body.get("destination_currency")).toBe("sol");
+    expect(body.getAll("destination_currencies[]")).toEqual(["sol"]);
   });
 
   it("requires a fiat currency", async () => {
@@ -174,7 +184,7 @@ describe("StripeRampClient", () => {
   it("throws when the secret key is not configured", async () => {
     await expect(
       new StripeRampClient().createOnrampQuote({ env: {}, mode: "sandbox" }, onrampInput())
-    ).rejects.toThrow(/Stripe is not configured/);
+    ).rejects.toThrow(/Stripe sandbox is not configured/);
   });
 
   it("returns an onramp estimate from Stripe quotes", async () => {

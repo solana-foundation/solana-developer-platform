@@ -294,7 +294,6 @@
       "select": "Select a signing wallet",
       "requiredAuthorityHint": "SDP will sign this action with the required authority wallet.",
       "selectedWalletHint": "SDP will sign this transaction with the selected wallet.",
-      "defaultSignerHint": "No signer wallets available — SDP will use the project's default signer.",
       "noneAvailable": "No signer wallets available."
     },
     "header": {
@@ -334,7 +333,6 @@
       "selectSignerWallet": "Select signer wallet",
       "mainSignerHint": "This wallet will be used as the token's main signer for deploy and later token actions.",
       "loadingSignerWallets": "Loading signer wallets…",
-      "noControlledWallets": "No controlled wallets are available yet. The token will use the current default signer.",
       "transferControls": "Transfer Controls",
       "transferControlsHint": "Choose how this token should treat approved or blocked destination addresses.",
       "creating": "Creating...",
@@ -1417,10 +1415,8 @@
       "operational": "Operational",
       "operationalDescription": "Optional operational settings.",
       "signingWallet": "Signing wallet",
-      "optionalSignerHint": "Optional — leave unselected to use the project's default signer.",
       "customFields": "Custom fields",
       "customFieldsDescription": "Add your own private fields, stored under custom.customer.",
-      "projectDefaultSigner": "Project default signer",
       "signingWalletLockReason": "Set at creation — individual operations can use a different signer.",
       "documentTypePlaceholder": "Document type",
       "documentNamePlaceholder": "Name",

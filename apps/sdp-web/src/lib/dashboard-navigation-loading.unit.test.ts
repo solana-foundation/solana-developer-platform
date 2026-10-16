@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isDashboardNavItemActive,
+  projectSwitchDestination,
   resolveDashboardLoadingRoute,
 } from "./dashboard-navigation-loading";
 
@@ -10,11 +11,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/wallets", "wallets-overview"],
     ["/dashboard/wallets/setup", "wallet-setup"],
     ["/dashboard/wallets/wallet-1", "wallet-detail"],
-    ["/dashboard/wallets/wallet-1/policy", "wallet-policy"],
-    ["/dashboard/wallets/wallet-1/policy/audit", "wallet-policy-audit-list"],
-    ["/dashboard/wallets/wallet-1/policy/audit/evaluation-1", "wallet-policy-audit-detail"],
     ["/dashboard/custody", "wallets-overview"],
-    ["/dashboard/custody/switch", "wallet-setup"],
     ["/dashboard/custody/wallet-1", "wallet-detail"],
     ["/dashboard/issuance", "issuance-overview"],
     ["/dashboard/issuance/create", "issuance-create"],
@@ -40,9 +37,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/api-keys", "api-keys-list"],
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
-    ["/dashboard/policies", "policies"],
-    ["/dashboard/approvals", "approvals-list"],
-    ["/dashboard/approvals/request-1", "approval-detail"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/members", "settings"],
     ["/dashboard/helius-rings", "helius-rings"],
@@ -55,7 +49,9 @@ describe("dashboard loading route", () => {
   });
 
   it.each([
-    "/dashboard/wallets/wallet-1/policy/unknown",
+    "/dashboard/policies",
+    "/dashboard/approvals",
+    "/dashboard/approvals/request-1",
     "/dashboard/api-keys/key-1",
     "/dashboard/unknown",
     "/dashboard/walletsmith",
@@ -86,7 +82,7 @@ describe("integrations route", () => {
     expect(
       isDashboardNavItemActive(
         "/dashboard/integrations?tab=custody",
-        "/dashboard/integrations?tab=rpc"
+        "/dashboard/integrations?tab=ramps"
       )
     ).toBe(false);
   });
@@ -133,5 +129,21 @@ describe("holdings route", () => {
   it("does not light up an unrelated nav item", () => {
     expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/wallets")).toBe(false);
     expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/payments")).toBe(false);
+  });
+});
+
+describe("project switch destination", () => {
+  it.each([
+    ["/dashboard/custody/cwlt_test_1", "/dashboard/wallets"],
+    ["/dashboard/wallets/setup", "/dashboard/wallets"],
+    ["/dashboard/payments/transactions/tx_test_1", "/dashboard/payments/transactions"],
+    ["/dashboard/payments", "/dashboard/payments"],
+    ["/dashboard/markets/dvp/trades/dvp_test_1", "/dashboard/markets/dvp"],
+    ["/dashboard/issuance/tok_test_1", "/dashboard/issuance"],
+    ["/dashboard/integrations/private-channels/events", "/dashboard/integrations"],
+    ["/dashboard/tokens", "/dashboard"],
+    ["/dashboard", "/dashboard"],
+  ])("lands %s on %s", (dashboardPath, destination) => {
+    expect(projectSwitchDestination(dashboardPath)).toBe(destination);
   });
 });

@@ -2,13 +2,11 @@
 
 import {
   BlocksIcon,
-  CircleCheckBigIcon,
   CircleDotDashedIcon,
   KeyRoundIcon,
   LibraryIcon,
   type LucideIcon,
   Settings2Icon,
-  ShieldCheckIcon,
   TrendingUpIcon,
   XIcon,
 } from "lucide-react";
@@ -22,6 +20,7 @@ import {
   DASHBOARD_SIDE_NAV_HREFS,
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type MoreItem = {
@@ -43,13 +42,11 @@ type MoreGroup = { title: string; items: MoreItem[] };
 function getMoreGroups(
   t: ReturnType<typeof useTranslations>,
   options: {
-    canReadApprovals: boolean;
     canManageOrgSettings: boolean;
     dvpEnabled: boolean;
     earnEnabled: boolean;
     heliusRingsEnabled: boolean;
     marketsEnabled: boolean;
-    policiesEnabled: boolean;
   }
 ): MoreGroup[] {
   return [
@@ -80,29 +77,11 @@ function getMoreGroups(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        ...(options.policiesEnabled
-          ? [
-              {
-                label: t("Shared.dashboardShell.policies"),
-                href: DASHBOARD_SIDE_NAV_HREFS.policies,
-                icon: ShieldCheckIcon,
-              },
-            ]
-          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
           icon: BlocksIcon,
         },
-        ...(options.policiesEnabled && options.canReadApprovals
-          ? [
-              {
-                label: t("Shared.dashboardShell.approvals"),
-                href: DASHBOARD_SIDE_NAV_HREFS.approvals,
-                icon: CircleCheckBigIcon,
-              },
-            ]
-          : []),
       ],
     },
     {
@@ -143,6 +122,7 @@ function TileLink({
   className: string;
   children: React.ReactNode;
 } & Record<string, unknown>) {
+  const projectHref = useProjectHref();
   if (external) {
     return (
       <a href={href} target="_blank" rel="noreferrer" onClick={onClick} className={className}>
@@ -151,7 +131,7 @@ function TileLink({
     );
   }
   return (
-    <Link href={href} onClick={onClick} className={className} {...rest}>
+    <Link href={projectHref(href)} onClick={onClick} className={className} {...rest}>
       {children}
     </Link>
   );
@@ -168,34 +148,28 @@ function TileLink({
  */
 export function DashboardMoreSheet({
   pathname,
-  canReadApprovals,
   canManageOrgSettings,
   dvpEnabled,
   earnEnabled,
   heliusRingsEnabled,
   marketsEnabled,
-  policiesEnabled,
   onClose,
 }: {
   pathname: string;
-  canReadApprovals: boolean;
   canManageOrgSettings: boolean;
   dvpEnabled: boolean;
   earnEnabled: boolean;
   heliusRingsEnabled: boolean;
   marketsEnabled: boolean;
-  policiesEnabled: boolean;
   onClose: () => void;
 }) {
   const t = useTranslations();
   const groups = getMoreGroups(t, {
-    canReadApprovals,
     canManageOrgSettings,
     dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
     marketsEnabled,
-    policiesEnabled,
   });
 
   useEffect(() => {

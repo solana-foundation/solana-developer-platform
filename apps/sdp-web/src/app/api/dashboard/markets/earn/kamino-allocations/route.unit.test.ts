@@ -17,7 +17,7 @@ vi.mock("@/lib/sdp-api", () => ({
   })),
 }));
 
-import { kaminoVaultAllocationsSchema } from "@/app/dashboard/markets/treasury-solutions/kamino-allocations-schema";
+import { kaminoVaultAllocationsSchema } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
 import { resetAllowedVaultsForTests } from "./kamino-allocations-store";
 import { GET } from "./route";
 

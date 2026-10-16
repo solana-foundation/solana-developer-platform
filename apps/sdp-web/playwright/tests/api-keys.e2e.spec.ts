@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import {
   bootstrapLocalWalletFixtures,
   provisionWithAdminSession,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 test.describe
@@ -20,16 +20,12 @@ test.describe
       projectId = fixtures.projectId;
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, projectId);
-    });
-
     test("user can create a selected-wallet API key and the secret is only shown once", async ({
       page,
     }) => {
       const keyName = `Playwright Selected Wallet Key ${Date.now()}`;
 
-      await page.goto("/dashboard/api-keys");
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
       await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
 
       await page.getByLabel("Name").fill(keyName);
@@ -46,9 +42,8 @@ test.describe
       await page.getByRole("button", { name: "Continue" }).click();
 
       await expect(page.getByText("Key identity")).toBeVisible();
-      await expect(page.getByText("Wallet-control baseline")).toBeVisible();
-      await expect(page.getByText("No additional API-key restrictions").first()).toBeVisible();
-      await expect(page.getByText("No policy bindings will be created").first()).toBeVisible();
+      await expect(page.getByText("Allowed operations").first()).toBeVisible();
+      await expect(page.getByText("All operations").first()).toBeVisible();
 
       await page.getByRole("button", { name: "Create key" }).click();
 
@@ -64,7 +59,7 @@ test.describe
       await expect(keyRow).toBeVisible({ timeout: 120_000 });
       await expect(keyRow).toContainText("Developer access");
       await expect(keyRow).toContainText("1 selected");
-      await expect(keyRow).toContainText("No API-key policy");
+      await expect(keyRow).toContainText("All operations");
 
       const tableBeforeMenu = await page.getByRole("table").boundingBox();
       const bodyOverflowBeforeMenu = await page.evaluate(
@@ -84,18 +79,18 @@ test.describe
       );
     });
 
-    test("user can replace and clear a restricted all-wallet binding without rotation loss", async ({
+    test("user can limit a key to Issuance, keep the limit through rotation, and clear it", async ({
       page,
     }) => {
-      const keyName = `Playwright Restricted Key ${Date.now()}`;
+      const keyName = `Playwright Limited Key ${Date.now()}`;
 
-      await page.goto("/dashboard/api-keys");
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
       await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("switch", { name: "Add API-key restrictions" }).click();
-      await page.getByRole("checkbox", { name: "Issuance" }).check();
+      await page.getByRole("radio", { name: /^Only selected operations/ }).check();
+      await page.getByRole("checkbox", { name: "Issuance", exact: true }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
 
@@ -103,7 +98,7 @@ test.describe
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
 
       let keyRow = page.getByRole("row", { name: new RegExp(keyName) });
-      await expect(keyRow).toContainText("1 policy binding", { timeout: 120_000 });
+      await expect(keyRow).toContainText("Issuance", { timeout: 120_000 });
 
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Rotate key (24h grace)" }).click();
@@ -111,10 +106,11 @@ test.describe
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
       const rotatedKeyRows = page.getByRole("row", { name: new RegExp(keyName) });
       await expect(rotatedKeyRows).toHaveCount(2);
-      await expect(rotatedKeyRows.nth(0)).toContainText("1 policy binding");
-      await expect(rotatedKeyRows.nth(1)).toContainText("1 policy binding");
+      await expect(rotatedKeyRows.nth(0)).toContainText("Issuance");
+      await expect(rotatedKeyRows.nth(1)).toContainText("Issuance");
       keyRow = rotatedKeyRows.first();
 
+      // Changing wallet access keeps the limit and needs no confirmation.
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Edit API key" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
@@ -126,22 +122,20 @@ test.describe
         .check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Save changes" }).click();
-      await expect(page.getByRole("dialog", { name: "Replace bindings" })).toBeVisible();
-      await page.getByRole("button", { name: "Replace bindings" }).click();
 
       keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("1 policy binding", { timeout: 120_000 });
+      await expect(keyRow).toContainText("Issuance", { timeout: 120_000 });
+      await expect(keyRow).toContainText("1 selected");
+
       await keyRow.getByRole("button", { name: "Actions" }).click();
       await page.getByRole("menuitem", { name: "Edit API key" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("switch", { name: "Add API-key restrictions" }).click();
+      await page.getByRole("radio", { name: /^All operations/ }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Save changes" }).click();
-      await expect(page.getByRole("dialog", { name: "Clear bindings" })).toBeVisible();
-      await page.getByRole("button", { name: "Clear bindings" }).click();
 
       keyRow = page.getByRole("row", { name: new RegExp(keyName) }).first();
-      await expect(keyRow).toContainText("No API-key policy", { timeout: 120_000 });
+      await expect(keyRow).toContainText("All operations", { timeout: 120_000 });
     });
   });

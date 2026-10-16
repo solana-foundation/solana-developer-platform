@@ -14,15 +14,15 @@
       "import": "./src/blocked-address.ts",
       "default": "./src/blocked-address.ts"
     },
-    "./byok": {
-      "types": "./src/byok.ts",
-      "import": "./src/byok.ts",
-      "default": "./src/byok.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",
       "default": "./src/errors.ts"
+    },
+    "./factory": {
+      "types": "./src/factory.ts",
+      "import": "./src/factory.ts",
+      "default": "./src/factory.ts"
     },
     "./relay": {
       "types": "./src/relay.ts",
@@ -38,6 +38,16 @@
       "types": "./src/verified-confirmation.ts",
       "import": "./src/verified-confirmation.ts",
       "default": "./src/verified-confirmation.ts"
+    },
+    "./read-context": {
+      "types": "./src/read-context.ts",
+      "import": "./src/read-context.ts",
+      "default": "./src/read-context.ts"
+    },
+    "./scope": {
+      "types": "./src/scope.ts",
+      "import": "./src/scope.ts",
+      "default": "./src/scope.ts"
     }
   },
   "scripts": {
@@ -47,7 +57,6 @@
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
-    "@solana/addresses": "catalog:",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {

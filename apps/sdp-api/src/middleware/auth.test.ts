@@ -1,11 +1,9 @@
+import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
-import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
-import { requireAdminApiKeyRole, unifiedAuthMiddleware } from "@/middleware/auth";
-import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   TEST_API_KEY,
@@ -15,16 +13,12 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
-import {
-  authenticateTestClerkUser,
-  clerkHeadersWithoutProject,
-  ensureTestClerkIssuer,
-} from "@/test/helpers/clerk";
+import { ensureTestClerkIssuer } from "@/test/helpers/clerk";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);
@@ -365,6 +359,29 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
+    // The cached check applies the live row's predicate, so a malformed expiry
+    // fails closed here too instead of reading as "not expired".
+    it("rejects a cached key whose expiry does not parse", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        expiresAt: "not-a-timestamp",
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
     it("rejects rotated API keys after their cached grace period ends", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
@@ -482,24 +499,12 @@ describe("Auth Middleware", () => {
           validKeyHash
         )
         .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_auth_resolved', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_auth_resolved', 'cust_auth_resolved', 'wallet_resolved',
-                   'wallet_resolved_public_key', 'active')`
-        )
-        .run();
+      await seedAuthCustodyWallet({
+        configId: "cust_auth_resolved",
+        provider: "local",
+        custodyWalletId: "cwlt_auth_resolved",
+        publicKey: "wallet_resolved_public_key",
+      });
       await getDb(env)
         .prepare(
           `INSERT INTO api_key_wallet_permissions
@@ -542,24 +547,12 @@ describe("Auth Middleware", () => {
         ],
       });
 
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_auth_ambiguous', ?, NULL, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_auth_ambiguous', 'cust_auth_ambiguous', 'wallet_resolved',
-                   'wallet_ambiguous_public_key', 'active')`
-        )
-        .run();
+      await seedAuthCustodyWallet({
+        configId: "cust_auth_ambiguous",
+        provider: "privy",
+        custodyWalletId: "cwlt_auth_ambiguous",
+        publicKey: "wallet_ambiguous_public_key",
+      });
       await clearKVStores(env);
 
       const unresolved = await app.request(
@@ -572,52 +565,95 @@ describe("Auth Middleware", () => {
     });
   });
 
-  describe("requireAdminApiKeyRole", () => {
-    function gatedApp() {
-      const gated = new Hono<{ Bindings: Env }>();
-      gated.use("*", kvStoreMiddleware());
-      gated.use("*", unifiedAuthMiddleware());
-      gated.onError((error, c) => c.json({ error: error.message }, 403));
-      gated.put("/gated", requireAdminApiKeyRole(), (c) => c.json({ ok: true }));
-      return gated;
-    }
-
-    it.each([
-      ["api_developer", 403],
-      ["api_admin", 200],
-    ] as const)("gates the %s API key role", async (role, status) => {
-      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, role });
-      const res = await gatedApp().request(
-        "/gated",
-        { method: "PUT", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+  // HOO-2048: authentication reads the key's wallet bindings in its uncached
+  // statement, so a change to them applies on the next request whatever the
+  // warm cache entry still says.
+  describe("fresh wallet bindings", () => {
+    const walletRequest = (walletId: string) =>
+      app.request(
+        `/v1/wallets/${walletId}?includeBalance=false`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
-      expect(res.status).toBe(status);
-    });
 
-    it.each([
-      ["member", 403],
-      ["admin", 200],
-    ] as const)("gates a Clerk organization %s", async (role, status) => {
+    beforeEach(async () => {
       await getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(TEST_USER.id, TEST_USER.email)
         .run();
-      const { token } = await authenticateTestClerkUser(env, getDb(env), {
-        userId: TEST_USER.id,
-        email: TEST_USER.email,
-        clerkUserId: "clerk_user_auth_gate",
+      await seedDefaultProjects(getDb(env), {
         organizationId: TEST_ORG.id,
-        clerkOrgId: "org_test_clerk_auth_gate",
-        orgSlug: TEST_ORG.slug,
-        role,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
       });
-      const res = await gatedApp().request(
-        "/gated",
-        { method: "PUT", headers: clerkHeadersWithoutProject(token) },
-        env
-      );
-      expect(res.status).toBe(status);
+      await seedTestCustodyRows(env, {
+        configs: [
+          {
+            id: "cust_fresh_bindings",
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            provider: "local",
+            configEncrypted: "test-config",
+            status: "active",
+          },
+        ],
+        wallets: ["a", "b"].map((suffix) => ({
+          id: `cwlt_fresh_${suffix}`,
+          owner: { kind: "config" as const, custodyConfigId: "cust_fresh_bindings" },
+          walletId: `wallet_fresh_${suffix}`,
+          publicKey: `wallet_fresh_${suffix}_public_key`,
+          label: null,
+          purpose: null,
+          status: "active" as const,
+        })),
+      });
+    });
+
+    it("refuses a key narrowed from all wallets to selected ones on its next request", async () => {
+      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, walletScope: "all" });
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+           VALUES ('akw_fresh_narrowed', ?, 'wallet_fresh_a', '["*"]')`
+        )
+        .bind(TEST_API_KEY.id)
+        .run();
+      // The cache entry is still warm and still says all wallets.
+      expect(
+        await createKVStoreSet(env).apiKeys.get<{ walletScope: string }>(
+          `key:${validKeyHash}`,
+          "json"
+        )
+      ).toMatchObject({ walletScope: "all" });
+
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
+      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
+    });
+
+    it("refuses a wallet whose binding was revoked, with the cache still warm", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        walletScope: "selected",
+        signingWalletId: "wallet_fresh_a",
+        walletBindings: [
+          { walletId: "wallet_fresh_a", custodyWalletId: "cwlt_fresh_a", permissions: ["*"] },
+          { walletId: "wallet_fresh_b", custodyWalletId: "cwlt_fresh_b", permissions: ["*"] },
+        ],
+      });
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+
+      await getDb(env)
+        .prepare(
+          "DELETE FROM api_key_wallet_permissions WHERE api_key_id = ? AND wallet_id = 'wallet_fresh_b'"
+        )
+        .bind(TEST_API_KEY.id)
+        .run();
+
+      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
+      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
     });
   });
 
@@ -682,3 +718,34 @@ describe("Auth Middleware", () => {
     });
   });
 });
+
+async function seedAuthCustodyWallet(params: {
+  configId: string;
+  provider: CustodyProvider;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: params.configId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: params.provider,
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        owner: { kind: "config", custodyConfigId: params.configId },
+        walletId: "wallet_resolved",
+        publicKey: params.publicKey,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
+}

@@ -1,5 +1,6 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino";
+import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import {
   createRpc,
   getSignatureStatuses,
@@ -352,6 +353,9 @@ async function reconcileMovement(
   chain: ChainObservation
 ): Promise<MovementOutcome> {
   if (status?.err) {
+    // A fork can report an error before the same signed transaction succeeds
+    // on the finalized chain. Keep its durable intent until finality decides.
+    if (status.confirmationStatus !== "finalized") return "unchanged";
     // The ledger keeps the readable sentence (it reaches the dashboard); the
     // chain's own variant goes to the log, where operators grep for it.
     const verdict = describeVaultSimulationError(status.err);
@@ -758,9 +762,12 @@ async function closePositionIfEmpty(
   try {
     const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
     if (!client) return;
-    const snapshots = await client.readVaultPositions(
-      { env, environment: movement.environment },
-      { owner, providerReferences: [vault] }
+    // A close decision never reuses a provider request sent before this one.
+    const snapshots = await withReadFloor(readStamp(), () =>
+      client.readVaultPositions(
+        { env, environment: movement.environment },
+        { owner, providerReferences: [vault] }
+      )
     );
     const snapshot = snapshots.find(
       (candidate) =>

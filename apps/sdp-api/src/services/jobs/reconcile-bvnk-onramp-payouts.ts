@@ -21,6 +21,7 @@ import type {
 import { bvnkPayoutObservationFromSource } from "@sdp/payments/ramps/providers/bvnk/settlement";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { toNumberAmount } from "@sdp/solana/amount";
+import type { SdpRampProviderStages } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { getDb } from "@/db";
 import type {
@@ -32,12 +33,14 @@ import { createPostgresBvnkOnrampTransfersRepository } from "@/db/repositories/b
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { internalError } from "@/lib/errors";
+import { isRampProviderAvailable } from "@/lib/feature-flags";
 import { buildBvnkOnrampPayout } from "@/routes/payments/ramps/providers/bvnk";
 import {
   applyTerminalBvnkPayoutObservation,
   recordBvnkPayoutCreation,
 } from "@/routes/payments/ramps/providers/bvnk-settlement";
 import { getLogger } from "@/runtime/logger";
+import { paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 export const BVNK_PAYOUT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
@@ -59,9 +62,17 @@ const BVNK_PAYOUT_ASSET_CURRENCIES = new Set<string>(BVNK_CRYPTO_CURRENCIES);
  * is awaited (P2-1).
  *
  * @param env - Process environment used for database and provider access.
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests may pass their own.
  * @returns The number of candidate rows touched by at least one database write or a successful provider-side create/record.
  */
-export async function reconcileBvnkOnrampPayouts(env: Env): Promise<number> {
+export async function reconcileBvnkOnrampPayouts(
+  env: Env,
+  rampProviderStages: SdpRampProviderStages
+): Promise<number> {
+  // BVNK outside the release channel is off completely, its in-flight payouts included.
+  if (!isRampProviderAvailable(env, "bvnk", rampProviderStages)) {
+    return 0;
+  }
   const repo = createPostgresBvnkOnrampTransfersRepository(getDb(env));
   const now = Date.now();
   const unclaimed = await repo.listUnclaimedPayoutCandidates({
@@ -387,7 +398,7 @@ async function translateUnclaimedFailure(
       transfer_id: candidate.id,
       counterparty_id: candidate.counterparty_id,
       funding_wallet_reference: candidate.fundingWalletReference,
-      error: errorMessage(error),
+      ...failureLogFields(error),
     },
     "[bvnk onramp] unclaimed payout reconcile failed"
   );
@@ -443,7 +454,11 @@ async function adjudicateRecoveryLookup(
     });
   } catch (error) {
     logger.error(
-      { transfer_id: candidate.id, payout_id: row.uuid, error: errorMessage(error) },
+      {
+        transfer_id: candidate.id,
+        payout_id: row.uuid,
+        ...failureLogFields(error),
+      },
       "[bvnk onramp] recovery adoption failed; the payout claim stays ambiguous"
     );
     return { kind: "ambiguous" };
@@ -516,7 +531,11 @@ async function reissueRecoveryPayout(
     }
     if (error.bvnkCode !== "MER-PAY-2010") {
       logger.warn(
-        { transfer_id: candidate.id, error: error.message, error_code: error.bvnkCode },
+        {
+          transfer_id: candidate.id,
+          ...failureLogFields(error),
+          error_code: error.bvnkCode,
+        },
         "[bvnk onramp] recovery reissue rejected; the payout claim stays ambiguous"
       );
       return true;
@@ -617,7 +636,7 @@ async function reconcileRecoverablePayout(
         transfer_id: candidate.id,
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
-        error: errorMessage(error),
+        ...failureLogFields(error),
       },
       "[bvnk onramp] recoverable payout reconcile failed"
     );
@@ -698,7 +717,7 @@ async function reconcilePollablePayout(
         transfer_id: candidate.id,
         counterparty_id: candidate.counterparty_id,
         funding_wallet_reference: candidate.fundingWalletReference,
-        error: errorMessage(error),
+        ...failureLogFields(error),
       },
       "[bvnk onramp] pollable payout reconcile failed"
     );
@@ -775,4 +794,12 @@ function resolveBvnkOnrampAsset(token: string): string | null {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** What every provider-failure log in this job carries about the failure. */
+function failureLogFields(cause: unknown): {
+  error: string;
+  error_diagnostics: Record<string, unknown> | undefined;
+} {
+  return { error: errorMessage(cause), error_diagnostics: paymentsErrorDiagnostics(cause) };
 }

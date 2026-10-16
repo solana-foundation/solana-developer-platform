@@ -10,20 +10,27 @@ import {
 } from "@/cron/earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import type { CronMonitor } from "@/cron/money-effects";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
 import { PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR } from "@/cron/provider-credential-secret-cleanup";
+import { RAMP_TRANSFERS_MONITOR } from "@/cron/ramp-transfers";
 import { RECURRING_PAYMENTS_COLLECTION_MONITOR } from "@/cron/recurring-payments";
 import { RINGS_INDEXING_MONITOR } from "@/cron/rings-indexing";
 import { runWithCronRunEvent } from "@/cron/run-event";
 import { SECRET_RETIREMENTS_MONITOR } from "@/cron/secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
+import {
+  assertSdpReleaseChannelConfigured,
+  isEarnEnabled,
+  isPrivateChannelsEnabled,
+} from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
+import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
@@ -33,13 +40,13 @@ import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
@@ -71,28 +78,30 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *
  * The reconciliation sequence:
  *
- * 1. **Pending transfers** + approved-wallet-operation replay + sponsorship
- *    budget reconciliation. The transfer legs settle before their tick reports
+ * 1. **Pending transfers** + sponsorship budget reconciliation. The transfer legs settle before their tick reports
  *    failure. Fatal.
- * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
+ * 2. **Ramp transfer reconciliation**: the same list the in-process scheduler
+ *    runs (`reconcileRampTransfers`). Behind no gate here, because replay skips
+ *    providers the release channel leaves out. Fatal.
+ * 3. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
  *    cadence, so no Redis slot is needed.
- * 3. **Private-channel deposit and withdrawal reconcilers** (gated on
+ * 4. **Private-channel deposit and withdrawal reconcilers** (gated on
  *    `PRIVATE_CHANNELS_ENABLED`) — siblings, not stages: concurrent under
  *    their own monitors so a failing leg never skips the other. The Managed
  *    Reconciliation Cadence is their effective cadence, the same degradation
  *    from the per-minute crontab that pending-transfers accepts. Fatal.
- * 4. **Rings indexing poll** — behind no gate here, because the job itself
+ * 5. **Rings indexing poll** — behind no gate here, because the job itself
  *    early-returns unless the rings flag is on. This job is the poll's only tick
  *    on managed deployments; without it an operation that reached `indexing`
  *    would neither complete nor ever time out. Fatal.
- * 5. **Earn vault-movement reconciliation** — deliberately outside the Earn
+ * 6. **Earn vault-movement reconciliation** — deliberately outside the Earn
  *    gate: signed vault intents are an outbox, not feature state, so disabling
  *    new deposits cannot strand old ones. Fatal.
- * 6. **DvP trade reconciliation** — ungated here; failures are logged and
+ * 7. **DvP trade reconciliation** — ungated here; failures are logged and
  *    non-fatal, so later reconcilers still run.
- * 7. **Secret retirements** — behind no flag, because the queue holds
+ * 8. **Secret retirements** — behind no flag, because the queue holds
  *    credentials that are ALREADY orphaned, so cleanup must outlive the
  *    feature that filled it — and managed Cloud Run is where GCP Secret
  *    Manager is the default backend, so it is precisely where retirements are
@@ -125,6 +134,7 @@ export async function runCronJob(): Promise<void> {
   const cleanupDeadlineMs =
     performance.now() + (timeoutSeconds - process.uptime()) * 1_000 - CLEANUP_SHUTDOWN_RESERVE_MS;
   assertSigningProviderAllowed(env);
+  assertSdpReleaseChannelConfigured(env);
 
   let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
   try {
@@ -188,7 +198,6 @@ export async function runCronJob(): Promise<void> {
                 // Keep revocation recovery ahead of payment reconciliation.
                 await reconcileRevokedApiKeyCache(env);
                 await trackPendingTransfers(env);
-                await recoverApprovedWalletOperations(env);
               })(),
               reconcileSponsorshipBudgets(env),
             ]);
@@ -198,6 +207,7 @@ export async function runCronJob(): Promise<void> {
             );
           })
         );
+        await collect(monitored(RAMP_TRANSFERS_MONITOR, () => reconcileRampTransfers(env)));
         await collect(
           monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () =>
             collectDueRecurringPayments(env, new Date())
@@ -245,8 +255,11 @@ export async function runCronJob(): Promise<void> {
   }
 }
 
-function createManagedTickRunner(): <T>(monitor: string, work: () => Promise<T>) => Promise<T> {
-  return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
+function createManagedTickRunner(): <T>(
+  monitor: CronMonitor,
+  work: () => Promise<T>
+) => Promise<T> {
+  return async <T>(monitor: CronMonitor, work: () => Promise<T>): Promise<T> => {
     const monitorSlug = getManagedMonitorSlug(monitor);
     try {
       // Reconciliation is cross-tenant by nature: every tick runs under a
@@ -376,6 +389,7 @@ export function describeCronFailure(error: unknown): Record<string, unknown> {
 
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
+  installOutboundDispatcher();
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {

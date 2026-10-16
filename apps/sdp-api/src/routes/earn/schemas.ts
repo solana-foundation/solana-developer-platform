@@ -868,4 +868,9 @@ export const earnMovementsQuerySchema = z.object({
 export const earnVaultPositionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   before: z.string().min(1).optional(),
+  afterMovementIds: z
+    .string()
+    .max(12_899)
+    .regex(/^[A-Za-z0-9_-]{1,128}(,[A-Za-z0-9_-]{1,128}){0,99}$/)
+    .optional(),
 });

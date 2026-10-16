@@ -8,6 +8,7 @@ import {
   type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
 } from "@/db/repositories/earn-movements.repository";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 
@@ -114,24 +115,27 @@ describe("vault exposure cap: the ledger write gate", () => {
       members: [],
       ids: { sandbox: PROJECT_OTHER, production: `${PROJECT_OTHER}_production` },
     });
-    for (const [config, org, wallet, pubkey] of [
-      [CONFIG, ORG, WALLET, WALLET_PUBKEY],
-      [CONFIG_OTHER, ORG_OTHER, WALLET_OTHER, WALLET_OTHER_PUBKEY],
+    for (const [config, org, project, wallet, pubkey] of [
+      [CONFIG, ORG, PROJECT, WALLET, WALLET_PUBKEY],
+      [CONFIG_OTHER, ORG_OTHER, PROJECT_OTHER, WALLET_OTHER, WALLET_OTHER_PUBKEY],
     ]) {
-      await db
-        .prepare(
-          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
-           VALUES (?, ?, NULL, 'local', 'encrypted')`
-        )
-        .bind(config, org)
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label)
-           VALUES (?, ?, ?, ?, 'Earn gate wallet')`
-        )
-        .bind(wallet, config, `${wallet}-ref`, pubkey)
-        .run();
+      await insertTestCustodyConfigRow(db, {
+        id: config,
+        organizationId: org,
+        projectId: project,
+        provider: "local",
+        configEncrypted: "encrypted",
+        status: "active",
+      });
+      await insertTestCustodyWalletRow(db, {
+        id: wallet,
+        owner: { kind: "config", custodyConfigId: config },
+        walletId: `${wallet}-ref`,
+        publicKey: pubkey,
+        label: "Earn gate wallet",
+        purpose: null,
+        status: "active",
+      });
     }
     await createPostgresEarnRepository(db).upsertStrategy({
       provider: "kamino",

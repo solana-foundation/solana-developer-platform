@@ -17,6 +17,20 @@ const contact = (index: number) => ({
 });
 
 describe("demo session cookies", () => {
+  it("counts the log in bytes, so a multi-byte log is not lost on the next read", () => {
+    // Each name is 40 characters but 120 bytes: past the byte budget, within the character one.
+    const ops = Array.from({ length: 400 }, (_, index) => ({
+      ...contact(index),
+      name: "\u65e5".repeat(40),
+    }));
+    const json = JSON.stringify(ops);
+    expect(json.length).toBeLessThan(MAX_DECODED_LENGTH);
+    expect(Buffer.byteLength(json)).toBeGreaterThan(MAX_DECODED_LENGTH);
+    const read = decodeDemoOps(encodeDemoOps(ops));
+    expect(read.length).toBeGreaterThan(0);
+    expect(read.at(-1)).toEqual(ops.at(-1));
+  });
+
   it("reads nothing from no cookies, or from ones that aren't a session", () => {
     expect(decodeDemoOps([])).toEqual([]);
     expect(decodeDemoOps(["not base64 deflate"])).toEqual([]);

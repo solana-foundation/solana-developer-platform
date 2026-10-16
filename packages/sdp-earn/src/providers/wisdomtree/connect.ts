@@ -113,6 +113,8 @@ export function readWisdomTreeConfig(ctx: EarnRuntimeContext): WisdomTreeConfig 
 interface CachedToken {
   token: string;
   expiresAtMs: number;
+  /** `/api/organizations/me` for this credential, fixed per credential, kept as long as the token. */
+  organizationGuid?: string;
 }
 
 /**
@@ -331,13 +333,19 @@ interface WisdomTreeOrganizationResponse {
  * uses elsewhere are accepted.
  */
 export async function getWisdomTreeOrganizationGuid(ctx: EarnRuntimeContext): Promise<string> {
+  const { cacheKey } = await getWisdomTreeAccessToken(ctx);
+  const cached = tokenCache.get(cacheKey)?.organizationGuid;
+  if (cached !== undefined) return cached;
   const response = await connectGetJson<WisdomTreeOrganizationResponse>(
     ctx,
     "/api/organizations/me"
   );
   for (const candidate of [response.guid, response.organisation_guid, response.organization_guid]) {
     if (typeof candidate === "string" && candidate.trim() !== "") {
-      return candidate.trim();
+      const guid = candidate.trim();
+      const entry = tokenCache.get(cacheKey);
+      if (entry) entry.organizationGuid = guid;
+      return guid;
     }
   }
   throw providerUnavailable("WisdomTree returned an organization response with no guid");

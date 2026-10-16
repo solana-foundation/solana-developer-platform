@@ -7,6 +7,7 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import app from "@/index";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -53,7 +54,7 @@ const CONFIG_A2 = "cfg_share_reconciliation_a2";
 const WALLET_A = "cwlt_share_reconciliation_a";
 const WALLET_A2 = "cwlt_share_reconciliation_a2";
 const PROVIDER_WALLET_A = "privy_share_reconciliation_a";
-const PROVIDER_WALLET_A2 = "privy_share_reconciliation_a2";
+const PROVIDER_WALLET_A2 = "para_share_reconciliation_a2";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const PUBLIC_KEY_A2 = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -135,29 +136,30 @@ async function seedScope(): Promise<void> {
   ]);
 }
 
-/**
- * A second wallet PROJECT_A can see, through an ORGANIZATION-level config
- * (`project_id IS NULL` — a second project-level 'privy' config would violate
- * the (org, project, provider) unique). Same visibility either way:
- * `listWallets` hands org-level configs to every project.
- */
 async function seedSecondProjectAWallet(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, NULL, 'privy', 'encrypted', 'active')`
-      )
-      .bind(CONFIG_A2, ORG),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(WALLET_A2, CONFIG_A2, PROVIDER_WALLET_A2, PUBLIC_KEY_A2),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: CONFIG_A2,
+        organizationId: ORG,
+        projectId: PROJECT_A,
+        provider: "para",
+        configEncrypted: "encrypted",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: WALLET_A2,
+        owner: { kind: "config", custodyConfigId: CONFIG_A2 },
+        walletId: PROVIDER_WALLET_A2,
+        publicKey: PUBLIC_KEY_A2,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
 }
 
 async function seedStrategy(overrides: Partial<UpsertEarnStrategyInput> = {}) {

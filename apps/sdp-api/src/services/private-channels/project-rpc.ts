@@ -1,19 +1,13 @@
 import type { SolanaRpcProbeResult } from "@sdp/private-channels";
-import { type ResolvedRpcTarget, resolveRpcTarget } from "@sdp/rpc/relay";
-import { createRpcFromTransport, type SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
 import { getDb } from "@/db";
-import type { KVStoreSet } from "@/runtime/kv";
-import { createKVStoreSet } from "@/runtime/kv-redis";
-import { createTenantRpcConnectionLookup } from "@/services/rpc-connection-lookup";
-import { createRpcTransportForTarget } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 
 export interface PrivateChannelProjectRpcClient {
   cluster: SolanaCluster;
   rpc: SolanaRpc;
-  target: ResolvedRpcTarget;
   probe: (deployment?: PrivateChannelDeploymentProbeInput) => Promise<SolanaRpcProbeResult>;
 }
 
@@ -28,17 +22,21 @@ export interface LoadProjectRpcClientInput {
   projectId: string;
   /** Already known on authenticated requests; jobs resolve it from the project row. */
   environment?: SdpEnvironment;
-  /** Reuse the request's stores when available; jobs construct the same Redis-backed set. */
-  kv?: KVStoreSet;
 }
 
 /**
- * Load a client for the same effective RPC target used by the SDP relay.
+ * Load a client on SDP's managed RPC pool for a project's Private Channels work.
  *
- * Resolution happens for every request/job pass so provider switches and BYOK
- * credential rotation take effect immediately. The returned endpoint and
- * headers are execution-only: Private Channels never persists or serializes
- * them on its instance records.
+ * The pool's endpoints are execution-only: Private Channels never persists or
+ * serializes them on its instance records.
+ *
+ * @param input - The project to load the client for.
+ * @param input.env - Process env carrying the managed RPC pool.
+ * @param input.organizationId - Organization that owns the project.
+ * @param input.projectId - Project whose environment picks the cluster.
+ * @param input.environment - The project's environment when the caller already knows it; otherwise read from the active project row.
+ * @returns The project's cluster, an RPC client for that cluster, and a deployment probe bound to both.
+ * @throws Error when the project is not active in the organization, or when the deployment has no RPC endpoint for the project's cluster.
  */
 export async function loadProjectRpcClient(
   input: LoadProjectRpcClientInput
@@ -61,22 +59,12 @@ export async function loadProjectRpcClient(
     throw new Error(`Active project ${input.projectId} was not found while resolving its RPC`);
   }
 
-  const target = await resolveRpcTarget({
-    env: input.env,
-    kv: input.kv ?? createKVStoreSet(input.env),
-    db,
-    organizationId: input.organizationId,
-    authProjectId: input.projectId,
-    requestedProjectId: null,
-    connections: createTenantRpcConnectionLookup(input.env, db),
-  });
-  const rpc = createRpcFromTransport(createRpcTransportForTarget(target));
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  const rpc = createClusterRpc(input.env, cluster);
 
   return {
     cluster,
     rpc,
-    target,
     probe: (deployment) => probeProjectRpcDeployment(rpc, cluster, deployment),
   };
 }

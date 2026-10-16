@@ -5,14 +5,15 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT } from "@/test/projects";
 import { SidebarUserMenu } from "./sidebar-user-menu";
 
-const router = vi.hoisted(() => ({ refresh: vi.fn() }));
 const design = vi.hoisted(() => ({ newDesign: true }));
 
 vi.mock("@/components/new-design", () => ({ useNewDesign: () => design.newDesign }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
 vi.mock("@clerk/nextjs", () => ({
   useUser: () => ({
@@ -34,13 +35,13 @@ vi.mock("@/contexts/network-debug-context", () => ({
 
 afterEach(() => {
   cleanup();
-  router.refresh.mockClear();
   design.newDesign = true;
   document.documentElement.lang = "";
 });
 
 describe("SidebarUserMenu", () => {
-  it("carries the language: the row names the current one and switches to another", async () => {
+  it("links Settings inside the URL's Project and switches the language", async () => {
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/payments`, {});
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -49,18 +50,18 @@ describe("SidebarUserMenu", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("menuitem", { name: "Settings" }).getAttribute("href")).toBe(
+      `/dashboard/${PRODUCTION_PROJECT.id}/settings`
+    );
     const row = screen.getByRole("menuitem", { name: /Language/ });
     expect(row.textContent).toContain("English");
 
     await user.click(row);
-    // jsdom does not pass Radix's pointer checks inside a submenu; the keyboard takes the
-    // same path to the choice.
     (await screen.findByRole("menuitemradio", { name: /Français/ })).focus();
     await user.keyboard("{Enter}");
 
-    // The preference cookie is Secure, which jsdom's http page does not keep.
     expect(document.documentElement.lang).toBe("fr");
-    expect(router.refresh).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the language to the header with NEW DESIGN off", async () => {

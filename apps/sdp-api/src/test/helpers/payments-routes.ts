@@ -1,4 +1,4 @@
-import * as feePaymentAdapters from "@sdp/payments/fee-payment";
+import * as feePaymentAdapters from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -57,8 +57,6 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
-export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
-
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaServices,
   "createOrgSignerForCustodyWallet"
@@ -92,6 +90,8 @@ export const TEST_PROJECT = {
   id: "prj_test_payments_policy",
   slug: "test-payments-policy-project",
 };
+
+export const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
 export const TEST_USER = {
   id: "usr_payments_policy_test",
@@ -154,43 +154,23 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 export const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
 
-export const TEST_MOONPAY_SECRET_KEY = "moonpay_secret_key";
+export const TEST_MOONPAY_SECRET_KEY = "sk_test_moonpay";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
 export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
-const TEST_LIGHTSPARK_GRID_CLIENT_ID = "lightspark_token_id";
-
-const TEST_LIGHTSPARK_GRID_CLIENT_SECRET = "lightspark_client_secret";
-
 export { TEST_BVNK_HAWK_AUTH_ID, TEST_BVNK_HAWK_SECRET_KEY, TEST_BVNK_WALLET_ID } from "./bvnk";
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
-
-export const TEST_MONEYGRAM_PUBLIC_KEY = "moneygram_sandbox_public_key";
-
-export const TEST_MONEYGRAM_SECRET_KEY = "moneygram_sandbox_secret_key";
 
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
 
-let originalMoonPayApiKey: string | undefined;
-
-let originalMoonPaySecretKey: string | undefined;
-
 let originalMoonPayOnrampUrl: string | undefined;
 
 let originalMoonPayOfframpUrl: string | undefined;
-
-let originalLightsparkGridSandboxClientId: string | undefined;
-
-let originalLightsparkGridSandboxClientSecret: string | undefined;
-
-let originalLightsparkGridClientId: string | undefined;
-
-let originalLightsparkGridClientSecret: string | undefined;
 
 let savedBvnkSandboxEnv: BvnkSandboxEnvSnapshot | undefined;
 
@@ -199,10 +179,6 @@ let originalBvnkHawkAuthId: string | undefined;
 let originalBvnkHawkSecretKey: string | undefined;
 
 let originalBvnkWalletId: string | undefined;
-
-let originalMoneygramSandboxPublicKey: string | undefined;
-
-let originalMoneygramSandboxSecretKey: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -230,14 +206,15 @@ async function seedAuthAndWallet(): Promise<void> {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
   await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
            (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, project_id = excluded.project_id, created_by = excluded.created_by, name = excluded.name, key_prefix = excluded.key_prefix, key_hash = excluded.key_hash, role = excluded.role, permissions = excluded.permissions, status = excluded.status`
       )
       .bind(
         TEST_API_KEY.id,
@@ -254,26 +231,18 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
-        TEST_WALLET_ID,
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -311,6 +280,7 @@ export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
   providerData?: Record<string, unknown>;
+  projectId?: string;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   const externalId = params?.externalId ?? null;
@@ -332,7 +302,7 @@ export async function seedCounterparty(params?: {
     .bind(
       id,
       TEST_ORG.id,
-      TEST_PROJECT.id,
+      params?.projectId ?? TEST_PROJECT.id,
       externalId,
       "individual",
       "MoonPay Test Counterparty",
@@ -592,45 +562,26 @@ export function installPaymentsRouteTestHooks(): void {
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    createOrgSignerMock.mockResolvedValue(
-      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
-    );
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
-    originalMoonPayApiKey = env.MOONPAY_API_KEY;
-    originalMoonPaySecretKey = env.MOONPAY_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
     originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
-    originalLightsparkGridSandboxClientId = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID;
-    originalLightsparkGridSandboxClientSecret = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET;
-    originalLightsparkGridClientId = env.LIGHTSPARK_GRID_CLIENT_ID;
-    originalLightsparkGridClientSecret = env.LIGHTSPARK_GRID_CLIENT_SECRET;
     savedBvnkSandboxEnv = stubBvnkSandboxEnv(env);
     originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
     originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
     originalBvnkWalletId = env.BVNK_WALLET_ID;
-    originalMoneygramSandboxPublicKey = env.MONEYGRAM_SANDBOX_PUBLIC_KEY;
-    originalMoneygramSandboxSecretKey = env.MONEYGRAM_SANDBOX_SECRET_KEY;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
-    env.MOONPAY_API_KEY = undefined;
-    env.MOONPAY_SECRET_KEY = undefined;
     env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
     env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = TEST_LIGHTSPARK_GRID_CLIENT_ID;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = TEST_LIGHTSPARK_GRID_CLIENT_SECRET;
-    env.LIGHTSPARK_GRID_CLIENT_ID = undefined;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = undefined;
     env.BVNK_HAWK_AUTH_ID = undefined;
     env.BVNK_HAWK_SECRET_KEY = undefined;
     env.BVNK_WALLET_ID = undefined;
-    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = TEST_MONEYGRAM_PUBLIC_KEY;
-    env.MONEYGRAM_SANDBOX_SECRET_KEY = TEST_MONEYGRAM_SECRET_KEY;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -639,22 +590,14 @@ export function installPaymentsRouteTestHooks(): void {
   afterEach(async () => {
     env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
-    env.MOONPAY_API_KEY = originalMoonPayApiKey;
-    env.MOONPAY_SECRET_KEY = originalMoonPaySecretKey;
     env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
     env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = originalLightsparkGridSandboxClientId;
-    env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkGridSandboxClientSecret;
-    env.LIGHTSPARK_GRID_CLIENT_ID = originalLightsparkGridClientId;
-    env.LIGHTSPARK_GRID_CLIENT_SECRET = originalLightsparkGridClientSecret;
     if (savedBvnkSandboxEnv !== undefined) {
       restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
     }
     env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
     env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
     env.BVNK_WALLET_ID = originalBvnkWalletId;
-    env.MONEYGRAM_SANDBOX_PUBLIC_KEY = originalMoneygramSandboxPublicKey;
-    env.MONEYGRAM_SANDBOX_SECRET_KEY = originalMoneygramSandboxSecretKey;
 
     await clearKVStores(env);
   });

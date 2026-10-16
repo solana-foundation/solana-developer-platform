@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
@@ -18,6 +18,8 @@ interface OrderedBoundary {
   file: string;
   section: string;
   before: string;
+  /** A marker that must sit between `before` and `after`. */
+  through?: string;
   after: string;
 }
 
@@ -48,7 +50,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
       section: 'transferBatches.post(\n  "/",',
-      before: "extract: extractTransferBatchPolicyCandidate",
+      before: 'requireAllowedOperation("payment_transfer_batch_execute")',
+      through: "requestGate(",
       after: "\n  createTransferBatch\n",
     },
     replay: [
@@ -73,7 +76,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
       section: "export async function collectRecurringPayment",
-      before: "await enforceRecurringPaymentPolicy({",
+      before: "await input.admitStart();",
       after: "solanaServices.createOrgSignerForCustodyWallet(",
     },
     replay: [
@@ -99,7 +102,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/authority",',
-      before: "extract: extractUpdateAuthorityPolicyCandidate",
+      before: 'requireAllowedOperation("issuance_update_authority_execute")',
+      through: "requestGate(",
       after: "executeUpdateAuthority",
     },
     replay: [
@@ -119,7 +123,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/freeze",',
-      before: "policyGate({ extract: extractFreezePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_freeze_execute")',
       after: "freezeAccount",
     },
     replay: [
@@ -140,7 +144,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unfreeze",',
-      before: "policyGate({ extract: extractUnfreezePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_unfreeze_execute")',
       after: "unfreezeAccount",
     },
     replay: [
@@ -160,7 +164,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/pause",',
-      before: "policyGate({ extract: extractPausePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_pause_execute")',
       after: "  pauseToken",
     },
     replay: [
@@ -180,7 +184,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/unpause",',
-      before: "policyGate({ extract: extractUnpausePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_unpause_execute")',
       after: "unpauseToken",
     },
     replay: [
@@ -200,7 +204,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/seize",',
-      before: "policyGate({ extract: extractSeizePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_seize_execute")',
       after: "executeSeize",
     },
     replay: [
@@ -220,7 +224,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/force-burn",',
-      before: "policyGate({ extract: extractForceBurnPolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_force_burn_execute")',
       after: "executeForceBurn",
     },
     replay: [
@@ -240,7 +244,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/burn",',
-      before: "policyGate({ extract: extractBurnPolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_burn_execute")',
       after: "executeBurn",
     },
     replay: [
@@ -255,12 +259,13 @@ const contracts: ValueMovingContract[] = [
     family: "payments",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/context.ts",
-      evidence: "createRequestSponsorshipFeePayment(c)",
+      evidence: "createRequestSponsorshipFeePayment(c, movement)",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
-      before: "extract: extractTransferPolicyCandidate",
+      before: 'requireAllowedOperation("payment_transfer_execute")',
+      through: "requestGate(",
       after: "\n  createTransfer\n",
     },
     replay: [
@@ -285,7 +290,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId",',
-      before: "policyGate({ extract: extractTokenUpdatePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_metadata_update_execute")',
       after: "  updateToken",
     },
     replay: [
@@ -305,7 +310,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/deploy",',
-      before: "policyGate({ extract: extractDeployPolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_deploy_execute")',
       after: "  deployToken",
     },
     replay: [
@@ -325,7 +330,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist",',
-      before: "policyGate({ extract: extractAllowlistAddPolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_allowlist_add_execute")',
       after: "addAllowlistEntry",
     },
     replay: [
@@ -345,7 +350,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
       section: '"/tokens/:tokenId/allowlist/:entryId",',
-      before: "policyGate({ extract: extractAllowlistRemovePolicyCandidate })",
+      before: 'requireAllowedOperation("issuance_allowlist_remove_execute")',
       after: "removeAllowlistEntry",
     },
     replay: [
@@ -365,7 +370,8 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
       section: '"/quote",',
-      before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
+      before: 'requireAllowedOperation("ramp_onramp_quote")',
+      through: "requestGate(",
       after: "\n  createOnrampQuote\n",
     },
     replay: [
@@ -382,7 +388,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP settle: wallet policy decides before the settlement authority signs. */
+    /** DvP settle: Allowed Operations run before the settlement authority signs. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
@@ -391,7 +397,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",
       section: '"/trades/:tradeId/settle",',
-      before: "policyGate({ extract: extractDvpSettlePolicyCandidate })",
+      before: 'requireAllowedOperation("dvp_settle")',
       after: "settleTrade",
     },
     replay: [
@@ -413,7 +419,7 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
-    /** DvP fund: wallet policy decides before a custody wallet's tokens leave. */
+    /** DvP fund: Allowed Operations run before a custody wallet's tokens leave. */
     family: "dvp",
     trustedContext: {
       file: "apps/sdp-api/src/routes/dvp/action-context.ts",
@@ -422,7 +428,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/dvp/index.ts",
       section: '"/trades/:tradeId/fund",',
-      before: "policyGate({ extract: extractDvpFundPolicyCandidate })",
+      before: 'requireAllowedOperation("dvp_fund")',
       after: "fundTrade",
     },
     replay: [
@@ -466,9 +472,9 @@ const contracts: ValueMovingContract[] = [
   {
     /**
      * Non-custodial Earn vault deposits. Registered late — the route shipped
-     * ungoverned, and the inventory below could not see it because
+     * ungated, and the inventory below could not see it because
      * `apps/sdp-api/src/services/earn` was not a scanned root, so this test
-     * passed while a value-moving path had no policy gate at all.
+     * passed while a value-moving path had no request gate at all.
      */
     family: "earn",
     trustedContext: {
@@ -478,7 +484,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
       section: '"/vault-deposits",',
-      before: "extract: extractEarnVaultDepositPolicyCandidate",
+      before: "requestGate(",
       after: "createEarnVaultDeposit",
     },
     replay: [
@@ -497,7 +503,7 @@ const contracts: ValueMovingContract[] = [
   {
     /**
      * The exit half (PRO-1702). Registered WITH the route rather than after
-     * it, so this money-moving surface is born governed — the deposit above is
+     * it, so this money-moving surface is born gated — the deposit above is
      * the cautionary tale.
      */
     family: "earn",
@@ -508,7 +514,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
       section: '"/vault-withdrawals",',
-      before: "extract: extractEarnVaultWithdrawalPolicyCandidate",
+      before: "requestGate(",
       after: "createEarnVaultWithdrawal",
     },
     replay: [
@@ -540,7 +546,7 @@ const signingSinkInventory: Record<string, string[]> = {
   // DvP create, fund, settle/cancel and payments share the owned sponsorship
   // submission sink, which signs and persists before broadcasting; fund and
   // settle only partially sign as authorities and are not sinks of their own.
-  "apps/sdp-api/src/routes/pay.ts": ["signAsFeePayer"],
+  "apps/sdp-api/src/services/payments/payment-request-sponsorship.ts": ["signAsFeePayer"],
   "apps/sdp-api/src/services/sponsorship-submission.ts": ["prepareOwnedSubmission"],
   "apps/sdp-api/src/services/payments/recurring-payments/shared.ts": ["signAndSend"],
   "apps/sdp-api/src/services/private-channels/deposit.ts": ["signTransactionMessageWithSigners"],
@@ -633,7 +639,7 @@ describe("value-moving authorization and replay conformance", () => {
     // unfreeze, pause, unpause, deploy, allowlist add and allowlist remove
     // are separately gated execute routes. `dvp` appears twice for fund and
     // settle, the two actions that commit value; reclaim and cancel are the
-    // recovery paths and are deliberately ungoverned (routes/dvp/policy.ts).
+    // recovery paths and are deliberately ungated.
     expect(contracts.map((contract) => contract.family).sort()).toEqual([
       "batch",
       "custody",
@@ -664,10 +670,20 @@ describe("value-moving authorization and replay conformance", () => {
 
     const source = sectionSource(contract.authorization);
     const authorizationIndex = source.indexOf(contract.authorization.before);
-    const signerIndex = source.indexOf(contract.authorization.after);
     expect(authorizationIndex, `${contract.family} authorization marker`).toBeGreaterThanOrEqual(0);
-    expect(signerIndex, `${contract.family} signing marker`).toBeGreaterThanOrEqual(0);
-    expect(authorizationIndex).toBeLessThan(signerIndex);
+    let cursor = authorizationIndex + contract.authorization.before.length;
+    if (contract.authorization.through !== undefined) {
+      const gateIndex = source.indexOf(contract.authorization.through, cursor);
+      expect(
+        gateIndex,
+        `${contract.family} gate marker after authorization`
+      ).toBeGreaterThanOrEqual(cursor);
+      cursor = gateIndex + contract.authorization.through.length;
+    }
+    const signerIndex = source.indexOf(contract.authorization.after, cursor);
+    expect(signerIndex, `${contract.family} signing marker after the gate`).toBeGreaterThanOrEqual(
+      cursor
+    );
   });
 
   it.each(contracts)("keeps explicit replay evidence for $family", (contract) => {
@@ -679,23 +695,47 @@ describe("value-moving authorization and replay conformance", () => {
     }
   });
 
-  it("enforces policy inside the gate before the handler runs", () => {
-    const gateSource = readSource("apps/sdp-api/src/middleware/policy-gate.ts");
-    const start = gateSource.indexOf("export function policyGate");
-    expect(start, "policy gate middleware must exist").toBeGreaterThanOrEqual(0);
+  it("runs extraction, replay and admission inside the request gate before the handler", () => {
+    const gateSource = readSource("apps/sdp-api/src/middleware/request-gate.ts");
+    const start = gateSource.indexOf("export function requestGate");
+    expect(start, "request gate middleware must exist").toBeGreaterThanOrEqual(0);
     const source = gateSource.slice(start);
     const orderedMarkers = [
-      "isDryRunRequest(c)",
+      "await config.extract(c)",
       "findIdempotentKeyReplay",
-      "candidate === null",
-      "await enforceWalletOperationPolicy(",
+      "await config.admit?.(c, extraction)",
       "return next()",
     ];
     let cursor = 0;
     for (const marker of orderedMarkers) {
       const index = source.indexOf(marker, cursor);
-      expect(index, `policy gate must retain ${marker} in order`).toBeGreaterThanOrEqual(cursor);
+      expect(index, `request gate must retain ${marker} in order`).toBeGreaterThanOrEqual(cursor);
       cursor = index + marker.length;
+    }
+  });
+
+  it("declares an allowed operation on every value-moving issuance route", () => {
+    const issuanceContracts = contracts.filter((contract) => contract.family === "issuance");
+    expect(issuanceContracts).toHaveLength(12);
+    for (const contract of issuanceContracts) {
+      expect(contract.authorization.before).toContain("requireAllowedOperation(");
+    }
+  });
+
+  it("gates only the issuance routes whose handler reads the gate context", () => {
+    // Authority and mint replay an Idempotency-Key and admit new work through the
+    // gate. No other issuance handler reads the gate context, so no other
+    // issuance route mounts it.
+    const gated = readSource("apps/sdp-api/src/routes/issuance/index.ts").match(/requestGate\(/g);
+    expect(gated).toHaveLength(2);
+  });
+
+  it("pins the allowed operation and the gate on payments, batch and ramp routes", () => {
+    for (const family of ["payments", "batch", "ramps"] as const) {
+      for (const contract of contracts.filter((candidate) => candidate.family === family)) {
+        expect(contract.authorization.before).toContain("requireAllowedOperation(");
+        expect(contract.authorization.through).toBe("requestGate(");
+      }
     }
   });
 
@@ -726,6 +766,53 @@ describe("value-moving authorization and replay conformance", () => {
         SIGNING_PROVIDER: "local",
       } as never)
     ).not.toThrow();
+  });
+
+  it("never loads or creates a stored local signing key in a managed deployment", async () => {
+    const { createAdapterFromEncryptedConfig } = await import(
+      "@/services/domain/signing/provider-adapter-factory"
+    );
+    const localRecord = {
+      id: "cfg_local",
+      organizationId: "org_1",
+      projectId: "prj_1",
+      provider: "local",
+      config: JSON.stringify({ provider: "local", encryptedPrivateKey: "ciphertext" }),
+      encryptionVersion: "v2",
+      status: "active",
+      createdAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    } as const;
+    const decrypt = vi.fn().mockRejectedValue(new Error("decrypt reached"));
+    // SAFETY: the guards read only SDP_RELEASE_CHANNEL and SDP_DEPLOYMENT_MODE, and
+    // decrypt is the one cipher method these paths can reach; the fakes implement exactly that.
+    const managedEnv = {
+      SDP_RELEASE_CHANNEL: "stable",
+      SDP_DEPLOYMENT_MODE: "managed",
+      DATABASE_URL: "postgres://unused",
+    } as never;
+    const selfHostedEnv = {
+      SDP_RELEASE_CHANNEL: "stable",
+      SDP_DEPLOYMENT_MODE: "self_hosted",
+    } as never;
+    const cipher = { decrypt } as never;
+
+    await expect(
+      createAdapterFromEncryptedConfig(managedEnv, "org_1", localRecord, cipher)
+    ).rejects.toThrow(/Local signing/);
+    expect(decrypt).not.toHaveBeenCalled();
+
+    await expect(
+      createAdapterFromEncryptedConfig(selfHostedEnv, "org_1", localRecord, cipher)
+    ).rejects.toThrow("decrypt reached");
+
+    const { SigningService } = await import("@/services/domain/signing.service");
+    const configStore = { findActiveByProvider: vi.fn() };
+    // SAFETY: initializeLocalSigning must refuse before its first store call;
+    // the fake only records whether that call happened.
+    const service = new SigningService(configStore as never, managedEnv);
+    await expect(service.initializeLocalSigning("org_1", "prj_1")).rejects.toThrow(/Local signing/);
+    expect(configStore.findActiveByProvider).not.toHaveBeenCalled();
   });
 
   it("keeps the local custody provider unavailable in a managed deployment", async () => {

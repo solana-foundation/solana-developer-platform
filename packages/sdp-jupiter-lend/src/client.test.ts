@@ -1,7 +1,14 @@
+import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
-import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import {
+  type AccountInfo,
+  Connection,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import BN from "bn.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 const sdk = vi.hoisted(() => ({
   getDepositContext: vi.fn(),
@@ -16,31 +23,57 @@ const sdk = vi.hoisted(() => ({
 vi.mock("@jup-ag/lend/earn", () => sdk);
 
 const { JupiterLendVaultDirectClient } = await import("./client");
+const { JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS } = await import("./rpc");
 
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const owner = new PublicKey("11111111111111111111111111111112");
 const rentPayer = new PublicKey("11111111111111111111111111111113");
 const shareMint = new PublicKey(JUPITER_LEND_USDT.shareMint);
+const assetMint = new PublicKey(JUPITER_LEND_USDT.assetMint);
 const shareAta = new PublicKey("11111111111111111111111111111114");
 const runtime = { environment: "production" as const, env: {} };
+const ownerShareAta = PublicKey.findProgramAddressSync(
+  [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), shareMint.toBuffer()],
+  ATA_PROGRAM
+)[0];
+
+function shareAccount(
+  amount: bigint,
+  layout: {
+    program?: PublicKey;
+    size?: number;
+    mint?: PublicKey;
+    holder?: PublicKey;
+    state?: number;
+  } = {}
+): AccountInfo<Buffer> {
+  const data = Buffer.alloc(layout.size ?? 165);
+  (layout.mint ?? shareMint).toBuffer().copy(data, 0);
+  (layout.holder ?? owner).toBuffer().copy(data, 32);
+  if (data.length >= 72) data.writeBigUInt64LE(amount, 64);
+  if (data.length > 108) data.writeUInt8(layout.state ?? 1, 108);
+  return { executable: false, owner: layout.program ?? TOKEN_PROGRAM, lamports: 2_039_280, data };
+}
+
+function liquidityResponse(withdrawable: string) {
+  return new Response(
+    JSON.stringify([
+      {
+        address: JUPITER_LEND_USDT.shareMint,
+        assetAddress: JUPITER_LEND_USDT.assetMint,
+        decimals: JUPITER_LEND_USDT.decimals,
+        liquiditySupplyData: { withdrawable },
+      },
+    ]),
+    { status: 200 }
+  );
+}
 
 function mockJupiterLiquidity(withdrawable = "100000000") {
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify([
-            {
-              address: JUPITER_LEND_USDT.shareMint,
-              assetAddress: JUPITER_LEND_USDT.assetMint,
-              decimals: JUPITER_LEND_USDT.decimals,
-              liquiditySupplyData: { withdrawable },
-            },
-          ]),
-          { status: 200 }
-        )
-    )
+    vi.fn(async () => liquidityResponse(withdrawable))
   );
 }
 
@@ -62,11 +95,8 @@ function client() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockJupiterLiquidity();
-  vi.spyOn(Connection.prototype, "getAccountInfo").mockResolvedValue({} as never);
-  vi.spyOn(Connection.prototype, "getTokenAccountBalance").mockResolvedValue({
-    context: { slot: 1 },
-    value: { amount: "4500000", decimals: 6, uiAmount: 4.5, uiAmountString: "4.5" },
-  });
+  vi.spyOn(Connection.prototype, "getAccountInfo").mockResolvedValue(shareAccount(4_500_000n));
+  vi.spyOn(Connection.prototype, "getTokenAccountBalance");
   const depositContext = {
     fTokenMint: shareMint,
     recipientTokenAccount: shareAta,
@@ -193,6 +223,17 @@ describe("JupiterLendVaultDirectClient", () => {
     ).resolves.toEqual([expect.objectContaining({ shares: "4.5", withdrawableShares: "2" })]);
   });
 
+  it("reads the share balance from the account's own bytes in one RPC call", async () => {
+    await client().readVaultPositions(runtime, {
+      owner: owner.toBase58(),
+      providerReferences: [JUPITER_LEND_USDT.assetMint],
+    });
+    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledTimes(1);
+    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledWith(ownerShareAta);
+    expect(Connection.prototype.getTokenAccountBalance).not.toHaveBeenCalled();
+    expect(sdk.getWithdrawContext).not.toHaveBeenCalled();
+  });
+
   it("returns zero only when the jlUSDT account is confirmed missing", async () => {
     vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(null);
     await expect(
@@ -203,12 +244,42 @@ describe("JupiterLendVaultDirectClient", () => {
     ).resolves.toEqual([
       expect.objectContaining({ shares: "0", withdrawableShares: "0", tokenValue: "0" }),
     ]);
-    expect(Connection.prototype.getTokenAccountBalance).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("preserves an existing jlUSDT account's RPC balance failure as unavailable", async () => {
-    vi.mocked(Connection.prototype.getTokenAccountBalance).mockRejectedValueOnce(
+  it("reads a frozen jlUSDT account's balance", async () => {
+    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+      shareAccount(18_446_744_073_709_551_615n, { state: 2 })
+    );
+    await expect(
+      client().readVaultPositions(runtime, {
+        owner: owner.toBase58(),
+        providerReferences: [JUPITER_LEND_USDT.assetMint],
+      })
+    ).resolves.toEqual([expect.objectContaining({ shares: "18446744073709.551615" })]);
+  });
+
+  it("reads an ATA whose token owner was reassigned, as getTokenAccountBalance does", async () => {
+    vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+      shareAccount(2_000_000_000n, { holder: rentPayer })
+    );
+    await expect(
+      client().readVaultPositions(runtime, {
+        owner: owner.toBase58(),
+        providerReferences: [JUPITER_LEND_USDT.assetMint],
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        owner: owner.toBase58(),
+        shares: "2000",
+        withdrawableShares: "95.000052",
+        tokenValue: "2105.262",
+      }),
+    ]);
+  });
+
+  it("preserves an existing jlUSDT account's RPC read failure as unavailable", async () => {
+    vi.mocked(Connection.prototype.getAccountInfo).mockRejectedValueOnce(
       new Error("RPC unavailable")
     );
     await expect(
@@ -217,6 +288,144 @@ describe("JupiterLendVaultDirectClient", () => {
         providerReferences: [JUPITER_LEND_USDT.assetMint],
       })
     ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
+  });
+
+  it.each([
+    ["program", { program: assetMint }],
+    ["program (lamports sent to the address)", { program: SystemProgram.programId, size: 0 }],
+    ["size", { size: 82 }],
+    ["mint", { mint: assetMint }],
+    ["uninitialized state", { state: 0 }],
+    ["unknown state", { state: 3 }],
+  ])(
+    "refuses a share account with the wrong %s instead of reading zero",
+    async (_field, layout) => {
+      vi.mocked(Connection.prototype.getAccountInfo).mockResolvedValueOnce(
+        shareAccount(4_500_000n, layout)
+      );
+      await expect(
+        client().readVaultPositions(runtime, {
+          owner: owner.toBase58(),
+          providerReferences: [JUPITER_LEND_USDT.assetMint],
+        })
+      ).rejects.toMatchObject({
+        code: "VAULT_UNREADABLE",
+        message: "Could not read the Jupiter Lend USDT position",
+      });
+    }
+  );
+
+  it("answers the SDK's pinned-mint reads locally and leaves the share-account read live", async () => {
+    await client().buildVaultDeposit(runtime, {
+      providerReference: JUPITER_LEND_USDT.assetMint,
+      owner: owner.toBase58(),
+      amount: "1",
+      minSharesOut: "0.9",
+    });
+    expect(Connection.prototype.getAccountInfo).not.toHaveBeenCalled();
+
+    const [{ connection: contextConnection }] = sdk.getDepositContext.mock.calls[0] as [
+      { connection: Connection },
+    ];
+    const [, , ataConnection] = sdk.getOrCreateATAInstruction.mock.calls[0] as [
+      PublicKey,
+      PublicKey,
+      Connection,
+    ];
+    expect(ataConnection).toBe(contextConnection);
+    await expect(ataConnection.getAccountInfo(assetMint)).resolves.toMatchObject({
+      owner: TOKEN_PROGRAM,
+    });
+    await expect(ataConnection.getAccountInfo(shareMint)).resolves.toMatchObject({
+      owner: TOKEN_PROGRAM,
+    });
+    expect(Connection.prototype.getAccountInfo).not.toHaveBeenCalled();
+    await expect(ataConnection.getAccountInfo(ownerShareAta, "confirmed")).resolves.toEqual(
+      shareAccount(4_500_000n)
+    );
+    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledTimes(1);
+    expect(Connection.prototype.getAccountInfo).toHaveBeenCalledWith(ownerShareAta, "confirmed");
+  });
+
+  it("shares one in-flight liquidity read between concurrent quotes, never a settled one", async () => {
+    const quote = () =>
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "1",
+      });
+    await Promise.all([quote(), quote()]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    await quote();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("never lets a floored quote join a liquidity read sent before its floor", async () => {
+    let releaseStale: (response: Response) => void = () => undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseStale = resolve;
+            })
+        )
+        .mockImplementation(async () => liquidityResponse("100000000"))
+    );
+    const quote = () =>
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "4.5",
+      });
+    const stale = quote();
+    onTestFinished(() => releaseStale(liquidityResponse("1000000")));
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+
+    await expect(withReadFloor(readStamp(), quote)).resolves.toMatchObject({
+      blockingIssues: [],
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+    releaseStale(liquidityResponse("1000000"));
+    await expect(stale).resolves.toMatchObject({
+      blockingIssues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
+    });
+  });
+
+  it("never lets a quote join a liquidity read sent a join window or more ago", async () => {
+    let releaseStalled: (response: Response) => void = () => undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseStalled = resolve;
+            })
+        )
+        .mockImplementation(async () => liquidityResponse("100000000"))
+    );
+    const quote = () =>
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "4.5",
+      });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    onTestFinished(() => clock.mockRestore());
+    const stalled = quote();
+    onTestFinished(() => releaseStalled(liquidityResponse("1000000")));
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+
+    clock.mockReturnValue(10_000 + JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS);
+    await expect(quote()).resolves.toMatchObject({ blockingIssues: [] });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+    releaseStalled(liquidityResponse("1000000"));
+    await expect(stalled).resolves.toMatchObject({
+      blockingIssues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
+    });
   });
 
   it("reports a withdrawal quote blocked by current protocol liquidity", async () => {

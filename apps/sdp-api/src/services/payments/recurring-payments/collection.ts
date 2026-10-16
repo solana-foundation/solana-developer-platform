@@ -1,4 +1,5 @@
 import {
+  firstRecurringPaymentDueAfter,
   hasRecurringPaymentAdvancedPastDueAt,
   nextRecurringPaymentCollectionDueAt,
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
@@ -17,7 +18,6 @@ import {
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
-  recurringPaymentPolicyPayloadSchema,
 } from "@sdp/types";
 import {
   AccountRole,
@@ -37,7 +37,7 @@ import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
 } from "@solana-program/token-2022";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import {
   type CollectibleRecurringPaymentRow,
   createPaymentRecurringPaymentsRepository,
@@ -64,6 +64,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
+import type { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   resolveMintDecimals,
@@ -79,7 +80,6 @@ import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.servi
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
@@ -549,6 +549,65 @@ function collectionRetryMetadata(error: Error): { error: string; retryAfterAt: s
   };
 }
 
+/**
+ * Locks a recurring payment's due collection cycle (`FOR UPDATE`) and confirms
+ * no attempt already holds it. Collectors create their attempt under this lock
+ * before they sign, so a cycle that is still open here cannot be signed by
+ * anyone else until the transaction ends.
+ */
+async function lockOpenCollectionCycle(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: RecurringPaymentCollectionCycleRow;
+    attemptedAt: string;
+  }
+): Promise<boolean> {
+  const subscriptionId = input.recurringPayment.subscription_id;
+  const dueAt = input.recurringPayment.next_collection_due_at;
+  const locked = await tx
+    .prepare(
+      `SELECT id
+         FROM payment_recurring_payments
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND status = 'active'
+          AND source_custody_wallet_id IS NOT DISTINCT FROM ?
+          AND source_wallet_id = ?
+          AND source_address = ?
+          AND subscription_id = ?
+          AND next_collection_due_at = ?
+          AND next_collection_due_at <= ?
+        FOR UPDATE`
+    )
+    .bind(
+      input.recurringPayment.id,
+      input.organizationId,
+      input.projectId,
+      input.recurringPayment.source_custody_wallet_id,
+      input.recurringPayment.source_wallet_id,
+      input.recurringPayment.source_address,
+      subscriptionId,
+      dueAt,
+      input.attemptedAt
+    )
+    .first<{ id: string }>();
+  if (!locked) return false;
+
+  const activeAttempt = await createPostgresPaymentSubscriptionsRepository(
+    tx
+  ).getCollectionAttemptByDue({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId,
+    dueAt,
+    statuses: COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
+  });
+  return activeAttempt === null;
+}
+
 async function createCollectionAttemptUnderRecurringLock(input: {
   env: Env;
   organizationId: string;
@@ -564,46 +623,9 @@ async function createCollectionAttemptUnderRecurringLock(input: {
   const dueAt = input.recurringPayment.next_collection_due_at;
 
   return getDb(input.env).transaction(async (tx) => {
-    const locked = await tx
-      .prepare(
-        `SELECT id
-           FROM payment_recurring_payments
-          WHERE id = ?
-            AND organization_id = ?
-            AND project_id = ?
-            AND status = 'active'
-            AND source_custody_wallet_id IS NOT DISTINCT FROM ?
-            AND source_wallet_id = ?
-            AND source_address = ?
-            AND subscription_id = ?
-            AND next_collection_due_at = ?
-            AND next_collection_due_at <= ?
-          FOR UPDATE`
-      )
-      .bind(
-        input.recurringPayment.id,
-        input.organizationId,
-        input.projectId,
-        input.recurringPayment.source_custody_wallet_id,
-        input.recurringPayment.source_wallet_id,
-        input.recurringPayment.source_address,
-        subscriptionId,
-        dueAt,
-        input.attemptedAt
-      )
-      .first<{ id: string }>();
-    if (!locked) return null;
+    if (!(await lockOpenCollectionCycle(tx, input))) return null;
 
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const activeAttempt = await subscriptionsRepo.getCollectionAttemptByDue({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      subscriptionId,
-      dueAt,
-      statuses: COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
-    });
-    if (activeAttempt) return null;
-
     if (input.enforceCooldown) {
       const retryBefore = new Date(
         new Date(input.attemptedAt).getTime() -
@@ -636,6 +658,88 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       createdAt: input.attemptedAt,
       updatedAt: input.attemptedAt,
     });
+  });
+}
+
+/**
+ * Skips a due collection period that money admission refused (HOO-1955): the
+ * organization is deleted or suspended, or its production project lost the
+ * entitlement. In one transaction, under the lock collectors take before they
+ * sign, it records a `skipped` attempt (shown in the collection history with
+ * the reason) and moves the due date to the first boundary after `now`. The
+ * job stops selecting the row, and nothing is caught up after re-entitlement.
+ *
+ * Returns false and changes nothing when the cycle moved on or an attempt
+ * already holds it; an in-flight collection finishes through recovery.
+ */
+export async function skipRefusedRecurringCollectionPeriod(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
+  refusal: MoneyMovementRefusedError;
+  now: Date;
+}): Promise<boolean> {
+  const { recurringPayment } = input;
+  const attemptedAt = input.now.toISOString();
+  const dueAt = recurringPayment.next_collection_due_at;
+  const nextDueAt = firstRecurringPaymentDueAfter(dueAt, recurringPayment.period_hours, input.now);
+
+  return getDb(input.env).transaction(async (tx) => {
+    if (!(await lockOpenCollectionCycle(tx, { ...input, attemptedAt }))) return false;
+
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const skipped = await subscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: recurringPayment.subscription_id,
+      transferId: null,
+      token: recurringPayment.token,
+      amount: recurringPayment.amount,
+      dueAt,
+      attemptedAt,
+      status: "skipped",
+      signature: null,
+      error: input.refusal.message,
+      metadata: initialCollectionMetadata({
+        recurringPaymentId: recurringPayment.id,
+        source: "automated",
+        initiatedByKeyId: null,
+      }),
+      createdAt: attemptedAt,
+      updatedAt: attemptedAt,
+    });
+    if (!skipped) {
+      throw internalError("Failed to record the skipped recurring payment period");
+    }
+
+    const advanced = await createPostgresPaymentRecurringPaymentsRepository(
+      tx
+    ).updateRecurringPaymentCollection({
+      recurringPaymentId: recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      currentCollectionDueAt: dueAt,
+      nextCollectionDueAt: nextDueAt,
+      updatedAt: attemptedAt,
+    });
+    if (!advanced) {
+      throw conflict("Recurring payment changed while skipping a refused period");
+    }
+    const subscription = await subscriptionsRepo.updateSubscription({
+      subscriptionId: recurringPayment.subscription_id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      nextCollectionDueAt: nextDueAt,
+      expectedNextCollectionDueAt: dueAt,
+      expectedStatus: "active",
+      updatedAt: attemptedAt,
+    });
+    if (!subscription) {
+      throw conflict("Subscription changed while skipping a refused period");
+    }
+    return true;
   });
 }
 
@@ -1331,6 +1435,13 @@ export async function collectRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   initiatedByKeyId: string | null;
   collectionSource: RecurringCollectionSource;
+  /**
+   * Money admission (HOO-1955), run once, after recovery and right before the
+   * attempt that leads to a new signature. A refusal throws
+   * `MoneyMovementRefusedError` with nothing written; finishing an in-flight
+   * collection never asks.
+   */
+  admitStart: () => Promise<void>;
 }): Promise<RecurringPaymentCollectionResult> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!hasRecoverableRecurringPaymentCollection(input.recurringPayment.status)) {
@@ -1381,6 +1492,7 @@ export async function collectRecurringPayment(input: {
   if (!recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw conflict("Recurring payment is missing on-chain subscription records");
   }
+  await input.admitStart();
   const nowIso = new Date().toISOString();
 
   let attempt: PaymentSubscriptionCollectionAttemptRow | null = null;
@@ -1461,31 +1573,6 @@ export async function collectRecurringPayment(input: {
       throw conflict("Recurring payment collection is already processing");
     }
 
-    await enforceRecurringPaymentPolicy({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.sourceWallet,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      destination: input.recurringPayment.destination_address,
-      apiKeyId: input.initiatedByKeyId,
-      actor:
-        input.initiatedByKeyId === null
-          ? null
-          : {
-              type: "api_key",
-              id: input.initiatedByKeyId,
-              apiKeyId: input.initiatedByKeyId,
-            },
-      rawPayload: recurringPaymentPolicyPayloadSchema.parse({
-        operationType: "recurring_payment_collection",
-        recurringPaymentId: input.recurringPayment.id,
-        subscriptionId: subscription.id,
-        collectionDueAt: dueAt,
-      }),
-    });
-
     const claimedAttempt = attempt;
     const linkedCollection = await getDb(input.env).transaction(async (tx) => {
       const transactionPaymentsRepo = createPostgresPaymentsRepository(
@@ -1558,7 +1645,8 @@ export async function collectRecurringPayment(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.collect"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1602,6 +1690,7 @@ export async function collectRecurringPayment(input: {
       tokenProgram,
     });
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      movement: "recurring.collect",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: input.sourceWallet.walletId },
@@ -1641,6 +1730,7 @@ export async function collectRecurringPayment(input: {
     }
 
     const signature = await sendSubscriptionInstructions({
+      movement: "recurring.collect",
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,

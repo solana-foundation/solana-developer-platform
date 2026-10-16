@@ -50,11 +50,11 @@ describe("setPaymentsDemoAction", () => {
     });
   });
 
-  it("falls back to the project cookie when the project list didn't load", async () => {
-    state.jar.set(PROJECT_COOKIE_NAME, "proj_cookie");
+  it("does not take the project from the last-used project cookie", async () => {
+    state.jar.set(PROJECT_COOKIE_NAME, "prj_cookie");
 
-    expect(await setPaymentsDemoAction(true, null)).toBe(true);
-    expect(state.jar.get("sdp-payments-demo")).toBe("proj_cookie");
+    expect(await setPaymentsDemoAction(true, null)).toBe(false);
+    expect(state.jar.has("sdp-payments-demo")).toBe(false);
   });
 
   it("refuses a missing project or one that isn't cookie-safe", async () => {

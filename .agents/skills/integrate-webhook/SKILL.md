@@ -22,24 +22,22 @@ Webhooks are **not** under `/v1`. They land at `POST /webhooks/payments/ramps/{s
 
 `verify(context: RampWebhookValidationContext): Promise<Payload>`. `context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed verification secret/key from `env`, verify the signature over the **raw** body, then `JSON.parse` and return the payload. Throw `UNAUTHORIZED` on a missing/invalid signature; throw `badRequest` on non-JSON. Use `apps/sdp-api/src/lib/webhook-signature.ts` and supply the upstream timestamp as `timestampSeconds`; the helper enforces replay tolerance as well as signature verification.
 
-The shared verifier currently supports HMAC-SHA256 and ECDSA P-256/SHA-256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
+The shared verifier currently supports HMAC-SHA256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
 
 This is one of the few places `unknown` is allowed — it's a genuine trust boundary, narrowed immediately by `parse`.
 
-Signature variety across the six registered webhook providers:
+Signature variety across the four registered webhook providers:
 
 | Provider | Header | Algorithm | Env keys |
 |---|---|---|---|
-| Lightspark | `x-grid-signature` | ECDSA P-256 / SHA-256 (public key) | `LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY` / `LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY` |
-| MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_WEBHOOK_KEY` / `MOONPAY_SANDBOX_WEBHOOK_KEY` |
+| MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_SANDBOX_WEBHOOK_KEY` (sandbox only) |
 | BVNK | `x-signature` | HMAC-SHA256 (base64) | `BVNK_WEBHOOK_SECRET` / `BVNK_SANDBOX_WEBHOOK_SECRET` |
 | Coinbase | `x-hook0-signature` | HMAC-SHA256 (hex, `t=…,v0=…`) | `COINBASE_CDP_RAMPS_WEBHOOK_SECRET` |
-| Mural | `x-mural-webhook-signature` + timestamp header | ECDSA P-256 / SHA-256 (public key, base64) | `MURAL_PAY_WEBHOOK_PUBLIC_KEY` / `MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY` |
-| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_WEBHOOK_SECRET` |
+| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_SANDBOX_WEBHOOK_SECRET` (sandbox only; events must carry `livemode: false`) |
 
 ## parse
 
-`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. Narrow the payload with `readString` / `readRecord` / `readNumber` from `@sdp/payments/json`. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
+`(payload: Payload) → Event`, typically `RampSettlementEvent` from `@sdp/payments/ramps/types`. `safeParse` the payload with a zod `z.discriminatedUnion` per event type (`bvnk.schema.ts` is the pattern); an event type the schema doesn't know is an `ignore` event, not a parse failure. Map upstream event types to `kind`, and set `reference` to the quote id persisted by SDP; that is how settlement finds the transfer. Anything legitimately signed but irrelevant maps to `{ provider, kind: "ignore", reason }`.
 
 `parse` runs synchronously **before** the 2xx ack, so it must be total over every payload the provider can legitimately sign: unknown event types and transactions the platform didn't create (sandbox tests, manual payments on the same account) must map to an `ignore` event or an absent reference — never a throw, which turns into a non-2xx and a provider retry loop. Reserve throws for payloads that violate the provider's own guaranteed envelope (e.g. a missing event type), where a loud deterministic failure is the point. Example: references not minted by SDP return `undefined` from the processor's reference reader and get logged-and-skipped in `process`.
 

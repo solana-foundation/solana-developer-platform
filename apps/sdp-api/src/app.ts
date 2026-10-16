@@ -1,3 +1,4 @@
+import type { EgressReadiness, SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -27,12 +28,12 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
-import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { requireModule } from "@/middleware/require-module";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -46,7 +47,6 @@ import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import internalHeliusRings from "@/routes/internal-helius-rings";
-import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -57,14 +57,13 @@ import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
 import playgroundInternal from "@/routes/playground-internal";
-import policies from "@/routes/policies";
 import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
 import transactions from "@/routes/transactions";
 import webhooks from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import type { Env } from "@/types/env";
@@ -77,6 +76,18 @@ export interface SdpPlugin {
 export interface AppDeps {
   observability: Observability;
   plugins?: SdpPlugin[];
+  /**
+   * Ramp provider stages to run the release channel against. Production passes
+   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * leave another out, which today's all-`experimental` stages cannot show.
+   */
+  rampProviderStages: SdpRampProviderStages;
+  /**
+   * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
+   * out of rotation until it can reach the internet. Absent where nothing gates
+   * on egress (the Workers entrypoint, tests).
+   */
+  egressReadiness?: () => EgressReadiness;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -268,7 +279,6 @@ function captureUnexpectedError(
     scope.setTag("http_path", path);
 
     const apiKey = c.get("apiKey");
-    const replayActor = c.get("approvedOperationActor");
     const clerk = c.get("clerk");
 
     if (apiKey) {
@@ -278,10 +288,6 @@ function captureUnexpectedError(
         scope.setTag("project_id", apiKey.projectId);
       }
       scope.setUser({ id: `api_key:${apiKey.id}` });
-    } else if (replayActor) {
-      scope.setTag("auth_type", "approved_operation");
-      scope.setTag("organization_id", replayActor.organizationId);
-      scope.setUser({ id: replayActor.userId });
     } else if (clerk) {
       scope.setTag("auth_type", "clerk");
       scope.setTag("organization_id", clerk.organizationId);
@@ -307,6 +313,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
+    c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 
@@ -320,7 +328,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
-  app.use("/v1/*", dryRunMiddleware());
 
   // Backstop body bound for the whole public API: request handlers buffer the
   // body whole before zod validation runs, so without a ceiling a single
@@ -395,8 +402,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Asset profiles live under the issuance namespace, as a sibling of
   // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
   // middleware).
+  v1.use("/issuance/*", requireModule("issuance"));
   v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
+  v1.use("/wallets/*", requireModule("custody"));
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
@@ -404,7 +413,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/earn", earn);
   v1.route("/dvp", dvp);
   v1.route("/places", places);
-  v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
   v1.route("/compliance", compliance);
@@ -423,8 +431,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
+  app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
-  app.route("/internal/dashboard/rpc", internalRpc);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
 
   // Admin routes (internal)
@@ -477,6 +485,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     ) {
       if (err instanceof SdpRpcError) {
         logVendorError("rpc", err.code, err.statusCode);
+      }
+      // The provider's own wording never reaches the body below; operators read
+      // it here. Its own event, so it stays out of the vendor-error alert, which
+      // leaves ramps to sdp_api_ramp_provider_error.
+      if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
+        logEvent(err.statusCode >= 500 ? "error" : "warn", {
+          event: "sdp_api_payments_provider_error",
+          code: err.code,
+          status: err.statusCode,
+          method: c.req.method,
+          path: c.req.path,
+          request_id: requestId,
+          ...describeError(err),
+          error_diagnostics: paymentsErrorDiagnostics(err),
+        });
       }
       const details = err.details ? redactCredentialSecrets(err.details) : undefined;
       c.header("X-SDP-Trace-ID", traceId);

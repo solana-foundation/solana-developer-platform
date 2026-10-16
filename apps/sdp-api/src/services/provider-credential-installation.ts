@@ -1,4 +1,8 @@
 import type {
+  CustodySetupAdmission,
+  CustodySetupRefusal,
+} from "@/services/provider-availability.service";
+import type {
   CustodyConnectionStatus,
   InstallationConnectionState,
   ProviderCredentialStatus,
@@ -19,15 +23,13 @@ type ExecuteDecision<Mode extends string = never> = [Mode] extends [never]
 export type InstallationDecision<Mode extends string = never> =
   | ExecuteDecision<Mode>
   | { kind: "replay" }
-  | { kind: "disabled" }
+  | { kind: "disabled"; refusal: CustodySetupRefusal }
   | { kind: "conflict"; reason?: InstallationConflictReason };
 
 export interface InstallationFacts {
   connectionStatus: CustodyConnectionStatus;
   credentialStatus: ProviderCredentialStatus;
-  credentialSource: "stored" | "runtime";
   isExpectedProjectCredential: boolean;
-  hasDefaultWallet: boolean;
   hasOwnedWallet: boolean;
   providerAccountFingerprint: string | null;
   activatedAt: string | null;
@@ -35,7 +37,7 @@ export interface InstallationFacts {
   lastCheckAt: string | null;
   lastCheckFailureCode: string | null;
   hasSiblingUnfinished: boolean;
-  fullCompletionEnabled: boolean;
+  completionAdmission: CustodySetupAdmission;
   nowMs: number;
 }
 
@@ -50,17 +52,15 @@ export interface InstallationDecisions {
 export function installationFactsFromConnection(
   connection: InstallationConnectionState,
   nowMs: number,
-  fullCompletionEnabled: boolean
+  completionAdmission: CustodySetupAdmission
 ): InstallationFacts {
   return {
     connectionStatus: connection.status,
     credentialStatus: connection.credential_status,
-    credentialSource: connection.credential_source,
     isExpectedProjectCredential:
       connection.credential_scope === "project" &&
       connection.credential_project_id === connection.project_id &&
       connection.provider_credential_scope_key === connection.project_id,
-    hasDefaultWallet: connection.default_custody_wallet_id !== null,
     hasOwnedWallet: connection.has_owned_wallet,
     providerAccountFingerprint: connection.provider_account_fingerprint,
     activatedAt: connection.activated_at,
@@ -68,7 +68,7 @@ export function installationFactsFromConnection(
     lastCheckAt: connection.last_check_at,
     lastCheckFailureCode: connection.last_check_failure_code,
     hasSiblingUnfinished: connection.has_sibling_unfinished,
-    fullCompletionEnabled,
+    completionAdmission,
     nowMs,
   };
 }
@@ -103,12 +103,7 @@ function decideComplete(
     return { kind: "replay" };
   }
   if (facts.connectionStatus === "failed" && facts.lastCheckStatus === "failed") {
-    if (!isRetryableRuntimeFailure(facts) || !facts.fullCompletionEnabled) {
-      return { kind: "replay" };
-    }
-    return facts.hasSiblingUnfinished
-      ? { kind: "conflict", reason: "unfinished_installation_exists" }
-      : { kind: "execute", mode: "full" };
+    return { kind: "replay" };
   }
   if (facts.connectionStatus !== "pending" && facts.connectionStatus !== "checking") {
     return { kind: "conflict" };
@@ -116,12 +111,12 @@ function decideComplete(
   if (leaseCurrent) {
     return { kind: "conflict", reason: "completion_in_progress" };
   }
-  if (facts.fullCompletionEnabled) {
+  if (facts.completionAdmission.admitted) {
     return { kind: "execute", mode: "full" };
   }
   return facts.providerAccountFingerprint
     ? { kind: "execute", mode: "reconcile_only" }
-    : { kind: "disabled" };
+    : { kind: "disabled", refusal: facts.completionAdmission };
 }
 
 function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): InstallationDecision {
@@ -131,12 +126,7 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
   if (leaseCurrent) {
     return { kind: "conflict", reason: "completion_in_progress" };
   }
-  if (
-    facts.providerAccountFingerprint ||
-    facts.hasOwnedWallet ||
-    facts.hasDefaultWallet ||
-    facts.activatedAt
-  ) {
+  if (facts.providerAccountFingerprint || facts.hasOwnedWallet || facts.activatedAt) {
     return { kind: "conflict", reason: "installation_completion_required" };
   }
   return facts.connectionStatus === "pending" || facts.connectionStatus === "checking"
@@ -145,11 +135,8 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
 }
 
 function decideReplace(facts: InstallationFacts): InstallationDecision {
-  if (facts.credentialSource !== "stored") {
-    return { kind: "conflict" };
-  }
-  if (!facts.fullCompletionEnabled) {
-    return { kind: "disabled" };
+  if (!facts.completionAdmission.admitted) {
+    return { kind: "disabled", refusal: facts.completionAdmission };
   }
   if (facts.hasSiblingUnfinished) {
     return { kind: "conflict", reason: "unfinished_installation_exists" };
@@ -158,23 +145,9 @@ function decideReplace(facts: InstallationFacts): InstallationDecision {
     facts.credentialStatus === "failed_validation" &&
     !facts.providerAccountFingerprint &&
     !facts.hasOwnedWallet &&
-    !facts.hasDefaultWallet &&
     !facts.activatedAt
     ? { kind: "execute" }
     : { kind: "conflict" };
-}
-
-function isRetryableRuntimeFailure(facts: InstallationFacts): boolean {
-  return (
-    facts.credentialSource === "runtime" &&
-    facts.credentialStatus === "failed_validation" &&
-    (facts.lastCheckFailureCode === "invalid_credentials" ||
-      facts.lastCheckFailureCode === "provider_account_already_connected") &&
-    facts.providerAccountFingerprint === null &&
-    !facts.hasOwnedWallet &&
-    !facts.hasDefaultWallet &&
-    facts.activatedAt === null
-  );
 }
 
 function isCompletionLeaseCurrent(facts: InstallationFacts): boolean {
@@ -200,7 +173,6 @@ function hasConsistentLifecycle(facts: InstallationFacts): boolean {
         facts.credentialStatus === "pending" &&
         ((facts.lastCheckStatus === null && facts.lastCheckAt === null) ||
           (facts.lastCheckStatus === "retry_unknown" && isValidTimestamp(facts.lastCheckAt))) &&
-        !facts.hasDefaultWallet &&
         !facts.hasOwnedWallet &&
         facts.activatedAt === null
       );
@@ -209,7 +181,6 @@ function hasConsistentLifecycle(facts: InstallationFacts): boolean {
         facts.credentialStatus === "pending" &&
         facts.lastCheckStatus === "running" &&
         isValidTimestamp(facts.lastCheckAt) &&
-        !facts.hasDefaultWallet &&
         !facts.hasOwnedWallet &&
         facts.activatedAt === null
       );
@@ -218,7 +189,6 @@ function hasConsistentLifecycle(facts: InstallationFacts): boolean {
         facts.credentialStatus === "active" &&
         facts.lastCheckStatus === "success" &&
         isValidTimestamp(facts.lastCheckAt) &&
-        facts.hasDefaultWallet &&
         facts.hasOwnedWallet &&
         facts.providerAccountFingerprint !== null &&
         facts.activatedAt !== null
@@ -228,14 +198,12 @@ function hasConsistentLifecycle(facts: InstallationFacts): boolean {
         facts.credentialStatus === "failed_validation" &&
         facts.lastCheckStatus === "failed" &&
         isValidTimestamp(facts.lastCheckAt) &&
-        !facts.hasDefaultWallet &&
         !facts.hasOwnedWallet &&
         facts.activatedAt === null
       );
     case "deactivated":
       return (
         facts.credentialStatus === "deactivated" &&
-        !facts.hasDefaultWallet &&
         !facts.hasOwnedWallet &&
         facts.providerAccountFingerprint === null &&
         facts.activatedAt === null &&

@@ -15,12 +15,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {
   clearStoredApiKeySecret,
   isValidSdpApiKey,
   normalizeApiKeyInput,
   storeApiKeySecret,
 } from "@/lib/playground-api-keys";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
@@ -42,7 +44,7 @@ async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: 
   // The empty body of an older API that answers 204 lands here too, as a json()
   // rejection rather than a response we can read.
   try {
-    const response = await fetch("/api/playground/api-key", {
+    const response = await dashboardRequest("/api/playground/api-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ apiKey }),
@@ -339,6 +341,7 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
  */
 export function PlaygroundApiKeySelector() {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   const refresh = useThemeScope() === "refresh";
   const { dashboardAccess, playgroundApiKeys } = useDashboardWorkspace();
   const pasted = usePastedApiKey();
@@ -357,7 +360,9 @@ export function PlaygroundApiKeySelector() {
 
     return (
       <Button asChild className="h-11 rounded-[14px] px-4 whitespace-nowrap">
-        <Link href="/dashboard/api-keys">{t("Shared.SharedComponents.createApiKey")}</Link>
+        <Link href={projectHref("/dashboard/api-keys")}>
+          {t("Shared.SharedComponents.createApiKey")}
+        </Link>
       </Button>
     );
   }

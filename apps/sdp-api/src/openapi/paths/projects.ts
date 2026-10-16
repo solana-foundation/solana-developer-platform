@@ -18,10 +18,18 @@ import {
   listProjectMembersResponse,
   listProjectsResponse,
   projectMemberResponse,
+  projectProviderAvailabilityResponse,
   projectResponse,
 } from "./responses";
 
-export function registerProjectPaths(registry: OpenAPIRegistry) {
+/**
+ * Registers the projects family's paths.
+ *
+ * @param registry - The OpenAPI registry being built.
+ * @param publishEarn - Whether the document carries the Earn family; when false,
+ *   the provider availability path documents no Earn entries.
+ */
+export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registry.registerPath({
     method: "get",
     path: "/v1/projects",
@@ -89,6 +97,28 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
         content: jsonContent(projectResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/projects/{projectId}/provider-availability",
+    tags: ["Projects"],
+    summary: "Get project provider availability",
+    operationId: "getProjectProviderAvailability",
+    description: `Lists every provider the deployment knows across ${publishEarn ? "custody, compliance, ramps and Earn" : "custody, compliance and ramps"}, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404.`,
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        projectId: projectIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Project provider availability",
+        content: jsonContent(projectProviderAvailabilityResponse(publishEarn)),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 

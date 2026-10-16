@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
@@ -52,7 +53,7 @@ function makeObservability(): {
 }
 
 function buildApp(observability: Observability) {
-  const app = createApp({ observability });
+  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability });
   // Mount a route that throws after createApp returns, so we exercise the
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
@@ -71,10 +72,12 @@ function buildApp(observability: Observability) {
     });
   });
   app.all(SECRET_PAYMENTS_ERROR_PATH, () => {
-    throw new SdpPaymentsError("PROVIDER_UNAVAILABLE", "Invalid apiKey=ramp-secret", {
-      apiKey: "ramp-secret",
-      provider: "bvnk",
-    });
+    throw new SdpPaymentsError(
+      "PROVIDER_UNAVAILABLE",
+      "Invalid apiKey=ramp-secret",
+      { apiKey: "ramp-secret", provider: "bvnk" },
+      { providerMessage: "quote service down for jane.doe@example.com" }
+    );
   });
   app.all(SECRET_SIGNING_ERROR_PATH, () => {
     throw new SigningError(
@@ -92,7 +95,7 @@ function buildApp(observability: Observability) {
   // identity echoed back in the message, and the request payload hung off the
   // error as `context`.
   app.all(PII_UNEXPECTED_ERROR_PATH, () => {
-    throw Object.assign(new Error("Mural rejected jane.doe@example.com (phone=+15551234567)"), {
+    throw Object.assign(new Error("Provider rejected jane.doe@example.com (phone=+15551234567)"), {
       context: {
         counterpartyId: "cp_1",
         identity: { firstName: "Jane", lastName: "Doe", dateOfBirth: "1988-04-02" },
@@ -168,7 +171,11 @@ describe("createApp plugin registration", () => {
         v1.get("/test-plugin", (c) => c.json({ ok: true }));
       },
     };
-    const app = createApp({ observability: obs, plugins: [plugin] });
+    const app = createApp({
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      observability: obs,
+      plugins: [plugin],
+    });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -185,7 +192,11 @@ describe("createApp plugin registration", () => {
         v1.post("/body-limit-test", (c) => c.json({ ok: true }));
       },
     };
-    const app = createApp({ observability: obs, plugins: [plugin] });
+    const app = createApp({
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      observability: obs,
+      plugins: [plugin],
+    });
 
     const res = await app.request(
       "/v1/body-limit-test",
@@ -204,7 +215,7 @@ describe("createApp plugin registration", () => {
 
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
     const { obs } = makeObservability();
-    const app = createApp({ observability: obs });
+    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability: obs });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -215,9 +226,13 @@ describe("createApp plugin registration", () => {
     const { obs } = makeObservability();
     const make = (name: string): SdpPlugin => ({ name, register: () => {} });
 
-    expect(() => createApp({ observability: obs, plugins: [make("dup"), make("dup")] })).toThrow(
-      /dup/
-    );
+    expect(() =>
+      createApp({
+        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        observability: obs,
+        plugins: [make("dup"), make("dup")],
+      })
+    ).toThrow(/dup/);
   });
 });
 
@@ -354,7 +369,8 @@ describe("createApp onError capture", () => {
     });
   });
 
-  it("redacts payments error messages and details", async () => {
+  it("redacts payments error messages and details, and logs diagnostics it never returns", async () => {
+    const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
@@ -365,12 +381,26 @@ describe("createApp onError capture", () => {
       error: { code: string; message: string; details: Record<string, unknown> };
     };
     expect(JSON.stringify(body)).not.toContain("ramp-secret");
+    expect(JSON.stringify(body)).not.toContain("quote service down");
     expect(body.error.code).toBe("PROVIDER_UNAVAILABLE");
     expect(body.error.message).toBe("Invalid apiKey=[REDACTED]");
     expect(body.error.details).toEqual({
       apiKey: "[REDACTED]",
       provider: "bvnk",
     });
+    const logged = loggerError.mock.calls.find(
+      ([payload]) =>
+        typeof payload === "object" &&
+        payload !== null &&
+        "event" in payload &&
+        payload.event === "sdp_api_payments_provider_error"
+    );
+    expect(logged?.[0]).toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      status: 503,
+      error_diagnostics: { providerMessage: "quote service down for [REDACTED_EMAIL]" },
+    });
+    loggerError.mockRestore();
   });
 
   it("uses safe signing provider messages", async () => {

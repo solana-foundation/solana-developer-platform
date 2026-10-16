@@ -7,8 +7,8 @@ import {
   formatDisplayAmount,
   formatTimestamp,
   shortenAddress,
-} from "../../dashboard/payments/payments-overview.utils";
-import { resolvePlaygroundApiBaseUrl } from "../../dashboard/playground-api-data";
+} from "../../dashboard/[projectId]/payments/payments-overview.utils";
+import { resolvePlaygroundApiBaseUrl } from "../../dashboard/[projectId]/playground-api-data";
 import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";

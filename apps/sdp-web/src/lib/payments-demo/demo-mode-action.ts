@@ -2,7 +2,6 @@
 
 import { cookies } from "next/headers";
 import { paymentsDemoMode } from "@/flags";
-import { PROJECT_COOKIE_NAME } from "../project-cookie";
 import { getSdpAuth } from "../sdp-api";
 import { isDemoSessionCookie, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
 
@@ -12,8 +11,7 @@ const COOKIE_SAFE_VALUE = /^[\w-]{1,80}$/;
 
 /**
  * The demo mode switch. On, it names the project whose Payments screens run the demo: the one
- * the dashboard has selected, or the project cookie's when the project list didn't load. Off,
- * it clears that. Either way it forgets what was done in the demo so far. Returns whether the
+ * in the tab's URL. Off, it clears that. Either way it forgets what was done in the demo so far. Returns whether the
  * switch took; the caller then redraws the page, dropping what it had cached.
  *
  * A server action can be called directly, so it does nothing for a caller who isn't signed in
@@ -38,11 +36,10 @@ export async function setPaymentsDemoAction(
     store.delete(PAYMENTS_DEMO_COOKIE_NAME);
     return true;
   }
-  const project = projectId ?? store.get(PROJECT_COOKIE_NAME)?.value ?? null;
-  if (!project || !COOKIE_SAFE_VALUE.test(project)) {
+  if (!projectId || !COOKIE_SAFE_VALUE.test(projectId)) {
     return false;
   }
-  store.set(PAYMENTS_DEMO_COOKIE_NAME, project, {
+  store.set(PAYMENTS_DEMO_COOKIE_NAME, projectId, {
     path: "/",
     maxAge: DEMO_COOKIE_MAX_AGE_SECONDS,
     sameSite: "lax",

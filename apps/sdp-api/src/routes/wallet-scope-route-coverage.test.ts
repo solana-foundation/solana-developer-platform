@@ -15,7 +15,7 @@ function extractRoutes(router: unknown): string[] {
 describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped custody route", () => {
     const allRoutes = extractRoutes(custodyRoutes);
-    const nonWalletScopedRoutes = new Set(["GET /config", "GET /configs", "GET /switch-options"]);
+    const nonWalletScopedRoutes = new Set(["GET /configs"]);
 
     expect(allRoutes.filter((route) => !nonWalletScopedRoutes.has(route))).toEqual([
       // Wallet lifecycle mutations enforce bindings (or reject wallet-scoped
@@ -24,24 +24,18 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /",
       "GET /:walletId",
       "GET /aggregate",
-      "GET /approval-requests",
-      "GET /approval-requests/:approvalRequestId",
       "GET /public-key",
       "PATCH /:walletId",
       "POST /",
-      "POST /approval-requests/:approvalRequestId/approve",
-      "POST /approval-requests/:approvalRequestId/cancel",
-      "POST /approval-requests/:approvalRequestId/reject",
-      "POST /default-wallet",
       "POST /initialize",
       "POST /signer-check",
-      "POST /switch",
     ]);
   });
 
   it("tracks every wallet-scoped payments route", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
     const nonWalletScopedRoutes = new Set([
+      "ALL /ramps/*",
       "ALL /recurring-payments",
       "ALL /recurring-payments/*",
       "ALL /subscription-plans",
@@ -59,7 +53,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfer-batches",
       "GET /transfer-batches/:batchId",
       "POST /ramps/coinbase/events",
-      "POST /ramps/moneygram/events",
       "POST /ramps/offramp/estimate",
       "POST /ramps/onramp/estimate",
       "POST /ramps/sandbox/simulate",
@@ -76,10 +69,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfers",
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",
-      "GET /wallets/:walletId/policies",
-      "GET /wallets/:walletId/policies/evaluations",
-      "GET /wallets/:walletId/policies/evaluations/:policyEvaluationId",
-      "GET /wallets/:walletId/policies/revisions",
       "PATCH /recurring-payments/:id",
       "PATCH /subscription-plans/:planId",
       "POST /ramps/offramp/quote",
@@ -96,7 +85,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /transfer-batches",
       "POST /transfer-batches/estimate",
       "POST /transfers",
-      "PUT /wallets/:walletId/policies",
     ]);
   });
 

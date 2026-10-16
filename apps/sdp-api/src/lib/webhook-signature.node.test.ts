@@ -1,4 +1,4 @@
-import { createHmac, createSign, generateKeyPairSync } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { verifyWebhookSignature, WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS } from "./webhook-signature";
 
@@ -102,53 +102,6 @@ describe("verifyWebhookSignature", () => {
           timestampSeconds: ts,
         })
       ).rejects.toThrow(/Invalid moonpay webhook signature/);
-    });
-  });
-
-  describe("ecdsa-sha256 (Lightspark shape: public key, base64 DER)", () => {
-    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-    const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
-    const sign = (payload: string) =>
-      createSign("SHA256").update(payload).sign(privateKey, "base64");
-
-    it("accepts a fresh, valid signature", async () => {
-      await expect(
-        verifyWebhookSignature({
-          provider: "lightspark",
-          signature: sign(BODY),
-          signedPayload: BODY,
-          algorithm: { type: "ecdsa-sha256", publicKeyPem, encoding: "base64" },
-          timestampSeconds: nowSeconds(),
-        })
-      ).resolves.toBeUndefined();
-    });
-
-    it("rejects a tampered body", async () => {
-      await expect(
-        verifyWebhookSignature({
-          provider: "lightspark",
-          signature: sign(BODY),
-          signedPayload: `${BODY} tampered`,
-          algorithm: { type: "ecdsa-sha256", publicKeyPem, encoding: "base64" },
-          timestampSeconds: nowSeconds(),
-        })
-      ).rejects.toThrow(/Invalid lightspark webhook signature/);
-    });
-
-    it("accepts a key stored with literal \\n escapes", async () => {
-      await expect(
-        verifyWebhookSignature({
-          provider: "lightspark",
-          signature: sign(BODY),
-          signedPayload: BODY,
-          algorithm: {
-            type: "ecdsa-sha256",
-            publicKeyPem: publicKeyPem.replace(/\n/g, "\\n"),
-            encoding: "base64",
-          },
-          timestampSeconds: nowSeconds(),
-        })
-      ).resolves.toBeUndefined();
     });
   });
 });

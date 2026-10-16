@@ -1,55 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { resolveWorkspaceReadiness } from "./workspace-readiness";
 
 describe("workspace readiness", () => {
   it("waits for Clerk sync before requesting any project data", async () => {
     const fetch = vi.fn().mockResolvedValue({ linked: false });
-    expect(await resolveWorkspaceReadiness({ fetch }, "old-project")).toEqual({
+    expect(await resolveWorkspaceReadiness({ fetch })).toEqual({
       state: "pending",
       reason: "sync",
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it("replaces a stale org project before rendering the dashboard", async () => {
+
+  it("is ready on the sandbox project once the default projects exist", async () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ linked: true })
-      .mockResolvedValueOnce({ projects: [{ id: "new-project", slug: "default-sandbox" }] });
-    expect(await resolveWorkspaceReadiness({ fetch }, "old-project")).toEqual({
+      .mockResolvedValueOnce({ projects: [PRODUCTION_PROJECT, SANDBOX_PROJECT] });
+    expect(await resolveWorkspaceReadiness({ fetch })).toEqual({
       state: "ready",
-      projectId: "new-project",
+      projectId: SANDBOX_PROJECT.id,
     });
   });
-  it("preserves a valid project selection", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce({ linked: true })
-      .mockResolvedValueOnce({
-        projects: [
-          { id: "sandbox", slug: "default-sandbox" },
-          { id: "production", slug: "default-production" },
-        ],
-      });
-    expect(await resolveWorkspaceReadiness({ fetch }, "production")).toEqual({
-      state: "ready",
-      projectId: "production",
-    });
-  });
+
   it("waits for default project provisioning", async () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce({ linked: true })
       .mockResolvedValueOnce({ projects: [] });
-    expect(await resolveWorkspaceReadiness({ fetch }, null)).toEqual({
+    expect(await resolveWorkspaceReadiness({ fetch })).toEqual({
       state: "pending",
       reason: "sync",
     });
   });
+
   it.each([
     [403, "access"],
     [503, "service"],
   ])("keeps failure %s distinct from an empty workspace", async (status, reason) => {
     const fetch = vi.fn().mockResolvedValueOnce({ linked: true }).mockRejectedValueOnce({ status });
-    expect(await resolveWorkspaceReadiness({ fetch }, null)).toEqual({ state: "pending", reason });
+    expect(await resolveWorkspaceReadiness({ fetch })).toEqual({ state: "pending", reason });
   });
 });

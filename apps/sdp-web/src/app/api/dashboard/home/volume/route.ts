@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { computeTodaysVolume } from "@/app/dashboard/home-page.data";
-import { fetchDashboardPaymentTransfers } from "@/app/dashboard/payments/payments-page.data";
+import { computeTodaysVolume } from "@/app/dashboard/[projectId]/home-page.data";
+import { fetchDashboardPaymentTransfers } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";

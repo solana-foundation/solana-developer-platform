@@ -50,6 +50,7 @@
     "@sdp/dvp": "workspace:*",
     "@sdp/earn": "workspace:*",
     "@sdp/env-config": "workspace:*",
+    "@sdp/fee-payment": "workspace:*",
     "@sdp/helius-rings": "workspace:*",
     "@sdp/helius-rings-sdk": "workspace:*",
     "@sdp/hastra": "workspace:*",
@@ -58,7 +59,6 @@
     "@sdp/jupiter-lend": "workspace:*",
     "@sdp/ondo": "workspace:*",
     "@sdp/payments": "workspace:*",
-    "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",
@@ -98,6 +98,7 @@
     "pg": "8.23.0",
     "pino": "10.3.1",
     "react": "19.3.0",
+    "undici": "7.29.1",
     "zod": "4.6.5"
   },
   "devDependencies": {

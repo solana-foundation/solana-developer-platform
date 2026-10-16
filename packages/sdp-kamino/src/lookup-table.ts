@@ -9,6 +9,14 @@ import { fetchAddressesForLookupTables } from "@solana/kit";
  */
 const UNSET_LOOKUP_TABLE = "11111111111111111111111111111111";
 
+/** The vault's configured lookup table, or undefined when none is set. */
+export function configuredLookupTable(
+  lookupTableAddress: Address | string | null | undefined
+): Address | undefined {
+  const table = String(lookupTableAddress ?? "");
+  return table === "" || table === UNSET_LOOKUP_TABLE ? undefined : (table as Address);
+}
+
 /**
  * Resolve a vault's published lookup table to the address list compilation
  * needs, or to nothing when the table cannot help.
@@ -28,11 +36,11 @@ export async function loadVaultLookupTableAddresses(
   rpc: Parameters<typeof fetchAddressesForLookupTables>[1],
   lookupTableAddress: Address | string | null | undefined
 ): Promise<AddressesByLookupTableAddress> {
-  const table = String(lookupTableAddress ?? "");
-  if (table === "" || table === UNSET_LOOKUP_TABLE) return {};
+  const table = configuredLookupTable(lookupTableAddress);
+  if (table === undefined) return {};
   try {
-    const addressesByTable = await fetchAddressesForLookupTables([table as Address], rpc);
-    const addresses = addressesByTable[table as Address];
+    const addressesByTable = await fetchAddressesForLookupTables([table], rpc);
+    const addresses = addressesByTable[table];
     // A table with no entries compresses nothing; treat it as absent so the
     // plan does not advertise a lookup table the compiler cannot use.
     if (!addresses || addresses.length === 0) return {};

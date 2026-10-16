@@ -2,11 +2,12 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
   PROJECT_COOKIE_NAME,
-  WORKSPACE_SCOPE_COOKIE_NAME,
-  workspaceScope,
+  PROJECT_COOKIE_OPTIONS,
+  PROJECT_HEADER_NAME,
 } from "@/lib/project-cookie";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
@@ -24,12 +25,6 @@ export const isPublicRoute = createRouteMatcher([
   // extensionless metadata routes are not excluded by the proxy matcher.
   "/opengraph-image",
   "/twitter-image",
-]);
-
-const needsSelectedProject = createRouteMatcher([
-  "/dashboard(.*)",
-  "/api/dashboard(.*)",
-  "/api/playground(.*)",
 ]);
 
 const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
@@ -95,28 +90,14 @@ export const proxy = clerkMiddleware(async (auth, req) => {
     });
   }
 
-  if (needsSelectedProject(req)) {
-    const { userId, orgId } = await auth();
-    const projectId = req.cookies.get(PROJECT_COOKIE_NAME)?.value;
-    if (
-      userId &&
-      orgId &&
-      (!projectId ||
-        req.cookies.get(WORKSPACE_SCOPE_COOKIE_NAME)?.value !==
-          workspaceScope(userId, orgId, projectId))
-    ) {
-      // Never send a previous organization's project to a dashboard data fetch.
-      // Slow webhook polling belongs in the loading page, not Proxy.
-      if (req.nextUrl.pathname.startsWith("/api/")) {
-        return NextResponse.json(
-          { error: { message: "Workspace is still being prepared" } },
-          { status: 425 }
-        );
-      }
-      const loadingUrl = new URL(WORKSPACE_LOADING_PATH, req.url);
-      loadingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-      return NextResponse.redirect(loadingUrl);
-    }
+  // A project-less page URL (old bookmarks, emailed links) matches no route under
+  // `[projectId]` once it is nested, so it is resolved before routing: the bare
+  // landing picks the Project and returns to the same page and query inside it.
+  const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
+  if (projectId === null && /^\/dashboard\/[^/]/.test(req.nextUrl.pathname)) {
+    const landingUrl = new URL("/dashboard", req.url);
+    landingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+    return NextResponse.redirect(landingUrl);
   }
 
   const requestHeaders = new Headers(req.headers);
@@ -130,13 +111,32 @@ export const proxy = clerkMiddleware(async (auth, req) => {
     requestHeaders.set("cookie", kept.join(";").trim());
   }
 
+  // The request's Project is the one its tab renders: page renders and server
+  // actions (Next posts actions to the tab's URL) take it from this URL, browser
+  // calls to /api/* send it themselves (dashboardRequest). Server code reads only
+  // this header, through createSdpApiClient (HOO-1965).
+  if (!req.nextUrl.pathname.startsWith("/api/")) {
+    if (projectId === null) {
+      requestHeaders.delete(PROJECT_HEADER_NAME);
+    } else {
+      requestHeaders.set(PROJECT_HEADER_NAME, projectId);
+    }
+  }
+
   const response = NextResponse.next({
     request: {
       headers: requestHeaders,
     },
   });
+
   for (const name of droppedDemoCookies) {
     response.cookies.set(name, "", { path: "/", maxAge: 0 });
+  }
+
+  // Last-used hint for the bare `/dashboard` landing only; nothing renders or
+  // sends requests from it, and it is validated against the Project list when read.
+  if (projectId !== null) {
+    response.cookies.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
   }
   return response;
 });

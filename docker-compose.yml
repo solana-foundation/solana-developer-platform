@@ -57,6 +57,7 @@ services:
       # Core
       ENVIRONMENT: ${ENVIRONMENT:-development}
       ASSET_PROFILES_ENABLED: ${ASSET_PROFILES_ENABLED:-true}
+      SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
       # Origins a project's Private Channels gateway/auth URL may point at. The
       # public sandbox is approved already; add your own instance's origins here
@@ -64,8 +65,6 @@ services:
       # written).
       PRIVATE_CHANNEL_EGRESS_ALLOWLIST: ${PRIVATE_CHANNEL_EGRESS_ALLOWLIST:-}
       SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}
-      PRIVY_BYOK_ENABLED: ${PRIVY_BYOK_ENABLED:-false}
-      SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: ${SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED:-false}
       API_VERSION: ${API_VERSION:-local-compose}
       SDP_DEPLOYMENT_MODE: ${SDP_DEPLOYMENT_MODE:-self_hosted}
       DATABASE_URL: postgresql://sdp:sdp@postgres:5432/sdp
@@ -116,10 +115,9 @@ services:
     ports:
       - "${SDP_WEB_PORT:-3000}:3000"
     environment:
+      SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
-      CUSTODY_ENABLED: ${CUSTODY_ENABLED:-false}
       ISSUANCE_ENABLED: ${ISSUANCE_ENABLED:-false}
-      POLICIES_ENABLED: ${POLICIES_ENABLED:-false}
       SDP_API_BASE_URL: http://sdp-api:8787
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
       SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}

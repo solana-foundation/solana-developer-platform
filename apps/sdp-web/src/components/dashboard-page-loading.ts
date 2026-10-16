@@ -1,45 +1,41 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { PreviousDashboardLoading as LegacyDashboardLoading } from "@/app/dashboard/(home)/loading";
-import { CurrentDashboardLoading } from "@/app/dashboard/(home)/loading.redesign";
-import AllowlistLoading from "@/app/dashboard/allowlist/loading";
-import ApiKeyEditLoading from "@/app/dashboard/api-keys/[keyId]/edit/loading";
-import { ApiKeysListSkeleton } from "@/app/dashboard/api-keys/api-key-page-skeletons";
-import ApiKeyNewLoading from "@/app/dashboard/api-keys/new/loading";
-import {
-  ApprovalDetailSkeleton,
-  ApprovalInboxSkeleton,
-} from "@/app/dashboard/approvals/approval-page-skeletons";
-import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
+import { PreviousDashboardLoading as LegacyDashboardLoading } from "@/app/dashboard/[projectId]/(home)/loading";
+import { CurrentDashboardLoading } from "@/app/dashboard/[projectId]/(home)/loading.redesign";
+import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
+import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
+import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
+import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
+import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
-  IntegrationsSkeleton,
-} from "@/app/dashboard/integrations/integrations-skeleton";
-import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import { IssuanceCreateSkeleton as LegacyIssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
-import { IssuanceDetailSkeleton as LegacyIssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
-import { IssuancePageSkeleton as LegacyIssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
+  IntegrationsFlagsSkeleton,
+} from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
+import { IssuanceCreateSkeleton as LegacyIssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton as LegacyIssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton as LegacyIssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-page-skeleton";
 import {
   CurrentIssuanceCreateSkeleton,
   CurrentIssuanceDetailSkeleton,
   CurrentIssuancePageSkeleton,
-} from "@/app/dashboard/issuance/issuance-route-skeletons.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-route-skeletons.redesign";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
   DvpTradesSkeleton,
   EarnIntegrationGuideSkeleton,
   EmbeddedYieldPortfolioSkeleton,
-  MarketsLandingSkeleton,
+  MarketsLandingFlagsSkeleton,
   TreasurySolutionsSkeleton,
-} from "@/app/dashboard/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
+} from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
+import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
 import CounterpartyDirectoryLoading, {
   PreviousCounterpartyLoading as LegacyCounterpartyDirectoryLoading,
-} from "@/app/dashboard/payments/counterparty/loading";
-import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
-import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton.redesign";
+} from "@/app/dashboard/[projectId]/payments/counterparty/loading";
+import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
+import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton.redesign";
 import {
   CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
@@ -49,7 +45,7 @@ import {
   RecurringPaymentCreateSkeleton as LegacyRecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton as LegacyRecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons";
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
@@ -62,12 +58,11 @@ import {
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons.redesign";
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 import PaymentRequestsLoading, {
   PreviousPaymentRequestsLoading as LegacyPaymentRequestsLoading,
-} from "@/app/dashboard/payments/requests/loading";
-import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
-import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
+} from "@/app/dashboard/[projectId]/payments/requests/loading";
+import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
   CurrentWalletDetailSkeleton,
   CurrentWalletSetupSkeleton,
@@ -76,14 +71,14 @@ import {
   WalletSetupSkeleton as LegacyWalletSetupSkeleton,
   WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
   WalletConnectionsListSkeleton,
-  WalletPolicyAuditDetailSkeleton,
-  WalletPolicyAuditListSkeleton,
-  WalletPolicySkeleton,
-} from "@/app/dashboard/wallets/wallet-route-skeletons.redesign";
+} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons.redesign";
+import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
 interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
+  /** The shell's flag snapshot, for skeletons that draw only what the page will render. */
+  flags?: DashboardFlags;
 }
 
 // The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
@@ -130,7 +125,7 @@ function resolveCurrentPageLoadingComponent(
     case "home":
       return CurrentDashboardLoading;
     case "integrations":
-      return IntegrationsSkeleton;
+      return IntegrationsFlagsSkeleton;
     case "integration-detail":
       return IntegrationDetailSkeleton;
     case "private-channels-setup":
@@ -145,12 +140,6 @@ function resolveCurrentPageLoadingComponent(
       return WalletConnectionsListSkeleton;
     case "wallet-detail":
       return CurrentWalletDetailSkeleton;
-    case "wallet-policy":
-      return WalletPolicySkeleton;
-    case "wallet-policy-audit-list":
-      return WalletPolicyAuditListSkeleton;
-    case "wallet-policy-audit-detail":
-      return WalletPolicyAuditDetailSkeleton;
     case "issuance-overview":
       return CurrentIssuancePageSkeleton;
     case "issuance-create":
@@ -160,7 +149,7 @@ function resolveCurrentPageLoadingComponent(
     case "payments-overview":
       return PaymentsPageSkeleton;
     case "markets-landing":
-      return MarketsLandingSkeleton;
+      return MarketsLandingFlagsSkeleton;
     case "treasury-solutions":
       return TreasurySolutionsSkeleton;
     case "embedded-yield-portfolio":
@@ -207,12 +196,6 @@ function resolveCurrentPageLoadingComponent(
       return ApiKeyNewLoading;
     case "api-key-edit":
       return ApiKeyEditLoading;
-    case "policies":
-      return PoliciesOverviewSkeleton;
-    case "approvals-list":
-      return ApprovalInboxSkeleton;
-    case "approval-detail":
-      return ApprovalDetailSkeleton;
     case "settings":
       return SettingsPageSkeleton;
     case "helius-rings":

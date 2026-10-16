@@ -1,4 +1,4 @@
-import { ORGANIZATION_RPC_PROVIDERS, ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
+import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types";
 import {
   acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
@@ -16,10 +16,6 @@ import {
 
 export const organizationSettingsSchema = z
   .object({
-    rpcProvider: z.enum(ORGANIZATION_RPC_PROVIDERS).optional().openapi({
-      description: "Organization-wide preferred RPC provider. `default` uses SDP round-robin.",
-      example: "default",
-    }),
     defaultEnvironment: z.enum(["sandbox", "production"]).optional().openapi({
       description: "Default environment for new resources.",
       example: "production",
@@ -219,7 +215,6 @@ export const updateOrganizationRequestSchema = updateOrgSchemaBase
     settings: withOpenApi(updateOrgSchemaBase.shape.settings, {
       description: "Organization settings to update.",
       example: {
-        rpcProvider: "default",
         defaultEnvironment: "production",
         allowedIpAddresses: ["203.0.113.0/24"],
       },

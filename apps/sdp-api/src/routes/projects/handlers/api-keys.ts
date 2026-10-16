@@ -12,6 +12,7 @@ import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  assertGrantableAllowedOperations,
   isWalletScopedActor,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
@@ -73,12 +74,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
   );
   const apiKeys = await apiKeyService.listForProject(projectId);
   const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    c.env,
     db,
-    createTenantScope({
-      organizationId: auth.organizationId,
-      projectId,
-    }),
     apiKeys.map((key) => key.id)
   );
 
@@ -99,7 +95,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
-        policyBindings: accessSummary?.policyBindings ?? [],
+        allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
         createdAt: key.createdAt,
@@ -123,6 +119,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     permissions,
     walletScope,
     allowedIps,
+    allowedOperations,
     expiresAt,
     signingWalletId,
     signingWalletIds,
@@ -132,9 +129,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     walletPurpose,
   } = body;
 
-  const connectionId =
-    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
-  const provisionWalletRequested = Boolean(provisionWallet);
+  const provisionWalletRequested = provisionWallet !== undefined;
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
@@ -142,7 +137,6 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     signingWalletIds,
     walletBindings,
     provisionWallet: provisionWalletRequested,
-    connectionId,
   });
 
   const actorApiKey = c.get("apiKey");
@@ -153,6 +147,11 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       walletScope
     );
   }
+
+  // Judge the requested Allowed Operations before any wallet is provisioned,
+  // so a refused request leaves nothing behind. The service judges again
+  // inside the key transaction.
+  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
@@ -174,8 +173,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
         creationReason: "api_key",
         organizationId: auth.organizationId,
         projectId,
-        legacyConfigProjectId: projectId,
-        connectionId,
+        owner: provisionWallet,
         label: walletLabel,
         purpose: walletPurpose,
       });
@@ -214,11 +212,13 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       createdByUserId: auth.userId ?? undefined,
       actorPermissions: auth.permissions,
       actorApiKeyRole: c.get("apiKey")?.role ?? null,
+      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
       name,
       description,
       role,
       permissions,
       allowedIps,
+      allowedOperations,
       expiresAt,
       signingWalletId: resolvedSigningWalletId,
       pepper: c.env.API_KEY_PEPPER,

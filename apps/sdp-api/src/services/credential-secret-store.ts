@@ -3,7 +3,7 @@ import { getDeploymentMode } from "@/lib/runtime-env";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 
-export type CredentialSecretStorageBackend = "gcp_secret_manager" | "encrypted_db" | "runtime_env";
+export type CredentialSecretStorageBackend = "gcp_secret_manager" | "encrypted_db";
 
 export type CredentialSecretPayload = Record<string, unknown>;
 
@@ -25,7 +25,6 @@ export interface StoredCredentialSecret {
   secretRef?: string;
   secretVersionRef?: string;
   encryptedSecretPayload?: string;
-  runtimeEnvFields?: Record<string, keyof Env & string>;
 }
 
 export interface WriteCredentialSecretParams {
@@ -156,64 +155,6 @@ export class EncryptedDbCredentialSecretStore implements CredentialSecretStore {
 
   predictFirstVersionRef(): string | null {
     return null;
-  }
-}
-
-export class RuntimeEnvCredentialSecretStore implements CredentialSecretStore {
-  readonly storageBackend = "runtime_env" as const;
-
-  constructor(private readonly env: Env) {}
-
-  async write(_params: WriteCredentialSecretParams): Promise<StoredCredentialSecret> {
-    throw new CredentialSecretStoreError(
-      "Runtime env credentials are read-only and must be supplied by deployment configuration",
-      "UNSUPPORTED_OPERATION"
-    );
-  }
-
-  predictFirstVersionRef(): string | null {
-    return null;
-  }
-
-  async read(params: ReadCredentialSecretParams): Promise<CredentialSecretPayload> {
-    const fields = params.stored.runtimeEnvFields;
-    if (!fields || Object.keys(fields).length === 0) {
-      throw new CredentialSecretStoreError(
-        "Runtime env credential is missing runtimeEnvFields metadata",
-        "MISSING_SECRET"
-      );
-    }
-
-    const payload: CredentialSecretPayload = {};
-    const source = this.env as unknown as Record<string, unknown>;
-
-    for (const [fieldName, envKey] of Object.entries(fields)) {
-      if (!isSafePayloadField(fieldName)) {
-        throw new CredentialSecretStoreError(
-          `Invalid runtime credential field name: ${fieldName}`,
-          "INVALID_CONFIGURATION"
-        );
-      }
-
-      const value = source[envKey];
-      if (typeof value !== "string" || value.length === 0) {
-        throw new CredentialSecretStoreError(
-          `Runtime credential env var is not configured: ${envKey}`,
-          "MISSING_SECRET"
-        );
-      }
-
-      payload[fieldName] = value;
-    }
-
-    return payload;
-  }
-
-  async destroyVersion(_params: DestroyCredentialSecretVersionParams): Promise<void> {
-    throw new CredentialSecretStoreError(
-      "Runtime env credentials do not have external versions to destroy",
-      "UNSUPPORTED_OPERATION"
-    );
   }
 }
 
@@ -693,10 +634,6 @@ export function createCredentialSecretStore(
     return new GcpSecretManagerCredentialSecretStore(gcpCredentialSecretOptions(env));
   }
 
-  if (backend === "runtime_env") {
-    return new RuntimeEnvCredentialSecretStore(env);
-  }
-
   requireEnv(env.CUSTODY_ENCRYPTION_KEY, "CUSTODY_ENCRYPTION_KEY");
   return new EncryptedDbCredentialSecretStore(createCustodyCipher(env));
 }
@@ -723,11 +660,7 @@ function gcpCredentialSecretOptions(env: Env): GcpSecretManagerCredentialSecretS
 export function resolveCredentialSecretStoreBackend(env: Env): CredentialSecretStorageBackend {
   const configured = env.CREDENTIAL_SECRET_STORE_BACKEND;
   if (configured) {
-    if (
-      configured !== "gcp_secret_manager" &&
-      configured !== "encrypted_db" &&
-      configured !== "runtime_env"
-    ) {
+    if (configured !== "gcp_secret_manager" && configured !== "encrypted_db") {
       throw new CredentialSecretStoreError(
         `Invalid CREDENTIAL_SECRET_STORE_BACKEND: ${configured}`,
         "INVALID_CONFIGURATION"
@@ -913,10 +846,6 @@ function assertGcpSecretId(secretId: string): void {
       "INVALID_SECRET_REF"
     );
   }
-}
-
-function isSafePayloadField(value: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(value);
 }
 
 function toGcpLabelValue(value: string): string {

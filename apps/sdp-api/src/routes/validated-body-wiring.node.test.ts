@@ -196,7 +196,7 @@ describe("validated handler wiring", () => {
   const inlineHandlers = collectInlineHandlers();
 
   it("finds the inline handler inventory", () => {
-    expect(inlineHandlers.length).toBeGreaterThan(1);
+    expect(inlineHandlers.length).toBeGreaterThan(0);
   });
 
   it.each(inlineHandlers)(

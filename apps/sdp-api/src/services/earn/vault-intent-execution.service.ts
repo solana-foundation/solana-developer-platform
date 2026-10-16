@@ -1,6 +1,6 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { createRpc } from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import type { MovementId, SolanaCluster } from "@sdp/types";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
@@ -21,6 +21,12 @@ import {
 } from "./vault-execution.service";
 import { rawSimulationDetails } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
+
+/** The movement each vault operation signs for: a deposit starts, a withdrawal exits. */
+const VAULT_OPERATION_MOVEMENTS = {
+  deposit: "earn.deposit",
+  withdrawal: "earn.withdraw",
+} as const satisfies Record<"deposit" | "withdrawal", MovementId>;
 
 /**
  * Vault programs' own words for "your floor was too high", as Anchor writes
@@ -81,7 +87,6 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
    * The same value reaches simulation and signing so they cannot disagree.
    */
   fee: VaultFeeMode;
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
   persist: (db: AppDb, signed: SignedVaultTransaction) => Promise<TResult>;
 }
 
@@ -175,7 +180,8 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
         env,
         input.organizationId,
         input.projectId,
-        input.walletId
+        input.walletId,
+        VAULT_OPERATION_MOVEMENTS[operation]
       )
     );
     if (signer.address !== input.walletPublicKey) {
@@ -196,10 +202,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     throw error;
   }
 
-  const runIntentTransaction =
-    input.runIntentTransaction ??
-    (<T>(mutation: (db: AppDb) => Promise<T>) => mutation(getDb(env)));
-  const result = await runIntentTransaction((db) => input.persist(db, signed));
+  const result = await input.persist(getDb(env), signed);
   if (result.replayed) return result;
 
   const movement = await broadcastRecordedVaultMovement(env, {

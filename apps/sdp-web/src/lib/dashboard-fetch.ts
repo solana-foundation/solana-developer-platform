@@ -1,4 +1,7 @@
 import { readApiErrorMessage } from "./api-error";
+import { parseDashboardPathname } from "./dashboard-project-path";
+import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
+import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
   | { ok: true; data: T; status: number }
@@ -6,10 +9,45 @@ export type DashboardFetchResult<T> =
 
 export interface DashboardFetchOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  /** Headers intentionally supplied by the caller; nothing is inferred from browser state. */
+  /** Headers supplied by the caller; only the Project is taken from the tab's URL. */
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+let tabShowsDemo = false;
+
+/**
+ * Set by the dashboard shell: whether this tab is showing Payments demo mode, so the calls it
+ * makes say so (see {@link TAB_DEMO_HEADER_NAME}).
+ *
+ * @param on - True while the tab shows demo mode.
+ */
+export function setTabShowsDemo(on: boolean): void {
+  tabShowsDemo = on;
+}
+
+/**
+ * `fetch` for the dashboard backend from the browser: sends the Project in this
+ * tab's URL as `x-project-id`, so the request acts on the Project the tab
+ * renders whatever another tab has selected since (HOO-1965). Outside a
+ * Project-scoped URL no header is sent and Project-scoped backend routes
+ * refuse the request.
+ *
+ * @param path - Dashboard backend path, e.g. `/api/dashboard/payments/transfers`.
+ * @param init - Standard fetch options; a caller-set `x-project-id` is overwritten.
+ * @returns The raw backend response.
+ */
+export function dashboardRequest(path: string, init: RequestInit): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const { projectId } = parseDashboardPathname(window.location.pathname);
+  if (projectId !== null) {
+    headers.set(PROJECT_HEADER_NAME, projectId);
+  }
+  if (tabShowsDemo) {
+    headers.set(TAB_DEMO_HEADER_NAME, "1");
+  }
+  return fetch(path, { ...init, headers });
 }
 
 export async function dashboardFetch<T = unknown>(
@@ -24,7 +62,7 @@ export async function dashboardFetch<T = unknown>(
 
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await dashboardRequest(path, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,

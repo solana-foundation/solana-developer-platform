@@ -5,7 +5,7 @@ export const ringsUnifiedTransactionSource = {
   o.id,
   o.id AS module_id,
   o.op_type AS kind,
-  o.state AS module_status,
+  CASE o.state WHEN 'approval_required' THEN 'failed' ELSE o.state END AS module_status,
   o.organization_id,
   o.project_id,
   wallet.custody_wallet_id,

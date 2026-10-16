@@ -90,7 +90,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
     const originalKey = created.data.apiKey;
     const originalKeyRequest = requestWithApiKey(originalKey.key);
 
-    const originalWalletsRes = await originalKeyRequest("/v1/wallets?includeAllProviders=true");
+    const originalWalletsRes = await originalKeyRequest("/v1/wallets");
     expect(originalWalletsRes.status).toBe(200);
     const originalWallets = (await originalWalletsRes.json()) as WalletListResponse;
     expect(originalWallets.data.wallets.some((entry) => entry.walletId === wallet.walletId)).toBe(
@@ -113,10 +113,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
     expect(rotation.data.previousKey.rotationDeadline).toBeTruthy();
 
     const rotatedKeyRequest = requestWithApiKey(rotation.data.apiKey.key);
-    const rotatedWalletsRes = await rotatedKeyRequest("/v1/wallets?includeAllProviders=true");
+    const rotatedWalletsRes = await rotatedKeyRequest("/v1/wallets");
     expect(rotatedWalletsRes.status).toBe(200);
 
-    const preRevokeOldKeyRes = await originalKeyRequest("/v1/wallets?includeAllProviders=true");
+    const preRevokeOldKeyRes = await originalKeyRequest("/v1/wallets");
     expect(preRevokeOldKeyRes.status).toBe(200);
 
     const revokeRes = await adminRequest(`/v1/api-keys/${originalKey.id}`, {
@@ -131,7 +131,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
 
     expect(revokeRes.status).toBe(200);
 
-    const postRevokeOldKeyRes = await originalKeyRequest("/v1/wallets?includeAllProviders=true");
+    const postRevokeOldKeyRes = await originalKeyRequest("/v1/wallets");
     expect(postRevokeOldKeyRes.status).toBe(401);
     const revokedBody = (await postRevokeOldKeyRes.json()) as { error: { code: string } };
     expect(revokedBody.error.code).toBe("REVOKED_API_KEY");

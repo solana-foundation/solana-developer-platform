@@ -6,8 +6,6 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   markets: "/dashboard/markets",
   heliusRings: "/dashboard/helius-rings",
   apiKeys: "/dashboard/api-keys",
-  policies: "/dashboard/policies",
-  approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
   integrations: "/dashboard/integrations",
 } as const;
@@ -29,7 +27,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
 
 export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
   custody: "/dashboard/integrations?tab=custody",
-  rpc: "/dashboard/integrations?tab=rpc",
   ramps: "/dashboard/integrations?tab=ramps",
   compliance: "/dashboard/integrations?tab=compliance",
   privacy: "/dashboard/integrations?tab=privacy",
@@ -42,9 +39,6 @@ export type DashboardLoadingRoute =
   | "wallet-setup"
   | "wallet-connections"
   | "wallet-detail"
-  | "wallet-policy"
-  | "wallet-policy-audit-list"
-  | "wallet-policy-audit-detail"
   | "issuance-overview"
   | "issuance-create"
   | "issuance-detail"
@@ -73,9 +67,6 @@ export type DashboardLoadingRoute =
   | "api-keys-list"
   | "api-key-new"
   | "api-key-edit"
-  | "policies"
-  | "approvals-list"
-  | "approval-detail"
   | "settings"
   | "integrations"
   | "integration-detail"
@@ -97,16 +88,12 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
         : null;
   if (!prefix) return null;
   if (pathname === prefix) return "wallets-overview";
-  if (pathname === `${prefix}/setup` || pathname === `${prefix}/switch`) return "wallet-setup";
+  if (pathname === `${prefix}/setup`) return "wallet-setup";
   if (pathname === `${prefix}/connections`) return "wallet-connections";
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (suffix.length < 1) return null;
-  if (suffix[1] !== "policy") return "wallet-detail";
-  if (suffix.length === 2) return "wallet-policy";
-  if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
-  if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
-  return null;
+  return "wallet-detail";
 }
 
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
@@ -138,9 +125,6 @@ function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute 
   if (pathname === "/dashboard/api-keys") return "api-keys-list";
   if (pathname === "/dashboard/api-keys/new") return "api-key-new";
   if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  if (pathname === "/dashboard/policies") return "policies";
-  if (pathname === "/dashboard/approvals") return "approvals-list";
-  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   // Members only redirects into Settings, so it loads as the page it lands on.
   if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
   return null;
@@ -241,4 +225,26 @@ export function isDashboardNavItemActive(pathname: string, href: string): boolea
     );
   }
   return pathnameOnly === href || pathnameOnly.startsWith(`${href}/`);
+}
+
+const PROJECT_SWITCH_DESTINATIONS = [
+  ...Object.values(DASHBOARD_MARKETS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_PAYMENTS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_SIDE_NAV_HREFS),
+];
+
+/**
+ * Where switching Project lands from the current page: the root of the module
+ * (or sub-module) the page belongs to, never the page itself, because ids in
+ * the path (wallets, tokens, trades) belong to the Project being left.
+ *
+ * @param dashboardPath - Project-less path of the current page, e.g. `/dashboard/custody/cwlt_1`.
+ * @returns The module root to open under the other Project, e.g. `/dashboard/wallets`.
+ */
+export function projectSwitchDestination(dashboardPath: string): string {
+  const destination = PROJECT_SWITCH_DESTINATIONS.find(
+    (href) =>
+      href !== DASHBOARD_SIDE_NAV_HREFS.home && isDashboardNavItemActive(dashboardPath, href)
+  );
+  return destination === undefined ? DASHBOARD_SIDE_NAV_HREFS.home : destination;
 }

@@ -19,11 +19,15 @@ import {
   isPlausibleEmail,
   resolveClerkEmail,
   resolveClerkOrganizationClaims,
-  verifyClerkJwtForRequest,
+  verifyClerkSessionToken,
 } from "@/lib/clerk-token";
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
-import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
+import { enforceOrganizationAccess, organizationNotActive } from "@/lib/organization-access";
+import {
+  loadOrganizationEntitlements,
+  recordOrganizationEntitlements,
+} from "@/lib/production-entitlement";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -322,6 +326,20 @@ async function ensureMembership(
     // granting access, and inserting first would let a concurrent revocation
     // win the invitation transition after access was already persisted.
     await db.transaction(async (tx) => {
+      // The organization was active when this request passed its door, but a
+      // deletion can commit after that read. Holding a share lock on the row
+      // here makes the deletion either finish first (and this refuses) or
+      // wait for this insert (and then remove the membership it finds). It
+      // locks the organization before invitations and memberships, the
+      // deletion's own order.
+      const organization = await tx
+        .prepare("SELECT id FROM organizations WHERE id = ? AND status = 'active' FOR SHARE")
+        .bind(params.organizationId)
+        .first<{ id: string }>();
+      if (!organization) {
+        throw organizationNotActive();
+      }
+
       // Reached only when the caller holds no membership row at all — an
       // existing member returned above — so this declines a join and never
       // revokes access someone already has.
@@ -413,16 +431,22 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   }
 
   // Everything below writes — user provisioning, membership, default projects,
-  // email repair — so the allowlist gates entry here rather than the response
-  // after: a blocked origin must not leave state behind. Only an organization
-  // that already exists can carry a restriction; one first provisioned by this
-  // request cannot have one yet, so the callers need no second check.
+  // email repair — so organization access gates entry here rather than the
+  // response after: a deleted organization or a blocked origin must not leave
+  // state behind. A Clerk organization outlives an SDP deletion, so without
+  // this a member could sign back into a deleted organization and be given a
+  // fresh active membership. Only an organization that already exists can be
+  // deleted or carry a restriction; one first provisioned by this request
+  // cannot, so the callers need no second check.
   const knownOrganization = await resolveClerkOrganization(
     getDb(c.env),
     organizationClaims.organizationId
   );
   if (knownOrganization) {
-    await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id);
+    recordOrganizationEntitlements(
+      c,
+      await enforceOrganizationAccess(c, knownOrganization.organization_id)
+    );
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
@@ -517,6 +541,10 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   );
 
   const permissions = getPermissionsForOrgRole(role);
+  if (!knownOrganization) {
+    // First provisioned by this request: no allowlist read recorded them yet.
+    await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
+  }
 
   return {
     userId: userIdentity.userId,
@@ -553,14 +581,7 @@ export function clerkAuthMiddleware() {
         throw unauthorized("Clerk session required");
       }
 
-      let payload: ClerkJwtPayload;
-      try {
-        payload = await verifyClerkJwtForRequest(c, token);
-      } catch (error) {
-        throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
-          cause: error instanceof Error ? error.message : String(error),
-        });
-      }
+      const payload = await verifyClerkSessionToken(c, token);
 
       assertClerkTenantClaims(payload);
 
@@ -595,14 +616,7 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
 
     try {
       await runWithSystemDatabaseIdentity("http:auth", async () => {
-        let payload: ClerkJwtPayload;
-        try {
-          payload = await verifyClerkJwtForRequest(c, token);
-        } catch (error) {
-          throw new AppError("UNAUTHORIZED", "Invalid Clerk token", {
-            cause: error instanceof Error ? error.message : String(error),
-          });
-        }
+        const payload = await verifyClerkSessionToken(c, token);
         assertClerkTenantClaims(payload);
         const clerkContext = await buildClerkContext(c, payload);
         await enforceRateLimit(
@@ -614,9 +628,14 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
       });
     } catch (error) {
       // Invalid Clerk auth is rejected by default (a presented credential
-      // must never silently downgrade to anonymous), but never rate
-      // limiting — a limited user must not proceed as anonymous either.
-      if (rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
+      // must never silently downgrade to anonymous). Rate limiting and
+      // unreachable signing keys are always rejected: a limited user, or one
+      // whose token was never checked, must not proceed as anonymous either.
+      if (
+        rejectInvalid ||
+        (error instanceof AppError &&
+          (error.code === "RATE_LIMITED" || error.code === "SERVICE_UNAVAILABLE"))
+      ) {
         throw error;
       }
     }

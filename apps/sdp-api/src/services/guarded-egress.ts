@@ -123,7 +123,7 @@ export interface RedirectStep {
 const CROSS_ORIGIN_REDIRECT_HEADERS = new Set(["accept", "content-type"]);
 
 /**
- * Tenant RPC headers may use provider-specific names, so there is no complete
+ * Tenant-supplied headers may use provider-specific names, so there is no complete
  * denylist for credentials. Preserve them only within the same origin. A
  * cross-origin redirect receives the protocol headers SDP owns, never the
  * tenant-supplied authentication material.

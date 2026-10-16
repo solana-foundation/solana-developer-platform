@@ -2,6 +2,7 @@ export {
   explicitClusterRpcUrl,
   getSolanaConfig,
   resolveClusterRpcUrl,
+  resolveClusterRpcUrls,
   resolveDefaultCluster,
   resolveDefaultSolanaRpcUrl,
   resolveSolanaRpcProviderUrls,
@@ -14,7 +15,7 @@ export {
   isUnauthorizedRpcError,
   withTransientRpcRetry,
 } from "./transient";
-export type { DatabaseClient, KVStore, KVStoreSet, PreparedStatement, RpcEnv } from "./types";
+export type { KVStore, KVStoreSet, ManagedRpcEnv, RpcEnv } from "./types";
 export {
   type VerifyTransactionLandedOptions,
   type VerifyTransactionLandedResult,

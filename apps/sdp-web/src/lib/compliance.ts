@@ -1,5 +1,6 @@
 import { COMPLIANCE_PROVIDERS, type ComplianceProviderId } from "@sdp/types";
 import { z } from "zod";
+import { dashboardRequest } from "./dashboard-fetch";
 
 export type ComplianceIntent = "transfer_destination" | "wallet_address_addition" | "unknown";
 
@@ -58,7 +59,7 @@ export async function screenAddressCompliance(input: {
   network?: string;
   intent?: ComplianceIntent;
 }): Promise<AddressScreeningResult> {
-  const response = await fetch("/api/dashboard/compliance/address-screenings", {
+  const response = await dashboardRequest("/api/dashboard/compliance/address-screenings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

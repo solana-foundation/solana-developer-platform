@@ -46,7 +46,7 @@ afterEach(() => {
 
 describe("PaymentsDemoToggle", () => {
   it("turns demo mode on for the selected project and redraws the page without a reload", async () => {
-    renderToggle({ demoProjectId: null, cookieProjectId: "proj_sandbox" });
+    renderToggle({ demoProjectId: null });
     const toggle = screen.getByRole("switch", { name: "Demo" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
 
@@ -58,7 +58,7 @@ describe("PaymentsDemoToggle", () => {
   });
 
   it("shows on for the project the demo names and turns it off", async () => {
-    renderToggle({ demoProjectId: "proj_sandbox", cookieProjectId: "proj_sandbox" });
+    renderToggle({ demoProjectId: "proj_sandbox" });
     const toggle = screen.getByRole("switch", { name: "Demo" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
 
@@ -67,22 +67,15 @@ describe("PaymentsDemoToggle", () => {
     expect(setPaymentsDemoAction).toHaveBeenCalledWith(false, "proj_sandbox");
   });
 
-  it("stays reachable when the project list didn't load", () => {
-    workspace.selectedProjectId = null;
-    renderToggle({ demoProjectId: "proj_sandbox", cookieProjectId: "proj_sandbox" });
-
-    expect(screen.getByRole("switch", { name: "Demo" }).getAttribute("aria-checked")).toBe("true");
-  });
-
   it("can't be turned on on a production project, but can be turned off", () => {
     workspace.selectedProjectId = "proj_production";
     workspace.sdpEnvironment = "production";
-    const { rerender } = renderToggle({ demoProjectId: null, cookieProjectId: null });
+    const { rerender } = renderToggle({ demoProjectId: null });
     expect((screen.getByRole("switch", { name: "Demo" }) as HTMLButtonElement).disabled).toBe(true);
 
     rerender(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PaymentsDemoToggle demoProjectId="proj_production" cookieProjectId={null} />
+        <PaymentsDemoToggle demoProjectId="proj_production" />
       </I18nProvider>
     );
     expect((screen.getByRole("switch", { name: "Demo" }) as HTMLButtonElement).disabled).toBe(
@@ -92,7 +85,7 @@ describe("PaymentsDemoToggle", () => {
 
   it("goes back when the switch doesn't take", async () => {
     setPaymentsDemoAction.mockResolvedValue(false);
-    renderToggle({ demoProjectId: null, cookieProjectId: "proj_sandbox" });
+    renderToggle({ demoProjectId: null });
     const toggle = screen.getByRole("switch", { name: "Demo" });
 
     await userEvent.click(toggle);

@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { expandDocsBlocks } from "../src/lib/docs-blocks";
+import { isPageSourcePublished, publicSurface } from "../src/lib/release-channel";
 import { getDocsPagePath } from "../src/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +14,13 @@ const docsPublicDir = path.resolve(__dirname, "../public");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
 const EXTERNAL_URL_TIMEOUT_MS = 10_000;
+
+// Links are checked as the build for src/generated/public-surface.json renders
+// them: pages a `module:` or `rampProvider:` tag leaves out do not exist, and
+// generated blocks link only to published pages (src/lib/docs-blocks.ts). CI runs
+// this per channel.
+const releaseChannel = publicSurface.releaseChannel;
+const excludedSlugs = new Set<string>();
 
 type DocsMeta = {
   pages?: string[];
@@ -105,8 +114,16 @@ async function loadDocPages(): Promise<Map<string, string>> {
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, string>();
 
-  for (const filePath of mdxFiles) {
-    pages.set(toPageSlug(filePath), filePath);
+  const sources = await Promise.all(
+    mdxFiles.map(async (filePath) => ({ filePath, raw: await fs.readFile(filePath, "utf8") }))
+  );
+
+  for (const { filePath, raw } of sources) {
+    if (isPageSourcePublished(raw, filePath)) {
+      pages.set(toPageSlug(filePath), filePath);
+    } else {
+      excludedSlugs.add(toPageSlug(filePath));
+    }
   }
 
   return pages;
@@ -117,14 +134,13 @@ async function loadSectionDirs(): Promise<Set<string>> {
 
   async function walk(dirPath: string): Promise<void> {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const fullPath = path.join(dirPath, entry.name);
+    const subDirs = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(dirPath, entry.name));
+    for (const fullPath of subDirs) {
       dirs.add(path.relative(docsContentDir, fullPath).replace(/\\/g, "/"));
-      await walk(fullPath);
     }
+    await Promise.all(subDirs.map(walk));
   }
 
   await walk(docsContentDir);
@@ -232,23 +248,20 @@ async function probeExternalUrl(
 }
 
 async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]> {
-  const references: LinkReference[] = [];
-
-  for (const [slug, filePath] of pages) {
-    const raw = await fs.readFile(filePath, "utf8");
-    const source = stripMarkdownSource(raw);
-
-    for (const link of extractMarkdownLinks(source)) {
-      references.push({
+  const perPage = await Promise.all(
+    [...pages].map(async ([slug, filePath]) => {
+      const raw = await fs.readFile(filePath, "utf8");
+      const source = stripMarkdownSource(expandDocsBlocks(raw, filePath));
+      return extractMarkdownLinks(source).map((link) => ({
         sourcePath: filePath,
         sourceSlug: slug,
         destination: link.destination,
         line: link.line,
-      });
-    }
-  }
+      }));
+    })
+  );
 
-  return references;
+  return perPage.flat();
 }
 
 function findMissingNavEntries(
@@ -262,7 +275,7 @@ function findMissingNavEntries(
     if (isDividerEntry(entry)) {
       continue;
     }
-    if (!pages.has(entry) && !sectionDirs.has(entry)) {
+    if (!pages.has(entry) && !sectionDirs.has(entry) && !excludedSlugs.has(entry)) {
       findings.push(`Missing docs page for navigation entry "${entry}" in ${docsMetaPath}`);
     }
   }
@@ -343,7 +356,7 @@ async function run(): Promise<void> {
   }
 
   console.log(
-    `Docs link integrity passed: ${pages.size} pages, ${links.length} markdown links, ${externalUrls.size} external URLs checked.`
+    `Docs link integrity passed (${releaseChannel}): ${pages.size} pages, ${links.length} markdown links, ${externalUrls.size} external URLs checked.`
   );
 }
 

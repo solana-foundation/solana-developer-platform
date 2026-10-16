@@ -7,18 +7,12 @@ import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
-import {
-  approvedWalletOperationId,
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-  reserveMintSupplyAtApprovedEffectBoundary,
-} from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -41,7 +35,6 @@ import {
   resolveIssuanceWallet,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
   persistSettledTransaction,
@@ -86,7 +79,7 @@ async function assertMintDestinationNotFrozen(params: {
   }
 }
 
-interface MintExecutionPolicyResolved {
+interface MintExecutionResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
@@ -99,7 +92,7 @@ interface MintExecutionPolicyResolved {
   custodyWalletId: string;
 }
 
-interface MintReplayPolicyResolved {
+interface MintReplayResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
@@ -107,14 +100,13 @@ interface MintReplayPolicyResolved {
   replay: TokenTransaction;
 }
 
-type MintPolicyResolved = MintExecutionPolicyResolved | MintReplayPolicyResolved;
+type MintResolved = MintExecutionResolved | MintReplayResolved;
 
 export async function admitMintRuntimeExecution(
   c: AppContext,
-  extraction: PolicyGateExtraction
+  extraction: RequestGateExtraction
 ): Promise<void> {
-  const resolved = extraction.resolved as MintPolicyResolved;
-  if ("replay" in resolved && isSettledIssuanceTransaction(resolved.replay)) return;
+  const resolved = extraction.resolved as MintResolved;
   const { auth, tokenService, custodyWalletId } = resolved;
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -136,13 +128,6 @@ function mintIdempotencyMetadata(
     mode: "execute",
     params: { ...input, signingCustodyWalletId: custodyWalletId },
   });
-}
-
-function isSettledIssuanceTransaction(transaction: TokenTransaction): boolean {
-  return (
-    (transaction.status === "confirmed" || transaction.status === "finalized") &&
-    transaction.signature !== null
-  );
 }
 
 interface SettledMintEvidence {
@@ -218,9 +203,9 @@ async function resolveMintReplayBeforeLiveChecks(
     auth: ApiKeyContext;
     tokenService: TokenService;
   }
-): Promise<{ transaction: TokenTransaction; providerWalletId: string } | null> {
+): Promise<{ transaction: TokenTransaction } | null> {
   const idempotencyKey = c.req.header("Idempotency-Key");
-  if (!idempotencyKey || isDryRunRequest(c)) return null;
+  if (!idempotencyKey) return null;
 
   const transaction = await resolved.tokenService.findTransactionByIdempotency(
     resolved.auth.organizationId,
@@ -243,7 +228,7 @@ async function resolveMintReplayBeforeLiveChecks(
     throw conflict("Idempotency key already used with different request payload");
   }
 
-  const wallet = await resolveIssuanceWallet({
+  await resolveIssuanceWallet({
     env: c.env,
     auth: resolved.auth,
     custodyWalletId,
@@ -255,7 +240,7 @@ async function resolveMintReplayBeforeLiveChecks(
     transaction
   );
 
-  return { transaction: recovered, providerWalletId: wallet.providerWalletId };
+  return { transaction: recovered };
 }
 
 function mintReplayResponse(c: AppContext, input: MintBody, transaction: TokenTransaction) {
@@ -269,20 +254,16 @@ function mintReplayResponse(c: AppContext, input: MintBody, transaction: TokenTr
   });
 }
 
-/** Return a validated persisted mint before admission or policy writes. */
+/** Return a validated persisted mint before admitting new work. */
 export async function findMintIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
-  const resolved = extraction.resolved as MintPolicyResolved;
+  const resolved = extraction.resolved as MintResolved;
   if (!("replay" in resolved)) return null;
   if (resolved.replay.idempotencyKey !== idempotencyKey) {
     throw conflict("Idempotency key already used with different request payload");
-  }
-  await assertApprovedWalletOperationCustodyWallet(c, resolved.custodyWalletId);
-  if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(resolved.replay)) {
-    return null;
   }
   return mintReplayResponse(c, extraction.body as MintBody, resolved.replay);
 }
@@ -416,7 +397,6 @@ async function syncDestinationToOnChainAllowlist(opts: {
   }
 
   try {
-    await beginApprovedWalletOperationEffect(opts.c);
     await opts.mosaic.addToList({
       list: listAddress,
       wallet: opts.destination,
@@ -495,20 +475,21 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     throw badRequest("Current mint authority is not available for this token");
   }
   const mintAuthority = assertValidAddress(currentAuthority, "mintAuthority");
-  const { custodyWalletId, signer } = await resolveAuthoritySigner({
+  const authority = await resolveAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: mintAuthority,
     requiredWalletPermissions: ["tokens:write"],
   });
+  const { signer, custodyWalletId } = authority;
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   // Preparation must not mutate on-chain compliance state. A destination that
-  // is not already on the ABL can only be added by the execute route after its
-  // wallet-operation policy and approval gate have run.
+  // is not already on the ABL can only be added by the execute route.
   if (ablListAddress) {
     const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
       tokenId,
@@ -635,14 +616,14 @@ async function recordPreSubmissionMintFailure(options: {
 }
 
 /**
- * Parse and resolve an execute-mint request into its wallet-operation policy candidate.
+ * Parse and resolve an execute-mint request into the resources the handler works from.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resources, and raw payload.
+ * @returns The validated body and the resolved resources.
  */
-export async function extractMintPolicyCandidate(
+export async function extractMintRequest(
   c: ValidatedBodyContext<typeof mintSchema>
-): Promise<PolicyGateExtraction> {
+): Promise<RequestGateExtraction> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const input = c.req.valid("json");
@@ -667,16 +648,6 @@ export async function extractMintPolicyCandidate(
       throw conflict("Idempotent issuance transaction has no exact wallet identity");
     }
     return {
-      candidate: buildIssuancePolicyCandidate({
-        auth,
-        token,
-        custodyWalletId,
-        walletId: replay.providerWalletId,
-        operationType: "issuance_mint_execute",
-        amount: input.mint.amount,
-        destination: input.mint.destination,
-      }),
-      legs: [],
       body: input,
       resolved: {
         tokenId,
@@ -684,20 +655,7 @@ export async function extractMintPolicyCandidate(
         tokenService,
         custodyWalletId,
         replay: replay.transaction,
-      } satisfies MintReplayPolicyResolved,
-      rawPayload: {
-        tokenId: token.id,
-        mintAddress: token.mintAddress,
-        action: "mint",
-        destination: input.mint.destination,
-        amount: input.mint.amount,
-        memo: input.mint.memo === undefined ? null : input.mint.memo,
-      },
-      executionRequestBody: {
-        ...input,
-        signingCustodyWalletId: custodyWalletId,
-      },
-      idempotencyKey: null,
+      } satisfies MintReplayResolved,
     };
   }
 
@@ -726,7 +684,7 @@ export async function extractMintPolicyCandidate(
     throw badRequest("Current mint authority is not available for this token");
   }
   const currentAuthority = assertValidAddress(currentAuthorityRaw, "mintAuthority");
-  const { custodyWalletId, providerWalletId } = await resolveAuthorityWallet({
+  const { custodyWalletId } = await resolveAuthorityWallet({
     env: c.env,
     auth,
     requestedCustodyWalletId: input.signingCustodyWalletId,
@@ -743,16 +701,6 @@ export async function extractMintPolicyCandidate(
   });
 
   return {
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId,
-      walletId: providerWalletId,
-      operationType: "issuance_mint_execute",
-      amount: input.mint.amount,
-      destination: input.mint.destination,
-    }),
-    legs: [],
     body: input,
     resolved: {
       tokenId,
@@ -766,32 +714,11 @@ export async function extractMintPolicyCandidate(
       currentAuthority,
       custodyWalletId,
     },
-    rawPayload: {
-      tokenId: token.id,
-      mintAddress: token.mintAddress,
-      action: "mint",
-      destination: input.mint.destination,
-      amount: input.mint.amount,
-      memo: input.mint.memo === undefined ? null : input.mint.memo,
-    },
-    executionRequestBody: {
-      ...input,
-      signingCustodyWalletId: custodyWalletId,
-    },
-    idempotencyKey: null,
   };
 }
 
 export const executeMint = async (c: AppContext) => {
-  const gate = getPolicyGateContext<MintBody, MintPolicyResolved>(c);
-  if ("replay" in gate.resolved) {
-    await assertApprovedWalletOperationCustodyWallet(c, gate.resolved.custodyWalletId);
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(gate.resolved.replay)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict("Approved mint execution is incomplete and requires manual reconciliation");
-    }
-    return mintReplayResponse(c, gate.body, gate.resolved.replay);
-  }
+  const gate = getRequestGateContext<MintBody, MintExecutionResolved>(c);
 
   const {
     body: input,
@@ -808,8 +735,6 @@ export const executeMint = async (c: AppContext) => {
       custodyWalletId,
     },
   } = gate;
-
-  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = mintIdempotencyMetadata(
     c.req.header("Idempotency-Key"),
@@ -840,10 +765,6 @@ export const executeMint = async (c: AppContext) => {
   const auditService = new AuditService(getDb(c.env));
   if (replayed) {
     const replayedTransaction = await recoverSettledMintReplay(auditService, tokenService, tx);
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(replayedTransaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict("Approved mint execution is incomplete and requires manual reconciliation");
-    }
     return mintReplayResponse(c, input, replayedTransaction);
   }
 
@@ -874,14 +795,16 @@ export const executeMint = async (c: AppContext) => {
   let reservedSupply: string | null = null;
   let addedToAllowlist = false;
   try {
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: tx.custodyWalletId,
       currentAuthority,
       requiredWalletPermissions: ["tokens:write"],
     });
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const signer = authority.signer;
+    const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
     addedToAllowlist = ablListAddress
       ? await syncDestinationToOnChainAllowlist({
           c,
@@ -904,11 +827,11 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
-        reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
-          c,
-          tokenId,
-          amountBaseUnits.toString()
-        );
+        const reserved = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
+        if (reserved === null) {
+          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+        }
+        reservedSupply = reserved;
       }
     );
 
@@ -940,6 +863,17 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: settledTokenAccount,
     });
   } catch (error) {
+    // The sponsor decides money admission when it signs, after supply is
+    // reserved. A refusal there comes before Kora signs or sends, so the
+    // transaction can never land and its reservation goes back (HOO-1955).
+    if (reservedSupply !== null && error instanceof MoneyMovementRefusedError) {
+      await tokenService.releaseUnsentMintReservation(
+        tokenId,
+        amountBaseUnits.toString(),
+        reservedSupply
+      );
+      reservedSupply = null;
+    }
     if (reservedSupply === null) {
       await recordPreSubmissionMintFailure({
         c,

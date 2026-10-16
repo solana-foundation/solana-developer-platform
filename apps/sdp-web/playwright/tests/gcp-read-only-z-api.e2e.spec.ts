@@ -1,13 +1,17 @@
 import { expect, test } from "@playwright/test";
+import type { SdpModule } from "@sdp/types";
 import { getE2EEnv } from "../env";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import { provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
+import { fetchApiReleaseChannel, isModuleServed } from "../support/release-channel";
 
 interface GoldenEndpoint {
   domain: string;
   path: string;
   scope: "org" | "project";
   query?: Record<string, string>;
+  /** Probed only where the API's release channel runs this module (403 elsewhere). */
+  module?: SdpModule;
 }
 
 const FIRST_PAGE = { page: "1", pageSize: "20" };
@@ -18,8 +22,19 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
   { domain: "api-keys", path: "/v1/api-keys", scope: "project" },
   { domain: "onboarding", path: "/v1/onboarding/status", scope: "org" },
   { domain: "counterparties", path: "/v1/counterparties", scope: "project", query: FIRST_PAGE },
-  { domain: "issuance-tokens", path: "/v1/issuance/tokens", scope: "project", query: FIRST_PAGE },
-  { domain: "issuance-templates", path: "/v1/issuance/templates", scope: "project" },
+  {
+    domain: "issuance-tokens",
+    path: "/v1/issuance/tokens",
+    scope: "project",
+    query: FIRST_PAGE,
+    module: "issuance",
+  },
+  {
+    domain: "issuance-templates",
+    path: "/v1/issuance/templates",
+    scope: "project",
+    module: "issuance",
+  },
   { domain: "wallets", path: "/v1/wallets", scope: "project", query: { view: "summary" } },
   {
     domain: "payments-transfers",
@@ -28,7 +43,6 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
     query: FIRST_PAGE,
   },
   { domain: "payments-recurring", path: "/v1/payments/recurring-payments", scope: "project" },
-  { domain: "policies", path: "/v1/policies", scope: "project" },
   // Earn answers 403 wherever EARN_ENABLED is off (stage and prod today); the smoke pins the
   // flag off in smoke-flags.json, so the row is only meaningful when the posture turns it on.
   ...(process.env.EARN_ENABLED === "true"
@@ -39,12 +53,15 @@ const GOLDEN_ENDPOINTS: GoldenEndpoint[] = [
 test.describe("GCP dev API golden endpoints", () => {
   let orgApi: LocalApiClient;
   let projectApi: LocalApiClient;
+  let servedModule: (module: SdpModule) => boolean;
 
   test.beforeAll(async ({ browser }) => {
     const env = getE2EEnv();
     if (!env.useExternalApi) {
       throw new Error("GCP smoke must run in explicit external mode");
     }
+    const releaseChannel = await fetchApiReleaseChannel(env.sdpApiBaseUrl);
+    servedModule = (module) => isModuleServed(releaseChannel, module);
 
     await provisionWithAdminSession(browser, async (session) => {
       expect(session.identity.organizationId).toBe(env.clerkOrgId);
@@ -60,6 +77,10 @@ test.describe("GCP dev API golden endpoints", () => {
 
   for (const endpoint of GOLDEN_ENDPOINTS) {
     test(`${endpoint.domain} responds to an authed read`, async () => {
+      test.skip(
+        endpoint.module !== undefined && !servedModule(endpoint.module),
+        `${endpoint.module} is outside the API's release channel`
+      );
       const api = endpoint.scope === "project" ? projectApi : orgApi;
       const path = endpoint.query
         ? `${endpoint.path}?${new URLSearchParams(endpoint.query)}`

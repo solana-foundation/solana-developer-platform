@@ -77,7 +77,7 @@
             "description": "Creates a new API key. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -110,7 +110,7 @@
             "description": "Updates API key attributes. Use null to clear optional fields.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"allowedOperations\": [\n    \"issuance_mint_execute\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -135,87 +135,6 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"confirmation\": \"Primary Key\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Create API-key policy profile",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles",
-            "description": "Creates a draft operation-level control profile for one API key.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Treasury service controls\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Create API-key policy revision",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions",
-            "description": "Appends an immutable rule snapshot to an API-key control profile without activating it.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-issuance\",\n      \"kind\": \"operation_family\",\n      \"family\": \"issuance\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Activate API-key policy revision",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions/{{revisionId}}/activate",
-            "description": "Makes one immutable revision the active policy for its API-key control profile."
-          }
-        },
-        {
-          "name": "Replace or clear API-key policy bindings",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-bindings",
-            "description": "Explicitly replaces the complete all-wallet/selected-wallet policy binding set, or clears it. Existing bindings are otherwise preserved by API-key updates and rotation.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mode\": \"replace\",\n  \"bindings\": [\n    {\n      \"bindingScope\": \"all\",\n      \"apiKeyControlProfileId\": \"\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -265,34 +184,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/initialize",
-            "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+            "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Switch wallet signing provider",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/wallets/switch",
-            "description": "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -307,7 +202,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Lists active wallets under active Config and Connection owners. Omitted or true includeAllProviders includes every eligible owner; false uses target-selection semantics. Provider narrows either mode."
+            "description": "Lists active wallets under active Config and Connection owners, oldest first. Provider narrows the list to one custody provider."
           }
         },
         {
@@ -322,10 +217,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Provisions a new wallet for the effective custody target, a provider-only resolved target, or an exact Custody Connection selected by connectionId.",
+            "description": "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Treasury wallet\",\n  \"purpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -359,45 +254,12 @@
           }
         },
         {
-          "name": "Set default wallet",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/wallets/default-wallet",
-            "description": "Resolves walletId to its exact Config or Connection owner and changes only that owner's default wallet. Provider, when supplied, is a consistency assertion.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Get wallet signing config",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/config",
-            "description": "Returns the resolved Config when the effective custody target is Config-owned. An effective Connection does not fabricate a Config and returns 404."
-          }
-        },
-        {
           "name": "List wallet signing configs",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/configs",
-            "description": "Returns active Config-owned wallet signing configurations for the requested scope. When a Connection is effective, defaultConfigId is null rather than a fabricated Config ID."
+            "description": "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider."
           }
         },
         {
@@ -410,21 +272,12 @@
           }
         },
         {
-          "name": "List switch provider options",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/switch-options",
-            "description": "Returns Provider-level switching metadata for the effective Config or Connection target while preserving durable wallet-reuse facts during temporary runtime unavailability."
-          }
-        },
-        {
           "name": "Get wallet public key",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/public-key",
-            "description": "Returns the persisted public key for an exact active walletId, or for the effective active custody target when walletId is omitted. Resolution is DB-backed only."
+            "description": "Returns the persisted public key for an exact active walletId. walletId may be omitted only by an API key whose own signing-wallet binding names the wallet; otherwise the request is rejected with 400. Resolution is DB-backed only."
           }
         },
         {
@@ -449,51 +302,6 @@
                 }
               }
             }
-          }
-        },
-        {
-          "name": "List wallet approval requests",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests",
-            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
-          }
-        },
-        {
-          "name": "Get wallet approval request",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}",
-            "description": "Returns one wallet operation approval request with operation and policy context."
-          }
-        },
-        {
-          "name": "Approve wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
-            "description": "Approves a pending wallet operation approval request. The resolver must differ from the requester, including across a user's Clerk identity and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
-          }
-        },
-        {
-          "name": "Reject wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
-            "description": "Rejects a pending wallet operation approval request. The resolver must differ from the requester, including across a user's Clerk identity and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
-          }
-        },
-        {
-          "name": "Cancel wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
-            "description": "Cancels a pending wallet operation approval request. The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
           }
         },
         {
@@ -567,13 +375,22 @@
             "description": "Updates project attributes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"webhookUrl\": \"https://example.com/webhook\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Get project provider availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/provider-availability",
+            "description": "Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
           }
         },
         {
@@ -666,7 +483,7 @@
             "description": "Creates an API key scoped to the project. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Treasury wallet\",\n  \"walletPurpose\": \"transfer\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -848,7 +665,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
-            "description": "Builds an unsigned deploy transaction for client-side signing."
+            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`, else the API key's preferred or sole wallet binding. The request is rejected with 400 when none resolves, or when the key has several bindings and no preferred one. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata."
           }
         },
         {
@@ -881,7 +698,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
-            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches."
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored), else the API key's preferred or sole wallet binding; the request is rejected with 400 when none resolves. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -1324,67 +1141,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/balances",
-            "description": "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets."
-          }
-        },
-        {
-          "name": "Get wallet policy",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets."
-          }
-        },
-        {
-          "name": "Update wallet policy",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Updates payment policy rules for a custody wallet, activating a new control-profile revision. API keys must hold the api_admin role; a key with a lesser role receives 403 even when it has the write permissions. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-batch-transfers\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"payment_transfer_batch_execute\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ],\n  \"expectedRevisionId\": \"wcpr_example\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "List wallet policy revisions",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/revisions",
-            "description": "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference."
-          }
-        },
-        {
-          "name": "List wallet policy evaluations",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations",
-            "description": "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads."
-          }
-        },
-        {
-          "name": "Get wallet policy evaluation",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations/{{policyEvaluationId}}",
-            "description": "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage."
+            "description": "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets."
           }
         },
         {
@@ -1907,20 +1664,6 @@
             "header": [],
             "url": "{{baseUrl}}/v1/transactions",
             "description": "Lists the project's transactions across SDP modules with stable cursor pagination. Results are limited to modules allowed by the caller's read permissions: payments:read for payments, private channels, and rings; wallets:read for DvP; and tokens:read for issuance. Requesting a module without its permission returns INSUFFICIENT_PERMISSIONS. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Policies",
-      "item": [
-        {
-          "name": "List policy controls",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/policies",
-            "description": "Lists wallet and API-key control targets in one paginated inventory. Every target, profile, binding, and evaluation is scoped to the authenticated organization and exact project."
           }
         }
       ]

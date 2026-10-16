@@ -22,6 +22,7 @@ export type ErrorCode =
   | "EXPIRED_API_KEY"
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
+  | "OPERATION_NOT_ALLOWED"
   | "INVALID_INVITATION"
   | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
@@ -43,16 +44,15 @@ export type ErrorCode =
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
   | "SOLANA_RPC_TIMEOUT"
-  | "UPSTREAM_RESPONSE_TOO_LARGE"
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
-  | "SIGNING_PENDING"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_RESPONSE_INVALID"
   | "ESTIMATE_NOT_AVAILABLE"
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
@@ -83,6 +83,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   EXPIRED_API_KEY: 401,
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
+  OPERATION_NOT_ALLOWED: 403,
   INVALID_INVITATION: 400,
   EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
@@ -104,7 +105,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
   SOLANA_RPC_TIMEOUT: 504,
-  UPSTREAM_RESPONSE_TOO_LARGE: 502,
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
@@ -113,9 +113,11 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
-  SIGNING_PENDING: 202,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
+  // 502, never 503: the provider answered success, so the action may have
+  // happened and a blind retry could repeat it.
+  PROVIDER_RESPONSE_INVALID: 502,
   ESTIMATE_NOT_AVAILABLE: 503,
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
@@ -139,6 +141,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   EXPIRED_API_KEY: "API key has expired",
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
+  OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
   INVALID_INVITATION: "Invalid invitation token",
   EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
@@ -161,17 +164,15 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
   SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",
-  UPSTREAM_RESPONSE_TOO_LARGE:
-    "The RPC upstream answered with a body larger than the relay returns",
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
-  SIGNING_PENDING: "Signing request pending approval",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
+  PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
   ESTIMATE_NOT_AVAILABLE:
     "An indicative estimate is not available; the rate is known at quote time",
   UNSUPPORTED_CORRIDOR: "Provider does not support this currency corridor",

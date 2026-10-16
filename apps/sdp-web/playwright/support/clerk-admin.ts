@@ -298,6 +298,7 @@ export async function setClerkOrganizationTier(
     sdp: {
       ...sdpMetadata,
       tier,
+      enableProductionProject: true,
       providerOverrides: undefined,
     },
   };

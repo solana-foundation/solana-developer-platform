@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import { apiKeyCreateSchema, apiKeyUpdateSchema } from "./schemas";
 
 const validCreateRequest = {
@@ -40,27 +39,41 @@ describe("API key IP allowlist schemas", () => {
 });
 
 describe("API key wallet provisioning schema", () => {
-  const exactConnectionRequest = {
-    name: "Connection key",
+  const provisioningRequest = {
+    name: "Provisioning key",
     walletScope: "selected",
-    provisionWallet: { connectionId: "cconn_selected" },
   } as const;
 
-  it("uses an exact-Connection shape that the previous revision rejects", () => {
-    const previousProvisioningSchema = z.object({
-      walletScope: z.enum(["all", "selected"]),
-      provisionWallet: z.boolean().optional(),
-    });
+  it.each([{ connectionId: "cconn_selected" }, { provider: "privy" }] as const)(
+    "accepts a provisioning owner that names one provider account: %j",
+    (provisionWallet) => {
+      expect(
+        apiKeyCreateSchema.safeParse({ ...provisioningRequest, provisionWallet }).success
+      ).toBe(true);
+    }
+  );
 
-    expect(apiKeyCreateSchema.safeParse(exactConnectionRequest).success).toBe(true);
-    expect(previousProvisioningSchema.safeParse(exactConnectionRequest).success).toBe(false);
-  });
+  it.each([
+    true,
+    false,
+    {},
+    { connectionId: "cconn_selected", provider: "privy" },
+    { connectionId: "" },
+    { provider: "not_a_provider" },
+  ])(
+    "rejects a provisioning owner that names no single provider account: %j",
+    (provisionWallet) => {
+      expect(
+        apiKeyCreateSchema.safeParse({ ...provisioningRequest, provisionWallet }).success
+      ).toBe(false);
+    }
+  );
 
-  it("rejects the obsolete top-level connectionId shape", () => {
+  it("rejects the obsolete top-level connectionId beside a valid owner", () => {
     expect(
       apiKeyCreateSchema.safeParse({
-        ...exactConnectionRequest,
-        provisionWallet: true,
+        ...provisioningRequest,
+        provisionWallet: { connectionId: "cconn_selected" },
         connectionId: "cconn_selected",
       }).success
     ).toBe(false);

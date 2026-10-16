@@ -164,7 +164,8 @@ export interface EarnMovementRow {
   signed_transaction: string | null;
   /** NUMERIC in Postgres, read back as a string so uint64 round-trips exactly. */
   last_valid_block_height: string | null;
-  request_id: string;
+  /** Null for observed payouts; command identity belongs to initiated movements. */
+  request_id: string | null;
   idempotency_fingerprint: string;
   provider_data: Record<string, unknown>;
   created_by: string | null;
@@ -1024,7 +1025,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     signature: row.signature as string | null,
     signed_transaction: row.signed_transaction as string | null,
     last_valid_block_height: row.last_valid_block_height as string | null,
-    request_id: row.request_id as string,
+    request_id: row.request_id as string | null,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
     created_by: row.created_by as string | null,
@@ -1123,7 +1124,7 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     signature: String(row.closing_signature),
     signed_transaction: null,
     last_valid_block_height: null,
-    request_id: String(row.client_request_id),
+    request_id: null,
     idempotency_fingerprint: String(row.idempotency_fingerprint),
     provider_data: {
       observation: "provider_solver_fulfillment",
@@ -1273,9 +1274,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
-          // ON DELETE SET NULL, so a null means the project was deleted — and
-          // accepting it here would expose that project's movements to every
-          // sibling project sharing an organization-level custody wallet.
+          // ON DELETE SET NULL, so a null means the project was deleted, and a
+          // deleted project's movements are not addressable through a
+          // project-scoped read.
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
                AND environment = ?
@@ -3312,13 +3313,13 @@ async function claimVaultPosition(
            (
              wallet.custody_config_id IS NOT NULL
              AND config.organization_id = project.organization_id
-             AND (config.project_id IS NULL OR config.project_id = project.id)
+             AND config.project_id = project.id
            )
            OR
            (
              wallet.custody_connection_id IS NOT NULL
              AND connection.organization_id = project.organization_id
-             AND (connection.project_id IS NULL OR connection.project_id = project.id)
+             AND connection.project_id = project.id
            )
          )
        ON CONFLICT (organization_id, environment, provider, vault_address, custody_wallet_id)

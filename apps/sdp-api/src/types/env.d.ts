@@ -1,18 +1,21 @@
 /** Environment variables consumed by the Node API runtime. */
 
-import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type { PolicyGateContext } from "@/middleware/policy-gate";
-import type { KVStoreSet } from "@/runtime/kv";
-import type { Observability } from "@/runtime/observability";
 import type {
+  AllowedOperation,
   ApiKeyEnvironment,
+  EgressReadiness,
+  OrganizationEntitlements,
   OrganizationRpcProvider,
   Permission,
-  WalletOperationHumanActorType,
+  SdpRampProviderStages,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
+import type { RequestGateContext } from "@/middleware/request-gate";
+import type { KVStoreSet } from "@/runtime/kv";
+import type { Observability } from "@/runtime/observability";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
@@ -61,16 +64,17 @@ export interface Env {
   // a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
+  // Release channel: which modules this deployment can run at all (`@sdp/types`
+  // release channels). Required: a missing or unknown name fails at boot.
+  SDP_RELEASE_CHANNEL?: string;
+
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
-  // to encrypted DB storage and can also resolve provider credentials directly
-  // from runtime env bindings.
-  CREDENTIAL_SECRET_STORE_BACKEND?: "gcp_secret_manager" | "encrypted_db" | "runtime_env";
+  // to encrypted DB storage.
+  CREDENTIAL_SECRET_STORE_BACKEND?: "gcp_secret_manager" | "encrypted_db";
   GCP_SECRET_MANAGER_PROJECT_ID?: string;
   GCP_SECRET_MANAGER_SECRET_PREFIX?: string;
   GCP_SECRET_MANAGER_API_BASE_URL?: string;
-  PRIVY_BYOK_ENABLED?: string;
-  SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED?: string;
 
   // Application secrets
   API_KEY_PEPPER?: string;
@@ -225,7 +229,7 @@ export interface Env {
   KORA_API_KEY?: string;
   KORA_CLOUD_RUN_AUDIENCE?: string;
   KORA_TIMEOUT_MS?: string;
-  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/payments `resolveKoraEndpoint`). */
+  /** Per-cluster Kora endpoints for a process sponsoring on both clusters (see @sdp/fee-payment `resolveKoraEndpoint`). */
   KORA_RPC_URL_DEVNET?: string;
   KORA_API_KEY_DEVNET?: string;
   KORA_CLOUD_RUN_AUDIENCE_DEVNET?: string;
@@ -271,23 +275,12 @@ export interface Env {
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
   // MoonPay ramps configuration
-  MOONPAY_API_KEY?: string;
-  MOONPAY_SECRET_KEY?: string;
+  // MoonPay sandbox only: production projects bring their own MoonPay account.
   MOONPAY_ONRAMP_URL?: string;
   MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
-  MOONPAY_WEBHOOK_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
-
-  // Lightspark Grid ramps configuration
-  LIGHTSPARK_GRID_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_API_BASE_URL?: string;
-  LIGHTSPARK_GRID_WEBHOOK_PUBLIC_KEY?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_ID?: string;
-  LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET?: string;
-  LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
 
   // BVNK ramps configuration
   BVNK_HAWK_AUTH_ID?: string;
@@ -299,24 +292,13 @@ export interface Env {
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
-  // Mural Pay ramps configuration
-  MURAL_PAY_API_KEY?: string;
-  MURAL_PAY_TRANSFER_API_KEY?: string;
-  MURAL_PAY_WEBHOOK_PUBLIC_KEY?: string;
-  MURAL_PAY_SANDBOX_API_KEY?: string;
-  MURAL_PAY_SANDBOX_TRANSFER_API_KEY?: string;
-  MURAL_PAY_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
-
-  // MoneyGram ramps configuration
-  MONEYGRAM_SANDBOX_PUBLIC_KEY?: string;
-  MONEYGRAM_SANDBOX_SECRET_KEY?: string;
-
   // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
   // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
   COINBASE_CDP_RAMPS_WEBHOOK_SECRET?: string;
-  STRIPE_SECRET_KEY?: string;
-  STRIPE_PUBLISHABLE_KEY?: string;
-  STRIPE_WEBHOOK_SECRET?: string;
+  // Stripe sandbox only: production projects bring their own Stripe account.
+  STRIPE_SANDBOX_SECRET_KEY?: string;
+  STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
+  STRIPE_SANDBOX_WEBHOOK_SECRET?: string;
 
   // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;
@@ -354,13 +336,17 @@ declare module "hono" {
   interface ContextVariableMap {
     // Injected by createApp so handlers use the same implementation as tests
     observability?: Observability;
+    // Set by createApp on every request; see AppDeps.rampProviderStages
+    rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.egressReadiness
+    egressReadiness?: () => EgressReadiness;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
-    approvedWalletOperationId?: string;
-    approvedWalletOperationAttemptId?: string;
-    // Set by policyGate middleware for gated routes
-    policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
+    // Loaded once by authentication for every actor; see lib/production-entitlement.ts
+    organizationEntitlements: OrganizationEntitlements;
+    // Set by requestGate middleware for gated routes
+    requestGate?: RequestGateContext;
     apiKey?: {
       id: string;
       organizationId: string;
@@ -368,6 +354,7 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
+      allowedOperations?: AllowedOperation[] | null;
       walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];
@@ -376,14 +363,6 @@ declare module "hono" {
         custodyWalletId?: string;
         permissions: Permission[];
       }>;
-    };
-    // Original human actor of an approved wallet operation being replayed
-    approvedOperationActor?: {
-      operationId: string;
-      userId: string;
-      storedActorType: WalletOperationHumanActorType;
-      organizationId: string;
-      permissions: Permission[];
     };
     // Clerk auth context set by middleware
     clerk?: {

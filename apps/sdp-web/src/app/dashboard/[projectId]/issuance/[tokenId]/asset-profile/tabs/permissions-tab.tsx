@@ -1,0 +1,224 @@
+"use client";
+
+import {
+  ChevronDown,
+  Coins,
+  FileText,
+  type LucideIcon,
+  Snowflake,
+  TriangleAlert,
+  UserCog,
+} from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Select, SelectItem } from "@/components/ui/select";
+import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
+import { shortenAddress, toWalletIdentity, WalletIdentityBadge } from "../../../wallet-identity";
+import { TokenDisabledActionTooltip } from "../../token-disabled-action-tooltip";
+import type { PermissionRowId } from "../../token-management-workspace.types";
+import { getSignerWalletOptionLabel } from "../../token-management-workspace.utils";
+import type { AssetProfileForm } from "../use-asset-profile-form";
+import type { TokenOperations } from "../use-token-operations";
+
+const PERMISSION_ROW_ICONS: Record<PermissionRowId, LucideIcon> = {
+  "mint-authority": Coins,
+  "freeze-authority": Snowflake,
+  "metadata-authority": FileText,
+  "permanent-delegate": UserCog,
+};
+
+export function PermissionsTab({
+  ops,
+  form,
+  canManageTokenAdmin,
+}: {
+  ops: TokenOperations;
+  form: AssetProfileForm;
+  canManageTokenAdmin: boolean;
+}) {
+  const t = useTranslations();
+  const copy = {
+    "mint-authority": [
+      t("DashboardIssuance.simplified.mintPermission"),
+      t("DashboardIssuance.simplified.mintPermissionHint"),
+    ],
+    "freeze-authority": [
+      t("DashboardIssuance.simplified.freezePermission"),
+      t("DashboardIssuance.simplified.freezePermissionHint"),
+    ],
+    "metadata-authority": [
+      t("DashboardIssuance.simplified.metadataPermission"),
+      t("DashboardIssuance.simplified.metadataPermissionHint"),
+    ],
+    "permanent-delegate": [
+      t("DashboardIssuance.simplified.recoveryPermission"),
+      t("DashboardIssuance.simplified.recoveryPermissionHint"),
+    ],
+  };
+  return (
+    <div className="w-full space-y-5">
+      {ops.authoritySummary.hasExternal ? <ExternalAuthorityWarning ops={ops} /> : null}
+      {ops.authorityWalletsLoading ? (
+        <div aria-busy="true" className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-4 py-6">
+              <SkeletonBlock className="h-5 w-52" />
+              <SkeletonBlock className="h-10 w-48 rounded-lg" />
+            </div>
+          ))}
+        </div>
+      ) : ops.canDeployToken ? (
+        <div className="w-full space-y-4">
+          {form.errors.authorityWalletIds ? (
+            <p role="alert" className="text-sm text-error">
+              {form.errors.authorityWalletIds}
+            </p>
+          ) : null}
+          {ops.permissionRows.map((row) => {
+            const assignedId =
+              form.draft.authorityWalletIds?.[row.id] ?? form.draft.signingWalletId;
+            const selectedId = ops.authorityWallets.some((wallet) => wallet.id === assignedId)
+              ? assignedId
+              : "";
+            return (
+              <div
+                key={row.id}
+                className="grid items-center gap-3 border-b border-border-subtle py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)]"
+              >
+                <p className="text-sm font-medium text-primary">{copy[row.id][0]}</p>
+                <Select
+                  ariaLabel={copy[row.id][0]}
+                  placeholder={t("DashboardIssuance.signer.select")}
+                  value={selectedId}
+                  disabled={!canManageTokenAdmin || form.saving || !ops.authorityWallets.length}
+                  onValueChange={(value) => {
+                    if (value)
+                      form.updateDraft({
+                        ...(row.id === "mint-authority" ? { signingWalletId: value } : {}),
+                        authorityWalletIds: { ...form.draft.authorityWalletIds, [row.id]: value },
+                      });
+                  }}
+                >
+                  {ops.authorityWallets.map((wallet) => (
+                    <SelectItem key={wallet.id} value={wallet.id}>
+                      {getSignerWalletOptionLabel(wallet, t)}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="divide-y divide-border-subtle">
+          {ops.permissionRows.map((row) => {
+            const wallet = ops.authorityWallets.find((wallet) => wallet.publicKey === row.value);
+            return (
+              <div
+                key={row.id}
+                data-testid={`permission-row-${row.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <p className="text-sm text-primary">{copy[row.id][0]}</p>
+                <TokenDisabledActionTooltip reason={row.editDisabledReason}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    iconRight={row.value ? <ChevronDown className="size-4" /> : undefined}
+                    disabled={
+                      !canManageTokenAdmin || ops.isPending || Boolean(row.editDisabledReason)
+                    }
+                    onClick={() => ops.handleAuthorityModalOpen(row)}
+                    aria-label={`${copy[row.id][0]} ${wallet?.label || (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}`}
+                  >
+                    {wallet?.label ||
+                      (row.value ? shortenAddress(row.value) : t("DashboardIssuance.wallet.none"))}
+                  </Button>
+                </TokenDisabledActionTooltip>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Warning + remediation for authorities held outside SDP custody. SDP can't sign
+ * for them (or transfer them itself — that requires the current external holder),
+ * so we surface which authorities are external, the custody address to transfer
+ * to, and note the holder must perform the on-chain transfer themselves.
+ */
+function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
+  const t = useTranslations();
+  const href = useProjectHref();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
+  const externalRows = ops.permissionRows.filter((row) => row.controlStatus === "external");
+  const custodyWallet = ops.authorityWallets[0] ?? null;
+
+  return (
+    <div className="rounded-xl border border-warning-border bg-warning-bg px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-warning" />
+        <p className="text-sm font-medium text-warning">
+          {t("DashboardIssuance.permissions.externalWarningTitle")}
+        </p>
+        {externalRows.map((row) => {
+          const Icon = PERMISSION_ROW_ICONS[row.id];
+          return (
+            <span
+              key={row.id}
+              className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning-border ring-inset"
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              {row.title}
+            </span>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-sm text-warning">
+        {t("DashboardIssuance.permissions.externalWarningBody")}
+      </p>
+      <div className="mt-4">
+        {custodyWallet ? (
+          <>
+            <p className="text-xs text-warning">
+              {t("DashboardIssuance.permissions.externalRemediationTarget")}
+            </p>
+            {/* The transfer target is one of our custody wallets, so name it —
+                the compact badge, not the card, whose 48px mark and stacked key
+                rows would dominate the banner. The flex wrapper keeps the badge
+                (itself a block-level flex container) at content width instead of
+                letting it stretch across the banner. */}
+            <div className="mt-1.5 flex">
+              <WalletIdentityBadge
+                identity={toWalletIdentity(custodyWallet, null, {
+                  unresolvedAs: "custom",
+                  unlabeled: t("DashboardIssuance.wallet.unlabeled"),
+                })}
+                onCopy={(value) => void ops.handleCopy(value)}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-warning">
+            {t("DashboardIssuance.permissions.externalRemediationNoWallet")}{" "}
+            {custodyEnabled ? (
+              <Link href={href("/dashboard/wallets/setup")} className="font-medium underline">
+                {t("DashboardIssuance.permissions.createWallet")}
+              </Link>
+            ) : null}
+          </p>
+        )}
+        <p className="mt-2 text-xs text-warning">
+          {t("DashboardIssuance.permissions.externalRemediationNote")}
+        </p>
+      </div>
+    </div>
+  );
+}

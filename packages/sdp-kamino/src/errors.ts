@@ -66,12 +66,8 @@ export function amountOutOfRange(field: string, value: string): SdpKaminoError {
 }
 
 /**
- * The vault account could not be read on this cluster.
- *
- * The most likely cause is the RPC pointing at the wrong chain: Kamino's mainnet
- * kvault program id ALSO exists on devnet with zero accounts under it, so a
- * cluster/RPC mismatch presents as "this vault does not exist" rather than as a
- * connection error. The message names both so the reader checks the right thing.
+ * Preserve the underlying RPC or decoding cause. Cluster identity is proved
+ * separately; an unreadable vault alone does not establish a cluster mismatch.
  */
 export function vaultUnreadable(
   vault: Address,
@@ -80,8 +76,7 @@ export function vaultUnreadable(
 ): SdpKaminoError {
   return new SdpKaminoError(
     "VAULT_UNREADABLE",
-    `Kamino vault ${vault} could not be read on ${cluster}. ` +
-      "Check that the RPC endpoint serves that cluster — a mismatched RPC reports a missing vault, not a connection error.",
+    `Kamino vault ${vault} could not be read on ${cluster}. The RPC request or vault state is unavailable.`,
     { cause }
   );
 }

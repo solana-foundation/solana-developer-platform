@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -51,23 +52,29 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       members: [],
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted)
-         VALUES ('cfg_transfer_batches_exact', ?, NULL, 'test_batch_exact', 'encrypted')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
-         VALUES (?, 'cfg_transfer_batches_exact', ?, 'Source111')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_transfer_batches_exact",
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          provider: "local",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: TEST_CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_exact" },
+          walletId: TEST_WALLET_ID,
+          publicKey: "Source111",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
 
     repo = createPostgresPaymentTransferBatchesRepository(db);
   });

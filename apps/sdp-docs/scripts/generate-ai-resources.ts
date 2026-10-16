@@ -2,6 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { SdpModule } from "@sdp/types";
+import { expandDocsBlocks } from "../src/lib/docs-blocks";
+import { DOCS_MODULES } from "../src/lib/docs-catalog";
+import { isModulePublished, isPageSourcePublished } from "../src/lib/release-channel";
 import { canonicalSite } from "../src/lib/site";
 
 const {
@@ -42,15 +46,22 @@ type Section = {
   pages: DocsPage[];
 };
 
-const FEATURE_SUMMARY = [
-  "Wallets and custody",
-  "API key management",
-  "Projects",
-  "Token issuance and lifecycle operations",
-  "Payments, transfers, and ramps",
-  "Compliance screening",
-  "Asset profiles and public token metadata",
-];
+// The llms files describe only what this build's release channel publishes.
+
+// One capability line per published module, from the same catalog as the
+// AI guide's <ModuleCapabilities /> block.
+const FEATURE_SUMMARY = DOCS_MODULES.filter(
+  (entry) => entry.module === "core" || isModulePublished(entry.module)
+).map((entry) => entry.capability);
+
+/**
+ * Generated API reference pages carry no frontmatter; their family exists only
+ * when the release channel runs its module.
+ */
+const KEY_PAGE_MODULES: Record<string, SdpModule> = {
+  "reference/api/issuance": "issuance",
+  "reference/api/asset-profiles": "issuance",
+};
 
 const KEY_PAGE_SLUGS = [
   "introduction",
@@ -125,14 +136,25 @@ function toPageSlug(filePath: string): string {
   return relativePath.replace(/\.mdx$/, "");
 }
 
+/** Pages a `module:` tag leaves out of this release channel. */
+const excludedSlugs = new Set<string>();
+
 async function loadPages(): Promise<Map<string, DocsPage>> {
   const files = await listFiles(docsContentDir);
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
   const pages = new Map<string, DocsPage>();
 
-  for (const filePath of mdxFiles) {
+  const sources = await Promise.all(
+    mdxFiles.map(async (filePath) => ({ filePath, raw: await fs.readFile(filePath, "utf8") }))
+  );
+
+  for (const { filePath, raw } of sources) {
     const slug = toPageSlug(filePath);
-    const source = await fs.readFile(filePath, "utf8");
+    if (!isPageSourcePublished(raw, filePath)) {
+      excludedSlugs.add(slug);
+      continue;
+    }
+    const source = expandDocsBlocks(raw, filePath);
     const { title, description } = parseFrontmatter(source);
 
     pages.set(slug, {
@@ -221,6 +243,10 @@ function buildSections(
       return;
     }
 
+    if (excludedSlugs.has(fullSlug)) {
+      return;
+    }
+
     const folderMeta = folderMetas.get(fullSlug);
     if (!folderMeta) {
       console.warn(`generate-ai-resources: no page or folder for entry "${fullSlug}" — skipping`);
@@ -246,7 +272,10 @@ function buildSections(
 }
 
 function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  return KEY_PAGE_SLUGS.map((slug) => {
+  const inChannel = KEY_PAGE_SLUGS.filter(
+    (slug) => !excludedSlugs.has(slug) && isModulePublished(KEY_PAGE_MODULES[slug])
+  );
+  return inChannel.map((slug) => {
     const page = pages.get(slug);
     if (!page) {
       throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);

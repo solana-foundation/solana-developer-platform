@@ -7,12 +7,13 @@ import type { Env } from "@/types/env";
  * Resolves the product environment (provider credentials, rail, and catalogue
  * scope) for the current request.
  *
- * Environment is a project boundary (migration 0005): API keys inherit it from
- * their project via the auth JOIN, and dashboard callers (Clerk) select a
- * project with the x-project-id header, which
- * projectContextMiddleware verifies against project membership before setting
- * `projectEnvironment`. A Clerk caller on a production project therefore
- * resolves to production — the same rails as a production API key.
+ * Environment is a project boundary (migration 0005). Only
+ * `projectContextMiddleware` sets `projectEnvironment`, for every actor (API
+ * key, dashboard, approved-operation replay), and only after it has refused a
+ * production project whose organization lacks the production entitlement
+ * (APE-351). There is deliberately no shortcut through the API key's own
+ * environment: a router that forgot the middleware fails here, closed, instead
+ * of reaching production unchecked.
  *
  * Fails closed: a request whose environment cannot be resolved must never
  * default to either side. Defaulting to sandbox would point sandbox provider
@@ -20,11 +21,6 @@ import type { Env } from "@/types/env";
  * worse.
  */
 export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnvironment {
-  const apiKey = c.get("apiKey");
-  if (apiKey) {
-    return apiKey.environment;
-  }
-
   const projectEnvironment = c.get("projectEnvironment");
   if (projectEnvironment) {
     return projectEnvironment;

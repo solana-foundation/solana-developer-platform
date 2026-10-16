@@ -3,10 +3,11 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
+import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -50,11 +51,15 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
+import { setTabShowsDemo } from "@/lib/dashboard-fetch";
 import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import {
+  useDashboardUrlState,
+  useSyncDashboardUrlStateWithRouter,
+} from "@/lib/dashboard-url-state";
 import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import { isDemoPath } from "@/lib/payments-demo/demo-cookie";
 import {
@@ -63,6 +68,7 @@ import {
   type PaymentsDemoState,
 } from "@/lib/payments-demo/payments-demo-context";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
+import { useDashboardPathname, useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
 
@@ -133,6 +139,7 @@ function SidebarGroup({
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   const search = useSearchParams().toString();
   const navigationLocation = search ? `${pathname}?${search}` : pathname;
   return (
@@ -152,7 +159,6 @@ function SidebarGroup({
         ) : null}
       </p>
       <div className="space-y-0.5 refresh:space-y-0">
-        {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
           const active = isDashboardNavItemActive(navigationLocation, item.href);
@@ -165,7 +171,7 @@ function SidebarGroup({
             <div key={item.label}>
               <div className="relative flex items-center">
                 <Link
-                  href={item.href}
+                  href={projectHref(item.href)}
                   onClick={() => {
                     // The chevron still toggles. This only ever opens, so a
                     // second click on the section you are already in does not
@@ -176,13 +182,7 @@ function SidebarGroup({
                     onNavigate?.();
                   }}
                   title={isCollapsed ? item.label : undefined}
-                  aria-label={
-                    isCollapsed && item.badge
-                      ? `${item.label}, ${t("Shared.dashboardShell.pendingApprovals", { count: item.badge })}`
-                      : isCollapsed
-                        ? item.label
-                        : undefined
-                  }
+                  aria-label={isCollapsed ? item.label : undefined}
                   className={cn(
                     navItemBase,
                     active ? navItemActive : navItemInactive,
@@ -194,22 +194,7 @@ function SidebarGroup({
                     className="h-5 w-5 shrink-0 refresh:size-5 refresh:text-primary/45"
                     strokeWidth={1.9}
                   />
-                  {isCollapsed ? null : (
-                    <>
-                      <span className="whitespace-nowrap">{item.label}</span>
-                      {item.badge ? (
-                        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-on-primary">
-                          {item.badge > 99 ? "99+" : item.badge}
-                        </span>
-                      ) : null}
-                    </>
-                  )}
-                  {isCollapsed && item.badge ? (
-                    <span
-                      className="absolute top-1 right-1 size-2 rounded-full border border-on-primary bg-primary"
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
                 </Link>
                 {subnavKey && !isCollapsed ? (
                   <button
@@ -263,7 +248,7 @@ function SidebarGroup({
                           </span>
                         ) : (
                           <Link
-                            href={child.href}
+                            href={projectHref(child.href)}
                             onClick={onNavigate}
                             className={cn(
                               childNavItemBase,
@@ -413,12 +398,8 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
  */
 function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): boolean {
   const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
   const isWalletSetupRoute =
     pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
 
@@ -426,7 +407,6 @@ function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): b
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
     (issuanceRedesigned && /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) ||
-    pathname === "/dashboard/policies" ||
     pathname === "/dashboard/api-keys" ||
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
@@ -436,12 +416,11 @@ function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): b
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
-    pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute
   );
 }
 
-const DEMO_OFF: PaymentsDemoState = { demoProjectId: null, cookieProjectId: null };
+const DEMO_OFF: PaymentsDemoState = { demoProjectId: null };
 
 /* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
@@ -455,6 +434,7 @@ export function DashboardShell({
 }) {
   const {
     assetProfiles: assetProfilesEnabled,
+    compliance: complianceEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -463,12 +443,13 @@ export function DashboardShell({
     markets: marketsEnabled,
     newDesign: newDesignEnabled = false,
     payments: paymentsEnabled,
-    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
+  useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
@@ -482,10 +463,13 @@ export function DashboardShell({
     flags.paymentsDemoMode !== false &&
     isPaymentsDemoOn(paymentsDemo, selectedProjectId);
   const paymentsDemoOn = demoAvailable && demoMode;
+  useEffect(() => {
+    setTabShowsDemo(paymentsDemoOn);
+    return () => setTabShowsDemo(false);
+  }, [paymentsDemoOn]);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
-  const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   // A page whose title is data (a contact's name) names itself here.
   const [pageTitleOverride, setPageTitleOverride] = useState<DashboardPageTitleOverride | null>(
     null
@@ -519,9 +503,9 @@ export function DashboardShell({
     t,
     assetProfilesEnabled,
     privateChannelsEnabled,
+    enabledTransactionModules(flags),
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled,
     newDesignEnabled,
     flags.newDesignModules
   );
@@ -539,7 +523,7 @@ export function DashboardShell({
     ),
   }));
   const navSections = getNavSections(t, {
-    canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    complianceEnabled,
     custodyEnabled,
     dvpEnabled,
     earnEnabled,
@@ -547,13 +531,12 @@ export function DashboardShell({
     issuanceEnabled,
     marketsEnabled,
     paymentsEnabled,
-    pendingApprovalCount,
-    policiesEnabled,
     privateChannelsEnabled,
     // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
     walletFavorites: isDesignModuleOn(flags, "wallets") ? walletFavoriteItems : undefined,
     newDesign: newDesignEnabled,
     newDesignModules: flags.newDesignModules,
+    rampsEnabled,
   });
   const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -691,38 +674,6 @@ export function DashboardShell({
     }
   }, [pathname]);
 
-  useEffect(() => {
-    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
-      setPendingApprovalCount(null);
-      return;
-    }
-
-    let ignored = false;
-    setPendingApprovalCount(null);
-    const refreshPendingCount = async () => {
-      try {
-        const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
-          cache: "no-store",
-        });
-        const body = (await response.json().catch(() => null)) as {
-          data?: { approvalRequests?: unknown[] };
-        } | null;
-        if (!ignored && response.ok) {
-          setPendingApprovalCount(body?.data?.approvalRequests?.length ?? 0);
-        }
-      } catch {
-        if (!ignored) setPendingApprovalCount(null);
-      }
-    };
-
-    refreshPendingCount();
-    window.addEventListener("sdp:approval-requests-updated", refreshPendingCount);
-    return () => {
-      ignored = true;
-      window.removeEventListener("sdp:approval-requests-updated", refreshPendingCount);
-    };
-  }, [dashboardAccess.capabilities.canReadApprovals, policiesEnabled, selectedProjectId]);
-
   if (!isLoaded) {
     return (
       <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
@@ -856,13 +807,11 @@ export function DashboardShell({
               {isMoreSheetOpen ? (
                 <DashboardMoreSheet
                   pathname={pathname}
-                  canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
                   canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                   dvpEnabled={dvpEnabled}
                   earnEnabled={earnEnabled}
                   heliusRingsEnabled={heliusRingsEnabled}
                   marketsEnabled={marketsEnabled}
-                  policiesEnabled={policiesEnabled}
                   onClose={() => setMoreSheetOpen(false)}
                 />
               ) : null}
@@ -1100,7 +1049,10 @@ export function DashboardShell({
                           <span className="sr-only">
                             {t("Shared.dashboardShell.loadingDashboard")}
                           </span>
-                          <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+                          <PageLoadingComponent
+                            assetProfilesEnabled={assetProfilesEnabled}
+                            flags={flags}
+                          />
                         </div>
                       ) : (
                         // Switching demo mode remounts the page, so nothing a form or flow

@@ -2,11 +2,11 @@ import { badRequest } from "@sdp/payments/errors";
 import { isAddress } from "@sdp/solana/address";
 import type { Permission } from "@sdp/types";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
 import {
+  assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
-  assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
   resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
@@ -20,6 +20,7 @@ async function findRetainedPaymentWallet(
   custodyWalletId: string
 ): Promise<CustodyWallet | null> {
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
   const row = await getDb(c.env)
     .prepare(
       `SELECT w.id, w.custody_config_id, w.custody_connection_id,
@@ -28,11 +29,11 @@ async function findRetainedPaymentWallet(
        LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
        LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
        WHERE w.id = ?
-         AND ((cfg.organization_id = ? AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+         AND ((cfg.organization_id = ? AND cfg.project_id = ?)
            OR (conn.organization_id = ? AND conn.project_id = ?))
        LIMIT 1`
     )
-    .bind(custodyWalletId, auth.organizationId, auth.projectId, auth.organizationId, auth.projectId)
+    .bind(custodyWalletId, auth.organizationId, projectId, auth.organizationId, projectId)
     .first<{
       id: string;
       custody_config_id: string | null;
@@ -71,8 +72,7 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
   const [operationalWallets, retainedWallet] = await Promise.all([
     new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
       organizationId: auth.organizationId,
-      projectId: auth.projectId ?? undefined,
-      includeAllProviders: true,
+      projectId: requireProjectId(c),
     }),
     retainedCustodyWalletId
       ? findRetainedPaymentWallet(c, retainedCustodyWalletId)
@@ -91,7 +91,15 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
-export async function resolvePolicyWalletFromParams(
+/**
+ * Resolve the wallet addressed by the `walletId` route param, honoring the
+ * API key's wallet binding. Used by the wallet balances route.
+ *
+ * @param c - Request context.
+ * @param requiredWalletPermissions - Wallet permissions the caller must hold.
+ * @returns The auth context and the resolved operational wallet.
+ */
+export async function resolveWalletFromParams(
   c: AppContext,
   requiredWalletPermissions: Permission[]
 ) {
@@ -101,16 +109,17 @@ export async function resolvePolicyWalletFromParams(
     throw walletNotFound();
   }
   const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
+  const projectId = requireProjectId(c);
   const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
   const wallet = custodyWalletId
     ? await targets.findOperationalWalletById({
         organizationId: auth.organizationId,
-        projectId: auth.projectId ?? undefined,
+        projectId,
         custodyWalletId,
       })
     : await targets.findOperationalWallet({
         organizationId: auth.organizationId,
-        projectId: auth.projectId ?? undefined,
+        projectId,
         walletId,
       });
   if (!wallet) {
@@ -142,31 +151,12 @@ export function resolveWalletByCustodyWalletId(
   return wallet;
 }
 
-export async function assertFreshPaymentWalletAccess(
-  c: AppContext,
-  wallet: CustodyWallet,
-  requiredWalletPermissions: Permission[]
-): Promise<void> {
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    getAuth(c),
-    wallet.id,
-    requiredWalletPermissions
-  );
-}
-
 export function assertPaymentWalletExactAccess(
   c: AppContext,
   custodyWalletId: string,
   requiredWalletPermissions: Permission[]
 ): void {
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
-    getAuth(c),
-    requiredWalletPermissions
-  );
-  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(custodyWalletId)) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-  }
+  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
 }
 
 export async function admitExactPaymentWallet(
@@ -174,7 +164,7 @@ export async function admitExactPaymentWallet(
   wallet: CustodyWallet,
   requiredWalletPermissions: Permission[]
 ): Promise<void> {
-  await assertFreshPaymentWalletAccess(c, wallet, requiredWalletPermissions);
+  assertPaymentWalletExactAccess(c, wallet.id, requiredWalletPermissions);
   await admitPaymentWalletRuntimeExecution(c, wallet);
 }
 
@@ -185,7 +175,7 @@ export async function admitPaymentWalletRuntimeExecution(
   const auth = getAuth(c);
   await createSigningService(c.env).admitRuntimeExecution(
     auth.organizationId,
-    auth.projectId ?? undefined,
+    requireProjectId(c),
     wallet.id
   );
 }

@@ -4,6 +4,7 @@ import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -15,6 +16,7 @@ import { custodyWalletForParty } from "./custody-party";
 
 const PROJECT_ID = "prj_custody_party_test";
 const OTHER_ORG_ID = "org_custody_party_other";
+const OTHER_ORG_PROJECT_ID = "prj_other_org";
 const CUSTODY_CONFIG_ID = "cust_custody_party_test";
 const OTHER_ORG_CONFIG_ID = "cust_custody_party_other_org";
 
@@ -58,29 +60,39 @@ describe("custodyWalletForParty", () => {
       organizationId: OTHER_ORG_ID,
       createdBy: TEST_USER.id,
       members: [],
-      ids: { sandbox: "prj_other_org", production: "prj_other_org_production" },
+      ids: { sandbox: OTHER_ORG_PROJECT_ID, production: `${OTHER_ORG_PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id, PROJECT_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(OTHER_ORG_CONFIG_ID, OTHER_ORG_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_party', ?, 'w1', ?, 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, PARTY_ADDRESS)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: CUSTODY_CONFIG_ID,
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          provider: "local",
+          configEncrypted: "x",
+          status: "active",
+        },
+        {
+          id: OTHER_ORG_CONFIG_ID,
+          organizationId: OTHER_ORG_ID,
+          projectId: OTHER_ORG_PROJECT_ID,
+          provider: "local",
+          configEncrypted: "x",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: "cwlt_party",
+          owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+          walletId: "w1",
+          publicKey: PARTY_ADDRESS,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
   });
 
   it("returns the active custody wallet whose public key matches the party address", async () => {
@@ -108,7 +120,7 @@ describe("custodyWalletForParty", () => {
   it("returns null when the address is in the wrong organization", async () => {
     const result = await custodyWalletForParty(
       env,
-      { organizationId: OTHER_ORG_ID, projectId: "prj_other_org" },
+      { organizationId: OTHER_ORG_ID, projectId: OTHER_ORG_PROJECT_ID },
       address(PARTY_ADDRESS),
       null
     );

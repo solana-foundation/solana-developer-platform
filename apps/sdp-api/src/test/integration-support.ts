@@ -5,7 +5,7 @@
 
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
-import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
+import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import {
@@ -31,7 +31,7 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { createOrgSigner } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -54,7 +54,7 @@ export const apiTestSupport = {
   createFeePaymentAdapter,
   createKVStoreSet,
   createMosaicService,
-  createOrgSigner,
+  createOrgSignerForCustodyWallet,
   createPostgresEarnRepository,
   createSigningService,
   createVaultDeadline,

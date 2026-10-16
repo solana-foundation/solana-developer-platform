@@ -9,7 +9,7 @@ disable-model-invocation: true
 Build the smallest honest skeleton for the capabilities the provider supports. Registration spans three ownership boundaries:
 
 - `packages/sdp-payments`: HTTP adapter and normalized ramp contract.
-- `apps/sdp-api`: auth, policy gates, DB orchestration, provider availability, schemas, and webhooks.
+- `apps/sdp-api`: auth, request gates, DB orchestration, provider availability, schemas, and webhooks.
 - `packages/sdp-types` / `apps/sdp-web`: shared public shapes and provider presentation.
 
 ## 1. Add the closed provider id
@@ -38,9 +38,9 @@ export class <Id>RampClient implements RampProvider {
 }
 ```
 
-`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` and `listExternalAccountDetails` are optional — implement the latter when the provider JIT-creates external accounts, so the provider-accounts list endpoint and the offramp payout tree can show display info (`bankName`, masked `accountNumberLast4`; fetched per request, never persisted).
+`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional.
 
-Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`.
+Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests, with a zod schema of exactly the response fields the adapter reads (a mismatch fails closed as `PROVIDER_UNAVAILABLE`), and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns. Add `providers/<id>/test-kit.ts` (recorded exchanges per direction, the mode-credential check, one malformed reply) and register it in `KITS` in `packages/sdp-payments/src/ramps/contract.test.ts`; typecheck fails until you do.
 
 If API-side handlers import provider-specific public helpers or types through package subpaths, add explicit exports in `packages/sdp-payments/package.json`.
 

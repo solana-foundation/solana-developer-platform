@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 const DASHBOARD_URL_STATE_EVENT = "sdp-dashboard-url-state";
 
@@ -38,6 +39,21 @@ function emitUrlStateChange() {
   }
 
   window.dispatchEvent(new Event(DASHBOARD_URL_STATE_EVENT));
+}
+
+/**
+ * Re-reads the URL after every App Router navigation. `<Link>` updates history
+ * without a popstate or store event, so without this a page reached by a
+ * `?tab=` link keeps rendering the tab it had before the URL changed. Mount
+ * once, in the dashboard shell.
+ */
+export function useSyncDashboardUrlStateWithRouter(): void {
+  const pathname = usePathname();
+  const search = useSearchParams().toString();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname and search are trigger-only deps — each navigation re-reads the URL, the values aren't read inside.
+  useEffect(() => {
+    emitUrlStateChange();
+  }, [pathname, search]);
 }
 
 /**

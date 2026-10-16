@@ -19,18 +19,21 @@ export function credentialAdminAuthMiddleware() {
 }
 
 /**
- * RPC connections hold organization-wide egress credentials rather than
- * signing material, so they gate on `org:admin` (HOO-1092) instead of
- * `custody:admin`. API keys are refused for the same reason as custody: a
- * credential administration surface must be tied to a person.
+ * Gate for surfaces that hold organization-wide egress endpoints rather than
+ * signing material (Helius Rings connections), so they require `org:admin`
+ * (HOO-1092) instead of `custody:admin`. API keys are refused for the same
+ * reason as custody: a credential administration surface must be tied to a
+ * person.
+ *
+ * @returns Hono middleware that authenticates the caller and requires an organization administrator.
  */
-export function rpcAdminAuthMiddleware() {
+export function organizationCredentialAdminAuthMiddleware() {
   const authenticate = unifiedAuthMiddleware();
 
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     await authenticate(c, async () => {
       if (!canManageOrganizationCredentials(getAuth(c))) {
-        throw forbidden("RPC connection administration requires an organization administrator");
+        throw forbidden("Connection administration requires an organization administrator");
       }
       await next();
     });

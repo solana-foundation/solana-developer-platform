@@ -1,17 +1,10 @@
-import {
-  CUSTODY_PROVIDERS,
-  type CustodyProvider,
-  normalizeOrganizationTier,
-  ORGANIZATION_RPC_PROVIDERS,
-  type OrganizationRpcProvider,
-} from "@sdp/types";
+import { CUSTODY_PROVIDERS, type CustodyProvider, normalizeOrganizationTier } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import type { completeOnboardingSchema } from "./schemas";
 import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
@@ -57,49 +50,46 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
   };
 }
 
-function resolveRpcProvider(settings: unknown): OrganizationRpcProvider | null {
-  if (!settings || typeof settings !== "object" || !("rpcProvider" in settings)) {
-    return null;
-  }
-
-  const provider = (settings as { rpcProvider?: unknown }).rpcProvider;
-  return ORGANIZATION_RPC_PROVIDERS.includes(provider as OrganizationRpcProvider)
-    ? (provider as OrganizationRpcProvider)
-    : null;
-}
-
-async function fetchCustodyProvider(
+/**
+ * The distinct custody providers backing the organization's default sandbox
+ * project: every provider with an active Managed config or an active BYOK
+ * connection there, in `CUSTODY_PROVIDERS` order.
+ *
+ * @param db - Database client.
+ * @param organizationId - The organization whose default sandbox project is read.
+ * @returns The providers in tuple order, empty when the project has no custody backend.
+ */
+async function fetchCustodyProviders(
   db: DatabaseClient,
-  organizationId: string,
-  expectedProvider: CustodyProvider | null = null
-): Promise<CustodyProvider | null> {
-  const row = await db
+  organizationId: string
+): Promise<CustodyProvider[]> {
+  const { results } = await db
     .prepare(
       `SELECT cc.provider
-       FROM projects p
-       INNER JOIN custody_scope_defaults csd
-         ON csd.organization_id = p.organization_id AND csd.project_id = p.id
-       INNER JOIN custody_configs cc
-         ON cc.id = csd.default_custody_config_id
-        AND cc.organization_id = p.organization_id
-        AND cc.project_id = p.id
-       INNER JOIN custody_wallets cw
-         ON cw.custody_config_id = cc.id AND cw.wallet_id = cc.default_wallet_id
-       WHERE p.organization_id = ?
-         AND p.slug = 'default-sandbox'
-         AND p.environment = 'sandbox'
-         AND p.status = 'active'
-         AND cc.status = 'active'
-         AND cw.status = 'active'
-         ${expectedProvider ? "AND cc.provider = ?" : ""}
-       LIMIT 1`
+         FROM projects p
+         JOIN custody_configs cc
+           ON cc.organization_id = p.organization_id AND cc.project_id = p.id
+        WHERE p.organization_id = ?
+          AND p.slug = 'default-sandbox'
+          AND p.environment = 'sandbox'
+          AND p.status = 'active'
+          AND cc.status = 'active'
+       UNION
+       SELECT conn.provider
+         FROM projects p
+         JOIN custody_connections conn
+           ON conn.organization_id = p.organization_id AND conn.project_id = p.id
+        WHERE p.organization_id = ?
+          AND p.slug = 'default-sandbox'
+          AND p.environment = 'sandbox'
+          AND p.status = 'active'
+          AND conn.status = 'active'`
     )
-    .bind(...(expectedProvider ? [organizationId, expectedProvider] : [organizationId]))
-    .first<{ provider: string }>();
+    .bind(organizationId, organizationId)
+    .all<{ provider: string }>();
 
-  return row && CUSTODY_PROVIDERS.includes(row.provider as CustodyProvider)
-    ? (row.provider as CustodyProvider)
-    : null;
+  const backed = new Set(results.map((row) => row.provider));
+  return CUSTODY_PROVIDERS.filter((provider) => backed.has(provider));
 }
 
 function canManageOnboarding(orgRole: string | null): boolean {
@@ -111,11 +101,10 @@ async function buildOnboardingSetup(params: {
   db: DatabaseClient;
   organization: Awaited<ReturnType<typeof fetchOrganization>>;
 }) {
-  const custodyProvider = await fetchCustodyProvider(params.db, params.organization.id);
+  const custodyProviders = await fetchCustodyProviders(params.db, params.organization.id);
   return resolveOnboardingSetup({
     completedAt: params.organization.onboardingCompletedAt,
-    rpcProvider: resolveRpcProvider(params.organization.settings),
-    custodyProvider,
+    custodyProviders,
     version: params.organization.onboardingVersion ?? ONBOARDING_VERSION,
     canManage: canManageOnboarding(params.clerkOrgRole),
   });
@@ -177,15 +166,10 @@ export const completeOnboarding = async (
 
   const organization = await fetchOrganization(db, mapping.organization_id);
   const requestedProvider = c.req.valid("json").custodyProvider;
-  const rpcProvider = resolveRpcProvider(organization.settings);
-  const custodyProvider = await fetchCustodyProvider(db, organization.id, requestedProvider);
-  if (!rpcProvider) {
-    throw badRequest("Select an RPC provider before finishing setup");
-  }
-  await assertProviderAvailable(c.env, db, organization.id, "rpc", rpcProvider);
-  if (!custodyProvider) {
+  const custodyProviders = await fetchCustodyProviders(db, organization.id);
+  if (!custodyProviders.includes(requestedProvider)) {
     throw badRequest(
-      "Create and select a default custody wallet for the sandbox project before finishing setup"
+      "Set up the requested custody provider for the sandbox project before finishing setup"
     );
   }
 

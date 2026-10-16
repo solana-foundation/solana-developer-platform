@@ -9,10 +9,12 @@ import {
 } from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { scanGcpCredentialContainers } from "./provider-credential-container-cleanup";
 
 const ORG = "org_shared_cleanup_prototype";
+const PROJECT = "prj_shared_cleanup_prototype";
 const USER = "usr_shared_cleanup_prototype";
 const PARENT = "projects/1234567890/secrets/sdp-provider-credentials-prototype";
 const ref = (version: number) => `${PARENT}/versions/${version}`;
@@ -48,10 +50,10 @@ async function reserve(id: string, version: number, predecessor: string | null =
   const row = await new ProviderCredentialStore(getDb(env)).insertCredential({
     id,
     organizationId: ORG,
-    projectId: null,
+    projectId: PROJECT,
     provider: "privy",
     label: "Prototype",
-    scope: "organization",
+    scope: "project",
     source: "stored",
     status: "creating",
     stored: { storageBackend: "gcp_secret_manager", secretRef: PARENT },
@@ -93,6 +95,12 @@ describe("shared-container orphan cleanup", () => {
       "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'shared-prototype@example.test', 1, 'active')",
       [USER]
     );
+    await seedDefaultProjects(getDb(env), {
+      organizationId: ORG,
+      createdBy: USER,
+      members: [],
+      ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    });
   });
 
   it("destroys an unreferenced version while preserving active and retained rollback versions", async () => {

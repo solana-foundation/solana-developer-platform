@@ -103,8 +103,9 @@ than by their container key, precisely because that container key is `address`.
 That has a consequence worth stating plainly, because it is the most likely way this policy
 develops a hole: **every provider spelling of the street line has to be listed by name.**
 Today that means SDP's own `line1`/`line2` (`CounterpartyAddress`), BVNK's
-`addressLine1`/`addressLine2` (`BvnkRuleEntityAddress`), and Mural's `address1` inside
-`physicalAddress` (`MuralPhysicalAddress`). A blanket `*Address` suffix rule is not available
+`addressLine1`/`addressLine2` (`BvnkRuleEntityAddress`), and `address1` inside
+`physicalAddress`, the shape a retired ramp provider submitted, kept so its logged history
+still scrubs. A blanket `*Address` suffix rule is not available
 as a shortcut: BVNK's `beneficiaryAddress` carries `destinationWalletAddress`, a crypto
 address. Adding a ramp provider means checking its address shape against
 `PII_KEYS` in `packages/sdp-redaction/src/policy.ts`.
@@ -121,7 +122,7 @@ is not done until it appears here with a test.
 | Audit ledger metadata | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed |
 | Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
-| Ramp provider error messages | `extractProviderErrorMessage` (`packages/sdp-payments/src/ramps/fetch.ts`) |
+| Ramp provider error messages | `providerErrorMessageSchema` (`packages/sdp-payments/src/ramps/fetch.ts`) scrubs the message into `SdpPaymentsError.diagnostics`, which error bodies never carry; `paymentsErrorDiagnostics` (`apps/sdp-api/src/runtime/money-path-events.ts`) scrubs diagnostics again before they are logged |
 | Earn provider error messages and bodies | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
 | Fireblocks request/response tracing | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino) |
 

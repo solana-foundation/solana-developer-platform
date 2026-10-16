@@ -65,15 +65,9 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
       custody_wallet_id TEXT, type TEXT NOT NULL, status TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
     )`);
-    await client.query(`CREATE TEMP TABLE wallet_operations (
-      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT,
-      operation_type TEXT NOT NULL, status TEXT NOT NULL, custody_wallet_id TEXT,
-      created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
-    )`);
 
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
       ('cfg_project', 'org_a', 'prj_a'),
-      ('cfg_org', 'org_a', NULL),
       ('cfg_foreign', 'org_a', 'prj_b')`);
     await client.query(`INSERT INTO custody_connections (id, organization_id, project_id) VALUES
       ('conn_project', 'org_a', 'prj_a'),
@@ -81,18 +75,14 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, custody_connection_id, wallet_id, public_key) VALUES
       ('cw_project', 'cfg_project', NULL, 'provider_project', 'address_project'),
-      ('cw_org', 'cfg_org', NULL, 'provider_org', 'address_org'),
       ('cw_connection', NULL, 'conn_project', 'provider_connection', 'address_connection'),
       ('cw_duplicate_a', 'cfg_project', NULL, 'provider_duplicate', 'address_duplicate_a'),
       ('cw_duplicate_b', NULL, 'conn_duplicate', 'provider_duplicate', 'address_duplicate_b'),
-      ('cw_project_shadow', 'cfg_project', NULL, 'provider_shadow', 'address_project_shadow'),
-      ('cw_org_shadow', 'cfg_org', NULL, 'provider_shadow', 'address_org_shadow'),
       ('cw_foreign', 'cfg_foreign', NULL, 'provider_foreign', 'address_foreign')`);
     await client.query(`INSERT INTO issued_tokens
       (id, organization_id, project_id, signing_custody_wallet_id,
        signing_wallet_id, mint_address, status) VALUES
       ('tok_project', 'org_a', 'prj_a', NULL, 'provider_project', NULL, 'pending'),
-      ('tok_org', 'org_a', 'prj_a', NULL, 'provider_org', NULL, 'pending'),
       ('tok_connection', 'org_a', 'prj_a', NULL, 'provider_connection', NULL, 'pending'),
       ('tok_ambiguous', 'org_a', 'prj_a', NULL, 'provider_duplicate', NULL, 'pending'),
       ('tok_unresolved', 'org_a', 'prj_a', NULL, 'provider_missing', NULL, 'pending'),
@@ -117,7 +107,6 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
       { id: "tok_deployed", signing_custody_wallet_id: null },
       { id: "tok_existing", signing_custody_wallet_id: "cw_project" },
       { id: "tok_no_selection", signing_custody_wallet_id: null },
-      { id: "tok_org", signing_custody_wallet_id: "cw_org" },
       { id: "tok_pending_minted", signing_custody_wallet_id: null },
       { id: "tok_project", signing_custody_wallet_id: "cw_project" },
       { id: "tok_unresolved", signing_custody_wallet_id: null },
@@ -131,8 +120,6 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
        signing_wallet_id, mint_address, status) VALUES
       ('tok_straggler', 'org_a', 'prj_a', NULL, 'provider_project', NULL, 'pending'),
       ('tok_mismatched', 'org_a', 'prj_a', 'cw_foreign', 'provider_project', 'mint_mismatch', 'active'),
-      ('tok_rollback_safe', 'org_a', 'prj_a', 'cw_project_shadow', 'provider_shadow', NULL, 'pending'),
-      ('tok_rollback_shadowed', 'org_a', 'prj_a', 'cw_org_shadow', 'provider_shadow', NULL, 'pending'),
       ('tok_deploying', 'org_a', 'prj_a', 'cw_project', 'provider_project', NULL, 'deploying')`);
     await client.query(`INSERT INTO issuance_transactions
       (id, token_id, organization_id, custody_wallet_id, type, status) VALUES
@@ -143,13 +130,6 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
       ('ttx_wrong_org', 'tok_deployed', 'org_b', 'cw_project', 'mint', 'confirmed'),
       ('ttx_exact_processing', 'tok_deployed', 'org_a', 'cw_project', 'burn', 'processing'),
       ('ttx_exact', 'tok_deployed', 'org_a', 'cw_project', 'mint', 'confirmed')`);
-    await client.query(`INSERT INTO wallet_operations
-      (id, organization_id, project_id, operation_type, status, custody_wallet_id) VALUES
-      ('op_pending', 'org_a', 'prj_a', 'issuance_mint_execute', 'pending_approval', 'cw_project'),
-      ('op_executing', 'org_a', 'prj_a', 'issuance_update_authority_execute', 'executing', 'cw_project'),
-      ('op_completed', 'org_a', 'prj_a', 'issuance_mint_execute', 'completed', 'cw_project'),
-      ('op_other', 'org_a', 'prj_a', 'payment_transfer_execute', 'pending_approval', 'cw_project')`);
-
     const auditSql = readFileSync(auditPath, "utf8");
     await client.query(withoutPsqlCommands(auditSql));
 
@@ -194,14 +174,6 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
         project_id: "prj_a",
         signing_custody_wallet_id: "cw_connection",
         signing_wallet_id: "provider_connection",
-      },
-      {
-        id: "tok_rollback_shadowed",
-        legacy_custody_wallet_id: "cw_project_shadow",
-        organization_id: "org_a",
-        project_id: "prj_a",
-        signing_custody_wallet_id: "cw_org_shadow",
-        signing_wallet_id: "provider_shadow",
       },
     ]);
     expect((await client.query(auditSection(auditSql, "3.", "4."))).rows).toEqual([
@@ -260,27 +232,7 @@ it("catches up only unambiguous pending Issuance drafts and audits live identity
         updated_at: "2026-01-01T00:00:00.000Z",
       },
     ]);
-    expect((await client.query(auditSection(auditSql, "6.", "7."))).rows).toEqual([
-      {
-        created_at: "2026-01-01T00:00:00.000Z",
-        custody_wallet_id: "cw_project",
-        id: "op_executing",
-        operation_type: "issuance_update_authority_execute",
-        organization_id: "org_a",
-        project_id: "prj_a",
-        status: "executing",
-      },
-      {
-        created_at: "2026-01-01T00:00:00.000Z",
-        custody_wallet_id: "cw_project",
-        id: "op_pending",
-        operation_type: "issuance_mint_execute",
-        organization_id: "org_a",
-        project_id: "prj_a",
-        status: "pending_approval",
-      },
-    ]);
-    expect((await client.query(auditSection(auditSql, "7."))).rows).toEqual([
+    expect((await client.query(auditSection(auditSql, "6."))).rows).toEqual([
       {
         created_at: "2026-01-01T00:00:00.000Z",
         id: "ttx_legacy",

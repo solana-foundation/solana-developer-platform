@@ -21,7 +21,7 @@
 # ── Base: pin Node + pnpm to the repo's packageManager ─────────────────────
 # Digest pinned so rebuilds don't silently float onto a new node:24-slim.
 # Refresh with: docker pull node:24-slim && docker inspect --format='{{index .RepoDigests 0}}' node:24-slim
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -42,13 +42,12 @@ COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-ui/package.json ./packages/sdp-ui/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
-COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 # The Sentry scrubbing hooks in all three sentry.*.config.ts files.
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 # sdp-web imports @sdp/issuance/capabilities (advanced-settings catalog); pull the
-# package and its workspace deps (@sdp/payments) into the frozen-install closure.
+# package and its workspace deps (@sdp/fee-payment) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
-COPY packages/sdp-payments/package.json ./packages/sdp-payments/
+COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
 
@@ -67,10 +66,9 @@ COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
-COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-issuance ./packages/sdp-issuance
-COPY packages/sdp-payments ./packages/sdp-payments
+COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).
@@ -134,7 +132,7 @@ RUN --mount=type=secret,id=sentry_auth_token \
     pnpm --filter sdp-web build
 
 # ── Runtime: slim image with only the standalone output ────────────────────
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

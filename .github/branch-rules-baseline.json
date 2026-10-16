@@ -20,5 +20,106 @@
   },
   {
     "type": "required_signatures"
+  },
+  {
+    "parameters": {
+      "do_not_enforce_on_create": false,
+      "required_status_checks": [
+        {
+          "context": "Lint",
+          "integration_id": 15368
+        },
+        {
+          "context": "actionlint",
+          "integration_id": 15368
+        },
+        {
+          "context": "Typecheck",
+          "integration_id": 15368
+        },
+        {
+          "context": "Unit Tests",
+          "integration_id": 15368
+        },
+        {
+          "context": "Unit Tests (packages)",
+          "integration_id": 15368
+        },
+        {
+          "context": "Unit Test Scope",
+          "integration_id": 15368
+        },
+        {
+          "context": "Module Boundaries",
+          "integration_id": 15368
+        },
+        {
+          "context": "Build API",
+          "integration_id": 15368
+        },
+        {
+          "context": "Docker Build API",
+          "integration_id": 15368
+        },
+        {
+          "context": "Build Docs",
+          "integration_id": 15368
+        },
+        {
+          "context": "Docker Build Docs",
+          "integration_id": 15368
+        },
+        {
+          "context": "Docs Integrity",
+          "integration_id": 15368
+        },
+        {
+          "context": "Pinned Dependency Policy",
+          "integration_id": 15368
+        },
+        {
+          "context": "Translation Catalog Policy",
+          "integration_id": 15368
+        },
+        {
+          "context": "Translation Agent",
+          "integration_id": 15368
+        },
+        {
+          "context": "Docker Build Web",
+          "integration_id": 15368
+        },
+        {
+          "context": "Docker Compose Smoke",
+          "integration_id": 15368
+        },
+        {
+          "context": "Action pins",
+          "integration_id": 15368
+        },
+        {
+          "context": "Changed-packages injection fixture",
+          "integration_id": 15368
+        },
+        {
+          "context": "Integration Tests (Surfpool/Kora)",
+          "integration_id": 15368
+        },
+        {
+          "context": "Dashboard E2E (Surfpool Local)",
+          "integration_id": 15368
+        },
+        {
+          "context": "Dashboard E2E (Transactions / Surfpool Local)",
+          "integration_id": 15368
+        },
+        {
+          "context": "Issuance E2E (Surfpool Shards)",
+          "integration_id": 15368
+        }
+      ],
+      "strict_required_status_checks_policy": false
+    },
+    "type": "required_status_checks"
   }
 ]

@@ -1,9 +1,10 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { tokenLifecycle } from "@/app/dashboard/issuance/issuance-token-state.redesign";
+import { tokenLifecycle } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
 import {
   fetchIssuanceTokenFacets,
   fetchIssuanceTokensPage,
-} from "@/app/dashboard/issuance/issuance-tokens.data";
+} from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { buildWorld, demoPathParts } from "./demo-fixtures";
 import { demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
@@ -27,7 +28,8 @@ let ops: DemoOp[] = [];
 let now = NOW;
 
 function world() {
-  return applyDemoOps(buildWorld(now), ops, now);
+  // The Issuance demo does not read the ramp providers; every one offered is the plain case.
+  return applyDemoOps(buildWorld(now, RAMP_PROVIDERS), ops, now);
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: tests read loosely shaped API envelopes.

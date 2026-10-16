@@ -1,5 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
+import { withRpcReadContext } from "@sdp/rpc/read-context";
+import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
+import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -9,10 +12,17 @@ import {
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const signatureStatuses = vi.hoisted(() => vi.fn());
+vi.mock("@sdp/rpc/solana", async (original) => ({
+  ...(await original<typeof import("@sdp/rpc/solana")>()),
+  getSignatureStatuses: signatureStatuses,
+}));
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
@@ -30,6 +40,7 @@ const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
+  assertClusterEndpoint: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
@@ -218,6 +229,98 @@ afterEach(() => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
+  it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
+    "does not constrain an unrelated %s position after a Kamino deposit",
+    async (provider) => {
+      const affected = await createPosition({ provider: "kamino", providerReference: "affected" });
+      const unrelated = await createPosition({ provider, providerReference: "unrelated" });
+      signatureStatuses.mockResolvedValue([
+        { slot: 101n, err: null, confirmationStatus: "confirmed" },
+      ]);
+      const originalRead = readVaultPositions.getMockImplementation();
+      if (!originalRead) throw new Error("Missing provider fixture");
+      readVaultPositions.mockImplementation(async (context, input) => {
+        const affectedRead = input.providerReferences.includes("affected");
+        const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
+          const payload = request.payload as { params: [string, { minContextSlot?: number }] };
+          expect(payload.params[1].minContextSlot).toBe(affectedRead ? 101 : undefined);
+          return {
+            jsonrpc: "2.0",
+            id: 1,
+            result: { context: { slot: affectedRead ? 101 : 100 }, value: null },
+          } as T;
+        };
+        const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+        await getAccountInfo(rpc, input.owner as Address);
+        return originalRead(context, input);
+      });
+      const response = await getPositions(`?afterMovementIds=${affected.movement.id}`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { positions: { id: string; tokenValue?: string }[] };
+      };
+      expect(body.data.positions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: affected.position.id, tokenValue: "1" }),
+          expect.objectContaining({ id: unrelated.position.id, tokenValue: "1" }),
+        ])
+      );
+      expect(readVaultPositions).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([100, 101])(
+    "only exposes balances whose RPC bank covers confirmation: bank %s",
+    async (slot) => {
+      const created = await createPosition({});
+      signatureStatuses.mockResolvedValue([
+        { slot: 101n, err: null, confirmationStatus: "confirmed" },
+      ]);
+      const originalRead = readVaultPositions.getMockImplementation();
+      if (!originalRead) throw new Error("Missing provider fixture");
+      const payloads: unknown[] = [];
+      const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
+        payloads.push(request.payload);
+        return { jsonrpc: "2.0", id: 1, result: { context: { slot }, value: null } } as T;
+      };
+      const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+      readVaultPositions.mockImplementation(async (context, input) => {
+        await getAccountInfo(rpc, input.owner as Address);
+        return originalRead(context, input);
+      });
+      const response = await getPositions(`?afterMovementIds=${created.movement.id}`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { balanceReadContext: unknown; positions: Array<{ tokenValue?: string }> };
+      };
+      expect(body.data.balanceReadContext).toEqual({
+        afterMovementIds: [created.movement.id],
+        minimumSlot: 101,
+      });
+      expect(body.data.positions).toHaveLength(1);
+      expect(body.data.positions[0]?.tokenValue).toBe(slot < 101 ? undefined : "1");
+      expect(payloads).toContainEqual(
+        expect.objectContaining({
+          method: "getAccountInfo",
+          params: [
+            PUBLIC_KEY_A,
+            expect.objectContaining({ minContextSlot: 101, commitment: "confirmed" }),
+          ],
+        })
+      );
+    }
+  );
+
+  it("rejects a foreign movement before any status or provider RPC read", async () => {
+    const created = await createPosition({});
+    const response = await requestAsProduction(
+      `/v1/earn/vault-positions?afterMovementIds=${created.movement.id}`
+    );
+    expect(response.status).toBe(404);
+    expect(signatureStatuses).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["position list", "/v1/earn/vault-positions", 200],
     ["deposit list", "/v1/earn/vault-deposits", 200],
@@ -258,29 +361,36 @@ describe("GET /v1/earn/vault-positions", () => {
   });
 
   it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
-    const orgConfigId = "cfg_vault_positions_org_fallback";
-    const orgWalletId = "cwlt_vault_positions_org_fallback";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, NULL, 'privy', 'encrypted', 'active')`
-        )
-        .bind(orgConfigId, ORG),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(orgWalletId, orgConfigId, PROVIDER_WALLET_A, PUBLIC_KEY_B),
-    ]);
+    const secondConfigId = "cfg_vault_positions_second";
+    const secondWalletId = "cwlt_vault_positions_second";
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: secondConfigId,
+          organizationId: ORG,
+          projectId: PROJECT_A,
+          provider: "para",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: secondWalletId,
+          owner: { kind: "config", custodyConfigId: secondConfigId },
+          walletId: PROVIDER_WALLET_A,
+          publicKey: PUBLIC_KEY_B,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
     await createPosition({ providerReference: "vault_project_binding" });
     await createPosition({
-      walletId: orgWalletId,
-      providerReference: "vault_org_binding",
-      signature: "sig_org_binding",
+      walletId: secondWalletId,
+      providerReference: "vault_second_binding",
+      signature: "sig_second_binding",
     });
     const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
     await seedCachedApiKey(env, keyHash, {
@@ -665,11 +775,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
   });
 
   it("refuses a movement recorded in another environment", async () => {
-    // Written straight to the tables so the environment is the ONLY thing that
-    // differs: same organization, same in-scope wallet, direction `deposit`.
-    // `createSignedDepositIntent` derives the environment from the project, so
-    // it cannot produce this row, and the composite position FK means the two
-    // rows have to be inserted mismatched rather than updated after the fact.
+    const productionProjectId = `${PROJECT_A}_production`;
     const positionId = `earn_vault_position_${crypto.randomUUID()}`;
     const movementId = `earn_vault_movement_${crypto.randomUUID()}`;
     await getDb(env).batch([
@@ -681,7 +787,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
            ) VALUES (?, ?, ?, 'production', 'kamino', 'vault_direct', 'vault_read_environment',
                      ?, ?, ?, 'Production vault', ?, sdp_iso_now())`
         )
-        .bind(positionId, ORG, PROJECT_A, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
+        .bind(positionId, ORG, productionProjectId, WALLET_A, SHARE_MINT, TOKEN_MINT, USER),
       getDb(env)
         .prepare(
           `INSERT INTO earn_movements (
@@ -696,7 +802,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
         .bind(
           movementId,
           ORG,
-          PROJECT_A,
+          productionProjectId,
           positionId,
           WALLET_A,
           crypto.randomUUID(),
@@ -717,8 +823,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
 /**
  * The LIST is the discovery tier: it is what lets a client re-derive its own
  * in-flight deposits after losing local state, and — via `?requestId=` — find a
- * deposit that did not exist when it was requested because policy held it for
- * approval.
+ * deposit by the Idempotency-Key the caller kept.
  */
 describe("GET /v1/earn/vault-deposits", () => {
   it("returns this workspace's deposits newest first", async () => {
@@ -800,9 +905,7 @@ describe("GET /v1/earn/vault-deposits", () => {
   });
 
   it("finds a deposit by the caller's own idempotency key", async () => {
-    // This is the approval-gated mechanism: a policy hold returns no movement
-    // id, but the approval executor replays the ORIGINAL Idempotency-Key, so the
-    // movement it eventually creates is findable by the key the caller kept.
+    // A caller that lost the response finds the movement by the key it kept.
     const requestId = `caller-chosen-${crypto.randomUUID()}`;
     const created = await createPosition({ providerReference: "vault_by_key", requestId });
 

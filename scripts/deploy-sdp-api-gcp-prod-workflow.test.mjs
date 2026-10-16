@@ -36,25 +36,24 @@ test("manual production deploy requires an immutable SHA-tagged image", () => {
   assert.match(workflow, /\^sha256:\[0-9a-f\]\{64\}\$/);
 });
 
-test("automatic production deploys are called from the protected main release flow", () => {
-  assert.match(workflow, /workflow_call:\n\s+inputs:/);
-  assert.match(workflow, /release_sha:\n\s+description:/);
-  assert.match(workflow, /release_tag:\n\s+description:/);
+test("automatic production deploys are called from main with a required image SHA", () => {
+  assert.match(
+    workflow,
+    /workflow_call:\n\s+inputs:\n\s+image_sha:\n\s+description: "[^"\n]*"\n\s+type: string\n\s+required: true\n\s+approved_schema:/
+  );
   assert.doesNotMatch(workflow, /\n\s+release:\n/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
+  assert.match(
+    workflow,
+    /name: Deploy production image\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.ref == 'refs\/heads\/main' &&\n\s+\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n\s+runs-on:/
+  );
 });
 
-test("release deploys verify and promote the signed image; only merge and approved deploys migrate", () => {
+test("deploys promote the signed image without rebuilding; only merge and approved deploys migrate", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.doesNotMatch(workflow, /docker build/);
   assert.match(
     workflow,
-    /- name: Verify and promote release image\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
-  );
-  assert.match(
-    workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\) \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
   assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
   assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
@@ -171,17 +170,20 @@ test("service and cron use the resolved digest", () => {
     /gcloud run jobs update "\$\{JOB\}" \\\n+\s+--region "\$\{REGION\}" --project "\$\{PROJECT_ID\}" --image "\$\{IMAGE\}"/
   );
   assert.match(workflow, /timeout-minutes: 150/);
-  assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
+  assert.match(
+    workflow,
+    /- name: Promote service and cron with rollback\n\s+id: promote\n\s+timeout-minutes: 10/
+  );
 });
 
 test("merge deploys promote signed per-merge images and migrate before rollout", () => {
   assert.match(
     workflow,
-    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\)\)\) && 'true' \|\| 'false' \}\}/
+    /BUILD_IMAGE: \$\{\{ \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\) && 'true' \|\| 'false' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\) \}\}/
+    /- name: Verify and promote merge image\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
   assert.match(
     workflow,
@@ -227,12 +229,11 @@ test("pending migrations are detected before the prod workflow is called", () =>
 
   assert.doesNotMatch(workflow, /\n {2}schema:\n/);
   assert.doesNotMatch(workflow, /pending_migrations/);
-  assert.match(workflow, /name: Deploy production image\n\s+needs: smoke\n/);
   assert.match(workflow, /\n\s+environment: production\n/);
   assert.doesNotMatch(workflow, /environment: \$\{\{/);
   assert.match(
     workflow,
-    /ref: \$\{\{ inputs\.release_sha != '' && inputs\.release_sha \|\| \(inputs\.approved_schema && inputs\.image_sha\) \|\| github\.sha \}\}/
+    /ref: \$\{\{ \(inputs\.approved_schema && inputs\.image_sha\) \|\| github\.sha \}\}/
   );
 });
 
@@ -252,20 +253,16 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   );
   assert.match(
     workflow,
-    /- name: Refuse a non-migrating deploy that carries unapplied migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \|\| \(github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema\) \}\}/
-  );
-  assert.match(
-    workflow,
-    /if git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" "\$\{APPLIED_SCHEMA_SHA\}"; then\n\s+exit 0\n\s+fi\n\s+pending="\$\(git diff --name-only "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres\)"/
-  );
-  assert.match(
-    workflow,
-    /if \[\[ -n "\$\{RELEASE_SHA\}" \]\]; then\n\s+echo "Prod schema position is unknown/
+    /- name: Refuse a non-migrating deploy that carries unapplied migrations\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}\n\s+run: \|\n\s+set -euo pipefail\n\s+if \[\[ -z "\$\{APPLIED_SCHEMA_SHA\}" \]\]; then\n\s+exit 0\n\s+fi\n\s+if git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" "\$\{APPLIED_SCHEMA_SHA\}"; then\n\s+exit 0\n\s+fi\n\s+pending="\$\(git diff --name-only "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres\)"/
   );
   const read = workflow.indexOf("- name: Read the schema position prod last applied");
   const refuse = workflow.indexOf("- name: Refuse a deploy that is behind prod");
-  const promoteRelease = workflow.indexOf("- name: Verify and promote release image");
-  assert.ok(read !== -1 && read < refuse && refuse < promoteRelease);
+  const refuseUnapplied = workflow.indexOf(
+    "- name: Refuse a non-migrating deploy that carries unapplied migrations"
+  );
+  const promoteMerge = workflow.indexOf("- name: Verify and promote merge image");
+  assert.ok(read !== -1 && read < refuse && refuse < refuseUnapplied);
+  assert.ok(refuseUnapplied < promoteMerge);
 });
 
 test("the approval workflow waits outside the deploy concurrency groups", () => {
@@ -316,7 +313,7 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   );
   assert.match(
     workflow,
-    /\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\) &&/
+    /\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\)\n/
   );
   const selfApproval = workflow.indexOf(
     "- name: Refuse an approved deploy that was re-run or self-approved"
@@ -383,17 +380,6 @@ test("the orchestrator sends every continuous merge to prod", () => {
   assert.match(
     orchestrator,
     /needs\.schema\.result == 'cancelled' \|\| needs\.deploy-api-prod\.result == 'cancelled' \|\| needs\.request-schema-approval\.result == 'cancelled'\) && 'CANCELLED'/
-  );
-});
-
-test("merge mode skips the internal smoke gate but requires the caller's", () => {
-  assert.match(
-    workflow,
-    /inputs\.image_sha == ''\n\s+uses: \.\/\.github\/workflows\/sdp-stage-smoke\.yml/
-  );
-  assert.match(
-    workflow,
-    /\(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' && needs\.smoke\.result == 'skipped'\)/
   );
 });
 

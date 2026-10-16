@@ -39,10 +39,8 @@ function isKnownProvider(value: string): value is CustodyProvider {
  *
  * Per provider, not per scope: `config` means "operations that target this
  * provider resolve through its config" (`getConfigurationByProvider`), so a
- * scope with several active configs reports `config` for each of them. Which
- * single provider default signing falls through to is a different question and
- * already answered by `isDefault` on the configs resource — restating it here
- * would make two endpoints disagree about the same fact.
+ * scope with several active configs reports `config` for each of them. There is
+ * no default provider to report: every operation names its custody wallet.
  *
  * An active Connection deliberately does NOT make this `connection`: signing
  * resolves exclusively through custody configs today (`signing.service.ts` never
@@ -56,7 +54,7 @@ function resolveTargetType(input: { hasLegacyConfig: boolean }): CustodyEffectiv
 }
 
 /**
- * Reports what is actually installed per custody provider for a scope.
+ * Reports what is actually installed per custody provider for a project.
  *
  * Deliberately reads nothing but existing rows: environment credentials make a
  * provider *installable*, and reporting them as installed is what made the setup
@@ -66,39 +64,24 @@ function resolveTargetType(input: { hasLegacyConfig: boolean }): CustodyEffectiv
 export async function getCustodySetupStatus(
   db: DatabaseClient,
   organizationId: string,
-  projectId: string | undefined
+  projectId: string
 ): Promise<CustodySetupStatusResponse> {
-  // Branch the predicates rather than comparing a bare placeholder to NULL:
-  // Postgres cannot infer a type for `? IS NULL` and rejects the statement.
-  //
-  // Configs and Connections resolve differently on purpose. Config lookup falls
-  // back to the organization scope when a project has none of its own
-  // (`signing.service.ts` getScopeAndFallbackConfigs, `custody-config.store.ts`
-  // findActive), so a project signing through an inherited config must not be
-  // reported as uninstalled — that would invite a second install. Connections
-  // carry no such fallback and stay strictly in scope.
-  const configPredicate = projectId
-    ? "AND (project_id = ? OR project_id IS NULL)"
-    : "AND project_id IS NULL";
-  const connectionPredicate = projectId ? "AND project_id = ?" : "AND project_id IS NULL";
-  const scopeParams = projectId ? [organizationId, projectId] : [organizationId];
-
   const [connectionRows, configRows] = await Promise.all([
     db.queryMany<ProviderCountRow>(
       `SELECT provider, status, COUNT(*) AS total
          FROM custody_connections
         WHERE organization_id = ?
-          ${connectionPredicate}
+          AND project_id = ?
         GROUP BY provider, status`,
-      scopeParams
+      [organizationId, projectId]
     ),
     db.queryMany<ProviderFlagRow>(
       `SELECT DISTINCT provider
          FROM custody_configs
         WHERE organization_id = ?
-          ${configPredicate}
+          AND project_id = ?
           AND status = 'active'`,
-      scopeParams
+      [organizationId, projectId]
     ),
   ]);
 

@@ -14,6 +14,7 @@ import {
   DASHBOARD_SIDE_NAV_HREFS,
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type BottomNavItem = {
@@ -54,6 +55,7 @@ export function DashboardBottomNav({
   newDesign?: boolean;
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
 
   const items: BottomNavItem[] = [
     {
@@ -107,7 +109,7 @@ export function DashboardBottomNav({
           return (
             <li key={item.href} className="flex min-w-0 flex-1">
               <Link
-                href={item.href}
+                href={projectHref(item.href)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   itemBase,

@@ -2,7 +2,7 @@
 # Generic deploy/result notifier for the Slack deploy webhook — reusable by any service's CI.
 # Reads the webhook from Doppler (SLACK_DEPLOY_WEBHOOK_URL).
 #
-# Required env: SERVICE, STATUS (started|success|failure/<other>), DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_TOKEN
+# Required env: SERVICE, STATUS (started|success|canary-failed|web-held|failure/<other>), DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_TOKEN
 # Optional env: ENV (e.g. mainnet/devnet), VERSION (tag/sha), COMMIT ("<sha> — <subject>"), ACTOR, RUN_URL, RUN_ID
 set -euo pipefail
 
@@ -21,6 +21,7 @@ case "$STATUS" in
   success)   MARKER="[SUCCESS] Deploy $LABEL";   COLOR="#36a64f" ;;
   cancelled) MARKER="[CANCELLED] Deploy $LABEL"; COLOR="#808080" ;;
   canary-failed) MARKER="[DEPLOYED, CANARY FAILED] Deploy $LABEL"; COLOR="#e36209" ;;
+  web-held) MARKER="[API DEPLOYED, WEB HELD] Deploy $LABEL"; COLOR="#e36209" ;;
   *)         MARKER="[FAILED] Deploy $LABEL";    COLOR="#cc0000" ;;
 esac
 

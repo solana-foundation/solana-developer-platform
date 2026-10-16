@@ -28,12 +28,6 @@ const USER = "usr_earn_feed";
 const PROJECT_A = "prj_earn_feed_a";
 const CONFIG_A = "cfg_earn_feed_a";
 const WALLET_A = "cwlt_earn_feed_a";
-// An ORGANIZATION-level config, so this wallet is reachable from PROJECT_A —
-// which is what makes the API-key wallet binding the only thing that can
-// exclude its movements.
-const CONFIG_ORG = "cfg_earn_feed_org";
-const WALLET_ORG = "cwlt_earn_feed_org";
-const PUBLIC_KEY_ORG = "6dNVeCP6YQ9GDDLLQrNqzKPfSHfmybEqMcaWEqMTBRvR";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
@@ -96,20 +90,12 @@ function cachedKey(
  */
 async function bindKeyToWallets(providerWalletIds: string[]): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
+  // seedCachedApiKey writes the binding rows authentication reads.
   await seedCachedApiKey(
     env,
     keyHash,
     cachedKey({ walletScope: "selected", signingWalletIds: providerWalletIds })
   );
-  for (const providerWalletId of providerWalletIds) {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, '["*"]')`
-      )
-      .bind(`akwp_${crypto.randomUUID()}`, API_KEY.id, providerWalletId)
-      .run();
-  }
 }
 
 async function seedScope(): Promise<void> {
@@ -154,20 +140,6 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
       )
       .bind(API_KEY.id, ORG, PROJECT_A, USER, "Feed key", "sk_test_ear", keyHash),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, NULL, 'privy', 'encrypted', 'active')`
-      )
-      .bind(CONFIG_ORG, ORG),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'privy_feed_org', ?, 'active')`
-      )
-      .bind(WALLET_ORG, CONFIG_ORG, PUBLIC_KEY_ORG),
     ...[[CONFIG_A, PROJECT_A, WALLET_A, "privy_feed_a", PUBLIC_KEY_A]].flatMap(
       ([configId, projectId, walletId, providerWalletId, publicKey]) => [
         getDb(env)
@@ -666,8 +638,10 @@ describe("GET /v1/earn/movements", () => {
       // vault reads apply. It must not silently invert into "no filter": a vault
       // movement is one project's signed transaction and stays hidden, while
       // custodial movements remain visible because program wallets carry no such
-      // binding. That asymmetry IS the visibility union.
-      await bindKeyToWallets([]);
+      // binding. That asymmetry IS the visibility union. (A selected key with no
+      // binding rows at all is an all-wallet key; the binding must exist and
+      // resolve to nothing.)
+      await bindKeyToWallets(["wallet_unresolvable"]);
 
       const body = await movementsJson();
       expect(body.movements.map((m) => m.id)).toEqual([withdrawal.id]);

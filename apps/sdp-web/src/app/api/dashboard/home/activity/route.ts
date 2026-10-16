@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "@/app/dashboard/home-page.data";
+import {
+  buildHomeActivityRows,
+  fetchOrgIssuanceActivity,
+} from "@/app/dashboard/[projectId]/home-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
-} from "@/app/dashboard/payments/payments-page.data";
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";

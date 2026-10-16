@@ -22,14 +22,7 @@ import {
   generateEarnVaultWithdrawalRequestId,
   generateEarnVaultWithdrawalRequestReservationId,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  transactionExpired,
-} from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalCancelFingerprint,
@@ -103,11 +96,6 @@ export interface QueuedWithdrawalMutationResult {
   request: EarnVaultWithdrawalRequestRow;
   action: EarnVaultWithdrawalRequestActionRow;
   replayed: boolean;
-}
-
-export interface QueuedWithdrawalExecutionOptions {
-  /** Couple an approved-operation effect fence to the first durable mutation. */
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
 }
 
 export interface ExternalQueuedWithdrawalBuiltTransaction {
@@ -395,6 +383,7 @@ async function quoteAndBuildRequest(
   };
 }
 
+/** Signs a custody cancellation; requests sign in `createCustodyQueuedWithdrawal`. */
 async function prepareCustodyTransaction(
   env: Env,
   input: {
@@ -407,6 +396,7 @@ async function prepareCustodyTransaction(
   const cluster = earnClusterFor(input.actor.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw_cancel",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
@@ -437,7 +427,8 @@ async function prepareCustodyTransaction(
       env,
       input.actor.organizationId,
       input.actor.projectId,
-      input.actor.custodyWalletId
+      input.actor.custodyWalletId,
+      "earn.queued_withdraw_cancel"
     )
   );
   if (signer.address !== input.actor.custodyWalletPublicKey) {
@@ -494,8 +485,7 @@ export async function createCustodyQueuedWithdrawal(
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     clientRequestId: string;
-  },
-  options: QueuedWithdrawalExecutionOptions = {}
+  }
 ): Promise<QueuedWithdrawalMutationResult> {
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const fingerprint = requestFingerprint({
@@ -527,6 +517,7 @@ export async function createCustodyQueuedWithdrawal(
   const actionId = generateEarnVaultWithdrawalRequestActionId();
   const deadline = createVaultDeadline();
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw_request",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
@@ -586,7 +577,8 @@ export async function createCustodyQueuedWithdrawal(
         env,
         input.actor.organizationId,
         input.actor.projectId,
-        input.actor.custodyWalletId
+        input.actor.custodyWalletId,
+        "earn.queued_withdraw_request"
       )
     );
     if (signer.address !== input.actor.custodyWalletPublicKey) {
@@ -636,9 +628,7 @@ export async function createCustodyQueuedWithdrawal(
         createdBy: input.actor.userId ?? null,
         initiatedByKeyId: input.actor.apiKeyId ?? null,
       });
-    const result = options.runIntentTransaction
-      ? await options.runIntentTransaction(persist)
-      : await persist(getDb(env));
+    const result = await persist(getDb(env));
     return broadcastQueuedAction(env, result);
   } finally {
     try {
@@ -1158,29 +1148,6 @@ async function requireExternalBuild(
   return build;
 }
 
-async function refuseExpiredExternalBuild(
-  env: Env,
-  build: ExternalQueuedWithdrawalBuiltTransaction
-) {
-  if ((build as EarnExternalWalletWithdrawalRequestTransactionRow).consumed_action_id) return;
-  let current: bigint;
-  try {
-    current = await readConfirmedBlockHeight(
-      env,
-      resolveClusterRpcUrl(env, earnClusterFor(build.environment))
-    );
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    getLogger().warn({ transactionId: build.id, error }, "queued build height unreadable");
-    return;
-  }
-  if (current > BigInt(build.last_valid_block_height)) {
-    throw transactionExpired(
-      "This queued withdrawal transaction expired. Build it again and collect fresh signatures."
-    );
-  }
-}
-
 export async function submitExternalQueuedWithdrawalAction(
   env: Env,
   input: {
@@ -1192,7 +1159,6 @@ export async function submitExternalQueuedWithdrawalAction(
   }
 ): Promise<QueuedWithdrawalMutationResult> {
   const build = await requireExternalBuild(env, input);
-  await refuseExpiredExternalBuild(env, build);
   const signed = await verifySignedExternalWalletTransaction(build, input.signedTransaction);
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   let result: QueuedWithdrawalMutationResult;

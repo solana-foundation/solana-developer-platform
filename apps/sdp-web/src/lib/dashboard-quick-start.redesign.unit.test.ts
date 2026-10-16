@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuickStartStatus, RpcProbeResult } from "./dashboard-quick-start.redesign";
+import type { QuickStartStatus } from "./dashboard-quick-start.redesign";
 
 beforeEach(() => {
   vi.resetModules();
@@ -10,58 +10,34 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 const status: QuickStartStatus = {
-  rpcProvider: null,
   custodyProvider: null,
   apiKeyCount: 0,
   lastCallAt: null,
 };
-const probe = (outcome: RpcProbeResult["outcome"]): RpcProbeResult => ({
-  outcome,
-  status: outcome === "unreachable" ? null : outcome === "ok" ? 200 : 503,
-  provider: outcome === "unreachable" ? null : "default",
-  checkedAt: "2026-09-25T10:00:00.000Z",
-});
 
 describe("resolveQuickStartSteps", () => {
-  it("reads the prototype's state: probe answered, custody skipped, no call yet", async () => {
+  it("reads the setup state: custody skipped, no call yet", async () => {
     const { resolveQuickStartSteps, countSettledQuickStartSteps, isQuickStartComplete } =
       await import("./dashboard-quick-start.redesign");
     const steps = resolveQuickStartSteps({
       status,
-      probe: probe("ok"),
       skipped: { custody: "2026-09-25T09:00:00.000Z" },
     });
     expect(steps).toEqual([
-      { id: "rpc", state: "done" },
       { id: "custody", state: "skipped" },
       { id: "first-call", state: "pending" },
     ]);
-    expect(countSettledQuickStartSteps(steps)).toBe(2);
+    expect(countSettledQuickStartSteps(steps)).toBe(1);
     expect(isQuickStartComplete(steps)).toBe(false);
-  });
-
-  it("keeps the RPC step checking until the first probe answers", async () => {
-    const { resolveQuickStartSteps } = await import("./dashboard-quick-start.redesign");
-    expect(resolveQuickStartSteps({ status, probe: null, skipped: {} })[0]?.state).toBe("checking");
-  });
-
-  it("fails the RPC step only when the node answered badly", async () => {
-    const { resolveQuickStartSteps } = await import("./dashboard-quick-start.redesign");
-    const rpc = (outcome: RpcProbeResult["outcome"]) =>
-      resolveQuickStartSteps({ status, probe: probe(outcome), skipped: {} })[0]?.state;
-    expect(rpc("upstream_error")).toBe("failing");
-    // Our own request failing (quota, network) is not the node's fault.
-    expect(rpc("unreachable")).toBe("pending");
   });
 
   it("lets a connected provider win over an earlier skip", async () => {
     const { resolveQuickStartSteps } = await import("./dashboard-quick-start.redesign");
     const steps = resolveQuickStartSteps({
       status: { ...status, custodyProvider: "privy" },
-      probe: probe("ok"),
       skipped: { custody: "2026-09-20T09:00:00.000Z" },
     });
-    expect(steps[1]).toEqual({ id: "custody", state: "done" });
+    expect(steps[0]).toEqual({ id: "custody", state: "done" });
   });
 
   it("completes only when every signal is in, not when steps are skipped", async () => {
@@ -70,7 +46,6 @@ describe("resolveQuickStartSteps", () => {
     );
     const skipped = resolveQuickStartSteps({
       status: { ...status, lastCallAt: "2026-09-25T09:30:00.000Z", apiKeyCount: 1 },
-      probe: probe("ok"),
       skipped: { custody: "2026-09-25T09:00:00.000Z" },
     });
     expect(isQuickStartComplete(skipped)).toBe(false);
@@ -81,7 +56,6 @@ describe("resolveQuickStartSteps", () => {
         lastCallAt: "2026-09-25T09:30:00.000Z",
         apiKeyCount: 1,
       },
-      probe: probe("ok"),
       skipped: {},
     });
     expect(isQuickStartComplete(done)).toBe(true);

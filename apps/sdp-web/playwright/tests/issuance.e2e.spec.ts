@@ -1,8 +1,9 @@
 import { expect, type Page, test } from "@playwright/test";
 import { address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { formatDisplayLabel } from "@/lib/utils";
 import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
-import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 // biome-ignore lint/security/noSecrets: Solana associated token program ID, not a secret.
@@ -33,8 +34,8 @@ async function deriveAssociatedTokenAccountAddress(owner: string, mint: string):
   return tokenAccount;
 }
 
-async function gotoIssuanceDashboard(page: Page): Promise<void> {
-  await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" });
+async function gotoIssuanceDashboard(page: Page, projectId: string): Promise<void> {
+  await gotoProjectPage(page, projectId, "/dashboard/issuance");
   const createDraftButton = page.getByRole("link", { name: "New", exact: true });
   await expect(createDraftButton)
     .toBeVisible({ timeout: 30_000 })
@@ -49,8 +50,8 @@ async function gotoIssuanceDashboard(page: Page): Promise<void> {
     });
 }
 
-async function gotoToken(page: Page, tokenId: string): Promise<void> {
-  await page.goto(`/dashboard/issuance/${tokenId}`, { waitUntil: "domcontentloaded" });
+async function gotoToken(page: Page, projectId: string, tokenId: string): Promise<void> {
+  await gotoProjectPage(page, projectId, `/dashboard/issuance/${tokenId}`);
   const operationsSection = page.getByRole("button", { name: "Operations", exact: true });
   await expect(operationsSection)
     .toBeVisible({ timeout: 30_000 })
@@ -206,6 +207,7 @@ async function waitForAllowlistCount(
 }
 
 interface CreateDraftOptions {
+  projectId: string;
   name: string;
   symbol: string;
   decimals: string;
@@ -216,7 +218,7 @@ interface CreateDraftOptions {
 // The single draft flow persists to SDP, then returns to the issuance list.
 async function createTokenDraft(page: Page, options: CreateDraftOptions): Promise<void> {
   await page.getByRole("link", { name: "New", exact: true }).click();
-  await page.waitForURL("**/dashboard/issuance/create");
+  await page.waitForURL(projectHref(options.projectId, "/dashboard/issuance/create"));
   await page
     .getByRole("button", { name: /Stablecoin/i })
     .first()
@@ -246,7 +248,7 @@ async function createTokenDraft(page: Page, options: CreateDraftOptions): Promis
   }
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await Promise.all([
-    page.waitForURL("**/dashboard/issuance", { timeout: 120_000 }),
+    page.waitForURL(projectHref(options.projectId, "/dashboard/issuance"), { timeout: 120_000 }),
     page.getByRole("button", { name: "Save draft", exact: true }).click(),
   ]);
 }
@@ -267,12 +269,8 @@ test.describe
       );
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, fixtures.projectId);
-    });
-
     test("1. user can sign in and load the issuance dashboard", async ({ page }) => {
-      await gotoIssuanceDashboard(page);
+      await gotoIssuanceDashboard(page, fixtures.projectId);
 
       await expect(page.getByTestId(`token-card-${fixtures.tokens.pending.id}`)).toBeVisible();
       await expect(page.getByTestId(`token-card-${fixtures.tokens.allowlisted.id}`)).toBeVisible();
@@ -285,8 +283,9 @@ test.describe
       const draftName = `E2E UI Draft ${draftSuffix}`;
       const draftSymbol = `USD${draftSuffix}`;
 
-      await gotoIssuanceDashboard(page);
+      await gotoIssuanceDashboard(page, fixtures.projectId);
       await createTokenDraft(page, {
+        projectId: fixtures.projectId,
         name: draftName,
         symbol: draftSymbol,
         decimals: "7",
@@ -299,7 +298,7 @@ test.describe
       await expect
         .poll(
           async () => {
-            await gotoIssuanceDashboard(page);
+            await gotoIssuanceDashboard(page, fixtures.projectId);
             await page.getByPlaceholder("Search").fill(draftName);
             return page.getByRole("heading", { name: draftName, exact: true }).count();
           },
@@ -313,7 +312,7 @@ test.describe
     test("3. user sees the configured controls on the allowlist-enabled token", async ({
       page,
     }) => {
-      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.allowlisted.id);
       await openTab(page, "Operations");
 
       await expect(page.getByTestId("fund-management-row-allowlist")).toContainText(
@@ -330,7 +329,7 @@ test.describe
     test("4. user can deploy the seeded pending token and see it become active", async ({
       page,
     }) => {
-      await gotoToken(page, fixtures.tokens.pending.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id);
       const deployButton = page.getByRole("button", { name: "Deploy", exact: true });
       await expect(deployButton).toBeVisible();
       const successCount = await page.getByText("Deploy transaction finalized.").count();
@@ -358,7 +357,7 @@ test.describe
       const updatedUri = "https://example.com/metadata/e2e-allowlisted-stable-updated.json";
       const updatedImageUrl = "https://example.com/assets/e2e-allowlisted-stable-updated.png";
 
-      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.allowlisted.id);
       await openTab(page, "Settings");
       await page.getByRole("button", { name: "Edit settings" }).click();
 
@@ -382,7 +381,7 @@ test.describe
     test("6. user can add and remove allowlist entries on the allowlist-enabled token", async ({
       page,
     }) => {
-      await gotoToken(page, fixtures.tokens.allowlisted.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.allowlisted.id);
       await selectOperationsAction(page, "Approved recipients");
 
       await page
@@ -429,7 +428,7 @@ test.describe
       const rowTestId = "permission-row-mint-authority";
       const authorityTokenId = fixtures.tokens.authority.id;
 
-      await gotoToken(page, authorityTokenId);
+      await gotoToken(page, fixtures.projectId, authorityTokenId);
       await openTab(page, "Permissions");
 
       const row = page.getByTestId(rowTestId);
@@ -475,7 +474,7 @@ test.describe
     });
 
     test("8. user sees denylist controls on the open stablecoin token", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.open.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id);
       await selectOperationsAction(page, "Blocked recipients");
 
       await expect(
@@ -497,7 +496,7 @@ test.describe
     test("9. user can mint and burn tokens with supply and transactions updating", async ({
       page,
     }) => {
-      await gotoToken(page, fixtures.tokens.open.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id);
 
       await openFundManagementAction(page, "mint");
       await page.getByLabel("Destination").fill(fixtures.wallets.treasury.publicKey);
@@ -537,7 +536,7 @@ test.describe
     });
 
     test("10. user can freeze and unfreeze using a wallet address in the UI", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.open.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id);
 
       await openFundManagementAction(page, "mint");
       await page.getByLabel("Destination").fill(fixtures.addresses.freezeWallet);
@@ -569,7 +568,7 @@ test.describe
       page,
     }) => {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-      await gotoToken(page, fixtures.tokens.open.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id);
 
       const mintAddress = fixtures.tokens.open.mintAddress;
       if (!mintAddress) throw new Error("Open issuance fixture is missing a mint address");
@@ -585,8 +584,10 @@ test.describe
     });
 
     test("12. user sees a populated tokenId dropdown in the API playground", async ({ page }) => {
-      // biome-ignore lint/security/noSecrets: dashboard URL with playground query params, not a secret
-      await page.goto("/dashboard/issuance?tab=playground&endpoint=get-token");
+      await page.goto(
+        // biome-ignore lint/security/noSecrets: dashboard URL with playground query params, not a secret
+        projectHref(fixtures.projectId, "/dashboard/issuance?tab=playground&endpoint=get-token")
+      );
 
       const tokenIdSelect = page.getByLabel("{tokenId}");
       await expect(tokenIdSelect).toBeVisible();
@@ -609,7 +610,7 @@ test.describe
     });
 
     test("13. user can pause and unpause the token from operations", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.open.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id);
 
       await selectOperationsAction(page, "Pause transfers");
       let successCount = await page.getByText("Pause transaction finalized.").count();

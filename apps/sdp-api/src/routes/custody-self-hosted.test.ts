@@ -141,30 +141,6 @@ describe("Custody routes — self-hosted deployment mode", () => {
     await clearKVStores(env);
   });
 
-  it("GET /v1/wallets/switch-options returns only the configured local provider", async () => {
-    await seedAuth("individual");
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { custody: { local: true } } }), TEST_ORG.id)
-      .run();
-
-    const res = await app.request(
-      "/v1/wallets/switch-options",
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: { providers: Array<{ provider: string }> };
-    };
-    const providers = body.data.providers.map((p) => p.provider).sort();
-    expect(providers).toEqual(["local"]);
-  });
-
   it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
     await seedAuth("individual");
 

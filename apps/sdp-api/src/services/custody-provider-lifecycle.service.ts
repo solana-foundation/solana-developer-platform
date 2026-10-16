@@ -36,18 +36,3 @@ export function assertCustodyProviderCanDeleteWallet(provider: CustodyProvider):
     );
   }
 }
-
-export function shouldSetCustodyScopeDefault(input: {
-  candidateProvider: CustodyProvider;
-  currentDefaultProvider: CustodyProvider | null;
-}): boolean {
-  if (!custodyProviderCanSign(input.candidateProvider)) {
-    return false;
-  }
-
-  if (!input.currentDefaultProvider) {
-    return true;
-  }
-
-  return !custodyProviderCanSign(input.currentDefaultProvider);
-}

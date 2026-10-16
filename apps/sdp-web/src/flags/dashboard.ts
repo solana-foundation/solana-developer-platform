@@ -1,22 +1,27 @@
+import type { SdpReleaseChannel } from "@sdp/types";
 import {
   assetProfiles,
-  custody,
   dvp,
   earn,
   heliusRings,
   issuance,
   markets,
   newDesign,
-  payments,
   paymentsDemoMode,
-  policies,
   privateChannels,
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+} from "@/flags/release-channel";
 import type { DesignModuleFlags } from "@/lib/design-modules";
+import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
+  /** Compliance integrations show whenever the deployment's release channel runs the Compliance module. */
+  compliance: boolean;
   custody: boolean;
   dvp: boolean;
   earn: boolean;
@@ -30,8 +35,10 @@ export type DashboardFlags = {
   payments: boolean;
   /** Payments' Demo switch; absent (older fixtures) follows NEW DESIGN. */
   paymentsDemoMode?: boolean;
-  policies: boolean;
   privateChannels: boolean;
+  ramps: boolean;
+  /** This deployment's release channel; the API playground offers only its modules. */
+  releaseChannel: SdpReleaseChannel;
 };
 
 /**
@@ -47,7 +54,6 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
-    custodyEnabled,
     dvpEnabled,
     earnEnabled,
     heliusRingsEnabled,
@@ -55,13 +61,11 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     marketsEnabled,
     newDesignEnabled,
     newDesignModules,
-    paymentsEnabled,
     paymentsDemoModeEnabled,
-    policiesEnabled,
     privateChannelsEnabled,
+    rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
-    custody(),
     dvp(),
     earn(),
     heliusRings(),
@@ -69,15 +73,16 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets(),
     newDesign(),
     getDesignModuleFlags(),
-    payments(),
     paymentsDemoMode(),
-    policies(),
     privateChannels(),
+    isRampsEnabled(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
-    custody: custodyEnabled,
+    compliance: isModuleInDeploymentReleaseChannel("compliance"),
+    // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
+    custody: isModuleInDeploymentReleaseChannel("custody"),
     dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
@@ -85,9 +90,10 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     markets: marketsEnabled,
     newDesign: newDesignEnabled,
     newDesignModules,
-    payments: paymentsEnabled,
+    payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
-    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
+    releaseChannel: deploymentReleaseChannel(),
   };
 }

@@ -683,7 +683,7 @@ async function recordFulfilledQueueMovement(
       request.owner_address,
       request.request_address,
       request.closing_signature,
-      request.client_request_id,
+      null,
       request.idempotency_fingerprint,
       JSON.stringify({
         observation:

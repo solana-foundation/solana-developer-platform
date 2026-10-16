@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -75,21 +76,38 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       members: [],
       ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES ('cfg_unified_transactions', ?, 'local', 'encrypted', 'active')`
-      )
-      .bind(TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status) VALUES
-           (?, 'cfg_unified_transactions', ?, 'UnifiedWallet111', 'active'),
-           (?, 'cfg_unified_transactions', 'wallet-other', 'UnifiedWallet222', 'active')`
-      )
-      .bind(CUSTODY_WALLET, WALLET, OTHER_CUSTODY_WALLET)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_unified_transactions",
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT,
+          provider: "local",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: CUSTODY_WALLET,
+          owner: { kind: "config", custodyConfigId: "cfg_unified_transactions" },
+          walletId: WALLET,
+          publicKey: "UnifiedWallet111",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: OTHER_CUSTODY_WALLET,
+          owner: { kind: "config", custodyConfigId: "cfg_unified_transactions" },
+          walletId: "wallet-other",
+          publicKey: "UnifiedWallet222",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
   });
 
   it("filters by module, kind, and status class", async () => {
@@ -111,6 +129,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       module: "payments",
       kind: "batch_pay",
       status: "succeeded",
@@ -132,6 +151,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"] as UnifiedTransactionModule[],
+      excludedRampProviders: [],
       limit: 25,
     };
 
@@ -165,6 +185,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       counterpartyId: "cpty_match",
       limit: 25,
     });
@@ -201,6 +222,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       limit: 25,
     });
 
@@ -237,6 +259,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "issuance"],
+      excludedRampProviders: [],
       limit: 1,
     });
     if (first.nextCursor === null) throw new Error("first page did not produce a cursor");
@@ -244,6 +267,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "issuance"],
+      excludedRampProviders: [],
       cursor: first.nextCursor,
       limit: 1,
     });
@@ -279,6 +303,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [CUSTODY_WALLET] }],
       limit: 25,
     });
@@ -304,6 +329,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "earn"],
+      excludedRampProviders: [],
       moduleWalletScopes: [
         { module: "payments", custodyWalletIds: [CUSTODY_WALLET] },
         { module: "earn", custodyWalletIds: [OTHER_CUSTODY_WALLET] },
@@ -325,6 +351,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [] }],
       limit: 25,
     });
@@ -362,6 +389,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       limit: 25,
     });
 
@@ -381,6 +409,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: PROJECT,
         modules: ["payments"],
+        excludedRampProviders: [],
         cursor: encodeKeysetCursor(JSON.stringify({ createdAt: CREATED_AT }), "missing-fields"),
         limit: 25,
       })

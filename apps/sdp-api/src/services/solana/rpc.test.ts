@@ -7,8 +7,9 @@ import {
   type SolanaRpc,
   sendAndConfirmTransaction,
 } from "@sdp/rpc/solana";
-import type { Signature } from "@solana/kit";
+import { getBase64Codec, type Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
 
 const TEST_SIGNATURE = "5confirmTimeoutSig" as Signature;
 
@@ -66,9 +67,11 @@ describe("confirmTransaction", () => {
 describe("sendAndConfirmTransaction", () => {
   it("throws a typed SOLANA_RPC_ERROR when the sent transaction never confirms", async () => {
     const { rpc, sendTransaction } = makePendingRpc(TEST_SIGNATURE);
+    const { signedTxBase64 } = signedRingsTransaction(1);
+    const signedTransaction = new Uint8Array(getBase64Codec().encode(signedTxBase64));
 
     const error = await captureRejection(
-      sendAndConfirmTransaction(rpc, new Uint8Array([1, 2, 3]), { pollIntervalMs: 1, timeoutMs: 1 })
+      sendAndConfirmTransaction(rpc, signedTransaction, { pollIntervalMs: 1, timeoutMs: 1 })
     );
 
     expect(error).toBeInstanceOf(SdpRpcError);
@@ -76,7 +79,10 @@ describe("sendAndConfirmTransaction", () => {
     expect(appError.code).toBe("SOLANA_RPC_ERROR");
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
-    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).toHaveBeenCalledExactlyOnceWith(
+      signedTxBase64,
+      expect.objectContaining({ encoding: "base64" })
+    );
   });
 });
 

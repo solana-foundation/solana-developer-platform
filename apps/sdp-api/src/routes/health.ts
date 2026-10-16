@@ -2,6 +2,7 @@
  * Health Check Route
  */
 
+import { EGRESS_READINESS_SERVES_TRAFFIC, resolveSdpReleaseChannel } from "@sdp/types";
 import { Hono } from "hono";
 import { getDb } from "@/db";
 import { pingRedis } from "@/runtime/kv-redis";
@@ -18,6 +19,8 @@ health.get("/", async (c) => {
     timestamp,
     version: c.env.API_VERSION,
     environment: c.env.ENVIRONMENT,
+    // Lets the dashboard confirm it runs the same release channel as this API.
+    releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
   };
 
   return c.json(health);
@@ -31,10 +34,14 @@ health.get("/ready", async (c) => {
   const checks = {
     database: database.status === "fulfilled" ? ("ok" as const) : ("error" as const),
     redis: redis.status === "fulfilled" ? ("ok" as const) : ("error" as const),
+    // Undefined where nothing gates on egress, so the JSON omits it.
+    egress: c.get("egressReadiness")?.(),
   };
   const body = {
     status:
-      checks.database === "ok" && checks.redis === "ok"
+      checks.database === "ok" &&
+      checks.redis === "ok" &&
+      (checks.egress === undefined || EGRESS_READINESS_SERVES_TRAFFIC[checks.egress])
         ? ("ready" as const)
         : ("not_ready" as const),
     timestamp: new Date().toISOString(),

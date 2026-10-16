@@ -4,43 +4,37 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuickStartStatus } from "@/lib/dashboard-quick-start.redesign";
+import {
+  dismissQuickStart,
+  invalidateQuickStartStatus,
+  type QuickStartStatus,
+  quickStartKey,
+} from "@/lib/dashboard-quick-start.redesign";
 
 const STATUS: QuickStartStatus = {
-  rpcProvider: null,
   custodyProvider: "privy",
   apiKeyCount: 1,
   lastCallAt: null,
-} as QuickStartStatus;
+};
+const QUICK_START_PATH = "/api/dashboard/quick-start";
 
 const mocks = vi.hoisted(() => ({
   workspace: {
-    initialQuickStartStatus: null as unknown,
+    initialQuickStartStatus: null as QuickStartStatus | null,
     sdpEnvironment: "sandbox",
     dashboardAccess: { capabilities: { canManageApiKeys: true } },
     dashboardCacheScope: { userId: "user_q", orgId: "org_q" },
     selectedProjectId: "prj_q" as string | null,
   },
-  fetch: vi.fn(),
 }));
 
+// The viewer's workspace is one ambient input per render; the fetch and SWR layers are real.
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
   useOptionalDashboardWorkspace: () => mocks.workspace,
 }));
-vi.mock("@/lib/dashboard-fetch", () => ({ dashboardFetch: mocks.fetch }));
-vi.mock("@/lib/dashboard-swr", async () => {
-  const { default: useSWR } = await import("swr");
-  return {
-    usePersistedDashboardSWR: (key: string | null, fetcher: () => Promise<unknown>, options = {}) =>
-      useSWR(key, fetcher, options),
-  };
-});
 
 const { useQuickStart } = await import("./use-quick-start");
-const { dismissQuickStart, invalidateQuickStartStatus, quickStartKey } = await import(
-  "@/lib/dashboard-quick-start.redesign"
-);
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -48,21 +42,21 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-type Answer = { ok: true; data: unknown } | { ok: false; error: string };
-function answer(routes: { status?: Answer; probe?: Answer }) {
-  mocks.fetch.mockImplementation(async (path: string) => {
-    const reply = path.includes("rpc-test") ? routes.probe : routes.status;
-    return reply ?? { ok: false, error: "unrouted", status: 500, body: null };
-  });
+/** What the quick-start route answers: a status, "unknown" (`data: null`), or a failure. */
+type Answer = { status: QuickStartStatus | null } | { failure: true };
+
+function answer(reply: Answer) {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async () =>
+      "failure" in reply
+        ? new Response("{}", { status: 500 })
+        : Response.json({ data: reply.status })
+    );
 }
-const okStatus = (status: Partial<QuickStartStatus> = {}): Answer => ({
-  ok: true,
-  data: { data: { ...STATUS, ...status } },
-});
-const probe = (ok: boolean, provider = "default"): Answer => ({
-  ok: true,
-  data: { data: { provider: { id: provider }, upstream: { ok, status: ok ? 200 : 502 } } },
-});
+
+const statusReads = (spy: ReturnType<typeof answer>) =>
+  spy.mock.calls.filter(([path]) => path === QUICK_START_PATH).length;
 
 let orgSequence = 0;
 beforeEach(() => {
@@ -75,93 +69,64 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  mocks.fetch.mockReset();
+  vi.restoreAllMocks();
 });
 
 describe("useQuickStart", () => {
-  it("shows the guide while the RPC probe settles, then marks the step done", async () => {
-    answer({ status: okStatus(), probe: probe(true) });
+  it("shows the guide with the server's status, custody done and the first call pending", () => {
+    answer({ status: STATUS });
     const { result } = renderHook(() => useQuickStart(), { wrapper });
 
     expect(result.current.eligible).toBe(true);
     expect(result.current.storageKey).toBe(quickStartKey(mocks.workspace.dashboardCacheScope));
-    await waitFor(() => expect(result.current.probe?.outcome).toBe("ok"));
-    expect(result.current.steps.map((step) => step.state)).toEqual(["done", "done", "pending"]);
+    expect(result.current.steps.map((step) => step.state)).toEqual(["done", "pending"]);
     expect(result.current.visible).toBe(true);
     expect(result.current.complete).toBe(false);
   });
 
-  it("reports a node that answered badly as failing, and an unreachable relay as pending", async () => {
-    answer({ status: okStatus(), probe: probe(false) });
-    const failing = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(failing.result.current.probe?.outcome).toBe("upstream_error"));
-    expect(failing.result.current.probe?.status).toBe(502);
-    expect(failing.result.current.steps[0]?.state).toBe("failing");
-    failing.unmount();
-
-    answer({ status: okStatus(), probe: { ok: false, error: "quota" } });
-    const unreachable = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(unreachable.result.current.probe?.outcome).toBe("unreachable"));
-    expect(unreachable.result.current.probe?.provider).toBeNull();
-    expect(unreachable.result.current.steps[0]?.state).toBe("pending");
-  });
-
-  it("hides itself once every step is done", async () => {
-    mocks.workspace.initialQuickStartStatus = { ...STATUS, lastCallAt: "2026-09-25T10:00:00Z" };
-    answer({ status: okStatus({ lastCallAt: "2026-09-25T10:00:00Z" }), probe: probe(true) });
+  it("hides itself once every step is done", () => {
+    const finished = { ...STATUS, lastCallAt: "2026-09-25T10:00:00Z" };
+    mocks.workspace.initialQuickStartStatus = finished;
+    answer({ status: finished });
     const { result } = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(result.current.complete).toBe(true));
+    expect(result.current.complete).toBe(true);
     expect(result.current.visible).toBe(false);
   });
 
-  it("probes the saved provider and re-reads the status when a flow marks it stale", async () => {
-    mocks.workspace.initialQuickStartStatus = { ...STATUS, rpcProvider: "helius" };
-    answer({ status: okStatus({ rpcProvider: "helius" }), probe: probe(true, "helius") });
-    const { result } = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(result.current.probe?.provider).toBe("helius"));
+  it("re-reads the status when a flow marks it stale", async () => {
+    const spy = answer({ status: STATUS });
+    renderHook(() => useQuickStart(), { wrapper });
     // The status arrives with the page; the guide re-reads it only when told it changed.
-    expect(mocks.fetch).not.toHaveBeenCalledWith("/api/dashboard/quick-start");
+    expect(statusReads(spy)).toBe(0);
 
-    const statusReads = () =>
-      mocks.fetch.mock.calls.filter(([path]) => path === "/api/dashboard/quick-start").length;
-    const before = statusReads();
     act(() => invalidateQuickStartStatus());
-    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
-  });
-
-  it("probes again after a provider switch instead of reusing the previous provider's answer", async () => {
-    answer({ status: okStatus(), probe: probe(true, "default") });
-    const { result } = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(result.current.probe?.provider).toBe("default"));
-
-    // The switch to a provider whose node fails: the old "ok" must not carry over.
-    answer({ status: okStatus({ rpcProvider: "helius" }), probe: probe(false, "helius") });
-    act(() => invalidateQuickStartStatus());
-    await waitFor(() => expect(result.current.probe?.provider).toBe("helius"));
-    expect(result.current.steps[0]?.state).toBe("failing");
-    const probes = mocks.fetch.mock.calls.filter(([path]) => String(path).includes("rpc-test"));
-    expect(probes).toHaveLength(2);
+    await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(0));
   });
 
   it("keeps the last known status when a re-read fails", async () => {
-    answer({ status: { ok: false, error: "down" }, probe: probe(true) });
+    const spy = answer({ failure: true });
     const { result } = renderHook(() => useQuickStart(), { wrapper });
-    await waitFor(() => expect(result.current.probe?.outcome).toBe("ok"));
     act(() => invalidateQuickStartStatus());
-    await waitFor(() =>
-      expect(mocks.fetch.mock.calls.some(([path]) => path === "/api/dashboard/quick-start")).toBe(
-        true
-      )
-    );
+    await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(0));
     expect(result.current.status).toEqual(STATUS);
 
-    answer({ status: { ok: true, data: { data: null } }, probe: probe(true) });
+    answer({ status: null });
     act(() => invalidateQuickStartStatus());
     await waitFor(() => expect(result.current.status).toEqual(STATUS));
   });
 
-  it("stops reading once dismissed", async () => {
-    answer({ status: okStatus(), probe: probe(true) });
+  it("recovers when the server's first read failed, once the status can be read again", async () => {
+    mocks.workspace.initialQuickStartStatus = null;
+    answer({ status: STATUS });
+    const { result } = renderHook(() => useQuickStart(), { wrapper });
+
+    expect(result.current.eligible).toBe(true);
+    await waitFor(() => expect(result.current.status).toEqual(STATUS));
+    expect(result.current.visible).toBe(true);
+  });
+
+  it("stops reading once dismissed", () => {
+    answer({ status: STATUS });
     const { result } = renderHook(() => useQuickStart(), { wrapper });
     act(() => dismissQuickStart(result.current.storageKey));
     expect(result.current.prefs.dismissed).toBe(true);
@@ -176,13 +141,12 @@ describe("useQuickStart", () => {
     ],
     ["no organization", (w: typeof mocks.workspace) => (w.dashboardCacheScope.orgId = "")],
     ["no project", (w: typeof mocks.workspace) => (w.selectedProjectId = null)],
-    ["no server status", (w: typeof mocks.workspace) => (w.initialQuickStartStatus = null)],
   ])("is not offered with %s", (_, change) => {
     change(mocks.workspace);
-    answer({ status: okStatus(), probe: probe(true) });
+    const spy = answer({ status: STATUS });
     const { result } = renderHook(() => useQuickStart(), { wrapper });
     expect(result.current.eligible).toBe(false);
     expect(result.current.visible).toBe(false);
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

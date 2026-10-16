@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -8,7 +9,6 @@ import {
   getPlaywrightCustodyProvider,
   provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 test.describe
@@ -16,11 +16,7 @@ test.describe
     let destinationAddress = "";
     let counterpartyName = "";
     let accountLabel = "";
-    let deniedDestinationAddress = "";
-    let deniedCounterpartyName = "";
-    let deniedAccountLabel = "";
     let sourceWalletLabel = "";
-    let sourceWalletId = "";
     let transferTokenSymbol = "";
     let bootstrapProjectId = "";
 
@@ -49,7 +45,6 @@ test.describe
           throw new Error("Payment bootstrap source wallet did not return its seeded label");
         }
         sourceWalletLabel = sourceWallet.label;
-        sourceWalletId = sourceWallet.walletId;
         transferTokenSymbol = "SOL";
 
         destinationAddress = await createExternalSolanaAddress();
@@ -61,34 +56,8 @@ test.describe
           accountLabel,
           destinationAddress,
         });
-
-        deniedDestinationAddress = await createExternalSolanaAddress();
-        deniedCounterpartyName = `E2E Blocked Payee ${suffix}`;
-        deniedAccountLabel = `E2E Blocked Solana ${suffix}`;
-        await seedCounterpartyWithSolanaAccount(api, {
-          displayName: deniedCounterpartyName,
-          accountLabel: deniedAccountLabel,
-          destinationAddress: deniedDestinationAddress,
-        });
-
-        await api.put(`/v1/payments/wallets/${sourceWalletId}/policies`, {
-          defaultAction: "allow",
-          rules: [
-            {
-              id: "allowlist-destinations",
-              kind: "destination",
-              allowlist: [destinationAddress],
-              action: "allow",
-              name: "Allowed destinations",
-            },
-          ],
-        });
         return walletBootstrap.projectId;
       });
-    });
-
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, bootstrapProjectId);
     });
 
     /**
@@ -99,7 +68,7 @@ test.describe
       const app = page.locator("main");
       const continueToReview = app.getByRole("button", { name: "Continue to review", exact: true });
 
-      await page.goto("/dashboard/payments/pay");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments/pay"));
 
       await app.getByRole("button", { name: "Contact", exact: true }).click();
       await page.getByPlaceholder("Search contacts").fill(contactName);
@@ -138,51 +107,13 @@ test.describe
       const doneButton = app.getByRole("button", { name: "Done", exact: true });
       await doneButton.focus();
       await doneButton.press("Enter");
-      await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
+      await expect(page).toHaveURL(
+        new RegExp(`${projectHref(bootstrapProjectId, "/dashboard/payments")}(?:\\?.*)?$`)
+      );
 
       const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
       const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
-    });
-
-    test("wallet policy denies a transfer to a non-allowlisted destination", async ({ page }) => {
-      const app = page.locator("main");
-
-      await fillPayDetails(page, deniedCounterpartyName, deniedAccountLabel);
-
-      await expect(app.getByText("Review transfer")).toBeVisible();
-      const sendButton = app.getByRole("button", { name: "Send transfer", exact: true });
-      await expect(sendButton).toBeEnabled({ timeout: 120_000 });
-
-      const transferResponsePromise = page.waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === "/api/dashboard/payments/transfers" &&
-          response.request().method() === "POST",
-        { timeout: 120_000 }
-      );
-      await sendButton.click();
-
-      const transferResponse = await transferResponsePromise;
-      expect(transferResponse.status()).toBe(403);
-      const transferBody = (await transferResponse.json()) as {
-        error?: { code?: string; message?: string };
-      };
-      expect(transferBody.error?.code).toBe("FORBIDDEN");
-      expect(transferBody.error?.message).toBe("Wallet operation denied by policy");
-
-      await expect(page.getByText("Transfer failed.", { exact: true })).toBeVisible({
-        timeout: 120_000,
-      });
-      await expect(page.getByText(/Wallet operation denied by policy/)).toBeVisible();
-      await expect(app.getByText("Transfer submitted")).not.toBeVisible();
-
-      await page.goto("/dashboard/payments");
-      const allowedShortened = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
-      await expect(app.getByRole("link").filter({ hasText: allowedShortened }).first()).toBeVisible(
-        { timeout: 120_000 }
-      );
-      const deniedShortened = `${deniedDestinationAddress.slice(0, 6)}…${deniedDestinationAddress.slice(-4)}`;
-      await expect(app.getByRole("link").filter({ hasText: deniedShortened })).toHaveCount(0);
     });
   });

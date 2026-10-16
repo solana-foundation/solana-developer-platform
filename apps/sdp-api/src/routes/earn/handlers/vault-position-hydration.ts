@@ -1,17 +1,88 @@
+import { createHash } from "node:crypto";
+import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { addDecimalAmounts } from "@sdp/payments/decimal";
+import { resolveClusterRpcUrls } from "@sdp/rpc";
+import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
   type EarnVaultPositionIntermediate,
   isEarnVaultHoldingEmpty,
   type SdpEnvironment,
+  type SolanaCluster,
 } from "@sdp/types";
 import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
-import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { createVaultDeadline, type VaultDeadline } from "@/services/earn/vault-deadline";
 import type { AppContext } from "../context";
 import { earnRuntime } from "../context";
+
+const MAX_IN_FLIGHT_VAULT_POSITION_READS = 256;
+
+/**
+ * Stamp a caller takes as soon as its position rows are read, and passes as
+ * `rowsReadAt`: no provider request its hydration uses was sent before it (see
+ * `sharedVaultPositionRead`). Close-out trusts the rows' `updatedAt`. Same
+ * clock as the providers' in-flight request sharing (`readStamp`).
+ */
+export function markVaultPositionRowsRead(): number {
+  return readStamp();
+}
+
+/**
+ * Provider reads in flight, keyed by everything a read depends on: environment,
+ * RPC endpoints, provider, owner, the sorted references and the minimum slot.
+ * Removed on settlement, so this is never a cache: it only stops overlapping
+ * requests from repeating the same chain read.
+ */
+const inFlightVaultPositionReads = new Map<
+  string,
+  { read: Promise<EarnVaultPositionSnapshot[]>; startedAt: number }
+>();
+
+/**
+ * Join an identical read whose creator read its rows no earlier than the
+ * caller did, or start one. A read is stamped with its creator's `rowsReadAt`
+ * and runs under that read floor, so every provider request it uses was sent
+ * after the creator's rows were read, and so after every joiner's. Every job
+ * of one hydration runs under the same floor, so owners on one page still
+ * share provider requests. A joiner stops waiting at its own deadline; the
+ * read itself runs on the deadline of the caller that started it.
+ */
+function sharedVaultPositionRead(
+  key: string,
+  rowsReadAt: number,
+  deadline: VaultDeadline,
+  read: () => Promise<EarnVaultPositionSnapshot[]>
+): Promise<EarnVaultPositionSnapshot[]> {
+  const existing = inFlightVaultPositionReads.get(key);
+  if (existing && existing.startedAt >= rowsReadAt) {
+    return deadline.run("vault position read", () => existing.read);
+  }
+  const entry = { startedAt: rowsReadAt, read: withReadFloor(rowsReadAt, read) };
+  if (!existing && inFlightVaultPositionReads.size >= MAX_IN_FLIGHT_VAULT_POSITION_READS) {
+    return entry.read;
+  }
+  inFlightVaultPositionReads.set(key, entry);
+  const clear = () => {
+    if (inFlightVaultPositionReads.get(key) === entry) inFlightVaultPositionReads.delete(key);
+  };
+  void entry.read.then(clear, clear);
+  return entry.read;
+}
+
+/**
+ * The RPC endpoints a read for `cluster` would use, in failover order, as a
+ * hash: reads through different endpoints never share, and the key never
+ * holds a URL (providers carry API keys in them).
+ */
+function rpcEndpointIdentity(env: AppContext["env"], cluster: SolanaCluster): string {
+  return createHash("sha256")
+    .update(JSON.stringify(resolveClusterRpcUrls(env, cluster)))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 /** A persisted vault claim with the live-read owner resolved. */
 export interface HydratableVaultPosition {
@@ -47,6 +118,9 @@ export function hydratedHoldingTokenValue(
 
 export interface VaultPositionHydrationOptions {
   ownerKind: "custody" | "external-wallet";
+  minimumSlotByPositionId?: ReadonlyMap<string, number>;
+  /** `markVaultPositionRowsRead()`, taken once the positions' rows were read. */
+  rowsReadAt: number;
 }
 
 /**
@@ -86,14 +160,21 @@ export async function hydrateVaultPositions(
   }> = [];
 
   for (const [provider, providerPositions] of byProvider) {
-    const byOwner = new Map<string, HydratableVaultPosition[]>();
+    const byOwner = new Map<
+      string,
+      { owner: string; minimumSlot?: number; positions: HydratableVaultPosition[] }
+    >();
     for (const position of providerPositions) {
-      const ownerPositions = byOwner.get(position.ownerAddress);
-      if (ownerPositions) ownerPositions.push(position);
-      else byOwner.set(position.ownerAddress, [position]);
+      const minimumSlot = options.minimumSlotByPositionId?.get(position.id);
+      // A transfer in one vault must not constrain another holding, even when
+      // both belong to the same owner and provider.
+      const key = JSON.stringify([position.ownerAddress, minimumSlot]);
+      const batch = byOwner.get(key);
+      if (batch) batch.positions.push(position);
+      else byOwner.set(key, { owner: position.ownerAddress, minimumSlot, positions: [position] });
     }
 
-    for (const [owner, ownerPositions] of byOwner) {
+    for (const { owner, minimumSlot, positions: ownerPositions } of byOwner.values()) {
       const trustedByReference = new Map<string, HydratableVaultPosition[]>();
       for (const position of ownerPositions) {
         const trusted = trustedByReference.get(position.providerReference);
@@ -107,10 +188,24 @@ export async function hydrateVaultPositions(
         hydrate: async () => {
           const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
-          const snapshots = await client.readVaultPositions(earnRuntime(c), {
-            owner,
-            providerReferences: [...trustedByReference.keys()],
-          });
+          const runtime = earnRuntime(c);
+          const providerReferences = [...trustedByReference.keys()];
+          const read = () => client.readVaultPositions(runtime, { owner, providerReferences });
+          // The whole scoped read is shared, never the inner one: a joiner's
+          // own minimum-slot scope would observe no RPC context and fail.
+          const snapshots = await sharedVaultPositionRead(
+            JSON.stringify([
+              runtime.environment,
+              rpcEndpointIdentity(c.env, earnClusterFor(runtime.environment)),
+              provider,
+              owner,
+              [...providerReferences].sort(),
+              minimumSlot ?? null,
+            ]),
+            options.rowsReadAt,
+            hydrationDeadline,
+            () => (minimumSlot === undefined ? read() : withMinimumRpcSlot(minimumSlot, read))
+          );
           for (const snapshot of snapshots) {
             const trustedPositions = trustedByReference.get(snapshot.providerReference);
             if (
@@ -178,18 +273,74 @@ export async function hydrateVaultPositions(
     settled.forEach((result, index) => {
       if (result.status !== "rejected") return;
       const job = hydrationJobs[index];
+      // Provider messages may embed the owner, so an end-user owner is
+      // scrubbed from them as well as from the fields.
+      const redactedOwner = options.ownerKind === "external-wallet" ? job?.owner : undefined;
       getLogger().warn(
         {
           provider: job?.provider,
           ...(job ? ownerTelemetryFields(options.ownerKind, job.owner) : {}),
           positionCount: job?.positionCount,
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          error: scrubLoggedText(
+            result.reason instanceof Error ? result.reason.message : String(result.reason),
+            redactedOwner
+          ),
+          causeChain: describeHydrationFailure(result.reason, redactedOwner),
         },
         "vault position: live hydration unavailable"
       );
     });
   }
   return live;
+}
+
+/** Bounds on the cause chain one hydration warning carries. */
+const MAX_LOGGED_CAUSES = 16;
+const MAX_LOGGED_CAUSE_DEPTH = 16;
+const MAX_LOGGED_TEXT_LENGTH = 300;
+// An RPC endpoint carries its API key in the path (Alchemy, Triton, QuickNode)
+// or the query string (Helius), so a URL is dropped whole, as is a bare query.
+const LOGGED_URL = /\b[a-z][a-z0-9+.-]{0,15}:\/\/[^\s"'<>]+/gi;
+const LOGGED_QUERY = /\?[^\s"'<>=]*=[^\s"'<>]*/g;
+
+/**
+ * The rejection's cause tree, flattened depth-first into `name[code]: message`
+ * lines, so the warning says WHY a value is unavailable. Providers wrap the
+ * transport failure several layers deep and nest per-vault failures in an
+ * `AggregateError`, none of which the top-level message shows.
+ */
+export function describeHydrationFailure(error: unknown, redactedOwner?: string): string[] {
+  const chain: string[] = [];
+  const seen = new Set<Error>();
+  const visit = (node: unknown, depth: number): void => {
+    if (chain.length >= MAX_LOGGED_CAUSES || depth > MAX_LOGGED_CAUSE_DEPTH) return;
+    if (!(node instanceof Error)) {
+      if (typeof node === "string") chain.push(scrubLoggedText(node, redactedOwner));
+      return;
+    }
+    if (seen.has(node)) return;
+    seen.add(node);
+    const code = (node as { code?: unknown }).code;
+    const name =
+      typeof code === "string" || typeof code === "number" ? `${node.name}[${code}]` : node.name;
+    chain.push(scrubLoggedText(`${name}: ${node.message}`, redactedOwner));
+    if (node instanceof AggregateError) {
+      for (const member of node.errors) visit(member, depth + 1);
+    }
+    visit(node.cause, depth + 1);
+  };
+  visit(error, 0);
+  return chain;
+}
+
+function scrubLoggedText(text: string, redactedOwner: string | undefined): string {
+  // Redact the owner before clipping, so a cut cannot leave part of it behind.
+  const anonymous = redactedOwner ? text.split(redactedOwner).join("[owner]") : text;
+  const clipped =
+    anonymous.length > MAX_LOGGED_TEXT_LENGTH
+      ? `${anonymous.slice(0, MAX_LOGGED_TEXT_LENGTH)}...`
+      : anonymous;
+  return clipped.replace(LOGGED_URL, "[url]").replace(LOGGED_QUERY, "[query]");
 }
 
 /** End-user owner addresses are omitted before the payload reaches the logger. */

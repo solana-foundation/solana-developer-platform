@@ -11,7 +11,7 @@ beforeEach(() => {
   mocks.projects.mockResolvedValue([{ id: "sandbox_project" }, { id: "production_project" }]);
   mocks.fetch.mockResolvedValue({ wallets: [], apiKeys: [] }).mockResolvedValueOnce({
     linked: true,
-    setup: { status: "not_started", canManage: true, custodyProvider: null },
+    setup: { status: "not_started", canManage: true, custodyProviders: [] },
   });
 });
 describe("onboarding eligibility from organization state", () => {
@@ -21,11 +21,11 @@ describe("onboarding eligibility from organization state", () => {
     expect(await loadQuickStartStep()).toBe("done");
     expect(mocks.projects).not.toHaveBeenCalled();
   });
-  it("suppresses the guide for an existing default wallet without requiring legacy completion", async () => {
+  it("suppresses the guide for an existing custody backend without requiring legacy completion", async () => {
     mocks.fetch.mockReset();
     mocks.fetch.mockResolvedValue({
       linked: true,
-      setup: { status: "in_progress", canManage: true, custodyProvider: "local" },
+      setup: { status: "in_progress", canManage: true, custodyProviders: ["local"] },
     });
     expect(await loadQuickStartStep()).toBe("done");
     expect(mocks.projects).not.toHaveBeenCalled();
@@ -33,10 +33,10 @@ describe("onboarding eligibility from organization state", () => {
   it("starts a synced organization only when all accessible projects have no wallets or API keys", async () => {
     expect(await loadQuickStartStep()).toBe("api-key");
     for (const projectId of ["sandbox_project", "production_project"]) {
-      expect(mocks.fetch).toHaveBeenCalledWith(
-        "/v1/wallets?includeAllProviders=true&includeBalances=false&view=summary",
-        { headers: { "x-project-id": projectId }, signal: expect.any(AbortSignal) }
-      );
+      expect(mocks.fetch).toHaveBeenCalledWith("/v1/wallets?includeBalances=false&view=summary", {
+        headers: { "x-project-id": projectId },
+        signal: expect.any(AbortSignal),
+      });
       expect(mocks.fetch).toHaveBeenCalledWith("/v1/api-keys", {
         headers: { "x-project-id": projectId },
         signal: expect.any(AbortSignal),

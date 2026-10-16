@@ -2,64 +2,57 @@ import { describe, expect, it } from "vitest";
 import { resolveOnboardingSetup } from "./state";
 
 describe("resolveOnboardingSetup", () => {
-  it("starts new organizations at RPC selection", () => {
+  it("starts new organizations at custody", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: null,
-        rpcProvider: null,
-        custodyProvider: null,
+        custodyProviders: [],
         canManage: true,
         version: 1,
       })
     ).toEqual({
       status: "not_started",
-      currentStep: "rpc",
-      rpcProvider: null,
-      custodyProvider: null,
+      currentStep: "custody",
+      custodyProviders: [],
       completedAt: null,
       canManage: true,
       version: 1,
     });
   });
 
-  it("resumes at custody once the RPC choice is persisted", () => {
+  it("does not trust a custody wallet alone to mark onboarding complete", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: null,
-        rpcProvider: "helius",
-        custodyProvider: null,
+        custodyProviders: ["privy"],
         canManage: true,
         version: 1,
       })
-    ).toMatchObject({ status: "in_progress", currentStep: "custody" });
+    ).toEqual({
+      status: "in_progress",
+      currentStep: "custody",
+      custodyProviders: ["privy"],
+      completedAt: null,
+      canManage: true,
+      version: 1,
+    });
   });
 
-  it("does not trust prerequisites alone to mark onboarding complete", () => {
-    expect(
-      resolveOnboardingSetup({
-        completedAt: null,
-        rpcProvider: "default",
-        custodyProvider: "privy",
-        canManage: true,
-        version: 1,
-      })
-    ).toMatchObject({ status: "in_progress", currentStep: "custody" });
-  });
-
-  it("keeps backfilled organizations complete even without provider selections", () => {
+  it("keeps backfilled organizations complete even without a custody wallet", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: "2026-07-21 12:00:00",
-        rpcProvider: null,
-        custodyProvider: null,
+        custodyProviders: [],
         canManage: false,
         version: 1,
       })
-    ).toMatchObject({
+    ).toEqual({
       status: "complete",
       currentStep: "complete",
+      custodyProviders: [],
       completedAt: "2026-07-21 12:00:00",
       canManage: false,
+      version: 1,
     });
   });
 });

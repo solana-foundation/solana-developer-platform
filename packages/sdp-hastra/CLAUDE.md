@@ -18,6 +18,23 @@ account discriminators, PDA bumps, token authorities, and six-decimal scales.
 Hastra's programs are upgradeable, so a pinned program address alone is not a
 sufficient execution boundary.
 
+That validation is batched and never cached, and reads validate exactly as
+builds do. The identity accounts (programs, configs, price, mints) go in one
+`getMultipleAccounts` with the vault token accounts the configs named at the
+last validated read. A vault the live config still names is used from that
+response; any other is read in a second request, so a remembered address is
+never trusted. A request only batches reads that failed with the same code
+before: owner token accounts and the legacy ticket ride the identity request
+on deposit, DEX and par builds (`PROGRAM_MISMATCH`); positions read their ATAs
+(`POSITION_UNREADABLE`) and the poll its request PDA (`REQUEST_UNREADABLE`) in
+their own request after the state; cancel reads the PDA and the owner's wYLDS
+(`REQUEST_UNREADABLE`) beside the state read. Every account is still checked in
+the original order, and the par build's reuse proof (confirmed PDA, finalized
+PDA, history) is sent only after the state checks pass, one step at a time.
+Rent-exempt minimums come from `getMinimumBalanceForRentExemption` where the
+build uses them, kept 10 minutes per (cluster, endpoint digest, size) and never
+on failure. `resetHastraReadCaches()` is the test seam for both memories.
+
 ## Money movement
 
 - Deposit is one transaction: USDC -> wYLDS (`vault-mint.deposit`) -> PRIME

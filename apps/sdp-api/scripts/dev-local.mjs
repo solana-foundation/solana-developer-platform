@@ -35,7 +35,12 @@ function loadLocalEnvFile(filePath) {
 }
 
 const localEnvPath = path.resolve(appDir, ".env.local");
-const localEnv = loadLocalEnvFile(localEnvPath);
+// Written by scripts/kora-local/up.sh (pnpm dev:kora); .env.local still wins.
+const koraLocalEnvPath = path.resolve(
+  process.env.KORA_LOCAL_STATE_DIR ?? path.resolve(appDir, "../../.secrets/kora-local"),
+  "api.env"
+);
+const localEnv = { ...loadLocalEnvFile(koraLocalEnvPath), ...loadLocalEnvFile(localEnvPath) };
 const port = localEnv.SDP_API_PORT ?? process.env.SDP_API_PORT ?? "8787";
 const databaseUrl =
   // biome-ignore lint/security/noSecrets: Local Docker Postgres fallback.
@@ -219,6 +224,10 @@ try {
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
       SDP_DEPLOYMENT_MODE:
         localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
+      // Local tooling runs every module unless told otherwise, like the compose files;
+      // deployed services must set SDP_RELEASE_CHANNEL (the boot check refuses one without it).
+      SDP_RELEASE_CHANNEL:
+        localEnv.SDP_RELEASE_CHANNEL ?? process.env.SDP_RELEASE_CHANNEL ?? "experimental",
       DATABASE_URL: databaseUrl,
       REDIS_URL: redisUrl,
       PORT: port,

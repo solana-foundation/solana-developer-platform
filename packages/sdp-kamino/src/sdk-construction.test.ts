@@ -21,7 +21,7 @@ const read = (file: string) => readFileSync(join(SRC, file), "utf8");
  */
 function importsModule(body: string, moduleName: string): boolean {
   const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:from|import|require\\()\\s*["']${escaped}["']`).test(body);
+  return new RegExp(`(?:from|import|require\\()\\s*["']${escaped}(?:/[^"']*)?["']`).test(body);
 }
 
 describe("the klend-sdk firewall", () => {
@@ -43,6 +43,12 @@ describe("the klend-sdk firewall", () => {
   it("still detects a real import — the guard is not vacuous", () => {
     expect(
       importsModule('import { X } from "@kamino-finance/klend-sdk";', "@kamino-finance/klend-sdk")
+    ).toBe(true);
+    expect(
+      importsModule(
+        'import { X } from "@kamino-finance/klend-sdk/dist/classes/farm_utils.js";',
+        "@kamino-finance/klend-sdk"
+      )
     ).toBe(true);
     expect(
       importsModule("// mentions @kamino-finance/klend-sdk in prose", "@kamino-finance/klend-sdk")
@@ -82,7 +88,7 @@ describe("vault construction", () => {
     for (const entry of [
       "buildKaminoDepositPlan",
       "buildKaminoWithdrawPlan",
-      "readKaminoPosition",
+      "readKaminoPositions",
       "quoteKaminoDeposit",
       "quoteKaminoWithdraw",
     ]) {
@@ -122,14 +128,35 @@ describe("vault construction", () => {
 
   it("fails closed on invalid observed shares but only withholds an invalid valuation", () => {
     const sdk = read("sdk.ts");
-    expect(sdk).toContain(
-      'requireNonNegativeFiniteDecimal("staked share balance", staked.stakedShares)'
-    );
+    expect(sdk).toContain('requireNonNegativeFiniteDecimal("staked share balance", stakedShares)');
     expect(sdk).toMatch(/requireNonNegativeFiniteDecimal\(\s*"total share balance"/);
     expect(sdk).toMatch(/requireNonNegativeFiniteDecimal\(\s*"vault exchange rate"/);
     expect(sdk).toMatch(
       /let tokenValue:[\s\S]*?try\s*\{[\s\S]*?requireNonNegativeFiniteDecimal\(\s*"vault exchange rate"/
     );
+  });
+
+  it("takes staked shares from klend-sdk's own farm reader", () => {
+    const sdk = read("sdk.ts");
+    expect(sdk).toContain("getUserSharesInTokensStakedInFarm(");
+    expect(sdk).toContain("getFarmUserStatePDA(");
+  });
+
+  it("keeps the shared de-duplicating transport on position reads only", () => {
+    const callers = (file: string, entry: string, end: string) => {
+      const source = read(file);
+      const body = source.slice(source.indexOf(entry));
+      const count = (text: string) => text.match(/createKaminoReadRpc\(/g)?.length ?? 0;
+      return { total: count(source), inEntry: count(body.slice(0, body.indexOf(end))) };
+    };
+    expect(callers("sdk.ts", "export async function readKaminoPositions", "\n}\n")).toEqual({
+      total: 1,
+      inEntry: 1,
+    });
+    expect(callers("client.ts", "async readVaultPositions(", "\n  }\n")).toEqual({
+      total: 1,
+      inEntry: 1,
+    });
   });
 
   it("fails closed if the patched klend-sdk shares-state method disappears", () => {

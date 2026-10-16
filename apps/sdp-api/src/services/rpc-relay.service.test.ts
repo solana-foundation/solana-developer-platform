@@ -1,40 +1,11 @@
-import { includesTransactionMethod, listRpcProviders, resolveRpcTarget } from "@sdp/rpc/relay";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { resolveRoundRobinRpcTargets, resolveRpcTarget } from "@sdp/rpc/relay";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
-import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
-import type { Env } from "@/types/env";
+import { env, resetManagedRpcEnv } from "@/test/helpers/env";
 
-const TEST_ORG_ID = "org_rpc_service_test";
-const TEST_PROJECT_ID = "prj_rpc_service_test";
-const TEST_USER_ID = "usr_rpc_service_test";
-const appEnv = env as unknown as Env;
-const SEND_RAW_TRANSACTION_METHOD = ["sendRaw", "Transaction"].join("");
-
-type MutableRpcEnv = {
-  SOLANA_RPC_URL?: string;
-  SOLANA_RPC_DEFAULT_PROVIDER?: string;
-  SOLANA_RPC_TRITON_URL?: string;
-  SOLANA_RPC_TRITON_API_KEY?: string;
-  SOLANA_RPC_HELIUS_URL?: string;
-  SOLANA_RPC_HELIUS_API_KEY?: string;
-  SOLANA_RPC_ALCHEMY_URL?: string;
-  SOLANA_RPC_ALCHEMY_API_KEY?: string;
-  SOLANA_RPC_QUICKNODE_URL?: string;
-  SOLANA_RPC_QUICKNODE_API_KEY?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
-  SOLANA_RPC_NODIT_URL?: string;
-  SOLANA_RPC_NODIT_API_KEY?: string;
-  SDP_DEPLOYMENT_MODE?: string;
-};
-
-const rpcEnv = env as MutableRpcEnv;
-const db = getDb(env as unknown as Env);
-const kv: KVStoreSet = createKVStoreSet(appEnv);
+const ROUND_ROBIN_CURSOR_KEY = "rpc:relay:round-robin-cursor";
+const kv: KVStoreSet = createKVStoreSet(env);
 
 async function clearKvStore(store: KVStore) {
   const listed = await store.list();
@@ -43,269 +14,47 @@ async function clearKvStore(store: KVStore) {
   }
 }
 
+async function resolveNextTarget() {
+  return resolveRpcTarget({ env, cache: kv.cache });
+}
+
 describe("rpc-relay.service", () => {
-  beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
-  afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-  });
-
   beforeEach(async () => {
     await clearKvStore(kv.cache);
-
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status, settings)
-       VALUES (?, 'RPC Service Org', 'rpc-service-org', 'enterprise', 'active', NULL)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         slug = excluded.slug,
-         tier = excluded.tier,
-         status = excluded.status,
-         settings = excluded.settings`
-      )
-      .bind(TEST_ORG_ID)
-      .run();
-
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-       VALUES (?, 'rpc-service@example.com', 1, 'active')
-       ON CONFLICT(id) DO UPDATE SET
-         email = excluded.email,
-         email_verified = excluded.email_verified,
-         status = excluded.status`
-      )
-      .bind(TEST_USER_ID)
-      .run();
-
-    await seedDefaultProjects(db, {
-      organizationId: TEST_ORG_ID,
-      createdBy: TEST_USER_ID,
-      members: [],
-      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
-    });
-
-    rpcEnv.SOLANA_RPC_URL = undefined;
-    rpcEnv.SOLANA_RPC_DEFAULT_PROVIDER = undefined;
-    rpcEnv.SOLANA_RPC_TRITON_URL = undefined;
-    rpcEnv.SOLANA_RPC_TRITON_API_KEY = undefined;
-    rpcEnv.SOLANA_RPC_HELIUS_URL = undefined;
-    rpcEnv.SOLANA_RPC_HELIUS_API_KEY = undefined;
-    rpcEnv.SOLANA_RPC_ALCHEMY_URL = undefined;
-    rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = undefined;
-    rpcEnv.SOLANA_RPC_QUICKNODE_URL = undefined;
-    rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = undefined;
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = undefined;
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = undefined;
-    rpcEnv.SOLANA_RPC_NODIT_URL = undefined;
-    rpcEnv.SOLANA_RPC_NODIT_API_KEY = undefined;
-    rpcEnv.SDP_DEPLOYMENT_MODE = undefined;
+    resetManagedRpcEnv();
   });
 
-  it("identifies transaction JSON-RPC methods", () => {
-    expect(includesTransactionMethod(["getVersion"])).toBe(false);
-    expect(includesTransactionMethod(["sendTransaction"])).toBe(true);
-    expect(includesTransactionMethod([SEND_RAW_TRANSACTION_METHOD])).toBe(true);
-  });
+  it("resolves a query-string key into the endpoint and masks it in the label", async () => {
+    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test/?api-key={API_KEY}";
+    env.SOLANA_RPC_QUICKNODE_API_KEY = "qn_secret";
 
-  it("resolves quicknode provider from organization settings with redacted endpoint labels", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "quicknode" }), TEST_ORG_ID)
-      .run();
+    const target = await resolveNextTarget();
 
-    rpcEnv.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test/?api-key={API_KEY}";
-    rpcEnv.SOLANA_RPC_QUICKNODE_API_KEY = "qn_secret";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
+    expect(target).toEqual({
+      providerId: "quicknode",
+      endpoint: "https://rpc.quicknode.test/?api-key=qn_secret",
+      endpointLabel: "https://rpc.quicknode.test/?api-key=***",
     });
-
-    expect(target.providerId).toBe("quicknode");
-    expect(target.selectionMode).toBe("organization_provider");
-    expect(target.endpoint).toContain("api-key=qn_secret");
-    expect(target.endpointLabel).toContain("api-key=***");
-  });
-
-  it("prefers project-managed provider over organization provider when project setting is set", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "helius" }), TEST_ORG_ID)
-      .run();
-    await db
-      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT_ID)
-      .run();
-
-    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: TEST_PROJECT_ID,
-      requestedProjectId: null,
-    });
-
-    expect(target.providerId).toBe("triton");
-    expect(target.selectionMode).toBe("project_provider");
-  });
-
-  it("uses project custom endpoint when project rpcProvider is custom", async () => {
-    await db
-      .prepare("UPDATE projects SET settings = ? WHERE id = ?")
-      .bind(
-        JSON.stringify({
-          rpcProvider: "custom",
-          rpcEndpoint: "https://rpc.custom-provider.test/?api-key=custom_secret",
-        }),
-        TEST_PROJECT_ID
-      )
-      .run();
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: TEST_PROJECT_ID,
-      requestedProjectId: null,
-    });
-
-    expect(target.providerId).toBe("custom");
-    expect(target.selectionMode).toBe("project_custom_provider");
-    expect(target.endpoint).toContain("custom_secret");
-    expect(target.endpointLabel).toContain("api-key=***");
-  });
-
-  it("round-robins managed providers when organization preference is not set", async () => {
-    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-
-    const first = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-
-    const second = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-
-    expect(first.providerId).toBe("triton");
-    expect(second.providerId).toBe("helius");
-    expect(first.selectionMode).toBe("round_robin_default");
-    expect(second.selectionMode).toBe("round_robin_default");
-  });
-
-  it("ignores SDP_DEPLOYMENT_MODE and resolves managed providers regardless of its value", async () => {
-    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    rpcEnv.SDP_DEPLOYMENT_MODE = "selfhosted";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-
-    expect(target.providerId).toBe("triton");
-    expect(target.selectionMode).toBe("round_robin_default");
   });
 
   it("resolves validationcloud, substitutes the path-segment key, and redacts it in the label", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
-      .run();
+    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
+    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
 
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
+    const target = await resolveNextTarget();
 
     expect(target.providerId).toBe("validationcloud");
-    expect(target.selectionMode).toBe("organization_provider");
-    // Upstream URL carries the substituted key as a path segment.
     expect(target.endpoint).toContain("/v1/vc_secret");
-    // The caller-facing label must not leak it.
     expect(target.endpointLabel).not.toContain("vc_secret");
     expect(target.endpointLabel).toContain("/v1/***");
   });
 
-  it("redacts path-segment provider keys from the provider list", async () => {
-    rpcEnv.SOLANA_RPC_ALCHEMY_URL = "https://solana-devnet.g.alchemy.com/v2/{API_KEY}";
-    rpcEnv.SOLANA_RPC_ALCHEMY_API_KEY = "alch_secret";
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret";
-
-    const providers = await listRpcProviders({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-
-    expect(providers.roundRobinOrder).toEqual(
-      expect.arrayContaining(["alchemy", "validationcloud"])
-    );
-    const allLabels = providers.providers.map((provider) => provider.endpoint).join(" ");
-    expect(allLabels).not.toContain("alch_secret");
-    expect(allLabels).not.toContain("vc_secret");
-    expect(
-      providers.providers.find((provider) => provider.id === "validationcloud")?.endpoint
-    ).toContain("/v1/***");
-  });
-
   it("masks overlapping provider keys without leaving remnants", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
-      .run();
+    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
+    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret_long_123";
+    env.SOLANA_RPC_TRITON_API_KEY = "vc_secret";
 
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://devnet.solana.validationcloud.io/v1/{API_KEY}";
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc_secret_long_123";
-    // A second configured key that is a prefix of the first — replacement
-    // order must not mangle the longer key's match and leave "_long_123".
-    rpcEnv.SOLANA_RPC_TRITON_API_KEY = "vc_secret";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
+    const target = await resolveNextTarget();
 
     expect(target.providerId).toBe("validationcloud");
     expect(target.endpointLabel).toContain("/v1/***");
@@ -313,27 +62,10 @@ describe("rpc-relay.service", () => {
   });
 
   it("redacts URL-encoded keys even when the endpoint URL is unparseable", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "validationcloud" }), TEST_ORG_ID)
-      .run();
+    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "devnet.solana.validationcloud.io/v1/{API_KEY}";
+    env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc+secret/with=chars";
 
-    // Scheme-less URL: new URL() throws, so the label comes from the
-    // catch fallback — which must return the scrubbed string, not the input.
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "devnet.solana.validationcloud.io/v1/{API_KEY}";
-    // Key with URL-special characters: the template embeds only its
-    // encodeURIComponent form, so the encoded-variant scrub is the sole
-    // redaction path for it.
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_API_KEY = "vc+secret/with=chars";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
+    const target = await resolveNextTarget();
 
     expect(target.providerId).toBe("validationcloud");
     expect(target.endpoint).toContain("/v1/vc%2Bsecret%2Fwith%3Dchars");
@@ -342,86 +74,44 @@ describe("rpc-relay.service", () => {
     expect(target.endpointLabel).not.toContain("vc%2Bsecret");
   });
 
-  it("resolves Nodit with URL-only authentication and redacted endpoint labels", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "nodit" }), TEST_ORG_ID)
-      .run();
+  it("resolves Nodit with URL-only authentication and a redacted endpoint label", async () => {
+    env.SOLANA_RPC_NODIT_URL = "https://solana-devnet.nodit.io/{API_KEY}";
+    env.SOLANA_RPC_NODIT_API_KEY = "nodit+secret/with=chars";
 
-    rpcEnv.SOLANA_RPC_NODIT_URL = "https://solana-devnet.nodit.io/{API_KEY}";
-    rpcEnv.SOLANA_RPC_NODIT_API_KEY = "nodit+secret/with=chars";
-
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-    const providers = await listRpcProviders({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
-    const listedNodit = providers.providers.find((provider) => provider.id === "nodit");
+    const target = await resolveNextTarget();
 
     expect(target.providerId).toBe("nodit");
-    expect(target.selectionMode).toBe("organization_provider");
     expect(target.endpoint).toBe("https://solana-devnet.nodit.io/nodit%2Bsecret%2Fwith%3Dchars");
-    expect(target.headers).toEqual({});
     expect(target.endpointLabel).toContain("/***");
     expect(target.endpointLabel).not.toContain("nodit+secret");
     expect(target.endpointLabel).not.toContain("nodit%2Bsecret");
-    expect(listedNodit?.endpoint).toContain("/***");
-    expect(listedNodit?.endpoint).not.toContain("nodit+secret");
-    expect(listedNodit?.endpoint).not.toContain("nodit%2Bsecret");
   });
 
   it("resolves a complete Nodit URL without a separate key like other providers", async () => {
-    await db
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "nodit" }), TEST_ORG_ID)
-      .run();
+    env.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/rpc";
 
-    rpcEnv.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/rpc";
-    rpcEnv.SOLANA_RPC_NODIT_API_KEY = undefined;
+    const target = await resolveNextTarget();
 
-    const target = await resolveRpcTarget({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
     expect(target.providerId).toBe("nodit");
     expect(target.endpoint).toBe("https://rpc.nodit.test/rpc");
   });
 
-  it("preserves existing provider order and appends Nodit before default", async () => {
-    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-    rpcEnv.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
-    rpcEnv.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
-    rpcEnv.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://rpc.validationcloud.test";
-    rpcEnv.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/{API_KEY}";
-    rpcEnv.SOLANA_RPC_NODIT_API_KEY = "nodit-key";
-    rpcEnv.SOLANA_RPC_URL = "https://rpc.default.test";
+  it("rotates through the managed pool in provider order with the default last", async () => {
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    env.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
+    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
+    env.SOLANA_RPC_VALIDATIONCLOUD_URL = "https://rpc.validationcloud.test";
+    env.SOLANA_RPC_NODIT_URL = "https://rpc.nodit.test/{API_KEY}";
+    env.SOLANA_RPC_NODIT_API_KEY = "nodit-key";
+    env.SOLANA_RPC_URL = "https://rpc.default.test";
 
-    const providers = await listRpcProviders({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
-    });
+    const providerIds: string[] = [];
+    for (let request = 0; request < 7; request += 1) {
+      providerIds.push((await resolveNextTarget()).providerId);
+    }
 
-    expect(providers.roundRobinOrder).toEqual([
+    expect(providerIds).toEqual([
       "triton",
       "helius",
       "alchemy",
@@ -432,27 +122,89 @@ describe("rpc-relay.service", () => {
     ]);
   });
 
-  it("honors default provider ordering and exposes quicknode in provider list", async () => {
-    rpcEnv.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
-    rpcEnv.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-    rpcEnv.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
-    rpcEnv.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
-    rpcEnv.SOLANA_RPC_URL = "https://rpc.default.test";
-    rpcEnv.SOLANA_RPC_DEFAULT_PROVIDER = "quicknode";
+  it("starts the rotation at SOLANA_RPC_DEFAULT_PROVIDER", async () => {
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+    env.SOLANA_RPC_QUICKNODE_URL = "https://rpc.quicknode.test";
+    env.SOLANA_RPC_DEFAULT_PROVIDER = "quicknode";
 
-    const providers = await listRpcProviders({
-      env: appEnv,
-      kv,
-      db,
-      organizationId: TEST_ORG_ID,
-      authProjectId: null,
-      requestedProjectId: null,
+    const target = await resolveNextTarget();
+
+    expect(target.providerId).toBe("quicknode");
+  });
+
+  it("wraps back to the first provider after the last one", async () => {
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+
+    const providerIds: string[] = [];
+    for (let request = 0; request < 3; request += 1) {
+      providerIds.push((await resolveNextTarget()).providerId);
+    }
+
+    expect(providerIds).toEqual(["triton", "helius", "triton"]);
+    expect(await kv.cache.get(ROUND_ROBIN_CURSOR_KEY)).toBe("1");
+  });
+
+  it("never writes the cursor for a single provider", async () => {
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+
+    expect((await resolveNextTarget()).providerId).toBe("triton");
+    expect((await resolveNextTarget()).providerId).toBe("triton");
+    expect((await kv.cache.list()).keys).toEqual([]);
+  });
+
+  it.each(["not-a-number", "-3"])(
+    "restarts the rotation at the first provider when the cursor reads %s",
+    async (storedCursor) => {
+      env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
+      await kv.cache.put(ROUND_ROBIN_CURSOR_KEY, storedCursor);
+
+      const target = await resolveNextTarget();
+
+      expect(target.providerId).toBe("triton");
+      expect(await kv.cache.get(ROUND_ROBIN_CURSOR_KEY)).toBe("1");
+    }
+  );
+
+  it("refuses to resolve a target when no managed provider is configured", async () => {
+    await expect(resolveNextTarget()).rejects.toMatchObject({
+      name: "SdpRpcError",
+      code: "SOLANA_RPC_ERROR",
     });
+    await expect(resolveRoundRobinRpcTargets({ env, cache: kv.cache })).rejects.toMatchObject({
+      name: "SdpRpcError",
+      code: "SOLANA_RPC_ERROR",
+    });
+  });
 
-    expect(providers.roundRobinOrder[0]).toBe("quicknode");
-    expect(providers.roundRobinOrder).toEqual(
-      expect.arrayContaining(["alchemy", "default", "helius", "quicknode", "triton"])
-    );
-    expect(providers.selected.providerId).toBe("quicknode");
+  it("lists every provider rotated to the selected one and advances the shared cursor", async () => {
+    env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
+    env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test/?api-key={API_KEY}";
+    env.SOLANA_RPC_HELIUS_API_KEY = "helius_secret";
+    env.SOLANA_RPC_ALCHEMY_URL = "https://rpc.alchemy.test";
+    await resolveNextTarget();
+
+    const targets = await resolveRoundRobinRpcTargets({ env, cache: kv.cache });
+
+    expect(targets).toEqual([
+      {
+        providerId: "helius",
+        endpoint: "https://rpc.helius.test/?api-key=helius_secret",
+        endpointLabel: "https://rpc.helius.test/?api-key=***",
+      },
+      {
+        providerId: "alchemy",
+        endpoint: "https://rpc.alchemy.test",
+        endpointLabel: "https://rpc.alchemy.test/",
+      },
+      {
+        providerId: "triton",
+        endpoint: "https://rpc.triton.test",
+        endpointLabel: "https://rpc.triton.test/",
+      },
+    ]);
+    expect((await resolveNextTarget()).providerId).toBe("alchemy");
   });
 });

@@ -9,7 +9,6 @@ import { setPaymentsDemoAction } from "@/lib/payments-demo/demo-mode-action";
 import {
   isPaymentsDemoOn,
   type PaymentsDemoState,
-  paymentsDemoProjectId,
 } from "@/lib/payments-demo/payments-demo-context";
 import { cn } from "@/lib/utils";
 
@@ -27,9 +26,6 @@ export function PaymentsDemoToggle(state: PaymentsDemoState) {
   const { selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
   const [pending, startTransition] = useTransition();
   const [target, setTarget] = useState<boolean | null>(null);
-  if (!paymentsDemoProjectId(state, selectedProjectId)) {
-    return null;
-  }
   const on = isPaymentsDemoOn(state, selectedProjectId);
   // The switch shows where it is going until the page has been drawn in the new mode.
   const checked = pending && target !== null ? target : on;

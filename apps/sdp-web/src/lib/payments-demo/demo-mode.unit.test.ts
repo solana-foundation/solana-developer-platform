@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
@@ -23,7 +23,13 @@ const browser = vi.hoisted(() => {
   return {
     jar,
     store,
-    pathname: "/dashboard/payments",
+    // The proxy stamps the page path with its project segment, and the project header apart.
+    pathname: "/dashboard/prj_sandbox/payments",
+    projectHeader: null as string | null,
+    // Whether the calling tab says it shows the demo (x-sdp-tab-demo).
+    tabDemo: false,
+    // The ramp providers the channel-capped flags leave on.
+    rampProviders: [] as RampProviderId[],
     newDesign: true,
     demoMode: true,
     newDesignModule: undefined as string | undefined,
@@ -33,6 +39,7 @@ const browser = vi.hoisted(() => {
 // Demo mode is part of the new design and has a flag of its own; the flags themselves read
 // Vercel and the request.
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => browser.demoMode }));
+vi.mock("@/flags/ramps", () => ({ getEnabledRampProviders: async () => browser.rampProviders }));
 vi.mock("@/flags/new-design", () => ({
   isNewDesignOn: async (designModule?: string) => {
     browser.newDesignModule = designModule;
@@ -43,15 +50,19 @@ vi.mock("@/flags/new-design", () => ({
 vi.mock("next/headers", () => ({
   // A fresh store object per request, as Next gives each request its own.
   cookies: async () => ({ ...browser.store }),
-  headers: async () => new Headers({ "x-sdp-pathname": browser.pathname }),
+  headers: async () =>
+    new Headers({
+      "x-sdp-pathname": browser.pathname,
+      ...(browser.projectHeader === null ? {} : { "x-project-id": browser.projectHeader }),
+      ...(browser.tabDemo ? { "x-sdp-tab-demo": "1" } : {}),
+    }),
 }));
 
 const { paymentsDemoResponse } = await import("./demo-mode");
 const { decodeDemoOps, encodeDemoOps } = await import("./demo-session");
 const { DEMO_TOKENS } = await import("./demo-fixtures");
-const { PROJECT_COOKIE_NAME } = await import("../project-cookie");
 
-const PROJECT = "proj_sandbox";
+const PROJECT = "prj_sandbox";
 const USDC = DEMO_TOKENS.USDC.mint;
 const NOW = new Date("2026-09-28T12:00:00.000Z");
 const upstream = vi.fn(async () => Response.json({ data: { ok: true } }));
@@ -78,7 +89,10 @@ async function data<T>(path: string): Promise<T> {
 beforeEach(() => {
   browser.jar.clear();
   browser.jar.set("sdp-payments-demo", PROJECT);
-  browser.pathname = "/dashboard/payments";
+  browser.pathname = "/dashboard/prj_sandbox/payments";
+  browser.projectHeader = null;
+  browser.tabDemo = false;
+  browser.rampProviders = [...RAMP_PROVIDERS];
   browser.newDesign = true;
   browser.demoMode = true;
   upstream.mockClear();
@@ -97,13 +111,13 @@ describe("scope", () => {
     browser.jar.delete("sdp-payments-demo");
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
     browser.jar.set("sdp-payments-demo", PROJECT);
-    browser.pathname = "/dashboard/wallets";
+    browser.pathname = "/dashboard/prj_sandbox/wallets";
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
   });
 
   it("stays out of the way with the page on the previous design, cookie or not", async () => {
     browser.newDesign = false;
-    browser.pathname = "/dashboard/payments/counterparty";
+    browser.pathname = "/dashboard/prj_sandbox/payments/counterparty";
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
     // The page's own design module decides, not NEW DESIGN alone.
     expect(browser.newDesignModule).toBe("contacts");
@@ -112,6 +126,29 @@ describe("scope", () => {
   it("stays out of the way with the demo flag off, cookie or not", async () => {
     browser.demoMode = false;
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+  });
+
+  it("refuses a write from a tab still showing the demo after the demo was turned off", async () => {
+    browser.pathname = "/api/dashboard/payments/counterparties";
+    browser.jar.delete("sdp-payments-demo");
+    browser.tabDemo = true;
+    const refused = await call("POST", "/v1/counterparties", {
+      entityType: "business",
+      displayName: "Stale Tab Ltd",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe("payments_demo_off");
+    // Reads still go through, and a tab that never showed the demo is not held back.
+    expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+    browser.tabDemo = false;
+    expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();
+  });
+
+  it("never holds back the API playground's writes", async () => {
+    browser.pathname = "/api/playground/execute";
+    browser.jar.delete("sdp-payments-demo");
+    browser.tabDemo = true;
+    expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();
   });
 
   it("refuses a demo-only write outside the demo instead of sending it to the API", async () => {
@@ -131,14 +168,11 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties/cpty_real")).status).toBe(404);
     expect((await call("GET", "/v1/payments/transfers/xfr_real")).status).toBe(404);
     expect((await call("GET", "/v1/projects")).status).toBeNull();
-    expect((await call("GET", "/v1/wallets/approval-requests?status=pending")).body).toEqual({
-      data: { approvalRequests: [] },
-    });
   });
 
-  it("offers Lightspark as the only ramp, on the organization's real provider answer", async () => {
-    // An organization-level read names no project; the dashboard's selected one decides.
-    browser.jar.set(PROJECT_COOKIE_NAME, PROJECT);
+  it("offers every ramp provider, on the organization's real provider answer", async () => {
+    // An organization-level read names no project; the request's own project header decides.
+    browser.projectHeader = PROJECT;
     upstream.mockResolvedValueOnce(
       Response.json({
         data: {
@@ -165,8 +199,40 @@ describe("scope", () => {
     upstream.mockClear();
   });
 
+  it("offers only the ramp providers the channel-capped flags leave on", async () => {
+    browser.projectHeader = PROJECT;
+    browser.rampProviders = ["moonpay", "bvnk"];
+    upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    const response = await paymentsDemoResponse(
+      "GET",
+      "/v1/organizations/org_1/provider-access",
+      null,
+      undefined,
+      upstream
+    );
+    const body = await response?.json();
+    const ramps = body.data.providers.ramps as Record<RampProviderId, { enabled: boolean }>;
+    expect(RAMP_PROVIDERS.filter((provider) => ramps[provider].enabled).sort()).toEqual([
+      "bvnk",
+      "moonpay",
+    ]);
+    upstream.mockClear();
+  });
+
+  it("does not answer an organization-level read without a project to judge it by", async () => {
+    browser.projectHeader = null;
+    const response = await paymentsDemoResponse(
+      "GET",
+      "/v1/organizations/org_1/provider-access",
+      null,
+      undefined,
+      upstream
+    );
+    expect(response).toBeNull();
+  });
+
   it("offers every provider even when the API can't be reached", async () => {
-    browser.jar.set(PROJECT_COOKIE_NAME, PROJECT);
+    browser.projectHeader = PROJECT;
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
@@ -296,10 +362,49 @@ describe("pay", () => {
   });
 });
 
+describe("ramps and the release channel", () => {
+  const quote = (provider: string) =>
+    call("POST", "/v1/payments/ramps/onramp/quote", {
+      provider,
+      counterpartyId: "demo_cpty_jane",
+      destinationCustodyWalletId: "demo_cwlt_treasury",
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      fiatAmount: "500",
+    });
+
+  it("refuses a quote from a provider the channel leaves out, as the API would", async () => {
+    browser.rampProviders = ["coinbase"];
+    expect((await quote("stripe")).status).toBe(400);
+    expect((await quote("coinbase")).status).toBe(201);
+  });
+
+  it("leaves a sample ramp transfer of a hidden provider out of the lists", async () => {
+    const ids = async () =>
+      (await data<{ id: string }[]>("/v1/payments/transfers?pageSize=100")).map(
+        (transfer) => transfer.id
+      );
+    expect(await ids()).toContain("demo_xfr_onramp_coinbase");
+    browser.rampProviders = RAMP_PROVIDERS.filter((provider) => provider !== "coinbase");
+    expect(await ids()).not.toContain("demo_xfr_onramp_coinbase");
+  });
+});
+
 describe("ramps", () => {
+  /** Walks a contact through BVNK's demo onboarding: agreements, the identity check, review. */
+  async function onboardBvnk(counterpartyId: string) {
+    await call("POST", `/v1/counterparties/${counterpartyId}/requirements`, {
+      provider: "bvnk",
+      direction: "offramp",
+      agreementConsent: true,
+    });
+    await call("POST", "/v1/payments/demo/verifications", { provider: "bvnk", counterpartyId });
+    vi.setSystemTime(new Date(Date.now() + 14_000));
+  }
+
   it("runs a deposit from quote to a completed transfer, then credits the wallet", async () => {
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=lightspark&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
     const estimate = await call("POST", "/v1/payments/ramps/onramp/estimate", {
@@ -310,7 +415,7 @@ describe("ramps", () => {
     expect(estimate.body.data.estimates[0].status).toBe("ok");
 
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "lightspark",
+      provider: "coinbase",
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
@@ -319,7 +424,7 @@ describe("ramps", () => {
     });
     expect(quoted.status).toBe(201);
     const { quote, transferId } = quoted.body.data;
-    expect(quote.paymentInstructions[0].accountOrWalletInfo.accountType).toBe("US_ACCOUNT");
+    expect(quote.deliveryMode).toBe("hosted");
     const waiting = await data<{ transfer: { status: string } }>(
       `/v1/payments/transfers/${transferId}`
     );
@@ -339,37 +444,20 @@ describe("ramps", () => {
     expect(done.transfer.signature).toBeTruthy();
   });
 
-  it("pays out to a saved bank account once the crypto is sent", async () => {
-    const requirements = await data<{
-      status: string;
-      payout: { accounts: { id: string; destinationCountry: string }[] };
-    }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=lightspark&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
+  it("pays out once the crypto is sent", async () => {
+    await onboardBvnk("demo_cpty_jane");
+    const requirements = await data<{ status: string }>(
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
-    expect(requirements.status).toBe("collect_account");
-    const saved = requirements.payout.accounts[0];
-    expect(saved?.destinationCountry).toBe("US");
-
-    const advanced = await call("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-      provider: "lightspark",
-      direction: "offramp",
-      assetRail: "usdc.solana",
-      fiatCurrency: "USD",
-      destinationCustodyWalletId: "demo_cwlt_treasury",
-      collectedData: { destinationCountry: "US" },
-      providerAccountId: saved?.id,
-    });
-    expect(advanced.body.data).toMatchObject({ status: "ready", providerAccountId: saved?.id });
+    expect(requirements.status).toBe("ready");
 
     const quoted = await call("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "lightspark",
+      provider: "bvnk",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
       cryptoAmount: "300",
       fiatCurrency: "USD",
-      destinationCountry: "US",
-      providerAccountId: saved?.id,
     });
     const { quote, transferId } = quoted.body.data;
     const deposit = quote.paymentInstructions[0];
@@ -383,35 +471,16 @@ describe("ramps", () => {
       amount: "300",
     });
     expect(funded.body.data.transfer.id).toBe(transferId);
-    vi.setSystemTime(new Date(NOW.getTime() + 6_000));
+    vi.setSystemTime(new Date(Date.now() + 6_000));
     expect(
       (await data<{ transfer: { status: string } }>(`/v1/payments/transfers/${transferId}`))
         .transfer.status
     ).toBe("completed");
   });
 
-  it("adds a new bank account from the collected details", async () => {
-    const advanced = await call("POST", "/v1/counterparties/demo_cpty_priya/requirements", {
-      provider: "lightspark",
-      direction: "offramp",
-      fiatCurrency: "GBP",
-      collectedData: {
-        destinationCountry: "GB",
-        bankName: "Monzo",
-        accountNumber: "12345678",
-        sortCode: "040004",
-      },
-    });
-    const id: string = advanced.body.data.providerAccountId;
-    const accounts = await data<{ accounts: { id: string; bankName: string }[] }>(
-      "/v1/counterparties/demo_cpty_priya/provider-accounts"
-    );
-    expect(accounts.accounts.find((entry) => entry.id === id)?.bankName).toBe("Monzo");
-  });
-
   it("cancels a deposit before it is paid", async () => {
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "lightspark",
+      provider: "coinbase",
       counterpartyId: "demo_cpty_kai",
       destinationCustodyWalletId: "demo_cwlt_payroll",
       assetRail: "usdc.solana",
@@ -490,38 +559,6 @@ describe("every ramp provider", () => {
     }
   );
 
-  it("runs a MoneyGram deposit and pays out through MoneyGram", async () => {
-    const deposit = await onrampQuote("moneygram", "usdc.solana");
-    expect(deposit.body.data.quote.deliveryMode).toBe("session_widget");
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      transferId: deposit.body.data.transferId,
-    });
-    expect((await statusAfterSettling(deposit.body.data.transferId)).status).toBe("completed");
-
-    const payout = await call("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "moneygram",
-      counterpartyId: "demo_cpty_jane",
-      sourceCustodyWalletId: "demo_cwlt_treasury",
-      assetRail: "usdc.solana",
-      cryptoAmount: "100",
-      fiatCurrency: "USD",
-    });
-    const { transferId } = payout.body.data;
-    const waiting = await data<{
-      transfer: { cryptoDeposit: { destinationAddress: string; amount: string } };
-    }>(`/v1/payments/transfers/${transferId}`);
-    expect(waiting.transfer.cryptoDeposit.amount).toBe("100");
-    const funded = await call("POST", "/v1/payments/transfers", {
-      transferId,
-      sourceCustodyWalletId: "demo_cwlt_treasury",
-      destination: waiting.transfer.cryptoDeposit.destinationAddress,
-      token: USDC,
-      amount: "100",
-    });
-    expect(funded.status).toBe(201);
-    expect((await statusAfterSettling(transferId)).status).toBe("completed");
-  });
-
   it("runs BVNK's onboarding: agreements, a simulated identity check, review, then the deposit", async () => {
     const path =
       "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=EUR";
@@ -551,7 +588,7 @@ describe("every ramp provider", () => {
     });
     expect(await status()).toBe("customer_verification_required");
 
-    expect((await simulateVerification("demo_cpty_jane", "mural")).status).toBe(400);
+    expect((await simulateVerification("demo_cpty_jane", "moonpay")).status).toBe(400);
     expect((await simulateVerification()).status).toBe(200);
     expect(await status()).toBe("customer_verifying");
     expect((await simulateVerification()).status).toBe(409);
@@ -571,22 +608,6 @@ describe("every ramp provider", () => {
     });
     await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
     expect((await statusAfterSettling(transferId)).status).toBe("completed");
-  });
-
-  it("runs a Mural deposit for a business contact", async () => {
-    const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "mural",
-      counterpartyId: "demo_cpty_acme",
-      destinationCustodyWalletId: "demo_cwlt_treasury",
-      assetRail: "usdc.solana",
-      fiatCurrency: "USD",
-      fiatAmount: "250",
-    });
-    expect(quoted.body.data.quote.paymentInstructions[0].bankDetails.bankName).toBeTruthy();
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      transferId: quoted.body.data.transferId,
-    });
-    expect((await statusAfterSettling(quoted.body.data.transferId)).status).toBe("completed");
   });
 
   it("refuses a provider on a pair it doesn't run", async () => {

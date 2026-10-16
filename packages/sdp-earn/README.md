@@ -96,7 +96,7 @@ which routes serve the flow:
 | Queued exit | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options and preview are keyless or keyed; request/cancellation builds, submits, and history require a key |
 | Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
 | Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
-| Authorization | wallet policy, then `createOrgSigner` | the owner's own ed25519 signature |
+| Authorization | wallet policy, then `createOrgSignerForCustodyWallet` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 
 Both are the SAME execution model (`vault_direct`). Treasury and keyed

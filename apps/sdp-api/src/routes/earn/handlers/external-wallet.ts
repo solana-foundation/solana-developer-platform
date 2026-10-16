@@ -28,6 +28,7 @@ import type {
   EarnVaultDirectMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
+import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -43,7 +44,6 @@ import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
@@ -93,6 +93,7 @@ import {
   type HydratedVaultPositionValue,
   hydratedHoldingTokenValue,
   hydrateVaultPositions,
+  markVaultPositionRowsRead,
 } from "./vault-position-hydration";
 
 /**
@@ -103,13 +104,13 @@ import {
  * that returns an unsigned transaction for that wallet to sign, and a SUBMIT
  * that takes the signed bytes back, records the movement, then broadcasts.
  *
- * WHY NO POLICY GATE, stated here because its absence looks like the deposit
- * route's cautionary tale: wallet policy governs the organization's own
- * custody — every rule scopes to a custody wallet, and enforcement exists to
- * stand between a request and `createOrgSigner`. This path never resolves a
- * signer, never touches custody, and moves the OWNER's money on the OWNER's
- * signature, which IS the authorization. There is no signing sink here
- * for the value-moving conformance inventory to find.
+ * WHY NO REQUEST GATE, stated here because its absence looks like the deposit
+ * route's cautionary tale: the custody wallet binding governs the
+ * organization's own custody and stands between a request and
+ * `createOrgSignerForCustodyWallet`. This path never resolves a signer, never
+ * touches custody, and moves the OWNER's money on the OWNER's signature, which
+ * IS the authorization. There is no signing sink here for the
+ * value-moving conformance inventory to find.
  *
  * WHY THE BUILD IS THE GATE MOMENT: the money-in gates below run when SDP
  * builds. The vault exposure cap is the exception for a keyed build: its
@@ -238,9 +239,11 @@ async function loadExternalWalletPortfolio(
       before,
     })
   );
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -287,9 +290,11 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
     limit: query.limit,
     before,
   });
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -535,9 +540,11 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
     ),
     repo.aggregateExternalWalletMovements({ ...scope, ownerAddress }),
   ]);
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -840,10 +847,7 @@ export async function createEarnExternalWalletDepositTransaction(
   // wording; the shared predicate re-checks them for free. `body.amount` is
   // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
   // dollar-for-dollar by design.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, {
-    environment,
-    organizationId: authenticated?.auth.organizationId ?? null,
-  });
+  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
 
   const swap = resolveDepositSwapRequest(
     {
@@ -955,9 +959,8 @@ function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDe
  *
  * Authenticated scoping answers 404 across the board: organization and
  * environment in the position query, kind and owner shape, and exact project.
- * A sibling project must not learn whether the position exists. This is
- * deliberately stricter than the custody exit, where sibling projects
- * legitimately share organization-level wallets.
+ * A sibling project must not learn whether the position exists. The custody
+ * exit holds the same boundary: every custody wallet belongs to one project.
  */
 export async function createEarnExternalWalletWithdrawalTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalTransactionSchema>
@@ -1194,16 +1197,6 @@ export async function createEarnExternalWalletWithdrawal(
 }
 
 function requireExternalWalletIdempotencyKey(c: AppContext, noun: string): string {
-  // `Dry-Run: true` is a POLICY preview, honored only by the policy gate —
-  // which these routes deliberately do not take. Without this refusal the
-  // header would validate and then be silently ignored, and a caller who
-  // learned dry-run on the custody routes would move real money here.
-  if (isDryRunRequest(c)) {
-    throw badRequest(
-      `Dry-Run is not supported for ${noun}: there is no policy evaluation to preview here, ` +
-        "and the submit would otherwise execute."
-    );
-  }
   const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
   if (requestId === null) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for ${noun}`);
@@ -1496,6 +1489,10 @@ function toExternalWalletMovementWire(
     providerReference: movement.vault_address,
     direction: movement.direction,
     status: status as EarnVaultDirectMovementStatus,
+    settlement:
+      movement.direction === "deposit"
+        ? earnProviderDepositSettlement(movement.provider)
+        : earnProviderWithdrawalSettlement(movement.provider),
     signature: movement.signature,
     ownerAddress: movement.owner_address,
     amount: movement.amount_requested,

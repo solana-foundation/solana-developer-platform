@@ -1,4 +1,5 @@
 ---
+module: issuance
 title: Allowlists
 description: Control which addresses can receive your token by maintaining an approved list.
 steps:
@@ -10,7 +11,7 @@ steps:
 
 **Token Access Control** gates who may hold or receive your token. This page covers its `allowlist` mode: tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers, and it's required for `tokenized-security` tokens.
 
-This is distinct from a wallet's transfer allowlist (a Wallet Policy concern) and the Platform Allowlist (deployment admission).
+This is distinct from an API key's [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), which limit what a key may do, and from the Platform Allowlist (deployment admission).
 
 ## Prerequisites
 

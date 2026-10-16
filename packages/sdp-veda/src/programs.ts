@@ -1,6 +1,6 @@
 import { MEMO_PROGRAM_ADDRESS, type SolanaCluster } from "@sdp/types";
 import { type VedaDeployment, vedaDeployment } from "@sdp/types/veda-programs";
-import { type Address, address } from "@solana/kit";
+import { type Address, address, getAddressEncoder, getProgramDerivedAddress } from "@solana/kit";
 import { deploymentNotConfigured, SdpVedaError } from "./errors";
 
 /**
@@ -82,6 +82,27 @@ export function toClusterConfig(
 export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS =
   // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+const TOKEN_2022_PROGRAM_ADDRESS =
+  // biome-ignore lint/security/noSecrets: a public Solana program address, not a credential
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
+/** A holder's Token-2022 share account for `shareMint`, derived as the SDK derives it. */
+export async function vedaShareAccountAddress(
+  owner: Address,
+  shareMint: Address
+): Promise<Address> {
+  const encoder = getAddressEncoder();
+  const [shareAccount] = await getProgramDerivedAddress({
+    programAddress: address(ASSOCIATED_TOKEN_PROGRAM_ADDRESS),
+    seeds: [
+      encoder.encode(owner),
+      encoder.encode(address(TOKEN_2022_PROGRAM_ADDRESS)),
+      encoder.encode(shareMint),
+    ],
+  });
+  return shareAccount;
+}
 
 /**
  * Programs that are the same on every cluster and may appear in a plan without

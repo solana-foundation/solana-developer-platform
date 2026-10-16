@@ -1,27 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { updateProjectSchema } from "@/routes/projects/schemas";
+import { updateProjectSchema } from "./schemas";
 
-describe("updateProjectSchema settings.rpcEndpoint", () => {
-  const parse = (rpcEndpoint: string) =>
-    updateProjectSchema.safeParse({ settings: { rpcProvider: "custom", rpcEndpoint } });
-
-  it("accepts an ordinary https endpoint", () => {
-    expect(parse("https://rpc.example.com/abc").success).toBe(true);
+describe("updateProjectSchema settings", () => {
+  it("rejects a removed settings key", () => {
+    expect(updateProjectSchema.safeParse({ settings: { rpcProvider: "x" } })).toMatchObject({
+      success: false,
+      error: {
+        issues: [{ code: "unrecognized_keys", keys: ["rpcProvider"], path: ["settings"] }],
+      },
+    });
   });
 
-  it.each([
-    ["http://rpc.example.com/", "plaintext"],
-    ["https://169.254.169.254/latest/meta-data", "the metadata address"],
-    ["https://127.0.0.1:8899/", "loopback"],
-    ["https://10.0.0.5/", "a private range"],
-    ["https://[::1]/", "IPv6 loopback"],
-    ["https://vault.internal/", "an internal name"],
-    ["https://user:pass@rpc.example.com/", "embedded credentials"],
-  ])("refuses %s (%s)", (endpoint) => {
-    expect(parse(endpoint).success).toBe(false);
-  });
+  it("accepts the webhook URL and metadata", () => {
+    const input = {
+      settings: { webhookUrl: "https://hooks.example.com/x", metadata: { team: "payments" } },
+    };
 
-  it("leaves an update without settings untouched", () => {
-    expect(updateProjectSchema.safeParse({ name: "Payments" }).success).toBe(true);
+    expect(updateProjectSchema.parse(input)).toEqual(input);
   });
 });

@@ -260,6 +260,10 @@ describe("a par request over held intermediate", () => {
       intermediate_amount: "2000",
     });
 
+    // A signed build may already have been broadcast by its owner. Expiry
+    // cannot authorize forgetting it or asking for a newly signed request.
+    readConfirmedBlockHeight.mockResolvedValue(99999n);
+    broadcastVaultTransaction.mockRejectedValueOnce(new Error("Blockhash not found"));
     const submitted = await submitExternalQueuedWithdrawalAction(env, {
       actor,
       transactionId: built.id,
@@ -267,6 +271,7 @@ describe("a par request over held intermediate", () => {
       clientRequestId: "par-intermediate-external-key",
       action: "request",
     });
+    expect(submitted.action).toMatchObject({ status: "requested" });
     expect(submitted.request).toMatchObject({
       shares: "0",
       intermediate_amount: "2000",

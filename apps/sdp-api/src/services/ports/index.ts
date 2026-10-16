@@ -10,5 +10,5 @@ export type {
   ExtendedFeePaymentPort,
   FeePaymentErrorCode,
   FeePaymentPort,
-} from "@sdp/payments/fee-payment/port";
-export { FeePaymentError } from "@sdp/payments/fee-payment/port";
+} from "@sdp/fee-payment/port";
+export { FeePaymentError } from "@sdp/fee-payment/port";

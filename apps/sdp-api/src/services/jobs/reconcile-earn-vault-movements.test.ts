@@ -1,3 +1,4 @@
+import { readFloor, readStamp } from "@sdp/rpc/read-context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -407,6 +408,25 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
       closed_at: expect.any(String),
     });
+  });
+
+  it("reads the post-exit balance under a floor stamped for this close", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
+    const floors: Array<number | undefined> = [];
+    readVaultPositions.mockImplementation(async () => {
+      floors.push(readFloor());
+      return liveSnapshot(seeded.position, EXTERNAL_OWNER, "0");
+    });
+    const before = readStamp();
+
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(floors).toEqual([expect.any(Number)]);
+    expect(floors[0]).toBeGreaterThan(before);
   });
 
   it("leaves the holding open when live shares remain after a partial exit", async () => {
@@ -910,6 +930,45 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
 });
 
 describe("reconcileEarnVaultMovements", () => {
+  it.each(["deposit", "withdrawal"] as const)(
+    "keeps a %s reconcilable through nonfinal errors in scheduled reconciliation",
+    async (direction) => {
+      const seeded = direction === "deposit" ? await seedMovement() : await seedWithdrawal();
+      for (const confirmationStatus of ["processed", "confirmed"] as const) {
+        getSignatureStatuses.mockResolvedValue([
+          { slot: 1n, confirmations: 0n, err: "InsufficientFundsForFee", confirmationStatus },
+        ]);
+        await reconcileEarnVaultMovements(env);
+        expect((await ledgerRow(seeded.movement.id))?.status).not.toBe("failed");
+      }
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 2n, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+      expect((await ledgerRow(seeded.movement.id))?.status).toBe("finalized");
+    }
+  );
+  it.each(["processed", "confirmed"] as const)(
+    "audit: preserves a movement after an error at %s commitment",
+    async (confirmationStatus) => {
+      const seeded = await seedMovement();
+      getSignatureStatuses.mockResolvedValue([
+        {
+          slot: 1n,
+          confirmations: 0n,
+          err: { InstructionError: [0, { Custom: 1 }] },
+          confirmationStatus,
+        },
+      ]);
+      const observed = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 2n, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ]);
+      const recovered = await reconcileEarnVaultMovementReadThrough(env, observed);
+      expect(recovered.status).toBe("finalized");
+    }
+  );
+
   it("reconciles withdrawals through the same movement queue", async () => {
     const seeded = await seedWithdrawal();
     getSignatureStatuses.mockResolvedValue([

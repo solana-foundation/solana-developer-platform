@@ -5,7 +5,7 @@
 #     docker build -f apps/sdp-api/Dockerfile -t sdp-api .
 
 # Digest pinned so rebuilds don't float onto a new node:24-slim.
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
 RUN corepack enable && corepack prepare pnpm@10.16.0 --activate
@@ -24,11 +24,11 @@ COPY packages/sdp-helius-rings-sdk/package.json ./packages/sdp-helius-rings-sdk/
 COPY packages/sdp-dvp/package.json ./packages/sdp-dvp/
 COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
+COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
-COPY packages/sdp-policy/package.json ./packages/sdp-policy/
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY packages/sdp-spc-escrow/package.json ./packages/sdp-spc-escrow/
@@ -57,11 +57,11 @@ COPY packages/sdp-helius-rings-sdk ./packages/sdp-helius-rings-sdk
 COPY packages/sdp-dvp ./packages/sdp-dvp
 COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
+COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-solana ./packages/sdp-solana
-COPY packages/sdp-policy ./packages/sdp-policy
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 COPY packages/sdp-spc-escrow ./packages/sdp-spc-escrow
@@ -77,7 +77,7 @@ COPY packages/sdp-ondo ./packages/sdp-ondo
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
 
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

@@ -1,5 +1,5 @@
 import type { ListProjectsResponse } from "@sdp/types";
-import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { resolveProjectFromList } from "./dashboard-project-selection";
 
 export type WorkspaceReadiness =
@@ -8,7 +8,6 @@ export type WorkspaceReadiness =
 
 export async function resolveWorkspaceReadiness(
   client: { fetch: <T>(path: string, options?: RequestInit) => Promise<T> },
-  currentProject: string | null,
   signal?: AbortSignal
 ): Promise<WorkspaceReadiness> {
   try {
@@ -18,9 +17,7 @@ export async function resolveWorkspaceReadiness(
     if (!status.linked) return { state: "pending", reason: "sync" };
     // A linked org alone does not prove the membership and default projects are ready.
     const { projects } = await client.fetch<ListProjectsResponse>("/v1/projects", { signal });
-    const project = resolveProjectFromList(projects, currentProject, {
-      fallbackToFirstProject: true,
-    });
+    const project = resolveProjectFromList(projects, null);
     return project
       ? { state: "ready", projectId: project.id }
       : { state: "pending", reason: "sync" };

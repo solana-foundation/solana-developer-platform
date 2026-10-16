@@ -1,16 +1,9 @@
 /**
- * Resolving what a DvP write acts on, in one place, because two callers need
- * the same answer (PRO-1975).
+ * Resolving what a DvP write acts on, in one place, because the leg handlers
+ * (fund, reclaim) share the same answer.
  *
- * A policy gate has to refuse before it records an operation, so the extractor
- * resolves the trade and the signing wallet exactly as the handler will, and
- * the handler then asserts the gate judged the wallet it ended up with. That is
- * the issuance pattern (`routes/issuance/handlers/policy.ts`): resolve twice,
- * compare, refuse a signer the gate never saw.
- *
- * These two resolvers moved out of `handlers.ts` unchanged. They live here
- * rather than there so `policy.ts` can call them without importing the module
- * that imports it back.
+ * The wallet check runs against the bindings authentication read fresh for
+ * this request, before anything is broadcast.
  */
 
 import type { Context } from "hono";
@@ -19,8 +12,7 @@ import { createDvpTradeRepository, type DvpTradeRow } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, notFound } from "@/lib/errors";
 import {
-  assertFreshApiKeyActive,
-  assertFreshApiKeyCustodyWalletAccess,
+  assertApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
 import { custodyWalletForParty, walletIdIfHoldsAddress } from "@/services/dvp/custody-party";
@@ -106,10 +98,7 @@ export async function resolveLegAction(
       `DvP trade ${trade.id}: no active custody wallet in this project holds the side ${side} party address`
     );
   }
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
-    "payments:write",
-  ]);
+  assertApiKeyCustodyWalletAccess(auth, custodyWalletId, ["payments:write"]);
 
   return {
     trade,
@@ -160,10 +149,7 @@ export async function resolveCloseAction(
     throw notFound("DvP settlement wallet not found for this trade's project");
   }
 
-  await assertFreshApiKeyActive(getDb(c.env), auth);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, settlement.custodyWalletId, [
-    "payments:write",
-  ]);
+  assertApiKeyCustodyWalletAccess(auth, settlement.custodyWalletId, ["payments:write"]);
 
   return { trade, actor: dvpTradeAuditActor(auth), settlement, projectId };
 }

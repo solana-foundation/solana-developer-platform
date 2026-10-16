@@ -1,0 +1,52 @@
+import { auth } from "@clerk/nextjs/server";
+import { hasPermission } from "@sdp/types";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestProjectId } from "@/lib/sdp-api";
+import { requirePrivateChannelsAccess } from "../private-channels-access";
+import { PrivateChannelsLoadError } from "../private-channels-load-error";
+import { loadEventReferences, loadEvents } from "../private-channels-page.data";
+import { EventsList } from "./events-list";
+
+export default async function PrivateChannelsEventsPage() {
+  await requirePrivateChannelsAccess();
+
+  // The same request-scoped resolution the client used: the scope the initial
+  // rows were loaded under. Follow-up loads answer for the same URL Project and
+  // are checked against it, so the feed can never mix projects.
+  const [t, { orgRole }, client, projectId] = await Promise.all([
+    getTranslations(),
+    auth(),
+    createSdpApiClient(),
+    requestProjectId(),
+  ]);
+  const { permissions } = resolveDashboardAccess(orgRole);
+  const canViewRawPayload = hasPermission(permissions, "org:admin");
+  const [events, references] = await Promise.all([loadEvents(client), loadEventReferences(client)]);
+
+  return (
+    <div className="mx-auto w-full max-w-5xl">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("DashboardPrivateChannels.events.title")}</CardTitle>
+          <CardDescription>{t("DashboardPrivateChannels.events.description")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {events.ok ? (
+            <EventsList
+              projectId={projectId}
+              initialEvents={events.data.events}
+              initialHasMore={events.data.hasMore}
+              initialNextCursor={events.data.nextCursor}
+              canViewRawPayload={canViewRawPayload}
+              names={references.data}
+            />
+          ) : (
+            <PrivateChannelsLoadError message={events.error} />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

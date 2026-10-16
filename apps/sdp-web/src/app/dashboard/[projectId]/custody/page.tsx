@@ -1,0 +1,173 @@
+import { auth } from "@clerk/nextjs/server";
+import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
+import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import {
+  fetchActiveApiKeys,
+  resolvePlaygroundApiBaseUrl,
+} from "@/app/dashboard/[projectId]/playground-api-data";
+import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
+import { withLegacyDesign } from "@/flags/new-design";
+import { getTranslations } from "@/i18n/server";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
+import { createTimedTrace } from "@/lib/request-tracing";
+import {
+  createRequestScopedSdpApiClients,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
+import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
+import type { OnboardingStatusResponse } from "../onboarding-status";
+import RedesignCurrentCustodyPage from "./page.redesign";
+import type { CustodyAvailabilityResult } from "./wallets-create-area";
+import { WalletsWorkspace } from "./wallets-workspace";
+
+type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
+  return promise.then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error })
+  );
+}
+
+async function getCustodyConfigs(
+  request: SdpApiClient["request"]
+): Promise<{ configs: CustodyConfigSummary[] }> {
+  const res = await request("/v1/wallets/configs");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`SDP API request failed (${res.status}): ${body}`);
+  }
+
+  const json = (await res.json()) as {
+    data: { configs: CustodyConfigSummary[] };
+  };
+  return json.data;
+}
+
+async function getCustodyWallets(
+  request: SdpApiClient["request"]
+): Promise<CustodyWalletSummary[]> {
+  // Wallet cards refresh balances client-side; avoid blocking the overview render on balance RPCs.
+  const res = await request("/v1/wallets");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`SDP API request failed (${res.status}): ${body}`);
+  }
+
+  const json = (await res.json()) as {
+    data?: { wallets?: CustodyWalletSummary[] };
+  };
+  return json.data?.wallets ?? [];
+}
+
+// react-doctor-disable-next-line no-high-complexity-react-function -- main's page, unchanged; this change only moves its default export to the design switch
+async function CustodyPage() {
+  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const trace = createTimedTrace("dashboard.custody.page");
+
+  try {
+    const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
+      createRequestScopedSdpApiClients({
+        organizationTraceContext: trace.childContext("dashboard.custody.org.api"),
+        projectTraceContext: trace.childContext("dashboard.custody.api"),
+      })
+    );
+    const onboarding = await trace.step("fetch_onboarding_status", () =>
+      organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+    );
+
+    if (!onboarding.linked) {
+      trace.log({
+        ok: true,
+        linked: false,
+      });
+
+      redirect(
+        `${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent(await requestProjectHref("/dashboard/wallets"))}`
+      );
+    }
+
+    const [configsResult, walletsResult, apiKeysResult, providerAvailabilityResult] =
+      await Promise.all([
+        trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
+        trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
+        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
+        trace.step("fetch_provider_availability", () =>
+          settle(fetchProjectProviderAvailability(projectClient))
+        ),
+      ]);
+
+    const connectedProviders: KnownCustodyProvider[] = configsResult.ok
+      ? configsResult.value.configs
+          .filter((config) => config.status === "active")
+          .map((config) => config.provider)
+          .filter(isKnownCustodyProvider)
+      : [];
+
+    const configsError = configsResult.ok
+      ? null
+      : configsResult.error instanceof Error
+        ? configsResult.error.message
+        : t("DashboardCustody.unableToLoadWalletProviders");
+    const walletsError = walletsResult.ok
+      ? null
+      : walletsResult.error instanceof Error
+        ? walletsResult.error.message
+        : t("DashboardCustody.unableToLoadWallets");
+    const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
+    // Availability only drives the create area, so a failed read closes that
+    // area instead of taking down the existing wallets.
+    const custodyAvailability: CustodyAvailabilityResult = providerAvailabilityResult.ok
+      ? { ok: true, providers: availableCustodyProviders(providerAvailabilityResult.value) }
+      : { ok: false };
+
+    trace.log({
+      ok: true,
+      linked: true,
+      connectedProviderCount: connectedProviders.length,
+      availableProviderCount: custodyAvailability.ok ? custodyAvailability.providers.length : null,
+      providerAvailabilityError: providerAvailabilityResult.ok
+        ? null
+        : String(providerAvailabilityResult.error),
+      walletCount: walletsResult.ok ? walletsResult.value.length : 0,
+      apiKeyCount: apiKeys.length,
+    });
+
+    return (
+      <Suspense fallback={<WalletsOverviewSkeleton />}>
+        <WalletsWorkspace
+          apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+          apiKeys={apiKeys}
+          connectedProviders={connectedProviders}
+          custodyAvailability={custodyAvailability}
+          configsError={configsError}
+          wallets={walletsResult.ok ? walletsResult.value : []}
+          walletsError={walletsError}
+        />
+      </Suspense>
+    );
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+}
+
+export default withLegacyDesign(RedesignCurrentCustodyPage, CustodyPage, "wallets");

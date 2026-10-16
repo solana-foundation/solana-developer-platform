@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { parseErrorMessage } from "@/app/dashboard/activity-format-utils";
+import { parseErrorMessage } from "@/app/dashboard/[projectId]/activity-format-utils";
 import {
   loadWalletActivity,
   WALLET_ACTIVITY_LIMIT,
   WALLET_ACTIVITY_MAX_LIMIT,
   type WalletActivityIdentity,
-} from "@/app/dashboard/custody/wallet-activity.data";
+} from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";

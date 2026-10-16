@@ -4,22 +4,16 @@
  * Projects group API keys by team or environment within an organization.
  */
 
-import { ORGANIZATION_RPC_PROVIDERS } from "./organizations";
 import type { ProjectRole } from "./permissions";
 
 export type ProjectEnvironment = "sandbox" | "production";
 
 export type ProjectStatus = "active" | "archived";
 
-export const PROJECT_RPC_PROVIDERS = [...ORGANIZATION_RPC_PROVIDERS, "custom"] as const;
-export type ProjectRpcProvider = (typeof PROJECT_RPC_PROVIDERS)[number];
-
 // Re-export ProjectRole for convenience
 export type { ProjectRole } from "./permissions";
 
 export interface ProjectSettings {
-  rpcProvider?: ProjectRpcProvider;
-  rpcEndpoint?: string;
   webhookUrl?: string;
   metadata?: Record<string, string>;
 }

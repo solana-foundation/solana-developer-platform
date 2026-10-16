@@ -20,9 +20,8 @@
  *     `TRANSFER_STUCK_WARNING` (debounced via `context.lastStuckWarningAt`),
  *     never auto-`failed` — the balance is already burned.
  *
- * The release reconciler resolves the project's CURRENT RPC connection each
- * tick, so provider changes and credential rotations apply to in-flight intents.
- * The audit context on each withdrawal is never consulted here.
+ * The release reconciler builds the project's RPC client on SDP's managed pool
+ * each tick. The audit context on each withdrawal is never consulted here.
  *
  * All status transitions are compare-and-swap (`expectedStatus`) so a concurrent
  * worker can't regress state. Release attribution is by content

@@ -15,22 +15,13 @@ import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { isDryRunRequest } from "@/middleware/dry-run";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { resolveApiKeySigningWalletId } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import type { MosaicFeePayment } from "@/services/issuance/mosaic";
-import {
-  approvedWalletOperationId,
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-} from "@/services/policy/approved-operation-replay";
-import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
@@ -50,7 +41,6 @@ import {
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { canonicalMetadataUrl, resolveMetadataOrigin } from "./metadata";
-import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -381,42 +371,16 @@ async function createDeployMetadataSigner(
 ): Promise<TransactionSigner> {
   if (!metadataWallet || metadataWallet.custodyWalletId === deploymentWallet.custodyWalletId)
     return signer;
-  return createResolvedAuthoritySigner({
+  // A signer for the metadata authority only; its sponsor is the deployment's.
+  const metadataAuthority = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env,
     auth,
     custodyWalletId: metadataWallet.custodyWalletId,
     currentAuthority: metadataWallet.publicKey,
     requiredWalletPermissions: ["tokens:write"],
   });
-}
-
-/**
- * Refuse a metadata signer the gate's extraction did not judge. Mirrors
- * `assertJudgedCustodyWallet` for the second signer a deploy can carry.
- */
-function assertJudgedMetadataCustodyWallet(
-  c: Context<{ Bindings: Env }>,
-  deploymentWallet: ResolvedIssuanceWallet,
-  metadataWallet?: ResolvedIssuanceWallet
-): void {
-  if (!metadataWallet || metadataWallet.custodyWalletId === deploymentWallet.custodyWalletId) {
-    return;
-  }
-  const judged = getPolicyGateContext<unknown, { judgedMetadataCustodyWalletId?: string | null }>(c)
-    .resolved?.judgedMetadataCustodyWalletId;
-  if (judged !== undefined && judged !== metadataWallet.custodyWalletId) {
-    throw conflict("Metadata authority wallet changed after the operation was evaluated by policy");
-  }
-}
-
-async function fenceApprovedUnsettledDeployReplay(
-  c: Context<{ Bindings: Env }>,
-  status: string
-): Promise<void> {
-  if (approvedWalletOperationId(c) && status !== "confirmed" && status !== "finalized") {
-    await beginApprovedWalletOperationEffect(c);
-    throw conflict("Approved deploy execution is incomplete and requires manual reconciliation");
-  }
+  return metadataAuthority.signer;
 }
 
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
@@ -475,8 +439,6 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     custodyWalletId: requestedCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
-  assertJudgedCustodyWallet(c, deploymentWallet.custodyWalletId);
-  await assertApprovedWalletOperationCustodyWallet(c, deploymentWallet.custodyWalletId);
 
   const [metadataWallet, freezeWallet, delegateWallet] = await resolveDeployAuthorityWallets(
     c.env,
@@ -540,7 +502,6 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   });
 
   if (replayed) {
-    await fenceApprovedUnsettledDeployReplay(c, tx.status);
     return success(c, { token: toPublicToken(token) });
   }
 
@@ -604,15 +565,16 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
     // `deploying`, uneditable and un-redeployable.
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: deploymentWallet.custodyWalletId,
       currentAuthority: deploymentWallet.publicKey,
       requiredWalletPermissions: ["tokens:write"],
     });
+    const signer = authority.signer;
     custodyAddress = signer.address;
-    assertJudgedMetadataCustodyWallet(c, deploymentWallet, metadataWallet);
     const metadataSigner = await createDeployMetadataSigner(
       c.env,
       auth,
@@ -636,9 +598,8 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     }
 
     // Create Mosaic service for template-based token deployment
-    const mosaic = createIssuanceMosaicService(c, signer, feePayment);
+    const mosaic = createIssuanceMosaicService(c, authority, feePayment);
 
-    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.createToken({
       template: token.template,
       metadata: {
@@ -817,12 +778,14 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
 
   // This legacy client-signed flow intentionally remains Config-only. Validate
   // the exact pin and load the Config signer before mutating the provider mirror.
-  const signer = await createLegacyResolvedAuthoritySigner({
+  const authority = await createLegacyResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });
+  const signer = authority.signer;
 
   // Pin the resolved signing wallet on the token so confirmDeploy derives the
   // SAME custody address — and thus the same mint/metadata authorities and ABL
@@ -837,7 +800,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
   const custodyAddress = signer.address;
 
   // Create Mosaic service and prepare transaction
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   const enableAbl = shouldEnableOnChainAcl(token);
   const aclMode = getMosaicAclMode(token);
@@ -1050,12 +1013,14 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // Recompute the authorities the deploy used (custody signer === mint &
     // metadata authority, matching prepareDeploy) rather than trusting the
     // request, so a recorded mint can't claim authorities the caller lacks.
-    const signer = await createLegacyResolvedAuthoritySigner({
+    const authority = await createLegacyResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       walletId: signingWalletId,
       expectedCustodyWalletId: claimed.signingCustodyWalletId,
     });
+    const signer = authority.signer;
     const custodyAddress = signer.address;
     const freezeAuthority = claimed.isFreezable ? custodyAddress : null;
 
@@ -1180,13 +1145,16 @@ export const prepareDeployMetadata = async (
     "tokens:write",
   ]);
 
-  const signer = await createLegacyResolvedAuthoritySigner({
+  const authority = await createLegacyResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+  const signer = authority.signer;
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   // Resolve the same uri prepareDeploy used so the on-chain pointer ends up at
   // the SDP-hosted (or issuer-supplied) URL.
@@ -1231,126 +1199,3 @@ export const prepareDeployMetadata = async (
     simulation,
   });
 };
-
-export async function extractDeployPolicyCandidate(
-  c: ValidatedBodyContext<typeof deployTokenSchema>
-): Promise<PolicyGateExtraction> {
-  const { tokenId } = c.req.param();
-  const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = c.req.valid("json");
-  const tokenService = getTenantTokenService(c);
-  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
-  if (!token) {
-    throw notFound("Token");
-  }
-
-  const emptyExtraction = {
-    legs: [],
-    body,
-    resolved: {},
-    rawPayload: {
-      tokenId: token.id,
-      action: "deploy",
-      template: token.template,
-      feePayment: body.feePayment,
-    },
-    idempotencyKey: null,
-  };
-
-  const idempotencyKey = c.req.header("Idempotency-Key");
-  const replayed =
-    !isDryRunRequest(c) &&
-    (await resolveCompletedDeployReplay({
-      env: c.env,
-      auth,
-      tokenService,
-      token,
-      idempotencyKey,
-      requestedCustodyWalletId: body.signingCustodyWalletId,
-      authorityCustodyWalletIds: body.authorityCustodyWalletIds,
-      feePayment: body.feePayment,
-    }));
-  if (replayed) {
-    return { ...emptyExtraction, candidate: null };
-  }
-
-  if (token.status !== "pending") {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Token has already been deployed or is not in pending status"
-    );
-  }
-  if (token.mintAddress) {
-    throw badRequest("Token already has a mint address");
-  }
-
-  const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
-  if (!requestedCustodyWalletId) {
-    throw badRequest("signingCustodyWalletId is required to deploy this token");
-  }
-
-  const wallet = await resolveIssuanceWallet({
-    env: c.env,
-    auth,
-    custodyWalletId: requestedCustodyWalletId,
-    requiredWalletPermissions: ["tokens:write"],
-  });
-
-  await admitIssuanceRuntimeExecution({
-    env: c.env,
-    auth,
-    custodyWalletId: wallet.custodyWalletId,
-    tokenService,
-  });
-
-  // The metadata authority wallet is a SECOND signer when it differs from the
-  // deployment wallet: it signs the metadata-URI follow-up inside the same
-  // deploy. The gate judges one wallet per operation, so that wallet's own
-  // policy is evaluated here without persisting an operation, and anything
-  // short of a plain allow refuses the deploy — a secondary signer cannot
-  // carry its own approval flow.
-  const metadataCustodyWalletId = body.authorityCustodyWalletIds?.metadata;
-  let judgedMetadataCustodyWalletId: string | null = null;
-  if (metadataCustodyWalletId && metadataCustodyWalletId !== wallet.custodyWalletId) {
-    const metadataWallet = await resolveIssuanceWallet({
-      env: c.env,
-      auth,
-      custodyWalletId: metadataCustodyWalletId,
-      requiredWalletPermissions: ["tokens:write"],
-    });
-    const verdict = await dryRunPolicyCandidate(
-      c.env,
-      getRequestTenantScope(c),
-      buildIssuancePolicyCandidate({
-        auth,
-        token,
-        custodyWalletId: metadataWallet.custodyWalletId,
-        walletId: metadataWallet.providerWalletId,
-        operationType: "issuance_deploy_execute",
-        amount: null,
-        destination: null,
-      }),
-      []
-    );
-    if (verdict.decision !== "allow") {
-      throw forbidden(
-        "Wallet policy does not allow the metadata authority wallet to sign this deploy"
-      );
-    }
-    judgedMetadataCustodyWalletId = metadataWallet.custodyWalletId;
-  }
-
-  return {
-    ...emptyExtraction,
-    resolved: { judgedCustodyWalletId: wallet.custodyWalletId, judgedMetadataCustodyWalletId },
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId: wallet.custodyWalletId,
-      walletId: wallet.providerWalletId,
-      operationType: "issuance_deploy_execute",
-      amount: null,
-      destination: null,
-    }),
-  };
-}

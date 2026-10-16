@@ -1,4 +1,4 @@
-import { type PolicyRule, SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -12,7 +12,6 @@ import {
   listTransferBatchesQuerySchema,
 } from "./transfer-batches/schemas";
 import { createTransferSchema, listTransfersQuerySchema } from "./transfers/schemas";
-import { updateWalletPolicySchema, walletPolicyRuleSchema } from "./wallet-policies/schemas";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
@@ -72,12 +71,10 @@ describe("payments exact wallet contract", () => {
 });
 
 describe("payments schema inferred types", () => {
-  it("destination infers as string and policy rules as PolicyRule[]", () => {
+  it("destination infers as string", () => {
     type CreateTransfer = z.infer<typeof createTransferSchema>;
-    type UpdateWalletPolicy = z.infer<typeof updateWalletPolicySchema>;
 
     expectTypeOf<CreateTransfer["destination"]>().toEqualTypeOf<string>();
-    expectTypeOf<UpdateWalletPolicy["rules"]>().toEqualTypeOf<PolicyRule[]>();
   });
 });
 
@@ -328,216 +325,5 @@ describe("recurring payment schema", () => {
       updateRecurringPaymentSchema.safeParse({ metadataUri: "https://example.com/metadata.json" })
         .success
     ).toBe(true);
-  });
-});
-
-describe("wallet policy destination rule allowlist schema", () => {
-  it("accepts trimmed valid addresses", () => {
-    const parsed = updateWalletPolicySchema.parse({
-      defaultAction: "allow",
-      rules: [{ kind: "destination", allowlist: [` ${VALID_DESTINATION} `, USDC_MINT] }],
-    });
-
-    expect(parsed.rules).toEqual([
-      { kind: "destination", allowlist: [VALID_DESTINATION, USDC_MINT] },
-    ]);
-  });
-
-  it("rejects an entry that is the wrong length", () => {
-    const result = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [{ kind: "destination", allowlist: [VALID_DESTINATION, "x".repeat(20)] }],
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry must be 32 to 44 characters (got 20)");
-    }
-  });
-
-  it("rejects a right-length non-base58 entry", () => {
-    const result = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [{ kind: "destination", allowlist: [VALID_DESTINATION, "!".repeat(43)] }],
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry contains characters outside the base58 alphabet");
-    }
-  });
-});
-
-describe("wallet policy rule schema", () => {
-  it("rejects an operation type rule with an unknown operation type", () => {
-    const result = walletPolicyRuleSchema.safeParse({
-      kind: "operation_type",
-      operationType: "signer-check",
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts the program family now produced by Earn vault deposits", () => {
-    const result = walletPolicyRuleSchema.safeParse({
-      kind: "operation_family",
-      family: "program",
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it("accepts the Earn vault deposit operation type", () => {
-    const result = walletPolicyRuleSchema.safeParse({
-      kind: "operation_type",
-      operationType: "earn_vault_deposit",
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects an approval rule with an unknown operation type", () => {
-    const result = walletPolicyRuleSchema.safeParse({
-      kind: "approval",
-      operationTypes: ["issuance_mint_execute", "signer-check"],
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts operation_type and standalone asset rules", () => {
-    const rules = [
-      {
-        id: "deny-payment-execution",
-        kind: "operation_type",
-        operationType: "payment_transfer_execute",
-        action: "deny",
-      },
-      {
-        id: "approve-usdc",
-        kind: "asset",
-        assets: ["USDC", USDC_MINT],
-        action: "approval_required",
-      },
-    ] satisfies PolicyRule[];
-
-    const parsed = updateWalletPolicySchema.parse({ defaultAction: "allow", rules });
-
-    expect(parsed.rules).toEqual(rules);
-  });
-
-  it("rejects invalid operation_type and asset values with field-specific errors", () => {
-    const result = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [
-        { kind: "operation_type", operationType: "" },
-        { kind: "asset", assets: [""] },
-      ],
-    });
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: ["rules", 0, "operationType"],
-            message: "operation type must be one of the supported wallet operation types",
-          }),
-          expect.objectContaining({
-            path: ["rules", 1, "assets", 0],
-            message: "assets entries must not be empty",
-          }),
-        ])
-      );
-    }
-  });
-
-  it("rejects an amount rule that names no asset", () => {
-    const result = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [{ id: "per-transaction-limit", kind: "amount", max: "100" }],
-    });
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: ["rules", 0],
-            message: "Amount rules must name the asset mint(s) they bound",
-          }),
-        ])
-      );
-    }
-  });
-
-  it("accepts a velocity rule with a supported window and rejects the rest", () => {
-    const valid = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [
-        {
-          id: "daily-volume",
-          kind: "velocity",
-          scope: "organization",
-          window: "P1D",
-          max: "100000",
-          asset: USDC_MINT,
-          operationTypes: ["earn_vault_deposit"],
-          action: "approval_required",
-        },
-      ],
-    });
-    expect(valid.success).toBe(true);
-
-    const invalid = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [
-        { id: "bad-window", kind: "velocity", window: "P1W", max: "1", asset: USDC_MINT },
-        { id: "bad-max", kind: "velocity", window: "PT1H", max: "1,5", asset: USDC_MINT },
-        { id: "no-window", kind: "velocity", max: "1", asset: USDC_MINT },
-      ],
-    });
-    expect(invalid.success).toBe(false);
-    if (!invalid.success) {
-      expect(invalid.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ path: ["rules", 0, "window"] }),
-          expect.objectContaining({ path: ["rules", 1, "max"], message: "Invalid amount format" }),
-          expect.objectContaining({ path: ["rules", 2, "window"] }),
-        ])
-      );
-    }
-
-    // The cross-rule refinement only runs on a shape-valid payload.
-    const assetless = updateWalletPolicySchema.safeParse({
-      defaultAction: "allow",
-      rules: [{ id: "no-asset", kind: "velocity", window: "PT1H", max: "1" }],
-    });
-    expect(assetless.success).toBe(false);
-    if (!assetless.success) {
-      expect(assetless.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: ["rules", 0],
-            message: "Velocity rules must name the asset mint(s) they bound",
-          }),
-        ])
-      );
-    }
-  });
-
-  it("keeps all existing public rule kinds backward-compatible", () => {
-    const rules = [
-      { kind: "operation_family", family: "payment", action: "allow" },
-      { kind: "destination", destination: VALID_DESTINATION, action: "deny" },
-      { kind: "amount", max: "100", asset: "USDC", action: "approval_required" },
-      { kind: "velocity", window: "PT1H", max: "100", asset: "USDC" },
-      { kind: "approval", families: ["payment"], approvalGroupId: "group-1" },
-      { kind: "always", action: "review" },
-    ] satisfies PolicyRule[];
-
-    const parsed = updateWalletPolicySchema.parse({ defaultAction: "allow", rules });
-
-    expect(parsed.rules).toEqual(rules);
   });
 });

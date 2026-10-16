@@ -304,8 +304,7 @@ export const FIELDS: EnvField[] = [
     kind: "text",
     label: "Privy wallet ID",
     required: true,
-    visibleWhen: (v) =>
-      parseList(v.SIGNING_PROVIDERS).includes("privy") && v.PRIVY_BYOK_ENABLED !== "true",
+    visibleWhen: listIncludes("SIGNING_PROVIDERS", "privy"),
   },
   {
     key: "COINBASE_CDP_API_KEY_ID",
@@ -644,30 +643,6 @@ export const FIELDS: EnvField[] = [
       { value: "true", label: "Enabled" },
     ],
     help: "Development is always enabled. This setting controls production only.",
-  },
-  {
-    key: "PRIVY_BYOK_ENABLED",
-    section: "advanced",
-    kind: "select",
-    label: "Privy BYOK Connections",
-    defaultValue: "false",
-    options: [
-      { value: "false", label: "Disabled" },
-      { value: "true", label: "Enabled" },
-    ],
-    help: "Enables Privy Custody Connections. Self-hosted deployments use runtime credentials unless stored setup is enabled below.",
-  },
-  {
-    key: "SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED",
-    section: "advanced",
-    kind: "select",
-    label: "Self-hosted stored credential setup",
-    defaultValue: "false",
-    options: [
-      { value: "false", label: "Disabled" },
-      { value: "true", label: "Enabled" },
-    ],
-    help: "Allows dashboard-stored custody Connection setup without provider credentials in this deployment.",
   },
   {
     key: "PAYMENTS_RECURRING_COLLECTION_BATCH_SIZE",

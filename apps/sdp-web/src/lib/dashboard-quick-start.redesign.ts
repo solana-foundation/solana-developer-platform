@@ -1,4 +1,5 @@
-import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
+import { CUSTODY_PROVIDERS } from "@sdp/types";
+import { z } from "zod";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "./dashboard-cache-scope";
 import {
   completeQuickStartStep as completeLegacyQuickStartStep,
@@ -7,43 +8,27 @@ import {
 import { type DesignFlags, isDesignModuleOn } from "./design-modules";
 
 /**
- * What the server knows about an organization's setup: the RPC provider it saved, the custody
- * provider it connected, and whether any of its keys has signed a request yet. Read once per
+ * What the server knows about an organization's setup: the custody provider it connected, and
+ * whether any of its keys has signed a request yet. Read once per
  * page load by the dashboard layout and refreshed while the guide is on screen.
  */
-export interface QuickStartStatus {
-  /** The saved provider; null (or "default") means the managed SDP RPC. */
-  rpcProvider: OrganizationRpcProvider | null;
-  custodyProvider: CustodyProvider | null;
-  apiKeyCount: number;
+export const quickStartStatusSchema = z.object({
+  custodyProvider: z.enum(CUSTODY_PROVIDERS).nullable(),
+  apiKeyCount: z.number().int().nonnegative(),
   /** When a key last signed a request; null until the first one arrives. */
-  lastCallAt: string | null;
-}
+  lastCallAt: z.string().nullable(),
+});
+export type QuickStartStatus = z.infer<typeof quickStartStatusSchema>;
 
-/**
- * One probe of the organization's RPC through the dashboard's test route. "unreachable" is our
- * request failing (quota, network), not the node answering badly, so it never reads as a failure.
- */
-export interface RpcProbeResult {
-  outcome: "ok" | "upstream_error" | "unreachable";
-  /** The node's HTTP status, when it answered. */
-  status: number | null;
-  /** The provider the relay resolved, when it answered. */
-  provider: string | null;
-  checkedAt: string;
-}
-
-export const QUICK_START_STEP_IDS = ["rpc", "custody", "first-call"] as const;
+export const QUICK_START_STEP_IDS = ["custody", "first-call"] as const;
 export type QuickStartStepId = (typeof QUICK_START_STEP_IDS)[number];
 
 /**
- * - done: the signal is in (a probe answered, a provider is connected, a call arrived).
+ * - done: the signal is in (a provider is connected, a call arrived).
  * - skipped: the person chose to leave it; only custody can be skipped.
- * - pending: waiting on the person, or on a probe we could not run.
- * - checking: the first probe has not answered yet.
- * - failing: the node answered with an error.
+ * - pending: waiting on the person.
  */
-export type QuickStartStepState = "done" | "skipped" | "pending" | "checking" | "failing";
+export type QuickStartStepState = "done" | "skipped" | "pending";
 
 export interface QuickStartStep {
   id: QuickStartStepId;
@@ -65,42 +50,35 @@ export const EMPTY_QUICK_START_PREFS: QuickStartPrefs = Object.freeze({
   collapsed: false,
   sidebarCollapsed: false,
   skipped: Object.freeze({}),
-}) as QuickStartPrefs;
+});
+
+/** A connected provider wins over an earlier skip. */
+function resolveCustodyState(
+  status: QuickStartStatus,
+  skipped: QuickStartPrefs["skipped"]
+): QuickStartStepState {
+  if (status.custodyProvider) return "done";
+  if (skipped.custody) return "skipped";
+  return "pending";
+}
 
 /**
- * Resolves each step from what the server and the probe report plus what the person chose.
+ * Resolves each step from what the server reports plus what the person chose.
  *
  * @param input.status - The server's setup status.
- * @param input.probe - The latest RPC probe, or null before the first one answers.
  * @param input.skipped - Steps the person skipped.
- * @returns The three steps in order.
+ * @returns The two steps in order.
  */
 export function resolveQuickStartSteps({
   status,
-  probe,
   skipped,
 }: {
   status: QuickStartStatus;
-  probe: RpcProbeResult | null;
   skipped: QuickStartPrefs["skipped"];
 }): QuickStartStep[] {
-  const rpc: QuickStartStepState =
-    probe === null
-      ? "checking"
-      : probe.outcome === "ok"
-        ? "done"
-        : probe.outcome === "upstream_error"
-          ? "failing"
-          : "pending";
-  const custody: QuickStartStepState = status.custodyProvider
-    ? "done"
-    : skipped.custody
-      ? "skipped"
-      : "pending";
   const firstCall: QuickStartStepState = status.lastCallAt ? "done" : "pending";
   return [
-    { id: "rpc", state: rpc },
-    { id: "custody", state: custody },
+    { id: "custody", state: resolveCustodyState(status, skipped) },
     { id: "first-call", state: firstCall },
   ];
 }
@@ -125,21 +103,27 @@ export function quickStartKey(scope: DashboardCacheScope): string {
   return `sdp:quick-start:v2:${getDashboardCacheScopeKey(scope)}`;
 }
 
+// Stored in the browser, so each field is read on its own: one bad field falls back to its
+// default without throwing away the others.
+const storedPrefsSchema = z.object({
+  dismissed: z.boolean().catch(false),
+  collapsed: z.boolean().catch(false),
+  sidebarCollapsed: z.boolean().catch(false),
+  skipped: z.object({ custody: z.string().optional().catch(undefined) }).catch({}),
+});
+
 function parsePrefs(raw: string | null): QuickStartPrefs {
   if (!raw) return EMPTY_QUICK_START_PREFS;
+  let json: unknown;
   try {
-    const value = JSON.parse(raw) as Partial<QuickStartPrefs> | null;
-    if (!value || typeof value !== "object") return EMPTY_QUICK_START_PREFS;
-    const skippedCustody = value.skipped?.custody;
-    return {
-      dismissed: value.dismissed === true,
-      collapsed: value.collapsed === true,
-      sidebarCollapsed: value.sidebarCollapsed === true,
-      skipped: typeof skippedCustody === "string" ? { custody: skippedCustody } : {},
-    };
+    json = JSON.parse(raw);
   } catch {
     return EMPTY_QUICK_START_PREFS;
   }
+  const result = storedPrefsSchema.safeParse(json);
+  if (!result.success) return EMPTY_QUICK_START_PREFS;
+  const { skipped, ...flags } = result.data;
+  return { ...flags, skipped: skipped.custody ? { custody: skipped.custody } : {} };
 }
 
 /**

@@ -19,6 +19,12 @@
  * never replaced by an active one — only by another terminal state or TTL
  * expiry (after which fills re-read the authoritative row anyway).
  *
+ * The cache is not the revocation boundary. Request authentication re-reads
+ * the organization's status and the key's own row on every request
+ * (`lib/organization-access.ts`), so a revocation whose cache write failed is
+ * still refused on the key's next request (APE-387). These rules keep the
+ * cache accurate so its cheap rejects are right and its fills stay fresh.
+ *
  * What this module guarantees, and where that guarantee stops
  * -----------------------------------------------------------
  * Guaranteed: a revocation never reports success until the terminal state is
@@ -39,7 +45,12 @@
  */
 
 import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import {
+  getPermissionsForApiKeyRole,
+  isAllowedOperation,
+  type Permission,
+  upgradeStoredAllowedOperations,
+} from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -77,8 +88,8 @@ export async function loadCachedApiKeyFromDb(
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
               p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
-              ak.rotation_deadline, o.status AS organization_status
+              ak.rate_limit_tier, ak.allowed_ips, ak.allowed_operations, ak.signing_wallet_id,
+              ak.status, ak.expires_at, ak.rotation_deadline, o.status AS organization_status
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
        JOIN organizations o ON o.id = ak.organization_id
@@ -95,6 +106,7 @@ export async function loadCachedApiKeyFromDb(
       environment: string;
       rate_limit_tier: string;
       allowed_ips: string | null;
+      allowed_operations: string | null;
       signing_wallet_id: string | null;
       status: string;
       expires_at: string | null;
@@ -106,6 +118,10 @@ export async function loadCachedApiKeyFromDb(
     return null;
   }
 
+  const storedAllowedOperations = parseOptionalPostgresJson<string[]>(result.allowed_operations);
+  const allowedOperations = storedAllowedOperations
+    ? upgradeStoredAllowedOperations(storedAllowedOperations)
+    : null;
   const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
     await loadApiKeyWalletAuthorization(
       db,
@@ -126,6 +142,10 @@ export async function loadCachedApiKeyFromDb(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
+    // Present only for a restricted key. An unrestricted key serializes exactly
+    // like a cache entry written before this field existed, so the
+    // stringify-based verification below keeps matching legacy entries.
+    ...(allowedOperations && allowedOperations.length > 0 ? { allowedOperations } : {}),
     walletScope,
     signingWalletId,
     signingWalletIds,
@@ -143,7 +163,10 @@ export async function loadCachedApiKeyFromDb(
  * drift. Rejects payloads written before rotation-deadline,
  * organization-status, or wallet-scope enforcement (a deploy must not extend
  * an old key's validity), bindings missing their custody-wallet resolution,
- * and pending installs — a fill's snapshot is not trustworthy until its
+ * allowed operations outside the current vocabulary (an entry cached before a
+ * family was renamed, such as `transfer`, is re-read from Postgres and
+ * translated instead of refusing the key for the rest of its TTL), and
+ * pending installs — a fill's snapshot is not trustworthy until its
  * post-install Postgres verification clears it.
  */
 export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
@@ -152,6 +175,7 @@ export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
     Object.hasOwn(entry, "rotationDeadline") &&
     Object.hasOwn(entry, "organizationStatus") &&
     (entry.walletScope === "all" || entry.walletScope === "selected") &&
+    (entry.allowedOperations ?? []).every(isAllowedOperation) &&
     (entry.walletBindings ?? []).every(
       (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
     )

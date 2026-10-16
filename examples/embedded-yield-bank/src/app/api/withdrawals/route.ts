@@ -1,4 +1,4 @@
-import { withdraw } from "@server/embedded-yield";
+import { prepareWithdrawal } from "@server/embedded-yield";
 import { apiErrorResponse, apiSuccessResponse } from "@server/http";
 import { assertTrustedJsonRequest } from "@server/request-security";
 import { z } from "zod";
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   try {
     assertTrustedJsonRequest(request);
     const input = inputSchema.parse(await request.json());
-    return apiSuccessResponse(await withdraw(input));
+    return apiSuccessResponse({ intent: await prepareWithdrawal(input) });
   } catch (error) {
     return apiErrorResponse(error);
   }

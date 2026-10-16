@@ -3,7 +3,6 @@ import {
   type CounterpartyAccount,
   type CounterpartyAccountSummary,
   type CounterpartyEntityType,
-  type CounterpartyProviderAccount,
   type CustodyProvider,
   type CustodyWalletAggregate,
   type CustodyWalletTokenBalance,
@@ -126,6 +125,8 @@ function matchesToken(mint: string | null | undefined, filter: string): boolean 
 // ─── Stable base58 addresses and signatures ──────────────────────────────────
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Replay seeds the cache with every id a visitor's session creates, so it is capped. */
+const MAX_CACHED_SEEDS = 2_000;
 const encodedSeeds = new Map<string, string>();
 
 /** Deterministic bytes for a seed: an FNV-1a hash of the seed drives a mulberry32 stream. */
@@ -164,6 +165,7 @@ function seededBase58(kind: "address" | "signature", seed: string): string {
   const cached = encodedSeeds.get(key);
   if (cached !== undefined) return cached;
   const encoded = base58(seededBytes(key, kind === "address" ? 32 : 64));
+  if (encodedSeeds.size >= MAX_CACHED_SEEDS) encodedSeeds.clear();
   encodedSeeds.set(key, encoded);
   return encoded;
 }
@@ -774,12 +776,6 @@ export interface DemoBatch {
   recipients: PaymentTransferRecipient[];
 }
 
-/** A payout account a provider holds for a contact. */
-export interface DemoProviderAccount {
-  counterpartyId: string;
-  account: CounterpartyProviderAccount;
-}
-
 /**
  * The fixtures, then whatever the visitor did in demo mode on top: contacts and addresses are
  * keyed by fixture key for the seeded ones and by id for the ones added since.
@@ -788,7 +784,6 @@ export interface DemoWorld {
   wallets: Record<string, DemoWallet>;
   contacts: Record<string, Counterparty>;
   accounts: Record<string, CounterpartyAccount>;
-  providerAccounts: DemoProviderAccount[];
   transfers: DemoTransferRow[];
   batches: DemoBatch[];
   requests: PaymentRequest[];
@@ -800,6 +795,8 @@ export interface DemoWorld {
   verifications: Record<string, number>;
   /** The Issuance screens' tokens, signing with these wallets. */
   issuance: IssuanceWorld;
+  /** The ramp providers the dashboard offers (the channel-capped flags); the demo answers for these only. */
+  rampProviders: readonly RampProviderId[];
 }
 
 export interface Clock {
@@ -1191,7 +1188,7 @@ export function newestFirst<T extends { createdAt: string }>(rows: T[]): T[] {
   return rows.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function buildWorld(now: Date): DemoWorld {
+export function buildWorld(now: Date, rampProviders: readonly RampProviderId[]): DemoWorld {
   const clock = createClock(now);
   const base: WorldBase = {
     wallets: mapRecord(WALLET_SPECS, (spec: WalletSpec, key) => buildWallet(spec, key)),
@@ -1199,15 +1196,16 @@ export function buildWorld(now: Date): DemoWorld {
     accounts: mapRecord(CONTACT_SPECS, (spec: ContactSpec, key) => buildAccount(spec, key, clock)),
   };
   const scheduleOutputs = SCHEDULE_SPECS.map((spec) => buildSchedule(spec, base, clock));
+  // A sample ramp transfer of a provider the channel hides is left out, as the API leaves it out.
+  const offeredRampProviders = new Set(rampProviders);
   const transfers = [
-    ...TRANSFER_SPECS,
+    ...TRANSFER_SPECS.filter((spec) => !spec.ramp || offeredRampProviders.has(spec.ramp.provider)),
     ...batchTransferSpecs(),
     ...scheduleOutputs.flatMap((output) => output.transfers),
   ].map((spec) => buildTransfer(spec, base, clock));
   transfers.sort((left, right) => right.transfer.createdAt.localeCompare(left.transfer.createdAt));
   return {
     ...base,
-    providerAccounts: buildProviderAccounts(base),
     transfers,
     batches: BATCH_SPECS.map((spec) => buildBatch(spec, base, clock)).sort((left, right) =>
       right.batch.createdAt.localeCompare(left.batch.createdAt)
@@ -1218,6 +1216,7 @@ export function buildWorld(now: Date): DemoWorld {
     consents: [],
     verifications: {},
     issuance: buildIssuanceWorld(base.wallets, clock),
+    rampProviders,
   };
 }
 
@@ -1625,114 +1624,9 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
 
 // ─── Counterparties ──────────────────────────────────────────────────────────
 
-/** Payout accounts providers hold for a few contacts, so a contact's page has rows to show. */
-const PROVIDER_ACCOUNT_SPECS: Partial<
-  Record<
-    ContactKey,
-    readonly Pick<
-      CounterpartyProviderAccount,
-      | "provider"
-      | "fiatCurrency"
-      | "destinationCountry"
-      | "paymentRail"
-      | "bankName"
-      | "accountNumberLast4"
-    >[]
-  >
-> = {
-  jane: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Chase Bank",
-      accountNumberLast4: "3321",
-    },
-  ],
-  acme: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "EUR",
-      destinationCountry: "DE",
-      paymentRail: "SEPA",
-      bankName: "Deutsche Bank",
-      accountNumberLast4: "8841",
-    },
-  ],
-  northwind: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "GBP",
-      destinationCountry: "GB",
-      paymentRail: "FPS",
-      bankName: "Barclays",
-      accountNumberLast4: "5307",
-    },
-  ],
-  lumen: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "WIRE",
-      bankName: "Silicon Valley Bank",
-      accountNumberLast4: "1188",
-    },
-  ],
-  orbit: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "EUR",
-      destinationCountry: "IE",
-      paymentRail: "SEPA",
-      bankName: "Bank of Ireland",
-      accountNumberLast4: "6620",
-    },
-  ],
-  kai: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Wells Fargo",
-      accountNumberLast4: "4472",
-    },
-  ],
-  priya: [
-    {
-      provider: "lightspark",
-      fiatCurrency: "USD",
-      destinationCountry: "US",
-      paymentRail: "ACH",
-      bankName: "Bank of America",
-      accountNumberLast4: "9015",
-    },
-  ],
-};
-
-function buildProviderAccounts(base: WorldBase): DemoProviderAccount[] {
-  return (Object.keys(PROVIDER_ACCOUNT_SPECS) as ContactKey[]).flatMap((key) =>
-    (PROVIDER_ACCOUNT_SPECS[key] ?? []).map((spec, index) => ({
-      counterpartyId: base.contacts[key].id,
-      account: {
-        ...spec,
-        id: `demo_cppa_${key}_${index}`,
-        kind: "payout_account" as const,
-        status: "active" as const,
-        providerStatus: "VERIFIED",
-        createdAt: base.contacts[key].createdAt,
-      },
-    }))
-  );
-}
-
-function providerAccountsBody(world: DemoWorld, counterparty: Counterparty) {
-  const accounts = world.providerAccounts
-    .filter((entry) => entry.counterpartyId === counterparty.id)
-    .map((entry) => entry.account);
-  return { data: { accounts } };
+/** No provider holds an account for a demo contact. */
+function providerAccountsBody() {
+  return { data: { accounts: [] } };
 }
 
 function counterpartiesBody(world: DemoWorld, params: URLSearchParams) {
@@ -1807,7 +1701,7 @@ function counterpartiesRoute(rest: string[], params: URLSearchParams, world: Dem
     case "accounts":
       return counterpartyAccountsBody(world, counterparty, params);
     case "provider-accounts":
-      return providerAccountsBody(world, counterparty);
+      return providerAccountsBody();
     default:
       return undefined;
   }
@@ -1845,8 +1739,12 @@ export function demoPathParts(
  * The JSON body the SDP API would send for this GET (the full envelope, e.g. `{ data: … }`),
  * read from the fixtures alone, or undefined when they hold no answer.
  */
-export function paymentsDemoBody(pathWithQuery: string, now?: Date): unknown | undefined {
-  return demoWorldBody(buildWorld(now ?? new Date()), pathWithQuery);
+export function paymentsDemoBody(
+  pathWithQuery: string,
+  rampProviders: readonly RampProviderId[],
+  now?: Date
+): unknown | undefined {
+  return demoWorldBody(buildWorld(now ?? new Date(), rampProviders), pathWithQuery);
 }
 
 /** The same answer, read from a given world (the fixtures with the session's actions applied). */

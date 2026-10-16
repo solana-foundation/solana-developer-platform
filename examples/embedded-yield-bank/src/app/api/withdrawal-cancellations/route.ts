@@ -1,4 +1,4 @@
-import { cancelQueuedWithdrawal } from "@server/embedded-yield";
+import { prepareQueuedWithdrawalCancellation } from "@server/embedded-yield";
 import { apiErrorResponse, apiSuccessResponse } from "@server/http";
 import { assertTrustedJsonRequest } from "@server/request-security";
 import { z } from "zod";
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     assertTrustedJsonRequest(request);
     const input = inputSchema.parse(await request.json());
     return apiSuccessResponse({
-      withdrawalRequest: await cancelQueuedWithdrawal(
+      intent: await prepareQueuedWithdrawalCancellation(
         input.withdrawalRequestId
       ),
     });

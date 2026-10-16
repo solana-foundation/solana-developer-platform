@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import { type ReactNode, useContext, useLayoutEffect } from "react";
 import { DashboardPageTitleContext } from "@/components/dashboard-page-title-context";
+import { useDashboardPathname } from "@/lib/use-dashboard-project";
 
 /**
  * Names the page in the shell's header when the title is data, as a contact's page is titled
@@ -25,7 +25,7 @@ export function DashboardPageTitle({
   actions?: ReactNode;
 }) {
   const setTitle = useContext(DashboardPageTitleContext);
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
   useLayoutEffect(() => {
     setTitle?.({ pathname, title, mark, actions });
     return () => setTitle?.(null);

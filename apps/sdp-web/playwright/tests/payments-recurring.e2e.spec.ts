@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   getBootstrapApiBaseUrl,
   provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstrap";
 
@@ -68,19 +68,16 @@ test.describe
       });
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, bootstrapProjectId);
-    });
-
     test("creates and displays a recurring payment", async ({ page }) => {
-      await page.goto("/dashboard/payments");
+      const recurringHref = projectHref(bootstrapProjectId, "/dashboard/payments/recurring");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
 
       // The sidebar names Schedules after the design: "Schedules" here, "Scheduled" in the branches
       // under this one, "Recurring" with new-design-activity off.
       const schedulesLink = page.getByRole("link", { name: /^(Schedules|Scheduled|Recurring)$/ });
       await expect(schedulesLink).toBeVisible();
       await schedulesLink.click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
+      await expect(page).toHaveURL(recurringHref);
       await expect(
         page.locator("main").getByRole("heading", { name: "Schedules" }).first()
       ).toBeVisible();
@@ -94,7 +91,7 @@ test.describe
       // An empty list hides the header's "New" and offers "New schedule" in its empty state; a
       // list with rows keeps the header's. Exactly one of them is visible.
       await page.getByRole("link", { name: /^New(?: schedule)?$/ }).click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/create$/);
+      await expect(page).toHaveURL(`${recurringHref}/create`);
 
       const app = page.locator("main");
       const next = app.getByRole("button", { name: "Continue", exact: true });
@@ -144,7 +141,7 @@ test.describe
       await expect(createButton).toBeEnabled({ timeout: 120_000 });
       await createButton.click();
 
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/prp_/);
+      await expect(page).toHaveURL(new RegExp(`${recurringHref}/prp_`));
       recurringPaymentId = page.url().split("/").pop() ?? "";
       expect(recurringPaymentId).toMatch(/^prp_/);
       await expect(page.getByText(recurringCounterpartyName).first()).toBeVisible();
@@ -155,7 +152,7 @@ test.describe
       await expect(page.getByText("Every day", { exact: true }).first()).toBeVisible();
 
       await pageSchedulesLink(page).click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
+      await expect(page).toHaveURL(recurringHref);
       const recurringRow = page
         .locator("tbody tr")
         .filter({ hasText: recurringCounterpartyName })
@@ -168,9 +165,7 @@ test.describe
       await recurringRow
         .getByRole("link", { name: `7.50 ${recurringTokenSymbol} to ${recurringCounterpartyName}` })
         .click();
-      await expect(page).toHaveURL(
-        new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
-      );
+      await expect(page).toHaveURL(`${recurringHref}/${recurringPaymentId}`);
       // The header names the schedule by what it pays and to whom.
       await expect(
         page.locator("main").getByRole("heading", {

@@ -1,10 +1,4 @@
-import type { ResolvedRpcTarget } from "@sdp/rpc/relay";
-import type {
-  ComplianceProviderId,
-  CustodyProvider,
-  OrganizationRpcProvider,
-  RampProviderId,
-} from "@sdp/types";
+import type { ComplianceProviderId, CustodyProvider, RampProviderId } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { isProviderConfigured } from "@/services/provider-availability.service";
@@ -16,16 +10,13 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
-import { isCustomerSuppliedTarget } from "@/services/rpc-egress";
-import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
-export const PROVIDER_SETUP_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
+export const PROVIDER_SETUP_FAMILIES = ["custody", "compliance", "ramps"] as const;
 export type ProviderSetupFamily = (typeof PROVIDER_SETUP_FAMILIES)[number];
 
 type ProviderIdByFamily = {
   custody: CustodyProvider;
-  rpc: OrganizationRpcProvider;
   compliance: ComplianceProviderId;
   ramps: RampProviderId;
 };
@@ -72,50 +63,26 @@ const privyCredentialSetupBaseSchema = z.object({
   walletLabel: z.string().trim().min(1).max(100).optional(),
 });
 
-const privyCredentialSubmissionSchema = privyCredentialSetupBaseSchema
-  .extend({ fields: privyCredentialFieldsSchema.optional() })
-  .strict();
-
-const privyCredentialReplacementSchema = privyCredentialSetupBaseSchema
+const privyCredentialSetupSchema = privyCredentialSetupBaseSchema
   .extend({ fields: privyCredentialFieldsSchema })
   .strict();
 
-export type PrivyCredentialSubmissionPayload = z.infer<typeof privyCredentialSubmissionSchema>;
-export type PrivyCredentialReplacementPayload = z.infer<typeof privyCredentialReplacementSchema>;
+export type PrivyCredentialSetupPayload = z.infer<typeof privyCredentialSetupSchema>;
 
-type PrivySetupOperation = "submit" | "replace";
-
-type PrivyStoreCredentialsInput =
-  | {
-      context: AppContext;
-      idempotencyKey: string;
-      payload: PrivyCredentialSubmissionPayload;
-      connectionId?: undefined;
-    }
-  | {
-      context: AppContext;
-      idempotencyKey: string;
-      payload: PrivyCredentialReplacementPayload;
-      connectionId: string;
-    };
+interface PrivyStoreCredentialsInput {
+  context: AppContext;
+  idempotencyKey: string;
+  payload: PrivyCredentialSetupPayload;
+  connectionId?: string;
+}
 
 interface PrivyConnectionOperationInput {
   context: AppContext;
   connectionId: string;
 }
 
-function validatePrivySetupPayload(
-  payload: unknown,
-  operation: "submit"
-): ReturnType<typeof privyCredentialSubmissionSchema.safeParse>;
-function validatePrivySetupPayload(
-  payload: unknown,
-  operation: "replace"
-): ReturnType<typeof privyCredentialReplacementSchema.safeParse>;
-function validatePrivySetupPayload(payload: unknown, operation: PrivySetupOperation) {
-  return operation === "replace"
-    ? privyCredentialReplacementSchema.safeParse(payload)
-    : privyCredentialSubmissionSchema.safeParse(payload);
+function validatePrivySetupPayload(payload: unknown) {
+  return privyCredentialSetupSchema.safeParse(payload);
 }
 
 async function storePrivyCredentials(input: PrivyStoreCredentialsInput) {
@@ -128,36 +95,6 @@ async function storePrivyCredentials(input: PrivyStoreCredentialsInput) {
     );
   }
   return submitProviderCredential(input.context, input.payload, input.idempotencyKey);
-}
-
-export interface RpcConnectionCheckInput {
-  target: ResolvedRpcTarget;
-}
-
-export interface RpcConnectionCheckResult {
-  elapsedMs: number;
-  upstream: Response;
-  upstreamBody: unknown;
-}
-
-/**
- * Run the same read-only JSON-RPC probe used by POST /rpc/test.
- *
- * `/v1/rpc/test` resolves tenant connections and the project's own `custom`
- * endpoint, and `projects.settings.rpcEndpoint` behind the latter is validated
- * as a URL when written and nothing more, so the probe reaches a
- * customer-supplied host in both cases and both go under the guard. Managed
- * providers keep the ordinary fetch: their endpoints come from deployment
- * config and are private on purpose in local development and in the Surfpool
- * suites. The probe does not follow redirects, which it already refused before
- * the guard existed.
- */
-export async function checkResolvedRpcTargetConnection(
-  input: RpcConnectionCheckInput
-): Promise<RpcConnectionCheckResult> {
-  return probeRpcEndpoint(input.target, {
-    enforcePublicEgress: isCustomerSuppliedTarget(input.target),
-  });
 }
 
 export interface ProviderConfigurationCheckInput {
@@ -189,15 +126,6 @@ function rampConfigurationCheck(provider: RampProviderId) {
       : "not_configured",
     checkedAt: new Date().toISOString(),
   });
-}
-
-function rpcSetup<const Provider extends OrganizationRpcProvider>(provider: Provider) {
-  return {
-    family: "rpc",
-    provider,
-    setupMode: "platform_managed",
-    checkConnection: checkResolvedRpcTargetConnection,
-  } as const;
 }
 
 function complianceSetup<const Provider extends ComplianceProviderId>(provider: Provider) {
@@ -249,15 +177,6 @@ export const PROVIDER_SETUP_REGISTRY = {
     anchorage: { family: "custody", provider: "anchorage", setupMode: "contact" },
     utila: { family: "custody", provider: "utila", setupMode: "contact" },
   },
-  rpc: {
-    alchemy: rpcSetup("alchemy"),
-    default: rpcSetup("default"),
-    helius: rpcSetup("helius"),
-    nodit: rpcSetup("nodit"),
-    quicknode: rpcSetup("quicknode"),
-    triton: rpcSetup("triton"),
-    validationcloud: rpcSetup("validationcloud"),
-  },
   compliance: {
     range: complianceSetup("range"),
     elliptic: complianceSetup("elliptic"),
@@ -266,11 +185,8 @@ export const PROVIDER_SETUP_REGISTRY = {
   },
   ramps: {
     moonpay: rampSetup("moonpay"),
-    lightspark: rampSetup("lightspark"),
     bvnk: rampSetup("bvnk"),
-    moneygram: rampSetup("moneygram"),
     coinbase: rampSetup("coinbase"),
-    mural: rampSetup("mural"),
     stripe: rampSetup("stripe"),
   },
 } as const satisfies ProviderSetupRegistryShape;

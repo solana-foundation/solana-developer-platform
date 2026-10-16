@@ -9,12 +9,16 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { acceptAtMintScale } from "./amounts";
-import type { WisdomTreeChainReader } from "./chain";
+import type { WisdomTreeChainAccount, WisdomTreeChainReader } from "./chain";
 import { SdpWisdomTreeError } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { parseFundMint } from "./mint";
 import { encodeWisdomTreeFundTokenAccount } from "./token-account";
-import { type ResolvedHookAccount, resolveTransferHookAccounts } from "./transfer-hook";
+import {
+  deriveExtraAccountMetasAddress,
+  type ResolvedHookAccount,
+  resolveTransferHookAccounts,
+} from "./transfer-hook";
 import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
 
 const SPL_TOKEN_PROGRAM = address(SPL_TOKEN_PROGRAMS["spl-token"]);
@@ -57,7 +61,16 @@ export async function verifyFundMint(
   fund: WisdomTreeFund,
   direction: WisdomTreeBuildDirection
 ): Promise<void> {
-  const account = await reader.getAccount(address(fund.mint));
+  verifyFundMintAccount(await reader.getAccount(address(fund.mint)), runtime, fund, direction);
+}
+
+/** `verifyFundMint` over a mint account this build has already read. */
+function verifyFundMintAccount(
+  account: WisdomTreeChainAccount | null,
+  runtime: WisdomTreeRuntime,
+  fund: WisdomTreeFund,
+  direction: WisdomTreeBuildDirection
+): void {
   if (account === null) {
     throw new SdpWisdomTreeError(
       "MINT_MISMATCH",
@@ -117,9 +130,6 @@ export async function buildWisdomTreeDepositPlan(
   runtime: WisdomTreeRuntime,
   input: WisdomTreeDepositPlanInput
 ): Promise<WisdomTreeInstructionPlan> {
-  await verifyFundMint(reader, runtime, input.fund, "deposit");
-
-  const accepted = acceptAtMintScale(input.amount, input.depositDecimals, "Deposit amount");
   const rentPayer = input.rentPayer ?? input.owner;
   const fundMint = address(input.fund.mint);
 
@@ -141,10 +151,10 @@ export async function buildWisdomTreeDepositPlan(
 
   // Measured, not assumed — the contract's `createsShareAccount` is a claim
   // about who paid rent, and only a chain read can make it.
-  const [ownerFundAccount, onReceiptUsdcAccount] = await Promise.all([
-    reader.getAccount(ownerFundAta),
-    reader.getAccount(onReceiptUsdcAta),
-  ]);
+  const [mintAccount = null, ownerFundAccount = null, onReceiptUsdcAccount = null] =
+    await reader.getAccounts([fundMint, ownerFundAta, onReceiptUsdcAta]);
+  verifyFundMintAccount(mintAccount, runtime, input.fund, "deposit");
+  const accepted = acceptAtMintScale(input.amount, input.depositDecimals, "Deposit amount");
   const createsShareAccount = ownerFundAccount === null;
 
   const instructions: Instruction[] = [];
@@ -230,16 +240,15 @@ export async function buildWisdomTreeRedemptionPlan(
   runtime: WisdomTreeRuntime,
   input: WisdomTreeRedemptionPlanInput
 ): Promise<WisdomTreeInstructionPlan> {
-  await verifyFundMint(reader, runtime, input.fund, "redemption");
   const hookProgram = WISDOMTREE_TRANSFER_HOOK_PROGRAM_IDS[runtime.cluster];
   if (hookProgram === undefined) {
+    await verifyFundMint(reader, runtime, input.fund, "redemption");
     throw new SdpWisdomTreeError(
       "CLUSTER_UNSUPPORTED",
       `WisdomTree deploys no compliance hook on ${runtime.cluster}; nothing can be redeemed there.`
     );
   }
 
-  const accepted = acceptAtMintScale(input.shares, input.fund.decimals, "Redemption quantity");
   const rentPayer = input.rentPayer ?? input.owner;
   const fundMint = address(input.fund.mint);
 
@@ -253,9 +262,18 @@ export async function buildWisdomTreeRedemptionPlan(
     tokenProgram: TOKEN_2022_PROGRAM,
     mint: fundMint,
   });
+  const validationAddress = await deriveExtraAccountMetasAddress(address(hookProgram), fundMint);
+
+  const [
+    mintAccount = null,
+    onReceiptFundAccount = null,
+    validationAccount = null,
+    ownerFundAccount = null,
+  ] = await reader.getAccounts([fundMint, onReceiptFundAta, validationAddress, ownerFundAta]);
+  verifyFundMintAccount(mintAccount, runtime, input.fund, "redemption");
+  const accepted = acceptAtMintScale(input.shares, input.fund.decimals, "Redemption quantity");
 
   const instructions: Instruction[] = [];
-  const onReceiptFundAccount = await reader.getAccount(onReceiptFundAta);
   if (onReceiptFundAccount === null) {
     instructions.push(
       getCreateAssociatedTokenIdempotentInstruction({
@@ -283,18 +301,21 @@ export async function buildWisdomTreeRedemptionPlan(
   // this plan creates that ATA first, resolution still happens before the
   // transaction is submitted, so project the exact initialized Token-2022
   // account bytes the preceding idempotent create will produce.
-  const hookReader: WisdomTreeChainReader =
-    onReceiptFundAccount === null
-      ? {
-          getAccount: async (accountAddress) =>
-            String(accountAddress) === String(onReceiptFundAta)
-              ? {
-                  owner: String(TOKEN_2022_PROGRAM),
-                  data: encodeWisdomTreeFundTokenAccount(fundMint, input.onReceiptWallet),
-                }
-              : reader.getAccount(accountAddress),
-        }
-      : reader;
+  const hookReader = snapshotReader(
+    reader,
+    new Map([
+      [String(fundMint), mintAccount],
+      [
+        String(onReceiptFundAta),
+        onReceiptFundAccount ?? {
+          owner: String(TOKEN_2022_PROGRAM),
+          data: encodeWisdomTreeFundTokenAccount(fundMint, input.onReceiptWallet),
+        },
+      ],
+      [String(validationAddress), validationAccount],
+      [String(ownerFundAta), ownerFundAccount],
+    ])
+  );
   const hookAccounts = await resolveTransferHookAccounts(hookReader, {
     hookProgram: address(hookProgram),
     mint: fundMint,
@@ -321,6 +342,31 @@ export async function buildWisdomTreeRedemptionPlan(
     assetIdentity: { depositTokenMint: input.depositMint, shareMint: fundMint },
     accepted: { shares: accepted.canonical },
   });
+}
+
+/**
+ * Serves the accounts this build already read and reads any other account
+ * once, so hook resolution repeats no request.
+ */
+function snapshotReader(
+  reader: WisdomTreeChainReader,
+  snapshot: ReadonlyMap<string, WisdomTreeChainAccount | null>
+): WisdomTreeChainReader {
+  const reads = new Map<string, Promise<WisdomTreeChainAccount | null>>();
+  const getAccount = (accountAddress: Address): Promise<WisdomTreeChainAccount | null> => {
+    const known = snapshot.get(String(accountAddress));
+    if (known !== undefined) return Promise.resolve(known);
+    let read = reads.get(String(accountAddress));
+    if (!read) {
+      read = reader.getAccount(accountAddress);
+      reads.set(String(accountAddress), read);
+    }
+    return read;
+  };
+  return {
+    getAccount,
+    getAccounts: (accountAddresses) => Promise.all(accountAddresses.map(getAccount)),
+  };
 }
 
 /**

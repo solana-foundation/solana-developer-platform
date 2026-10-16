@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   loadWalletActivity: vi.fn(),
 }));
 
-vi.mock("@/app/dashboard/custody/wallet-activity.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", () => ({
   loadWalletActivity: mocks.loadWalletActivity,
   WALLET_ACTIVITY_LIMIT: 20,
   WALLET_ACTIVITY_MAX_LIMIT: 500,

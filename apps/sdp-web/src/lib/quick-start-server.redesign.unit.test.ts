@@ -15,8 +15,7 @@ const onboarding = (setup: Record<string, unknown> | null, linked = true) => ({
       : {
           status: "in_progress",
           canManage: true,
-          rpcProvider: null,
-          custodyProvider: null,
+          custodyProviders: [],
           ...setup,
         },
 });
@@ -27,9 +26,9 @@ beforeEach(() => {
 });
 
 describe("quick start status from organization state", () => {
-  it("reads the providers and the latest call across every project", async () => {
+  it("reads the custody provider and the latest call across every project", async () => {
     mocks.fetch
-      .mockResolvedValueOnce(onboarding({ rpcProvider: "helius", custodyProvider: "privy" }))
+      .mockResolvedValueOnce(onboarding({ custodyProviders: ["privy"] }))
       .mockResolvedValueOnce({
         apiKeys: [{ id: "a", lastUsedAt: "2026-09-24T10:00:00.000Z" }],
       })
@@ -40,7 +39,6 @@ describe("quick start status from organization state", () => {
         ],
       });
     expect(await loadQuickStartStatus()).toEqual({
-      rpcProvider: "helius",
       custodyProvider: "privy",
       apiKeyCount: 3,
       lastCallAt: "2026-09-25T08:00:00.000Z",
@@ -89,6 +87,17 @@ describe("quick start status from organization state", () => {
       apiKeyCount: 1,
       lastCallAt: "2026-09-25T08:00:00.000Z",
     });
+  });
+
+  it("returns unknown when the API answers with a shape the guide does not understand", async () => {
+    mocks.fetch.mockResolvedValueOnce({ linked: true, setup: { canManage: true } });
+    expect(await loadQuickStartStatus()).toBeNull();
+
+    mocks.fetch
+      .mockResolvedValueOnce(onboarding({}))
+      .mockResolvedValueOnce({ apiKeys: "none" })
+      .mockResolvedValueOnce({ apiKeys: [] });
+    expect(await loadQuickStartStatus()).toBeNull();
   });
 
   it("returns unknown rather than new when the status request fails", async () => {

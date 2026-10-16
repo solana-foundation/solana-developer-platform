@@ -17,6 +17,7 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
+import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { deriveAssociatedTokenAddress, isAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
@@ -612,7 +613,7 @@ export class OndoVaultDirectClient
   ): Promise<OndoTokenAccount[]> {
     let response: Response;
     try {
-      response = await fetch(runtime.rpcUrl, {
+      response = await contextAwareRpcFetch(runtime.rpcUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

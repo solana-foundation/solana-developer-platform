@@ -8,17 +8,22 @@
 import type { CachedApiKey } from "@sdp/types";
 import { getDb } from "@/db/client";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 /**
- * Seeds a cached API key into KV for testing auth
+ * Seeds a cached API key into KV for testing auth, and its `api_keys` row when
+ * the suite has not inserted one: authentication re-reads the key's live row
+ * on every request and refuses a cached key that has none (HOO-1955). A row
+ * the suite already inserted is left as it is, so a test can still make the
+ * cache and the row disagree on purpose.
  */
 export async function seedCachedApiKey(
   env: Env,
   keyHash: string,
   data: CachedApiKey
 ): Promise<void> {
+  await seedApiKeyRowFor(env, keyHash, data);
   const kv = createKVStoreSet(env);
   const walletBindings = await Promise.all(
     (data.walletBindings ?? []).map(async (binding) => {
@@ -37,7 +42,7 @@ export async function seedCachedApiKey(
               (
                 cfg.status = 'active'
                 AND cfg.organization_id = ?
-                AND (cfg.project_id IS NULL OR cfg.project_id = ?)
+                AND cfg.project_id = ?
               )
               OR (
                 conn.status = 'active'
@@ -74,6 +79,113 @@ export async function seedCachedApiKey(
   );
 }
 
+/** Creates the user a seeded key row needs when the suite has none. */
+const SEEDED_KEY_CREATOR_ID = "usr_seeded_key_creator";
+
+/**
+ * Inserts the `api_keys` row a cached key stands for, mirroring the cached
+ * lifecycle columns. Authentication matches the row by key and organization
+ * only, so when the suite has not seeded the key's project the row hangs off
+ * an inactive placeholder project, which the one-active-project-per-
+ * environment rule ignores and no request ever selects. Skipped when the row
+ * (or its hash) already exists, or when the organization does not.
+ */
+export async function seedApiKeyRowFor(
+  env: Env,
+  keyHash: string,
+  data: CachedApiKey
+): Promise<void> {
+  const db = getDb(env);
+  const placeholderProjectId = `${data.organizationId}_seeded_key_project`;
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       SELECT ?, 'seeded-key-creator@example.test', 1, 'active'
+        WHERE NOT EXISTS (SELECT 1 FROM users)
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(SEEDED_KEY_CREATOR_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+       SELECT ?, o.id, 'Seeded key project', ?, ?, 'inactive', (SELECT id FROM users ORDER BY id LIMIT 1)
+         FROM organizations o
+        WHERE o.id = ?
+          AND NOT EXISTS (SELECT 1 FROM projects WHERE id = ? AND organization_id = o.id)
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(
+      placeholderProjectId,
+      placeholderProjectId,
+      data.environment,
+      data.organizationId,
+      data.projectId
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO api_keys
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+          role, permissions, status, expires_at, rotation_deadline, signing_wallet_id)
+       SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?
+         FROM projects p
+        WHERE p.organization_id = ? AND p.id IN (?, ?)
+        ORDER BY (p.id = ?) DESC
+        LIMIT 1
+       ON CONFLICT DO NOTHING`
+    )
+    .bind(
+      data.id,
+      keyHash,
+      data.role,
+      JSON.stringify(data.permissions),
+      data.status,
+      data.expiresAt,
+      data.rotationDeadline === undefined ? null : data.rotationDeadline,
+      data.signingWalletId,
+      data.organizationId,
+      data.projectId,
+      placeholderProjectId,
+      data.projectId
+    )
+    .run();
+
+  // Authentication reads wallet bindings from Postgres on every request
+  // (HOO-2048), so an entry that names bindings replaces the key's rows with
+  // them. One that names none leaves rows a test inserted itself.
+  if (data.walletBindings === undefined && data.signingWalletIds === undefined) {
+    return;
+  }
+  const bindings = [
+    ...(data.walletBindings ?? []).map((binding) => ({
+      walletId: binding.walletId,
+      permissions: binding.permissions,
+    })),
+    ...(data.signingWalletIds ?? [])
+      .filter((walletId) => !data.walletBindings?.some((binding) => binding.walletId === walletId))
+      .map((walletId) => ({ walletId, permissions: ["*"] })),
+  ];
+  // One replacement: a failed insert must not leave the key partly unbound.
+  await db.transaction(async (tx) => {
+    await tx.execute("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?", [data.id]);
+    for (const binding of bindings) {
+      await tx.execute(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         SELECT ?, ak.id, ?, ? FROM api_keys ak WHERE ak.id = ?
+         ON CONFLICT DO NOTHING`,
+        [
+          `akw_${crypto.randomUUID()}`,
+          binding.walletId,
+          JSON.stringify(binding.permissions),
+          data.id,
+        ]
+      );
+    }
+  });
+}
+
 /**
  * Clears all KV data
  */
@@ -87,6 +199,20 @@ export async function clearKVStores(env: Env): Promise<void> {
       await store.delete(key.name);
     }
   }
+}
+
+/**
+ * Empties this worker's Redis logical database. Every vitest worker shares one
+ * Redis server on its own logical database (src/test/helpers/env.ts), so a
+ * raw-Redis suite resets through FLUSHDB here and never FLUSHALL, which would
+ * wipe other workers' in-flight state mid-test.
+ *
+ * @param env - Test environment bindings carrying this worker's REDIS_URL.
+ * @returns Resolves once the worker's logical database is empty.
+ */
+export async function flushWorkerRedis(env: Env): Promise<void> {
+  const redis = await getRedisClient(env);
+  await redis.flushdb();
 }
 
 /**

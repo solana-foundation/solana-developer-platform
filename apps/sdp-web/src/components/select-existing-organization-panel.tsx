@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
-import { selectProjectAction } from "@/lib/project-cookie-action";
 
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
   if (imageUrl) {
@@ -90,7 +89,6 @@ export function SelectExistingOrganizationPanel() {
                   if (!setActive) return;
                   setSwitchingTo(organization.id);
                   try {
-                    await selectProjectAction(null);
                     clearStoredApiKeySecrets();
                     await setActive({ organization: organization.id });
                     router.refresh();

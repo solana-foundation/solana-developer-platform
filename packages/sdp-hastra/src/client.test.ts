@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
 import type { EarnRuntimeContext, EarnVaultInstruction } from "@sdp/earn/types";
+import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { wellKnownMint } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { PublicKey } from "@solana/web3.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deriveHastraAddresses,
   HASTRA_PAR_MINIMUM_ASSETS,
   HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS,
   HASTRA_SWAP_COMPUTE_UNIT_LIMIT,
   HastraVaultDirectClient,
+  resetHastraReadCaches,
 } from "./client";
 import type { HastraSwapLeg, HastraSwapPort } from "./types";
 
@@ -27,6 +29,8 @@ const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
+/** The chain slot every stubbed account read reports. */
+const STUB_SLOT = 1_000;
 
 function disc(namespace: "account" | "event" | "global", name: string): Buffer {
   return createHash("sha256").update(`${namespace}:${name}`).digest().subarray(0, 8);
@@ -266,22 +270,27 @@ function stubRpc(
     "fetch",
     vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { method: string; params: unknown[] };
+      const context = { slot: STUB_SLOT };
       if (body.method === "getMultipleAccounts") {
         const addresses = body.params[0] as string[];
         return Response.json({
-          result: { value: addresses.map((address) => accountWire(accounts.get(address))) },
+          result: {
+            context,
+            value: addresses.map((address) => accountWire(accounts.get(address))),
+          },
         });
       }
       if (body.method === "getAccountInfo") {
         const address = body.params[0] as string;
         const options = body.params[1] as { commitment?: string } | undefined;
         if (options?.commitment === "finalized" && reuse?.finalizedRequest) {
-          return Response.json({ result: { value: accountWire(reuse.finalizedRequest) } });
+          return Response.json({ result: { context, value: accountWire(reuse.finalizedRequest) } });
         }
-        return Response.json({ result: { value: accountWire(accounts.get(address)) } });
+        return Response.json({ result: { context, value: accountWire(accounts.get(address)) } });
       }
       if (body.method === "getMinimumBalanceForRentExemption") {
-        return Response.json({ result: 2_039_280 });
+        // Mainnet's rent parameters: 3480 lamports per byte-year, a 2.0 threshold.
+        return Response.json({ result: (Number(body.params[0]) + 128) * 3_480 * 2 });
       }
       if (body.method === "getSignaturesForAddress") {
         const historyEntry = {
@@ -339,6 +348,15 @@ function stubRpc(
   );
 }
 
+/** The JSON-RPC requests the stubbed fetch received, in order. */
+function rpcCalls(): { method: string; params: unknown[] }[] {
+  return vi
+    .mocked(globalThis.fetch)
+    .mock.calls.map(
+      ([, init]) => JSON.parse(String(init?.body)) as { method: string; params: unknown[] }
+    );
+}
+
 function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapLeg {
   return {
     instructions: [
@@ -356,13 +374,13 @@ function swapLeg(minOutAmount: string, quotedAmount = minOutAmount): HastraSwapL
   };
 }
 
-function makeClient(port: Partial<HastraSwapPort> = {}) {
+function makeClient(port: Partial<HastraSwapPort> = {}, rpcUrl = "https://rpc.test") {
   const swapPort: HastraSwapPort = {
     quoteSwap: port.quoteSwap ?? (async () => ({ outAmount: "125", priceImpactPct: "0" })),
     buildSwapLeg: port.buildSwapLeg ?? (async () => swapLeg("120", "125")),
   };
   return new HastraVaultDirectClient(
-    async () => "https://rpc.test",
+    async () => rpcUrl,
     (_label, operation) => operation(() => {}),
     () => swapPort
   );
@@ -375,6 +393,8 @@ function instructionAmount(instruction: EarnVaultInstruction): bigint {
 function event(name: string, fields: Buffer[]): string {
   return `Program data: ${Buffer.concat([disc("event", name), ...fields]).toString("base64")}`;
 }
+
+beforeEach(() => resetHastraReadCaches());
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -661,14 +681,15 @@ describe("Hastra par redemption", () => {
       shares: "1600",
       rentPayer: PAYER,
     });
-    // One System transfer of the request account's live rent, sponsor -> owner.
+    // One System transfer of the request account's live rent, sponsor -> owner:
+    // the stubbed RPC's mainnet answer for 81 bytes, (128 + 81) * 3480 * 2.0.
     expect(plan.instructions[1]?.programAddress).toBe("11111111111111111111111111111111");
     expect(plan.instructions[1]?.accounts).toEqual([
       { address: PAYER, role: 3 },
       { address: OWNER, role: 1 },
     ]);
     expect(Buffer.from(plan.instructions[1]?.data ?? "", "base64").readBigUInt64LE(4)).toBe(
-      2_039_280n
+      1_454_640n
     );
     // The builder-controlled creates and the transient account charge the sponsor...
     expect(plan.instructions[2]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
@@ -1258,5 +1279,548 @@ describe("Hastra positions and deployment guardrails", () => {
         amount: "100",
       })
     ).rejects.toMatchObject({ code: "PROGRAM_MISMATCH" });
+  });
+});
+
+describe("Hastra RPC budget", () => {
+  const REQUEST = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
+  const REQUEST_PDA = REQUEST.toBase58();
+  const TICKET = pda(DEPLOYMENT.vaultStakeProgramAddress, "ticket", key(OWNER))[0].toBase58();
+  const REUSE_PROOF = [
+    `getAccountInfo ${REQUEST_PDA}`,
+    `getAccountInfo ${REQUEST_PDA} finalized`,
+    `getSignaturesForAddress ${REQUEST_PDA} finalized`,
+  ];
+  const reference = { providerReference: DEPLOYMENT.primeMint };
+  const sharesParRequest = { ...reference, owner: OWNER, shares: "1600", rentPayer: PAYER };
+  const dexExit = { ...reference, owner: OWNER, shares: "100", minAmountOut: "120" };
+
+  function withPrime(fixture: ReturnType<typeof fixtureState>) {
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
+    });
+    return fixture;
+  }
+
+  function withOpenRequest(fixture: ReturnType<typeof fixtureState>): string {
+    const [, bump] = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER));
+    fixture.accounts.set(REQUEST_PDA, {
+      owner: DEPLOYMENT.vaultMintProgramAddress,
+      data: Buffer.concat([
+        disc("account", "RedemptionRequest"),
+        key(OWNER),
+        u64(2_000_000_000n),
+        key(DEPLOYMENT.wYldsMint),
+        Buffer.from([bump]),
+      ]),
+    });
+    return REQUEST_PDA;
+  }
+
+  function identity(fixture: ReturnType<typeof fixtureState>): string[] {
+    const { addresses } = fixture;
+    return [
+      DEPLOYMENT.vaultMintProgramAddress,
+      DEPLOYMENT.vaultStakeProgramAddress,
+      addresses.mintConfig,
+      addresses.mintVaultTokenAccountConfig,
+      addresses.stakeConfig,
+      addresses.stakeVaultTokenAccountConfig,
+      addresses.stakePriceConfig,
+      USDC,
+      DEPLOYMENT.wYldsMint,
+      DEPLOYMENT.primeMint,
+    ];
+  }
+
+  function vaults(fixture: ReturnType<typeof fixtureState>): string[] {
+    return [fixture.depositVault, fixture.redeemVault, fixture.stakeVault];
+  }
+
+  const ownerTokenAccounts = [
+    ata(OWNER, DEPLOYMENT.wYldsMint),
+    ata(OWNER, DEPLOYMENT.primeMint),
+    ata(OWNER, USDC),
+  ];
+
+  /** Each request: a `getMultipleAccounts`'s accounts, else its method and target. */
+  function requests(): unknown[] {
+    return rpcCalls().map(({ method, params }) => {
+      if (method === "getMultipleAccounts") return params[0];
+      const options = params[1] as { commitment?: string } | undefined;
+      return `${method} ${String(params[0])}${options?.commitment === "finalized" ? " finalized" : ""}`;
+    });
+  }
+
+  /** Answers HTTP 429 to every request that reads `address`, the way one read failed at f00e234ee. */
+  function failReadsOf(address: string): void {
+    const stub = vi.mocked(globalThis.fetch);
+    const healthy = stub.getMockImplementation();
+    if (!healthy) throw new Error("test premise: stubRpc installs the stub first");
+    stub.mockImplementation(async (url, init) => {
+      const { method, params } = JSON.parse(String(init?.body)) as {
+        method: string;
+        params: unknown[];
+      };
+      const reads =
+        method === "getMultipleAccounts"
+          ? (params[0] as string[]).includes(address)
+          : method === "getAccountInfo" && params[0] === address;
+      return reads ? new Response("rate limited", { status: 429 }) : healthy(url, init);
+    });
+  }
+
+  /** Answers HTTP 429 wherever `fails(method, n)` holds; n counts that method's requests from 1. */
+  function rateLimit(fails: (method: string, n: number) => boolean): void {
+    const stub = vi.mocked(globalThis.fetch);
+    const healthy = stub.getMockImplementation();
+    if (!healthy) throw new Error("test premise: stubRpc installs the stub first");
+    const seen = new Map<string, number>();
+    stub.mockImplementation(async (url, init) => {
+      const { method } = JSON.parse(String(init?.body)) as { method: string };
+      const n = (seen.get(method) ?? 0) + 1;
+      seen.set(method, n);
+      return fails(method, n) ? new Response("rate limited", { status: 429 }) : healthy(url, init);
+    });
+  }
+
+  it("reads a position in three requests cold, then two once the vaults are remembered", async () => {
+    const fixture = withPrime(fixtureState());
+    const read = () =>
+      makeClient().readVaultPositions(CTX, {
+        owner: OWNER,
+        providerReferences: [DEPLOYMENT.primeMint],
+      });
+    const ownerShares = [ata(OWNER, DEPLOYMENT.primeMint), ata(OWNER, DEPLOYMENT.wYldsMint)];
+
+    stubRpc(fixture.accounts);
+    const cold = await read();
+    expect(requests()).toEqual([identity(fixture), vaults(fixture), ownerShares]);
+
+    stubRpc(fixture.accounts);
+    await expect(read()).resolves.toEqual(cold);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture)], ownerShares]);
+  });
+
+  it("scopes every position request to the minimum slot, cold and warm", async () => {
+    stubRpc(withPrime(fixtureState()).accounts);
+    const scoped = () =>
+      withMinimumRpcSlot(STUB_SLOT, () =>
+        makeClient().readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })
+      );
+    await scoped();
+    await scoped();
+    const calls = rpcCalls();
+    expect(calls).toHaveLength(5);
+    for (const call of calls) {
+      expect(call.params[1]).toMatchObject({ commitment: "confirmed", minContextSlot: STUB_SLOT });
+    }
+  });
+
+  it("re-reads only a vault the live config moved, then remembers the new one", async () => {
+    const fixture = fixtureState();
+    const options = () => makeClient().getParRedemptionOptions(CTX, reference);
+    stubRpc(fixture.accounts);
+    const before = await options();
+
+    const moved = pda(DEPLOYMENT.vaultMintProgramAddress, "fixture_moved_redeem_vault")[0];
+    const redeemVault = fixture.accounts.get(fixture.redeemVault);
+    const mintConfig = fixture.accounts.get(fixture.addresses.mintConfig);
+    if (!redeemVault || !mintConfig) throw new Error("fixture premise");
+    fixture.accounts.set(moved.toBase58(), redeemVault);
+    fixture.accounts.delete(fixture.redeemVault);
+    // Config.redeem_vault follows the discriminator, two mints, two empty
+    // administrator vectors and the vault authority.
+    key(moved.toBase58()).copy(mintConfig.data, 112);
+
+    stubRpc(fixture.accounts);
+    await expect(options()).resolves.toEqual(before);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture)], [moved.toBase58()]]);
+
+    stubRpc(fixture.accounts);
+    await options();
+    expect(requests()).toEqual([
+      [...identity(fixture), fixture.depositVault, moved.toBase58(), fixture.stakeVault],
+    ]);
+  });
+
+  it("refuses vault token-account drift on reads as well as builds", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(fixture.stakeVault, {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(USDC, fixture.addresses.stakeVaultAuthority),
+    });
+    const drift = {
+      code: "PROGRAM_MISMATCH",
+      message: "Hastra wYLDS stake vault has an unexpected mint or authority.",
+    };
+    stubRpc(fixture.accounts);
+    await expect(
+      makeClient().readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })
+    ).rejects.toMatchObject(drift);
+    await expect(makeClient().getParRedemptionOptions(CTX, reference)).rejects.toMatchObject(drift);
+    await expect(
+      makeClient().readParRedemptionRequest(CTX, {
+        ...reference,
+        requestAddress: withOpenRequest(fixture),
+      })
+    ).rejects.toMatchObject(drift);
+  });
+
+  it("reads options and quotes in one request and polls a request in two", async () => {
+    const fixture = fixtureState();
+    const requestAddress = withOpenRequest(fixture);
+    const client = makeClient();
+    stubRpc(fixture.accounts);
+    await client.getParRedemptionOptions(CTX, reference);
+    expect(requests()).toEqual([identity(fixture), vaults(fixture)]);
+
+    stubRpc(fixture.accounts);
+    await client.getParRedemptionOptions(CTX, reference);
+    await client.quoteParRedemption(CTX, { ...reference, shares: "1600" });
+    await client.quoteVaultDeposit(CTX, { ...reference, amount: "100" });
+    await expect(
+      client.readParRedemptionRequest(CTX, { ...reference, requestAddress })
+    ).resolves.toMatchObject({ status: "pending", request: { intermediateAmount: "2000" } });
+    const state = [...identity(fixture), ...vaults(fixture)];
+    expect(requests()).toEqual([state, state, state, state, `getAccountInfo ${requestAddress}`]);
+  });
+
+  it("refuses the poll on identity drift after the identity request alone", async () => {
+    const fixture = fixtureState();
+    const requestAddress = withOpenRequest(fixture);
+    const configAccount = fixture.accounts.get(fixture.addresses.mintConfig);
+    if (!configAccount) throw new Error("fixture premise");
+    key(DEPLOYMENT.primeMint).copy(configAccount.data, 8);
+    stubRpc(fixture.accounts);
+    await expect(
+      makeClient().readParRedemptionRequest(CTX, { ...reference, requestAddress })
+    ).rejects.toMatchObject({ code: "PROGRAM_MISMATCH" });
+    expect(requests()).toEqual([identity(fixture)]);
+  });
+
+  it("builds a deposit in one request once the vaults are remembered", async () => {
+    const fixture = fixtureState();
+    const owned = [
+      ata(OWNER, USDC),
+      ata(OWNER, DEPLOYMENT.wYldsMint),
+      ata(OWNER, DEPLOYMENT.primeMint),
+    ];
+    const build = () =>
+      makeClient().buildVaultDeposit(CTX, { ...reference, owner: OWNER, amount: "100" });
+    stubRpc(fixture.accounts);
+    const cold = await build();
+    expect(requests()).toEqual([[...identity(fixture), ...owned], vaults(fixture)]);
+
+    stubRpc(fixture.accounts);
+    await expect(build()).resolves.toEqual(cold);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture), ...owned]]);
+  });
+
+  it("builds the DEX exit in three requests cold, then one once vaults and rent are known", async () => {
+    const fixture = withPrime(fixtureState());
+    const owned = [...ownerTokenAccounts, TICKET];
+    stubRpc(fixture.accounts);
+    await makeClient().buildVaultWithdrawal(CTX, dexExit);
+    expect(requests()).toEqual([
+      [...identity(fixture), ...owned],
+      vaults(fixture),
+      "getMinimumBalanceForRentExemption 165",
+    ]);
+
+    stubRpc(fixture.accounts);
+    const plan = await makeClient().buildVaultWithdrawal(CTX, dexExit);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture), ...owned]]);
+    // The cached rent still funds the transient account: (128 + 165) * 3480 * 2.0.
+    // CreateAccountWithSeed data: u32 tag, base, u64-prefixed seed, then lamports.
+    const create = plan.instructions[3];
+    expect(create?.programAddress).toBe("11111111111111111111111111111111");
+    const data = Buffer.from(create?.data ?? "", "base64");
+    expect(data.readBigUInt64LE(44 + Number(data.readBigUInt64LE(36)))).toBe(2_039_280n);
+  });
+
+  it("builds a first sponsored PRIME par request in seven requests cold, four once vaults and rent are known", async () => {
+    const fixture = withPrime(fixtureState());
+    const owned = [...ownerTokenAccounts, TICKET];
+    stubRpc(fixture.accounts);
+    await makeClient().buildParRedemptionRequest(CTX, sharesParRequest);
+    expect(requests()).toEqual([
+      [...identity(fixture), ...owned],
+      vaults(fixture),
+      ...REUSE_PROOF,
+      "getMinimumBalanceForRentExemption 81",
+      "getMinimumBalanceForRentExemption 165",
+    ]);
+
+    stubRpc(fixture.accounts);
+    const plan = await makeClient().buildParRedemptionRequest(CTX, sharesParRequest);
+    expect(requests()).toEqual([
+      [...identity(fixture), ...vaults(fixture), ...owned],
+      ...REUSE_PROOF,
+    ]);
+    // The cached request rent still pre-funds the owner: (128 + 81) * 3480 * 2.0.
+    expect(Buffer.from(plan.instructions[1]?.data ?? "", "base64").readBigUInt64LE(4)).toBe(
+      1_454_640n
+    );
+  });
+
+  it("asks for no rent and no ticket on a wallet-paid held-wYLDS par request", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 3_000_000_000n),
+    });
+    stubRpc(fixture.accounts);
+    await makeClient().buildParRedemptionRequest(CTX, {
+      ...reference,
+      owner: OWNER,
+      intermediateAmount: "1",
+    });
+    expect(requests()).toEqual([
+      [...identity(fixture), ...ownerTokenAccounts],
+      vaults(fixture),
+      ...REUSE_PROOF,
+    ]);
+  });
+
+  it("sends the reuse proof and rent only once every check before them passes", async () => {
+    const owned = [...ownerTokenAccounts, TICKET];
+    const paused = withPrime(fixtureState({ mintPaused: true }));
+    stubRpc(paused.accounts);
+    await expect(
+      makeClient().buildParRedemptionRequest(CTX, sharesParRequest)
+    ).rejects.toMatchObject({ code: "REDEMPTION_REFUSED" });
+    expect(requests()).toEqual([[...identity(paused), ...owned], vaults(paused)]);
+
+    const open = withPrime(fixtureState());
+    withOpenRequest(open);
+    stubRpc(open.accounts);
+    await expect(makeClient().buildParRedemptionRequest(CTX, sharesParRequest)).rejects.toThrow(
+      /already has an open Hastra redemption request/
+    );
+    const state = [...identity(open), ...vaults(open), ...owned];
+    expect(requests()).toEqual([state, REUSE_PROOF[0]]);
+
+    stubRpc(withPrime(fixtureState()).accounts, {
+      latestSlot: 900,
+      closingBlockHeight: 1_000,
+      currentBlockHeight: 2_000,
+      finalizedRequest: { owner: DEPLOYMENT.vaultMintProgramAddress, data: Buffer.alloc(1) },
+    });
+    await expect(makeClient().buildParRedemptionRequest(CTX, sharesParRequest)).rejects.toThrow(
+      /not finalized closed yet/
+    );
+    expect(requests()).toEqual([state, ...REUSE_PROOF.slice(0, 2)]);
+
+    resetHastraReadCaches();
+    const drifted = withPrime(fixtureState());
+    const configAccount = drifted.accounts.get(drifted.addresses.mintConfig);
+    if (!configAccount) throw new Error("fixture premise");
+    key(DEPLOYMENT.primeMint).copy(configAccount.data, 8);
+    stubRpc(drifted.accounts);
+    await expect(
+      makeClient().buildParRedemptionRequest(CTX, sharesParRequest)
+    ).rejects.toMatchObject({ code: "PROGRAM_MISMATCH" });
+    expect(requests()).toEqual([[...identity(drifted), ...owned]]);
+  });
+
+  it("cancels in two requests over one round trip once the vaults are remembered", async () => {
+    const fixture = fixtureState();
+    const requestAddress = withOpenRequest(fixture);
+    const cancel = () =>
+      makeClient().buildParRedemptionCancel(CTX, { ...reference, owner: OWNER, requestAddress });
+    const requestRead = [requestAddress, ata(OWNER, DEPLOYMENT.wYldsMint)];
+    stubRpc(fixture.accounts);
+    const cold = await cancel();
+    expect(requests()).toEqual([identity(fixture), requestRead, vaults(fixture)]);
+
+    stubRpc(fixture.accounts);
+    await expect(cancel()).resolves.toEqual(cold);
+    expect(requests()).toEqual([[...identity(fixture), ...vaults(fixture)], requestRead]);
+  });
+
+  it("fails a full outage with PROGRAM_MISMATCH, as the identity read always did", async () => {
+    const fixture = withPrime(fixtureState());
+    const requestAddress = withOpenRequest(fixture);
+    const outage = {
+      code: "PROGRAM_MISMATCH",
+      message: "The Solana RPC answered HTTP 429 while reading Hastra accounts.",
+    };
+    stubRpc(fixture.accounts);
+    await makeClient().getParRedemptionOptions(CTX, reference);
+    for (const remembered of [true, false]) {
+      if (!remembered) resetHastraReadCaches();
+      stubRpc(fixture.accounts);
+      rateLimit(() => true);
+      const client = makeClient();
+      await expect(
+        client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })
+      ).rejects.toMatchObject(outage);
+      await expect(
+        client.readParRedemptionRequest(CTX, { ...reference, requestAddress })
+      ).rejects.toMatchObject(outage);
+      await expect(
+        client.buildParRedemptionCancel(CTX, { ...reference, owner: OWNER, requestAddress })
+      ).rejects.toMatchObject(outage);
+      await expect(client.buildParRedemptionRequest(CTX, sharesParRequest)).rejects.toMatchObject(
+        outage
+      );
+    }
+  });
+
+  it("fails each request with the code its reads had, cold and warm", async () => {
+    const withRequest = withPrime(fixtureState());
+    const requestAddress = withOpenRequest(withRequest);
+    const free = withPrime(fixtureState());
+    const failure = (code: string, read = "Hastra accounts") => ({
+      code,
+      message: `The Solana RPC answered HTTP 429 while reading ${read}.`,
+    });
+    const client = makeClient();
+    const cases: [
+      string,
+      ReturnType<typeof fixtureState>,
+      () => Promise<unknown>,
+      ReturnType<typeof failure>,
+    ][] = [
+      [
+        withRequest.stakeVault,
+        withRequest,
+        () => client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [] }),
+        failure("PROGRAM_MISMATCH"),
+      ],
+      [
+        ata(OWNER, DEPLOYMENT.primeMint),
+        withRequest,
+        () => client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [] }),
+        failure("POSITION_UNREADABLE"),
+      ],
+      [
+        withRequest.stakeVault,
+        withRequest,
+        () => client.readParRedemptionRequest(CTX, { ...reference, requestAddress }),
+        failure("PROGRAM_MISMATCH"),
+      ],
+      [
+        requestAddress,
+        withRequest,
+        () => client.readParRedemptionRequest(CTX, { ...reference, requestAddress }),
+        failure("REQUEST_UNREADABLE", `account ${requestAddress}`),
+      ],
+      [
+        withRequest.stakeVault,
+        withRequest,
+        () => client.buildParRedemptionCancel(CTX, { ...reference, owner: OWNER, requestAddress }),
+        failure("PROGRAM_MISMATCH"),
+      ],
+      [
+        requestAddress,
+        withRequest,
+        () => client.buildParRedemptionCancel(CTX, { ...reference, owner: OWNER, requestAddress }),
+        failure("REQUEST_UNREADABLE"),
+      ],
+      [
+        ata(OWNER, DEPLOYMENT.wYldsMint),
+        withRequest,
+        () => client.buildParRedemptionCancel(CTX, { ...reference, owner: OWNER, requestAddress }),
+        failure("REQUEST_UNREADABLE"),
+      ],
+      [
+        free.stakeVault,
+        free,
+        () => client.buildParRedemptionRequest(CTX, sharesParRequest),
+        failure("PROGRAM_MISMATCH"),
+      ],
+      [
+        REQUEST_PDA,
+        free,
+        () => client.buildParRedemptionRequest(CTX, sharesParRequest),
+        failure("REQUEST_UNREADABLE", `account ${REQUEST_PDA}`),
+      ],
+      [
+        ata(OWNER, DEPLOYMENT.wYldsMint),
+        free,
+        () => client.buildParRedemptionRequest(CTX, sharesParRequest),
+        failure("PROGRAM_MISMATCH"),
+      ],
+      [TICKET, free, () => client.buildVaultWithdrawal(CTX, dexExit), failure("PROGRAM_MISMATCH")],
+      [
+        ata(OWNER, USDC),
+        free,
+        () => client.buildVaultDeposit(CTX, { ...reference, owner: OWNER, amount: "100" }),
+        failure("PROGRAM_MISMATCH"),
+      ],
+    ];
+    for (const remembered of [false, true]) {
+      for (const [address, fixture, run, expected] of cases) {
+        resetHastraReadCaches();
+        stubRpc(fixture.accounts);
+        if (remembered) await client.getParRedemptionOptions(CTX, reference);
+        failReadsOf(address);
+        await expect(run()).rejects.toMatchObject(expected);
+      }
+    }
+  });
+
+  it("keeps a rent minimum ten minutes per endpoint and never keeps a failure", async () => {
+    const fixture = withPrime(fixtureState());
+    const rentRequests = () =>
+      rpcCalls().filter((call) => call.method === "getMinimumBalanceForRentExemption").length;
+    stubRpc(fixture.accounts);
+    rateLimit((method) => method === "getMinimumBalanceForRentExemption");
+    await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
+      code: "PROGRAM_MISMATCH",
+      message: "The Solana RPC answered HTTP 429 while reading classic token-account rent.",
+    });
+
+    stubRpc(fixture.accounts);
+    await makeClient().buildVaultWithdrawal(CTX, dexExit);
+    await makeClient().buildVaultWithdrawal(CTX, dexExit);
+    expect(rentRequests()).toBe(1);
+
+    stubRpc(fixture.accounts);
+    await makeClient({}, "https://other-rpc.test").buildVaultWithdrawal(CTX, dexExit);
+    expect(rentRequests()).toBe(1);
+
+    stubRpc(fixture.accounts);
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 600_000);
+    await makeClient().buildVaultWithdrawal(CTX, dexExit);
+    expect(rentRequests()).toBe(1);
+  });
+
+  it("surfaces a rent failure only where the build uses the rent", async () => {
+    stubRpc(withPrime(fixtureState({ stakePaused: true })).accounts);
+    rateLimit((method) => method === "getMinimumBalanceForRentExemption");
+    await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
+      code: "WITHDRAW_REFUSED",
+    });
+
+    stubRpc(withPrime(fixtureState()).accounts);
+    rateLimit((method) => method === "getMinimumBalanceForRentExemption");
+    await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).rejects.toMatchObject({
+      code: "PROGRAM_MISMATCH",
+      message: "The Solana RPC answered HTTP 429 while reading classic token-account rent.",
+    });
+
+    stubRpc(withPrime(fixtureState()).accounts);
+    rateLimit((method, n) => method === "getMinimumBalanceForRentExemption" && n === 1);
+    await expect(
+      makeClient().buildParRedemptionRequest(CTX, sharesParRequest)
+    ).rejects.toMatchObject({
+      code: "PROGRAM_MISMATCH",
+      message: "The Solana RPC answered HTTP 429 while reading redemption-request rent.",
+    });
+
+    // Once known, a rent outage no longer reaches the build.
+    stubRpc(withPrime(fixtureState()).accounts);
+    await makeClient().buildParRedemptionRequest(CTX, sharesParRequest);
+    rateLimit((method) => method === "getMinimumBalanceForRentExemption");
+    await expect(makeClient().buildVaultWithdrawal(CTX, dexExit)).resolves.toMatchObject({
+      cluster: "mainnet-beta",
+    });
+    await expect(
+      makeClient().buildParRedemptionRequest(CTX, sharesParRequest)
+    ).resolves.toMatchObject({ requestAddress: REQUEST_PDA });
   });
 });

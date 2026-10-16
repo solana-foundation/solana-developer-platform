@@ -1,6 +1,7 @@
 import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { clearIssuanceFixtures, type IssuanceFixtures } from "../support/issuance-fixtures";
-import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootstrap";
 
 // The new design's Issuance (new-design-issuance on): the token list, the draft flow and one
@@ -52,15 +53,20 @@ async function withRetry(page: Page, ready: () => Promise<void>): Promise<void> 
   });
 }
 
-async function gotoIssuanceList(page: Page): Promise<void> {
-  await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" });
+async function gotoIssuanceList(page: Page, projectId: string): Promise<void> {
+  await gotoProjectPage(page, projectId, "/dashboard/issuance");
   const createDraft = page.getByRole("link", { name: "Create a draft", exact: true }).first();
   await withRetry(page, () => expect(createDraft).toBeVisible({ timeout: 60_000 }));
 }
 
-async function gotoToken(page: Page, tokenId: string, tab: TokenTab = "overview"): Promise<void> {
+async function gotoToken(
+  page: Page,
+  projectId: string,
+  tokenId: string,
+  tab: TokenTab = "overview"
+): Promise<void> {
   const query = tab === "overview" ? "" : `?tab=${tab}`;
-  await page.goto(`/dashboard/issuance/${tokenId}${query}`, { waitUntil: "domcontentloaded" });
+  await gotoProjectPage(page, projectId, `/dashboard/issuance/${tokenId}${query}`);
   await withRetry(page, () =>
     expect(page.locator(`[data-token-page="${tab}"]`)).toBeVisible({ timeout: 60_000 })
   );
@@ -83,9 +89,13 @@ function recordValue(page: Page, label: string) {
  * says it has none, while one still loading shows neither, so a check that an entry is gone
  * would otherwise pass against the empty loading state.
  */
-async function openLoadedComplianceList(page: Page, tokenId: string): Promise<void> {
+async function openLoadedComplianceList(
+  page: Page,
+  projectId: string,
+  tokenId: string
+): Promise<void> {
   const compliance: TokenTab = "compliance";
-  await gotoToken(page, tokenId, compliance);
+  await gotoToken(page, projectId, tokenId, compliance);
   const tab = page.locator(`[data-token-page="${compliance}"]`);
   await expect(
     tab.getByText("Nothing is on the list yet").or(tab.locator("tbody tr").first())
@@ -156,9 +166,8 @@ test.describe
       lastActivity = Date.now();
     });
 
-    test.beforeEach(async ({ page }, testInfo) => {
+    test.beforeEach(async ({ page: _page }, testInfo) => {
       await waitForFreshRateWindow(lastActivity, testInfo);
-      await seedProjectCookie(page, fixtures.projectId);
     });
 
     test.afterEach(() => {
@@ -166,7 +175,7 @@ test.describe
     });
 
     test("R1. user sees every seeded token on the Issuance list", async ({ page }) => {
-      await gotoIssuanceList(page);
+      await gotoIssuanceList(page, fixtures.projectId);
 
       for (const token of Object.values(fixtures.tokens)) {
         await expect(page.locator(`[data-issuance-token-row="${token.id}"]`)).toBeVisible();
@@ -184,9 +193,9 @@ test.describe
       const draftName = `E2E Redesign Draft ${suffix}`;
       const draftSymbol = `RD${suffix}`;
 
-      await gotoIssuanceList(page);
+      await gotoIssuanceList(page, fixtures.projectId);
       await page.getByRole("link", { name: "Create a draft", exact: true }).first().click();
-      await page.waitForURL("**/dashboard/issuance/create");
+      await page.waitForURL(projectHref(fixtures.projectId, "/dashboard/issuance/create"));
 
       // Classify: Continue waits for a classification and a name.
       const continueButton = page.getByRole("button", { name: "Continue", exact: true });
@@ -211,13 +220,13 @@ test.describe
       // Review, then Create draft opens the new token's page.
       await expect(page.getByText(draftName).first()).toBeVisible();
       await Promise.all([
-        page.waitForURL(/\/dashboard\/issuance\/(?!create)[^/?]+/, { timeout: 120_000 }),
+        page.waitForURL(/\/dashboard\/[^/]+\/issuance\/(?!create)[^/?]+/, { timeout: 120_000 }),
         page.getByRole("button", { name: "Create draft", exact: true }).click(),
       ]);
       await expect(page.locator('[data-token-page="overview"]')).toBeVisible({ timeout: 60_000 });
       await expect(page.getByText("Deploy this token")).toBeVisible();
 
-      await gotoIssuanceList(page);
+      await gotoIssuanceList(page, fixtures.projectId);
       await page.getByRole("searchbox").fill(draftName);
       await expect(
         page.locator("[data-issuance-token-row]").filter({ hasText: draftName })
@@ -227,13 +236,13 @@ test.describe
     test("R3. user opens every tab of a live token", async ({ page }) => {
       const tabs: TokenTab[] = ["details", "public", "compliance", "operations", "permissions"];
       for (const tab of tabs) {
-        await gotoToken(page, fixtures.tokens.allowlisted.id, tab);
+        await gotoToken(page, fixtures.projectId, fixtures.tokens.allowlisted.id, tab);
       }
       await expect(page.locator('[data-token-permission="mint-authority"]')).toBeVisible();
     });
 
     test("R4. user deploys the seeded draft from Overview", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.pending.id);
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id);
       const deployButton = page.getByRole("button", { name: "Deploy token", exact: true });
       await expect(deployButton).toBeEnabled({ timeout: 120_000 });
       const successCount = await page.getByText("Deploy transaction finalized.").count();
@@ -244,7 +253,7 @@ test.describe
       await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await eventually(
-        () => gotoToken(page, fixtures.tokens.pending.id),
+        () => gotoToken(page, fixtures.projectId, fixtures.tokens.pending.id),
         () =>
           expect(page.locator('[data-token-page="overview"]')).toContainText("Live onchain", {
             timeout: 90_000,
@@ -254,7 +263,7 @@ test.describe
     });
 
     test("R5. user mints from Operations and sees the issued supply grow", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.open.id, "operations");
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id, "operations");
       const before = (await recordValue(page, "Issued supply").textContent()) ?? "";
 
       await expect(operationButton(page, "mint")).toBeEnabled({ timeout: 120_000 });
@@ -273,14 +282,14 @@ test.describe
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
       await eventually(
-        () => gotoToken(page, fixtures.tokens.open.id, "operations"),
+        () => gotoToken(page, fixtures.projectId, fixtures.tokens.open.id, "operations"),
         () => expect(recordValue(page, "Issued supply")).not.toHaveText(before, { timeout: 90_000 })
       );
       await expect(recordValue(page, "Issued supply")).toContainText("10");
     });
 
     test("R6. user pauses and resumes transfers from Operations", async ({ page }) => {
-      await gotoToken(page, fixtures.tokens.open.id, "operations");
+      await gotoToken(page, fixtures.projectId, fixtures.tokens.open.id, "operations");
 
       await expect(operationButton(page, "pause")).toHaveText("Pause", { timeout: 120_000 });
       let successCount = await page.getByText("Pause transaction finalized.").count();
@@ -305,7 +314,7 @@ test.describe
     test("R7. user adds and removes an approved recipient on Compliance", async ({ page }) => {
       const tokenId = fixtures.tokens.allowlisted.id;
       const address = fixtures.addresses.allowlistWallet;
-      await gotoToken(page, tokenId, "compliance");
+      await gotoToken(page, fixtures.projectId, tokenId, "compliance");
 
       await page.getByLabel("Address", { exact: true }).fill(address);
       await page.getByLabel("Label", { exact: true }).fill("E2E allowlist wallet");
@@ -315,7 +324,7 @@ test.describe
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
       await eventually(
-        () => openLoadedComplianceList(page, tokenId),
+        () => openLoadedComplianceList(page, fixtures.projectId, tokenId),
         () =>
           expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
             timeout: 90_000,
@@ -328,7 +337,7 @@ test.describe
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
       await eventually(
-        () => openLoadedComplianceList(page, tokenId),
+        () => openLoadedComplianceList(page, fixtures.projectId, tokenId),
         () => expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 })
       );
     });
