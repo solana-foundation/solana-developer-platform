@@ -1,3 +1,4 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaRpc } from "@sdp/rpc/solana";
@@ -44,7 +45,7 @@ interface ParsedAccountKey {
 
 interface RpcTokenBalanceAmount {
   amount?: string;
-  decimals?: number;
+  decimals?: number | bigint;
   uiAmountString?: string | null;
 }
 
@@ -161,6 +162,10 @@ function readInstructionInfoInteger(
 ): bigint | null {
   const value = info?.[key];
 
+  if (typeof value === "bigint") {
+    return value >= 0n ? value : null;
+  }
+
   if (typeof value === "string" && /^\d+$/.test(value.trim())) {
     return BigInt(value.trim());
   }
@@ -183,7 +188,8 @@ function readTokenAmountInfo(
   const rawTokenAmount = info?.tokenAmount;
   if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
     const rawAmount = readInstructionInfoInteger(info, "amount");
-    const decimalsValue = info?.decimals;
+    const rawDecimals = info?.decimals;
+    const decimalsValue = typeof rawDecimals === "bigint" ? Number(rawDecimals) : rawDecimals;
     if (
       rawAmount === null ||
       typeof decimalsValue !== "number" ||
@@ -206,11 +212,13 @@ function readTokenAmountInfo(
     typeof tokenAmountRecord.amount === "string" && /^\d+$/.test(tokenAmountRecord.amount)
       ? BigInt(tokenAmountRecord.amount)
       : null;
+  const rawDecimals =
+    typeof tokenAmountRecord.decimals === "bigint"
+      ? Number(tokenAmountRecord.decimals)
+      : tokenAmountRecord.decimals;
   const decimalsValue =
-    typeof tokenAmountRecord.decimals === "number" &&
-    Number.isFinite(tokenAmountRecord.decimals) &&
-    Number.isInteger(tokenAmountRecord.decimals)
-      ? tokenAmountRecord.decimals
+    typeof rawDecimals === "number" && Number.isFinite(rawDecimals) && Number.isInteger(rawDecimals)
+      ? rawDecimals
       : null;
 
   if (amountValue === null || decimalsValue === null) {
@@ -368,11 +376,12 @@ async function fetchParsedTransactionFromRpc(
     .send();
   // SAFETY: kit types each parsed instruction's `info` as `object`; it is the RPC's open
   // jsonParsed map, which buildObservedTransferRows reads key by key and checks per value.
+  // kit parses its integers (lamports, tokenAmount.decimals) to bigint, so the readers
+  // accept bigint as well as string and number.
   return parsedTransaction as ParsedTransactionResponse["result"];
 }
 
 async function fetchParsedTransaction(
-  rpc: SolanaRpc,
   signature: Signature,
   isFinalized: boolean
 ): Promise<ParsedTransactionResponse["result"]> {
@@ -387,7 +396,7 @@ async function fetchParsedTransaction(
     return inFlight;
   }
 
-  const pending = fetchParsedTransactionFromRpc(rpc, signature)
+  const pending = fetchParsedTransactionFromRpc(createClusterRpc(), signature)
     .then((parsedTransaction) => {
       // Cache a body only once the fresh signature history reports the
       // signature finalized. A null means the transaction is not yet indexed
@@ -745,7 +754,6 @@ function buildObservedTransferRows(
 }
 
 export async function buildObservedTransfersForSignatures(
-  rpc: SolanaRpc,
   signatures: Array<Awaited<ReturnType<typeof solanaRpc.getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
 ): Promise<TransferRow[]> {
@@ -763,11 +771,7 @@ export async function buildObservedTransfersForSignatures(
       // The history entry was fetched fresh for this request, so its
       // confirmationStatus is the current finality signal for the body gate.
       const isFinalized = signatureInfo.confirmationStatus === "finalized";
-      const parsedTransaction = await fetchParsedTransaction(
-        rpc,
-        signatureInfo.signature,
-        isFinalized
-      );
+      const parsedTransaction = await fetchParsedTransaction(signatureInfo.signature, isFinalized);
       return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
     }
   );

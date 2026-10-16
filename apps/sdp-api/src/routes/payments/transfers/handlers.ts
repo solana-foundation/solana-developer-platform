@@ -1165,15 +1165,11 @@ export async function listTransfers(c: AppContext) {
     const missingObservedSignatures = onChainSigs.filter(
       (signatureInfo) => !persistedSignatures.has(String(signatureInfo.signature))
     );
-    const observedRows = await buildObservedTransfersForSignatures(
-      historyRpc,
-      missingObservedSignatures,
-      {
-        organizationId: auth.organizationId,
-        projectId: requireProjectId(c),
-        walletIdsByAddress,
-      }
-    );
+    const observedRows = await buildObservedTransfersForSignatures(missingObservedSignatures, {
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+      walletIdsByAddress,
+    });
 
     // 4. Filter only synthetic observations; the repository already applied
     // the same filters to the authoritative exact ledger.
