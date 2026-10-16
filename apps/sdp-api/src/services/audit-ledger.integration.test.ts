@@ -29,11 +29,30 @@ class MemoryCheckpointStore implements KVStore {
   private value: string | null = null;
   private compareAndSetCalls = 0;
   private rejectAtCall: number | null = null;
+  private stallAtCall: number | null = null;
+  private stalledEffect: (() => void) | null = null;
 
   reset() {
     this.value = null;
     this.compareAndSetCalls = 0;
     this.rejectAtCall = null;
+    this.stallAtCall = null;
+    this.stalledEffect = null;
+  }
+
+  /**
+   * The next compare-and-set never answers, as on a stalled Redis. Its effect
+   * still lands, in order, before the next command the store receives, as a
+   * queued command does once the connection recovers.
+   */
+  stallNextCompareAndSet() {
+    this.stallAtCall = this.compareAndSetCalls + 1;
+  }
+
+  private catchUp() {
+    const effect = this.stalledEffect;
+    this.stalledEffect = null;
+    effect?.();
   }
 
   rejectCompareAndSetAfter(offset = 1) {
@@ -43,6 +62,7 @@ class MemoryCheckpointStore implements KVStore {
   get(_key: string): Promise<string | null>;
   get<T>(_key: string, _type: "json"): Promise<T | null>;
   async get<T>(_key: string, type?: "json"): Promise<string | T | null> {
+    this.catchUp();
     if (this.value === null) return null;
     return type === "json" ? (JSON.parse(this.value) as T) : this.value;
   }
@@ -56,7 +76,15 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndSet(_key: string, expected: string | null, value: string): Promise<boolean> {
+    this.catchUp();
     this.compareAndSetCalls += 1;
+    if (this.compareAndSetCalls === this.stallAtCall) {
+      this.stallAtCall = null;
+      this.stalledEffect = () => {
+        if (this.value === expected) this.value = value;
+      };
+      return new Promise<boolean>(() => {});
+    }
     if (this.compareAndSetCalls === this.rejectAtCall) {
       this.rejectAtCall = null;
       return false;
@@ -67,6 +95,7 @@ class MemoryCheckpointStore implements KVStore {
   }
 
   async compareAndDelete(_key: string, expected: string): Promise<boolean> {
+    this.catchUp();
     this.compareAndSetCalls += 1;
     if (this.compareAndSetCalls === this.rejectAtCall) {
       this.rejectAtCall = null;
@@ -200,6 +229,40 @@ describe("tamper-evident audit ledger", () => {
     expect(
       await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
     ).toMatchObject({ count: 1 });
+  });
+
+  it("fails the write and frees the audit lock when Redis stalls inside it (HOO-2089)", async () => {
+    const bounded = new AuditService(db, checkpoint, 50);
+    await bounded.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_stall",
+    });
+    // The pending-witness CAS stalls past the bound, then lands late.
+    checkpoint.stallNextCompareAndSet();
+    await expect(
+      bounded.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "stalled_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(
+      await db.queryOne<{ count: number }>("SELECT count(*)::integer AS count FROM audit_logs")
+    ).toMatchObject({ count: 1 });
+    await expect(
+      bounded.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "after_stall",
+      })
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 2,
+      externalCheckpointMatches: true,
+    });
   });
 
   it("detects tail deletion during the commit-to-checkpoint-promotion window", async () => {
