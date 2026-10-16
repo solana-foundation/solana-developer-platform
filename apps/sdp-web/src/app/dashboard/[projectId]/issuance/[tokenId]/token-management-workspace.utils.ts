@@ -888,6 +888,29 @@ export function resolveAuthorityAddressForRole(
   }
 }
 
+/**
+ * The wallet a burn opens on. A burn has a default signer only when one wallet could sign it, so
+ * with several, the form opens empty; in demo mode it opens on the mint's signer instead, so the
+ * prefilled form runs on one click.
+ *
+ * @param input.burnDefaultWalletId - The burn's own default signer, or "" when it has none.
+ * @param input.mintDefaultWalletId - The mint's default signer.
+ * @param input.demo - Whether demo mode is on.
+ * @returns The wallet id to open the burn on, or "" for none.
+ */
+export function resolveBurnSigningWalletId({
+  burnDefaultWalletId,
+  mintDefaultWalletId,
+  demo,
+}: {
+  burnDefaultWalletId: string;
+  mintDefaultWalletId: string;
+  demo: boolean;
+}): string {
+  if (burnDefaultWalletId) return burnDefaultWalletId;
+  return demo ? mintDefaultWalletId : "";
+}
+
 export function getSignerSelectionForAction({
   action,
   token,

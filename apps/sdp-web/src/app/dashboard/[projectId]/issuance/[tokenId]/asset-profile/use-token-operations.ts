@@ -44,6 +44,7 @@ import {
   isPositiveAmount,
   isValidSolanaAddressInput,
   resolveAuthorityAddressForRole,
+  resolveBurnSigningWalletId,
 } from "../token-management-workspace.utils";
 import { useTokenActionRunner } from "../use-token-action-runner";
 import { getTokenOperationPermissions } from "./token-operation-permissions";
@@ -986,7 +987,11 @@ export function useTokenOperations({
         break;
       }
       case "burn": {
-        const signingWalletId = burnSignerSelection.defaultWalletId;
+        const signingWalletId = resolveBurnSigningWalletId({
+          burnDefaultWalletId: burnSignerSelection.defaultWalletId,
+          mintDefaultWalletId: mintSignerSelection.defaultWalletId,
+          demo,
+        });
         setBurnForm((previous) => ({
           ...previous,
           signingWalletId,
