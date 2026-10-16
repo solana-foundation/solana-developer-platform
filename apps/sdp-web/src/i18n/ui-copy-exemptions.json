@@ -210,5 +210,37 @@
   {
     "candidate": "src/components/dashboard-nav.ts:284:11:overview",
     "reason": "Design-module id passed to isDesignModuleOn, never rendered; the label comes from the catalog"
+  },
+  {
+    "candidate": "src/app/dashboard/[projectId]/issuance/create/issuance-draft-flow.redesign.tsx:96:5:A dollar stablecoin for paying suppliers, backed one to one by cash at a regulated bank.",
+    "reason": "Demo sample value typed into the draft form as data; not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:113:5:A dollar stablecoin, backed one to one by cash and short-term treasuries.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:146:5:A euro stablecoin for settlement between Hoodies entities.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:173:5:A note held by approved investors only. Transfers are paused for the audit.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:204:5:Points customers earn at checkout and spend on rewards.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:231:5:Loyalty points, no cap.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:255:5:A dollar stablecoin for partner payouts.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
+  },
+  {
+    "candidate": "src/lib/payments-demo/issuance-fixtures.ts:279:5:Reserve token for the Hoodies demo.",
+    "reason": "Seeded demo token description: fixture data the API would return, not interface copy"
   }
 ]

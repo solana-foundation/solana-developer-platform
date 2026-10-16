@@ -11,7 +11,6 @@
   "src/app/dashboard/[projectId]/issuance/create/advanced-settings-editor.tsx:113:15:advanced",
   "src/app/dashboard/[projectId]/issuance/create/advanced-settings-editor.tsx:151:9:primary",
   "src/app/dashboard/[projectId]/issuance/create/advanced-settings-editor.tsx:159:15:advanced",
-  "src/app/dashboard/[projectId]/issuance/create/issuance-draft-flow.redesign.tsx:96:5:A dollar stablecoin for paying suppliers, backed one to one by cash at a regulated bank.",
   "src/app/dashboard/[projectId]/issuance/create/issuance-draft-form.tsx:570:13:freeze",
   "src/app/dashboard/[projectId]/issuance/create/issuance-draft-form.tsx:570:13:pause",
   "src/app/dashboard/[projectId]/issuance/create/issuance-draft-form.tsx:570:13:recover",
@@ -117,12 +116,5 @@
   "src/flags/definitions.ts:284:22:New design",
   "src/flags/definitions.ts:83:7:`Show ${title} as a selectable provider in the onramp and offramp wizards.`",
   "src/flags/definitions.ts:85:25:Hidden",
-  "src/flags/definitions.ts:86:24:Enabled",
-  "src/lib/payments-demo/issuance-fixtures.ts:113:5:A dollar stablecoin, backed one to one by cash and short-term treasuries.",
-  "src/lib/payments-demo/issuance-fixtures.ts:146:5:A euro stablecoin for settlement between Hoodies entities.",
-  "src/lib/payments-demo/issuance-fixtures.ts:173:5:A note held by approved investors only. Transfers are paused for the audit.",
-  "src/lib/payments-demo/issuance-fixtures.ts:204:5:Points customers earn at checkout and spend on rewards.",
-  "src/lib/payments-demo/issuance-fixtures.ts:231:5:Loyalty points, no cap.",
-  "src/lib/payments-demo/issuance-fixtures.ts:255:5:A dollar stablecoin for partner payouts.",
-  "src/lib/payments-demo/issuance-fixtures.ts:279:5:Reserve token for the Hoodies demo."
+  "src/flags/definitions.ts:86:24:Enabled"
 ]
