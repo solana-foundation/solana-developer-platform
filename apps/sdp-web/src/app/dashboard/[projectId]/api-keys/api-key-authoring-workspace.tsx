@@ -24,6 +24,7 @@ import {
   type ApiKeyAuthoringMode,
   type ApiKeyAuthoringStep,
   createApiKeyAuthoringDraft,
+  isAuthoringStepComplete,
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
@@ -588,15 +589,7 @@ export function ApiKeyAuthoringWorkspace({
       ? t("DashboardCustody.production")
       : t("DashboardCustody.sandbox");
   const currentStepIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
-  const selectedWalletCount = draft.selectedWalletIds.length;
-  const canContinue =
-    currentStep === "details"
-      ? draft.name.trim().length > 0
-      : currentStep === "permissions"
-        ? draft.grants.length > 0
-        : currentStep === "wallets"
-          ? draft.walletScope === "all" || selectedWalletCount > 0
-          : true;
+  const canContinue = isAuthoringStepComplete(currentStep, draft);
 
   const update = (patch: Partial<ApiKeyAuthoringDraft>) => {
     if ("grants" in patch) {

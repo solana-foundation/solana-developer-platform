@@ -503,6 +503,10 @@ interface PaymentRequestsWorkspaceProps {
   counterparties: Counterparty[];
 }
 
+/** The hosted pay page for a token, on this origin. Call it from an event, never in render. */
+function payLinkFor(token: string): string {
+  return `${window.location.origin}/pay/${token}`;
+}
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
@@ -522,11 +526,12 @@ export function PaymentRequestsWorkspace({
   );
   const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
-  // A request's pay link token, from the create response or read on open, kept
-  // with the request it belongs to so it is never shown on another one.
+  // A request's pay link, from the create response or read on open, kept with
+  // the request it belongs to so it is never shown on another one. It is built
+  // in those events, never while rendering, where `window` does not exist.
   const [selectedLink, setSelectedLink] = useState<{
     requestId: string;
-    token: string | null;
+    payLink: string | null;
   } | null>(null);
   // The request opened last: a link read that lands after the user opened
   // another row, or closed the details, is dropped.
@@ -544,9 +549,7 @@ export function PaymentRequestsWorkspace({
   );
   // Reads never carry the pay link (APE-849): opening a row reads its token, which the
   // API returns only to a member whose role may manage payment requests.
-  const selectedToken =
-    selected && selectedLink?.requestId === selected.id ? selectedLink.token : null;
-  const payLink = selectedToken ? `${window.location.origin}/pay/${selectedToken}` : null;
+  const payLink = selected && selectedLink?.requestId === selected.id ? selectedLink.payLink : null;
   const openRequest = async (row: PaymentRequest) => {
     openingRequestId.current = row.id;
     const res = await dashboardFetch<{ data: PaymentRequestLink }>(
@@ -559,7 +562,10 @@ export function PaymentRequestsWorkspace({
       toast.error(res.error);
       return;
     }
-    setSelectedLink({ requestId: row.id, token: res.ok ? res.data.data.publicToken : null });
+    setSelectedLink({
+      requestId: row.id,
+      payLink: res.ok ? payLinkFor(res.data.data.publicToken) : null,
+    });
     setSelected(row);
   };
 
@@ -858,7 +864,9 @@ export function PaymentRequestsWorkspace({
             // behind it, rather than closing and making the user find the new row.
             setCreateOpen(false);
             openingRequestId.current = request ? request.id : null;
-            setSelectedLink(request ? { requestId: request.id, token: request.publicToken } : null);
+            setSelectedLink(
+              request ? { requestId: request.id, payLink: payLinkFor(request.publicToken) } : null
+            );
             setSelected(request);
             router.refresh();
           }}

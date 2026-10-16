@@ -124,6 +124,24 @@ describe("API-key authoring: grant toggles", () => {
     expect(toggleGrant(ticked, "transfers.execute")).toEqual(["transfers.read"]);
   });
 
+  it("keeps a read next to verbs that include nothing (issuance enforce, authority)", () => {
+    const grants = toggleGrant(
+      toggleGrant(["issuance.read"], "issuance.enforce"),
+      "issuance.authority"
+    );
+    expect(grants).toEqual(["issuance.read", "issuance.enforce", "issuance.authority"]);
+    expect(grantToggleState(grants, "issuance.read")).toBe("on");
+    expect(toggleGrant(["issuance.enforce"], "issuance.read")).toEqual([
+      "issuance.read",
+      "issuance.enforce",
+    ]);
+    expect(toggleGrant(grants, "issuance.enforce")).toEqual([
+      "issuance.read",
+      "issuance.authority",
+    ]);
+    expect(toggleGrant(["issuance.enforce"], "issuance.enforce")).toEqual([]);
+  });
+
   it("writes Everything out as the explicit offered list, the RPC relay left to its own tick", () => {
     const offered = grantableActionsInChannel(inStable);
     expect(offered).toContain("rpc.execute");

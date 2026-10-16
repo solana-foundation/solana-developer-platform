@@ -47,7 +47,7 @@ export function registeredRouteAuthorizations(
 }
 
 /** A route pattern with every parameter name erased, so Hono and OpenAPI paths compare. */
-function routeShape(path: string): string {
+function eraseRouteParameterNames(path: string): string {
   return path.replace(/\{[A-Za-z0-9_]+\}/g, ":_").replace(/:[A-Za-z0-9_]+/g, ":_");
 }
 
@@ -73,10 +73,10 @@ export function declaredActionForOperation(
     for (const route of registeredRouteAuthorizations(app)) {
       const [declaration] = route.declarations;
       if (route.declarations.length === 1 && declaration?.kind === "action") {
-        map.set(`${route.method} ${routeShape(route.path)}`, declaration.action);
+        map.set(`${route.method} ${eraseRouteParameterNames(route.path)}`, declaration.action);
       }
     }
     actionsByOperation = map;
   }
-  return actionsByOperation.get(`${method.toUpperCase()} ${routeShape(openApiPath)}`);
+  return actionsByOperation.get(`${method.toUpperCase()} ${eraseRouteParameterNames(openApiPath)}`);
 }
