@@ -154,11 +154,13 @@ function replayBody(row: Record<string, unknown>): string {
       if (rawBody !== null) {
         return rawBody;
       }
-      if (typeof row.payload === "string") {
-        return row.payload;
+      const stringPayload = z.string().safeParse(row.payload);
+      if (stringPayload.success) {
+        return stringPayload.data;
       }
-      if (row.payload !== null && row.payload !== undefined) {
-        return JSON.stringify(row.payload);
+      const jsonPayload = z.json().safeParse(row.payload);
+      if (jsonPayload.success && jsonPayload.data !== null) {
+        return JSON.stringify(jsonPayload.data);
       }
       throw new Error("active ramp webhook event has no replay body");
     }

@@ -487,6 +487,19 @@ describe("Ramp webhook event inbox", () => {
     expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
   });
 
+  it("replays a legacy JSONB string without encoding it again", async () => {
+    const rawBody = JSON.stringify(completedPayload);
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: rawBody,
+    });
+
+    expect(stored.rawBody).toBe(rawBody);
+    expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(true);
+    expect(await readTransferStatus()).toBe("completed");
+  });
+
   it("does not claim events still inside the background pass's window", async () => {
     await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
       provider: "moonpay",
