@@ -1,34 +1,16 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  BVNK_FUNDING_WALLET_FIAT,
-  bvnkPayoutPartyDetailsFromCustomer,
-  isBvnkCustomerVerified,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { BVNK_FUNDING_WALLET_STATUS, type PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampQuote } from "@sdp/types";
 import { OFFRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
-import {
-  badRequest,
-  badRequestQuery,
-  counterpartyNotProvisioned,
-  internalError,
-} from "@/lib/errors";
+import { badRequest, badRequestQuery, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-import {
-  completePendingBvnkOfframpTransfer,
-  createPendingBvnkOfframpTransfer,
-  readFundingWalletRow,
-  refreshBvnkCustomerAccount,
-} from "../providers/bvnk";
 import {
   buildProviderDetails,
   type CreateOfframpQuoteBody,
@@ -92,7 +74,6 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   return success(c, { estimates });
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: provider dispatch keeps each off-ramp integration explicit, including its persistence and failure semantics.
 export async function createOfframpQuote(c: AppContext): Promise<Response> {
   const {
     body: input,
@@ -175,107 +156,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         });
         throw error;
       }
-      break;
-    }
-    case "bvnk": {
-      if (input.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
-        throw badRequest("BVNK supports USD only.");
-      }
-      const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
-      const fundingRow = await readFundingWalletRow(
-        accounts,
-        {
-          organizationId: scope.auth.organizationId,
-          projectId,
-          counterpartyId: counterparty.id,
-          provider: "bvnk",
-        },
-        BVNK_FUNDING_WALLET_FIAT
-      );
-      if (
-        fundingRow === null ||
-        fundingRow.provider_status !== BVNK_FUNDING_WALLET_STATUS.provisioned ||
-        fundingRow.external_account_reference === null
-      ) {
-        throw counterpartyNotProvisioned("bvnk", "offramp", {
-          fundingWalletStatus: fundingRow === null ? null : fundingRow.provider_status,
-        });
-      }
-      const customerLinkRow = await accounts.getProviderAccount({
-        organizationId: scope.auth.organizationId,
-        projectId,
-        counterpartyId: counterparty.id,
-        provider: "bvnk",
-      });
-      if (customerLinkRow === null) {
-        throw counterpartyNotProvisioned("bvnk", "offramp");
-      }
-      const refreshedCustomer = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
-        counterparty,
-        projectId,
-        providerAccountId: customerLinkRow.id,
-        customerReference: customerLinkRow.provider_customer_reference,
-      });
-      if (!isBvnkCustomerVerified(refreshedCustomer.customer.status)) {
-        throw counterpartyNotProvisioned("bvnk", "offramp", {
-          customerStatus: refreshedCustomer.customer.status,
-        });
-      }
-      const customerReference = customerLinkRow.provider_customer_reference;
-      const bvnkCustomer = refreshedCustomer.latest;
-      const pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
-        transferId: reservedTransferId,
-        organizationId: scope.auth.organizationId,
-        projectId,
-        counterpartyId: counterparty.id,
-        custodyWalletId: sourceWallet.id,
-        walletId: sourceWallet.walletId,
-        walletAddress: sourceWalletAddress,
-        assetRail: input.assetRail,
-        cryptoAmount: input.cryptoAmount,
-        fiatCurrency: input.fiatCurrency,
-        rampsMemo: input.rampsMemo,
-      });
-      let bvnkQuote: PaymentRampQuote;
-      try {
-        bvnkQuote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
-          assetRail: input.assetRail,
-          fiatCurrency: input.fiatCurrency,
-          cryptoAmount: input.cryptoAmount,
-          sourceWalletAddress,
-          paymentTransferId: pendingTransfer.id,
-          externalCustomerId: customerReference,
-          bvnkCompliance: {
-            partyDetails: [bvnkPayoutPartyDetailsFromCustomer(bvnkCustomer, "ORIGINATOR")],
-          },
-          bvnkFundingWalletId: fundingRow.external_account_reference,
-        });
-      } catch (error) {
-        await getPaymentsRepository(c).updateTransferStatusGuarded({
-          transferId: pendingTransfer.id,
-          organizationId: scope.auth.organizationId,
-          projectId,
-          fromStatuses: ["pending"],
-          toStatus: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          updatedAt: new Date().toISOString(),
-        });
-        throw error;
-      }
-      await completePendingBvnkOfframpTransfer(c, {
-        organizationId: scope.auth.organizationId,
-        projectId,
-        transferId: pendingTransfer.id,
-        quote: bvnkQuote,
-        cryptoAmount: input.cryptoAmount,
-        status: rampQuoteTransferStatus(bvnkQuote),
-        channel: {
-          walletId: fundingRow.external_account_reference,
-          customerReference: customerReference,
-        },
-      });
-      quote = bvnkQuote;
-      precreatedTransferId = pendingTransfer.id;
       break;
     }
     case "stripe":

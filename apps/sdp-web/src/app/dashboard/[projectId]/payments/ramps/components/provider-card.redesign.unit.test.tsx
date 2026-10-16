@@ -20,19 +20,19 @@ function wrapper({ children }: { children: ReactNode }) {
 
 afterEach(cleanup);
 
-const bvnk = { id: "bvnk", title: "BVNK" } as const;
+const moonpay = { id: "moonpay", title: "MoonPay" } as const;
 
 describe("ProviderQuoteCard", () => {
   it("explains a failed quote without relaying the provider's own error text", () => {
     const estimate: RampProviderEstimateResult = {
-      provider: "bvnk",
+      provider: "moonpay",
       status: "error",
       error: "Request failed with status 502",
     };
     render(
       <ProviderQuoteCard
         name="provider"
-        option={bvnk}
+        option={moonpay}
         active={false}
         estimate={estimate}
         onSelect={vi.fn()}
@@ -48,9 +48,12 @@ describe("ProviderQuoteCard", () => {
   });
 
   it("asks for an amount before any quote exists", () => {
-    render(<ProviderQuoteCard name="provider" option={bvnk} active={false} onSelect={vi.fn()} />, {
-      wrapper,
-    });
+    render(
+      <ProviderQuoteCard name="provider" option={moonpay} active={false} onSelect={vi.fn()} />,
+      {
+        wrapper,
+      }
+    );
 
     expect(screen.getByText("Enter an amount to see a quote")).toBeTruthy();
   });

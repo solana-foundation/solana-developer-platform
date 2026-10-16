@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 
-import type {
-  BvnkRampSettlement,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types";
 import type { RenderHookResult } from "@testing-library/react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -40,11 +36,11 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const TRANSFER_ID = "xfr_bvnk_wizard";
+const TRANSFER_ID = "xfr_moonpay_wizard";
 
 const WALLET: PaymentsDashboardWallet = {
-  id: "wallet-bvnk",
-  walletId: "provider-bvnk",
+  id: "wallet-moonpay",
+  walletId: "provider-moonpay",
   isRuntimeExecutionAllowed: true,
   custodyConfigId: "cc_test",
   publicKey: "wallet-pubkey",
@@ -52,33 +48,16 @@ const WALLET: PaymentsDashboardWallet = {
   balances: [{ token: "USDC", mint: USDC_MINT, amount: "1000000", uiAmount: "1", decimals: 6 }],
 };
 
-// A bvnk onramp requirements answer that needs no collection and no onboarding:
+// A moonpay onramp requirements answer that needs no collection and no onboarding:
 // the advance straight to `ready` lets the transaction stage fire the quote.
-const REQUIREMENTS_READY = { provider: "bvnk", direction: "onramp", status: "ready" };
+const REQUIREMENTS_READY = { provider: "moonpay", direction: "onramp", status: "ready" };
 
-const BVNK_QUOTE = {
-  id: "quote_bvnk",
-  provider: "bvnk",
+const MOONPAY_QUOTE = {
+  id: "quote_moonpay",
+  provider: "moonpay",
   status: "pending",
-  deliveryMode: "manual_instructions",
-  paymentInstructions: [],
-};
-
-const BVNK_PROCESSING_SETTLEMENT: BvnkRampSettlement = {
-  provider: "bvnk",
-  status: "PROCESSING",
-  payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
-  payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
-  receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
-  fiatCurrency: "USD",
-  fiatAmount: "9.9",
-  cryptoCurrency: "USDC",
-  cryptoAmount: "9.8802",
-  feeCurrency: "USD",
-  feeAmount: "0.1",
-  networkFeeCurrency: "USD",
-  networkFeeAmount: "0.12",
-  exchangeRate: "0.998",
+  deliveryMode: "hosted",
+  hostedUrl: "https://buy-sandbox.moonpay.com/",
 };
 
 function transferFixture(
@@ -93,7 +72,7 @@ function transferFixture(
     signature: null,
     rampsMemo: {},
     type: "onramp",
-    provider: "bvnk",
+    provider: "moonpay",
     ...overrides,
   };
 }
@@ -101,7 +80,7 @@ function transferFixture(
 const PROPS: UseRampWizardProps = {
   wallets: [WALLET],
   walletsError: null,
-  enabledRampProviders: ["bvnk"],
+  enabledRampProviders: ["moonpay"],
   rampProviderAccess: null,
   counterpartiesResult: { ok: true, data: [] },
   selectedCounterparty: null,
@@ -163,7 +142,7 @@ beforeEach(() => {
     }
     if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
       return Promise.resolve(
-        Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+        Response.json({ data: { quote: MOONPAY_QUOTE, transferId: TRANSFER_ID } })
       );
     }
     if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
@@ -184,14 +163,14 @@ type WizardRender = RenderHookResult<ReturnType<typeof useOnrampWizard>, unknown
 
 /**
  * Drives the real wizard from the deposit step to the transaction stage: pick
- * the BVNK provider, fund the deposit form, advance through the memo (which
+ * the MOONPAY provider, fund the deposit form, advance through the memo (which
  * POSTs the requirements advance and lands on the PROVIDER step), let the
  * readiness effect fire the quote POST, and wait for the transfer-status poll
  * to deliver the scenario transfer.
  */
 async function driveToTransferStatus(rendered: WizardRender) {
   await act(async () => {});
-  act(() => rendered.result.current.selectProvider("bvnk"));
+  act(() => rendered.result.current.selectProvider("moonpay"));
   act(() => rendered.result.current.setField("amount", "100"));
   act(() => rendered.result.current.setField("walletId", WALLET.id));
   await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
@@ -246,44 +225,13 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     expect(transferStatusCalls()).toBeGreaterThan(callsBefore);
   });
 
-  it("shows the complete screen once a BVNK PROCESSING settlement arrives, polling until terminal", async () => {
-    const { result } = await renderAtTransfer(
-      transferFixture("settling", {
-        providerReference: "01a0ab3c-4388-7e84-a501-3b02668d715b",
-        settlement: BVNK_PROCESSING_SETTLEMENT,
-      })
-    );
-
-    expect(result.current.transferStatus?.status).toBe("settling");
-    expect(result.current.transferStatus?.settlement?.provider).toBe("bvnk");
-    expect(result.current.showCompleteScreen).toBe(true);
-
-    // PROCESSING is still non-terminal: the status poll keeps ticking.
-    const callsBefore = transferStatusCalls();
-    await allowPollingTick();
-    expect(transferStatusCalls()).toBeGreaterThan(callsBefore);
-  });
-
   it("keeps the complete screen for a completed transfer and stops polling", async () => {
     const signature =
       "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
-    const completeSettlement: BvnkRampSettlement = {
-      ...BVNK_PROCESSING_SETTLEMENT,
-      status: "COMPLETE",
-      txHash: signature,
-      cryptoAmountActual: "9.8802",
-      fiatAmountActual: "9.9",
-      feeAmountActual: "0.1",
-      feeCurrencyActual: "USD",
-      networkFeeAmountActual: "0",
-      networkFeeCurrencyActual: "USD",
-      exchangeRateActual: "0.998",
-    };
     const { result } = await renderAtTransfer(
       transferFixture("completed", {
         signature,
         providerReference: "01a0ab3c-4388-7e84-a501-3b02668d715b",
-        settlement: completeSettlement,
       })
     );
 
@@ -319,7 +267,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
   // Primary presses from the deposit step to the transaction stage.
   const STEPS_TO_TRANSACTION_STAGE = 2;
   const quoteCreated = () =>
-    Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } });
+    Response.json({ data: { quote: MOONPAY_QUOTE, transferId: TRANSFER_ID } });
   const quoteFailed = () =>
     Response.json({ error: { message: "The provider is unavailable." } }, { status: 502 });
 
@@ -388,7 +336,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
   async function renderWithQuoteInFlight(): Promise<WizardRender> {
     const rendered = renderWizard();
     await act(async () => {});
-    act(() => rendered.result.current.selectProvider("bvnk"));
+    act(() => rendered.result.current.selectProvider("moonpay"));
     await enterTransactionStage(rendered, WALLET.id, "100");
     await waitFor(() => expect(quoteCalls).toHaveLength(1));
     expect(quoteCalls[0]?.body).toMatchObject({

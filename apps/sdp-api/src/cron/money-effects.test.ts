@@ -45,6 +45,6 @@ describe("cron money effects (HOO-1955)", () => {
       .map(([monitor]) => monitor)
       .sort();
 
-    expect(gaps).toEqual(["sdp-api-poll-rings-indexing", "sdp-api-track-pending-transfers"]);
+    expect(gaps).toEqual(["sdp-api-poll-rings-indexing"]);
   });
 });

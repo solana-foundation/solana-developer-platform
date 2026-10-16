@@ -23,11 +23,6 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
-  type BvnkSandboxEnvSnapshot,
-  restoreBvnkSandboxEnv,
-  stubBvnkSandboxEnv,
-} from "@/test/helpers/bvnk";
-import {
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
@@ -165,8 +160,6 @@ export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
 export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
-export { TEST_BVNK_HAWK_AUTH_ID, TEST_BVNK_HAWK_SECRET_KEY, TEST_BVNK_WALLET_ID } from "./bvnk";
-
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
@@ -178,14 +171,6 @@ let originalMoonPaySandboxSecretKey: string | undefined;
 let originalMoonPayOnrampUrl: string | undefined;
 
 let originalMoonPayOfframpUrl: string | undefined;
-
-let savedBvnkSandboxEnv: BvnkSandboxEnvSnapshot | undefined;
-
-let originalBvnkHawkAuthId: string | undefined;
-
-let originalBvnkHawkSecretKey: string | undefined;
-
-let originalBvnkWalletId: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -608,18 +593,11 @@ export function installPaymentsRouteTestHooks(): void {
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
     originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
     originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
-    savedBvnkSandboxEnv = stubBvnkSandboxEnv(env);
-    originalBvnkHawkAuthId = env.BVNK_HAWK_AUTH_ID;
-    originalBvnkHawkSecretKey = env.BVNK_HAWK_SECRET_KEY;
-    originalBvnkWalletId = env.BVNK_WALLET_ID;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
     env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
     env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
-    env.BVNK_HAWK_AUTH_ID = undefined;
-    env.BVNK_HAWK_SECRET_KEY = undefined;
-    env.BVNK_WALLET_ID = undefined;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -630,12 +608,6 @@ export function installPaymentsRouteTestHooks(): void {
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
     env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
     env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
-    if (savedBvnkSandboxEnv !== undefined) {
-      restoreBvnkSandboxEnv(env, savedBvnkSandboxEnv);
-    }
-    env.BVNK_HAWK_AUTH_ID = originalBvnkHawkAuthId;
-    env.BVNK_HAWK_SECRET_KEY = originalBvnkHawkSecretKey;
-    env.BVNK_WALLET_ID = originalBvnkWalletId;
 
     await clearKVStores(env);
   });

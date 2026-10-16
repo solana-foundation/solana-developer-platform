@@ -1,5 +1,4 @@
 import { SdpPaymentsError } from "@sdp/payments";
-import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
 import {
@@ -21,7 +20,6 @@ import type {
   RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import type { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -31,16 +29,9 @@ import type {
 } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import {
-  AppError,
-  conflict,
-  internalError,
-  redactErrorForCapture,
-  unsupportedRampCorridor,
-} from "@/lib/errors";
+import { AppError, conflict, redactErrorForCapture, unsupportedRampCorridor } from "@/lib/errors";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
@@ -59,17 +50,7 @@ import {
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
-import { advanceBvnkRequirements } from "./providers/bvnk";
-import {
-  assertRampQuoteBindingMatches,
-  type RampQuoteBinding,
-  rampQuoteCryptoDepositProviderData,
-} from "./quote-binding";
-
-type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
-  counterparty: CounterpartyRow;
-  projectId: string;
-};
+import { assertRampQuoteBindingMatches, type RampQuoteBinding } from "./quote-binding";
 
 /**
  * Whether SDP offers ramp `provider` on this request: the release channel
@@ -221,9 +202,6 @@ export async function resolveRampQuoteRequest(
 }
 
 export function rampQuoteTransferStatus(quote: PaymentRampQuote): PaymentTransferStatus {
-  if (quote.deliveryMode === "manual_instructions" && quote.status === "pending") {
-    return "awaiting_payment";
-  }
   return quote.status;
 }
 
@@ -286,7 +264,6 @@ export async function persistRampQuoteTransfer(
       rampsMemo: input.rampsMemo,
       providerData: {
         ...(input.providerData ?? {}),
-        ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
       serializedTx: null,
       signature: null,
@@ -308,24 +285,6 @@ export async function persistRampQuoteTransfer(
     throw new AppError("INTERNAL_ERROR", "Failed to create ramp transfer record");
   }
   return created.id;
-}
-
-export async function advanceCounterpartyRequirements(
-  c: AppContext,
-  input: ScopedSubmitCounterpartyRequirementsInput
-): Promise<CounterpartyRequirements> {
-  switch (input.provider) {
-    case "moonpay":
-      return readyCounterparty("moonpay", input.direction);
-    case "bvnk":
-      return advanceBvnkRequirements(c, input);
-    case "stripe":
-      return readyCounterparty("stripe", input.direction);
-    default: {
-      const _exhaustive: never = input;
-      throw internalError(`Unhandled ramp provider: ${_exhaustive}`);
-    }
-  }
 }
 
 /** Ceiling on simultaneous live provider estimate calls per request. */

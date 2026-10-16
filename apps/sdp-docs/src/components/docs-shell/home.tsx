@@ -114,7 +114,6 @@ const PARTNER_ROWS: {
     module: "ramps",
     partners: [
       { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg", rampProvider: "moonpay" },
-      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg", rampProvider: "bvnk" },
       { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg", rampProvider: "stripe" },
     ],
   },

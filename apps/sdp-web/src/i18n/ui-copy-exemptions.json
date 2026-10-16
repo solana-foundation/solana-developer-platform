@@ -64,10 +64,6 @@
     "reason": "Ramp provider brand name"
   },
   {
-    "candidate": "src/lib/ramps.ts:40:17:BVNK",
-    "reason": "Ramp provider brand name"
-  },
-  {
     "candidate": "src/lib/ramps.ts:44:19:Stripe",
     "reason": "Ramp provider brand name"
   },

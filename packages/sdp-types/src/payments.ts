@@ -303,89 +303,7 @@ export interface MoonpayRampSettlement {
   failureReason?: string;
 }
 
-/**
- * BVNK on-ramp settlement economics, from the payout CREATE response
- * (PROCESSING) until the COMPLETE crypto payout webhook or poll replaces it
- * with the delivery facts. The processing variant stores the create-time
- * estimate: the fiat wallet debit, the crypto to receive, the fee legs, the
- * receipt url BVNK provides at create, and `exchangeRate.rate`. The complete
- * variant keeps every create-time estimate (the dashboard shows them) and
- * adds the observed terminal facts separately: the on-chain hash, the actual
- * settled crypto/fiat, the actual fee/network-fee legs with their currencies,
- * and the actual exchange rate. Amounts are decimal strings.
- */
-export const bvnkRampProcessingSettlementSchema = z.object({
-  provider: z.literal("bvnk"),
-  status: z.literal("PROCESSING"),
-  payinId: z.string(),
-  payoutId: z.string(),
-  receiptUrl: z.string(),
-  fiatCurrency: z.string(),
-  fiatAmount: z.string(),
-  cryptoCurrency: z.string(),
-  cryptoAmount: z.string(),
-  feeCurrency: z.string(),
-  feeAmount: z.string(),
-  networkFeeCurrency: z.string(),
-  networkFeeAmount: z.string(),
-  exchangeRate: z.string(),
-});
-
-export const bvnkRampCompleteSettlementSchema = bvnkRampProcessingSettlementSchema.extend({
-  status: z.literal("COMPLETE"),
-  txHash: z.string(),
-  cryptoAmountActual: z.string(),
-  fiatAmountActual: z.string(),
-  feeAmountActual: z.string(),
-  feeCurrencyActual: z.string(),
-  networkFeeAmountActual: z.string(),
-  networkFeeCurrencyActual: z.string(),
-  exchangeRateActual: z.string(),
-});
-
-export const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
-  bvnkRampProcessingSettlementSchema,
-  bvnkRampCompleteSettlementSchema,
-]);
-
-export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
-
-/**
- * BVNK off-ramp channel settlement economics, recorded once when the
- * confirmed channel-transaction webhook settles the transfer: the crypto
- * received (`paidAmount`), the fiat credited to the funding wallet
- * (`walletAmount`), the fee and network-fee legs, the exchange rate, the
- * deposit transaction hash, and the source wallet addresses that paid the channel.
- * Amounts are decimal strings.
- */
-export const bvnkOfframpChannelSettlementSchema = z.object({
-  provider: z.literal("bvnk"),
-  kind: z.literal("offramp_channel"),
-  status: z.literal("COMPLETE"),
-  channelId: z.string(),
-  transactionId: z.string(),
-  txHash: z.string(),
-  depositAddress: z.string(),
-  cryptoCurrency: z.string(),
-  cryptoAmount: z.string(),
-  fiatCurrency: z.string(),
-  fiatAmount: z.string(),
-  displayCurrency: z.string(),
-  displayAmount: z.string(),
-  feeCurrency: z.string(),
-  feeAmount: z.string(),
-  networkFeeCurrency: z.string(),
-  networkFeeAmount: z.string(),
-  exchangeRate: z.string(),
-  sources: z.array(z.string()),
-});
-
-export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSettlementSchema>;
-
-export type RampTransferSettlement =
-  | MoonpayRampSettlement
-  | BvnkRampSettlement
-  | BvnkOfframpChannelSettlement;
+export type RampTransferSettlement = MoonpayRampSettlement;
 
 /** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
 export interface RampCryptoDeposit {
@@ -1146,59 +1064,7 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export type BvnkOnboardingStatus =
-  | "verification_required"
-  | "verifying"
-  | "verification_failed"
-  | "ready";
-
-export interface BvnkBankFundingDetails {
-  accountNumber?: string;
-  code?: string;
-  accountNumberFormat?: string;
-  paymentReference?: string;
-  routingNumber?: string;
-  bankName?: string;
-}
-
-/** On-ramp: fund a fiat virtual account to receive crypto. */
-export interface BvnkFiatFundingInstruction {
-  provider: "bvnk";
-  kind: "fiat_funding";
-  onboardingStatus: BvnkOnboardingStatus;
-  verificationUrl?: string;
-  fundingWalletId?: string;
-  fiatCurrency: string;
-  beneficiaryAddress: string;
-  network: string;
-  bankAccount?: BvnkBankFundingDetails;
-  /**
-   * Remittance line the payer must include in the bank transfer reference so
-   * the pay-in webhook can attribute the deposit to this transfer. Set by the
-   * BVNK on-ramp quote via the shared reference formatter; absent only on
-   * instructions serialized before the field existed.
-   */
-  paymentReference?: string;
-  /**
-   * Instrument-scoped remittance prefix BVNK prepends to inbound references.
-   * Shown as its own instruction field, never concatenated into
-   * `paymentReference`.
-   */
-  remittanceInformationPrefix?: string;
-  instructionsNotes: string;
-}
-
-/** Off-ramp: send crypto to a deposit address; BVNK converts and pays out fiat. */
-export interface BvnkCryptoDepositInstruction extends CryptoDepositPaymentRampInstruction {
-  provider: "bvnk";
-  fiatCurrency: RampFiatCurrency;
-  reference: string;
-  instructionsNotes: string;
-}
-
-export type BvnkPaymentRampInstruction = BvnkFiatFundingInstruction | BvnkCryptoDepositInstruction;
-
-export type PaymentRampInstruction = BvnkPaymentRampInstruction;
+export type PaymentRampInstruction = never;
 
 export const RAMP_DIRECTIONS = ["onramp", "offramp"] as const;
 
@@ -1313,13 +1179,7 @@ interface BasePaymentRampQuote {
 
 export type PaymentRampQuote =
   | (BasePaymentRampQuote & {
-      provider: "bvnk";
-      deliveryMode: "manual_instructions";
-      /** BVNK fiat virtual-account funding instructions; fund these to receive crypto. */
-      paymentInstructions: BvnkPaymentRampInstruction[];
-    })
-  | (BasePaymentRampQuote & {
-      provider: "moonpay" | "bvnk";
+      provider: "moonpay";
       deliveryMode: "hosted";
       hostedUrl: string;
     })

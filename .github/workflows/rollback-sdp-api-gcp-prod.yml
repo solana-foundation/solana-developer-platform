@@ -1,0 +1,151 @@
+name: Roll back sdp-api prod to the previous build
+
+# A deliberate rollback in a couple of minutes: traffic, cron and worker go
+# back to the revision that served before the last promotion, with no rebuild
+# and no migrations. Prod stays held until a deploy dispatched with clear_hold
+# passes its canary.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-api-gcp-deploy-prod
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: solana-developer-platform
+  REGION: us-central1
+  SERVICE: sdp-prod-api-public
+  JOB: sdp-prod-api-public-cron
+  WORKER_SERVICE: sdp-prod-worker
+  MIGRATE_JOB: sdp-prod-api-public-migrate
+
+jobs:
+  rollback:
+    name: Move prod back to the previous build
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    outputs:
+      revision: ${{ steps.rollback.outputs.revision }}
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Roll back to the previous build
+        id: rollback
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          label() {
+            gcloud run jobs describe "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --format "value(metadata.labels.$1)"
+          }
+          previous="$(label sdp_prod_previous_revision)"
+          if [[ -z "${previous}" ]]; then
+            echo "No previous build is recorded: a breaking migration ran since, a failed rollout was restored, or a rollback already ran. Dispatch Deploy sdp-api to Cloud Run (prod) with the commit to serve." >&2
+            exit 1
+          fi
+          serving="$(
+            gcloud run services describe "${SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json |
+              jq -er '
+                [.status.traffic[] | select((.percent // 0) > 0)]
+                | if length == 1 and (.[0].revisionName // "") != "" then .[0].revisionName
+                  else error("production traffic is not on exactly one revision") end
+              '
+          )"
+          # A re-run after a partial failure finds traffic already moved and
+          # finishes the cron and worker rollback; the label clears only at the end.
+          if [[ "${serving}" == "${previous}" ]]; then
+            echo "Traffic is already on ${previous}; finishing the rollback."
+          fi
+          revision_json="$(
+            gcloud run revisions describe "${previous}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --format=json
+          )"
+          if ! jq -e '[.status.conditions[] | select(.type == "Ready" and .status == "True")] | length == 1' \
+            <<<"${revision_json}" >/dev/null; then
+            echo "${previous} is not Ready, so it cannot take traffic back." >&2
+            exit 1
+          fi
+          image="$(jq -er '.spec.containers[0].image' <<<"${revision_json}")"
+
+          if [[ -z "$(label sdp_prod_hold)" ]]; then
+            gcloud run jobs update "${MIGRATE_JOB}" \
+              --region "${REGION}" --project "${PROJECT_ID}" \
+              --update-labels "sdp_prod_hold=rollback-${GITHUB_RUN_ID}"
+          fi
+          gcloud run services update-traffic "${SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --to-revisions "${previous}=100"
+          gcloud run jobs update "${JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
+          describe_err="$(mktemp)"
+          if gcloud run services describe "${WORKER_SERVICE}" \
+            --region "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>"${describe_err}"; then
+            gcloud run services update "${WORKER_SERVICE}" \
+              --region "${REGION}" --project "${PROJECT_ID}" --image "${image}"
+          elif ! grep -qiE "NOT_FOUND|could not be found" "${describe_err}"; then
+            cat "${describe_err}" >&2
+            exit 1
+          fi
+
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --max-time 10 "https://api.solana.com/health/ready" |
+              jq -e --arg revision "${previous}" '.revision == $revision' >/dev/null; then
+              break
+            fi
+            if [[ "${attempt}" -eq 12 ]]; then
+              echo "Production traffic did not reach ${previous}." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --remove-labels sdp_prod_previous_revision
+          echo "revision=${previous}" >> "${GITHUB_OUTPUT}"
+          echo "Prod is back on ${previous} and stays held until a deploy dispatched with clear_hold passes its canary." >> "${GITHUB_STEP_SUMMARY}"
+
+  notify-result:
+    name: "Notify Slack: rollback result"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: rollback
+    if: always() && github.repository == 'solana-foundation/solana-developer-platform'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        run: scripts/doppler/oidc-login.sh "${{ vars.DOPPLER_CI_IDENTITY_ID }}"
+
+      - name: Notify Slack
+        env:
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: dev_ci
+          SERVICE: sdp-api
+          ENV: production
+          STATUS: ${{ needs.rollback.result == 'success' && 'rolled-back' || 'failure' }}
+          VERSION: ${{ needs.rollback.outputs.revision }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: ./scripts/notify-slack.sh

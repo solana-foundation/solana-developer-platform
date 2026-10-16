@@ -286,15 +286,6 @@ export interface Env extends ManagedRpcEnv {
   MOONPAY_SANDBOX_SECRET_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
-  // BVNK ramps configuration
-  BVNK_HAWK_AUTH_ID?: string;
-  BVNK_HAWK_SECRET_KEY?: string;
-  BVNK_WALLET_ID?: string;
-  BVNK_WEBHOOK_SECRET?: string;
-  BVNK_SANDBOX_HAWK_AUTH_ID?: string;
-  BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
-  BVNK_SANDBOX_WALLET_ID?: string;
-  BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
   // Stripe sandbox only: production projects bring their own Stripe account.
   STRIPE_SANDBOX_SECRET_KEY?: string;

@@ -70,7 +70,6 @@ describe("ramp providers outside the release channel", () => {
 
   it.each([
     ["GET", "/onramp/currency?provider=stripe"],
-    ["GET", "/offramp/currency?provider=bvnk"],
     [
       "GET",
       "/counterparties/cp_1/requirements?provider=stripe&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",

@@ -1,7 +1,6 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types";
-import { isRampOnboardingPendingStatus } from "@sdp/types/ramp-requirements";
 import { SendIcon } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,7 @@ import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { WizardSummaryList } from "../wizard-summary-list";
-import { InstructionActionButton } from "./components/manual-instructions-quote.redesign";
+import { InstructionActionButton } from "./components/instruction-action-button";
 import { OfframpStepContent } from "./components/offramp-step-content.redesign";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
 import { RampStatusInline } from "./components/ramp-status-panel";
@@ -32,14 +31,8 @@ function offrampPrimaryLabel(
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
-    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
-      return wizard.verificationSimulating
-        ? t("DashboardPayments.demo.verification.simulating")
-        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
-    case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
-      return t("DashboardPayments.bvnk.acceptAgreements");
     case wizard.isLastStep:
       return t("DashboardPayments.counterparty.done");
     default:
@@ -52,8 +45,6 @@ function offrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
-    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
-      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
@@ -68,7 +59,6 @@ function offrampPrimaryDisabled(wizard: OfframpWizard, verificationPending: bool
   return (
     wizard.hostedQuoteLoading ||
     verificationPending ||
-    wizard.verificationSimulating ||
     !wizard.canProceed ||
     (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
   );
@@ -153,23 +143,8 @@ function OfframpFooterActionButton({
  * verification the person still has to open, or a wait on the provider. Only
  * the steps that host onboarding consult it.
  */
-function offrampOnboardingState(wizard: OfframpWizard): {
-  verificationUrl: string | undefined;
-  verificationPending: boolean;
-} {
-  const onOnboardingStep =
-    wizard.currentStepId === "COMPLETE" || wizard.currentStepId === "REQUIREMENTS";
-  if (!onOnboardingStep) {
-    return { verificationUrl: undefined, verificationPending: false };
-  }
-  const onboarding = wizard.onboarding;
-  return {
-    verificationUrl:
-      onboarding?.status === "customer_verification_required"
-        ? onboarding.verificationUrl
-        : undefined,
-    verificationPending: onboarding !== null && isRampOnboardingPendingStatus(onboarding.status),
-  };
+function offrampOnboardingState(_wizard: OfframpWizard) {
+  return { verificationUrl: undefined, verificationPending: false };
 }
 
 export function OfframpRail({

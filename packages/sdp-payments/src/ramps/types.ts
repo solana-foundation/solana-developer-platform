@@ -18,11 +18,8 @@ import {
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 import type { StripeCustomerInfo } from "./providers/stripe/client";
 
-export type { BvnkCustomerResolution } from "./providers/bvnk/provider-data";
-export type { BvnkComplianceInput } from "./providers/bvnk/schemas";
 export type { StripeCustomerInfo } from "./providers/stripe/client";
 
 export interface ProviderDirectionSupportSnapshot {
@@ -207,7 +204,6 @@ export interface RampOnrampQuoteInput {
   externalCustomerId: string;
   /** Handler-reserved SDP payment transfer id for provider correlation. */
   paymentTransferId?: string;
-  bvnkCompliance?: BvnkComplianceInput;
   /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
   customerIpAddress?: string;
   /** Identity pre-fill for the embedded on-ramp widget (Stripe). */
@@ -222,9 +218,6 @@ export interface RampOfframpQuoteInput {
   /** Handler-generated SDP payment transfer id for provider caller-defined references. */
   paymentTransferId?: string;
   externalCustomerId: string;
-  /** Handler-resolved BVNK customer funding wallet id the channel credits. */
-  bvnkFundingWalletId?: string;
-  bvnkCompliance?: BvnkComplianceInput;
 }
 
 export type ValidateCounterpartyOptions =

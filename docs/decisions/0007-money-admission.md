@@ -62,7 +62,7 @@ dropped.
   production checks (#2228) still refuse some exits for a production project
   without the entitlement; opening those routes at the edge is follow-up work,
   and until then such an exit is refused at the edge, never at a waist.
-- Provider-API money (BVNK payouts, provider-managed withdrawals) does not pass
+- Provider-API money (provider-managed payouts and withdrawals) does not pass
   a signer; a future provider-API start needs its own waist.
 - Asynchronous, quorum-based signing (pending approvals, not built yet) must
   call the same decision when it opens a signing request and again when it

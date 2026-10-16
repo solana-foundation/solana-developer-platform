@@ -29,7 +29,7 @@ async function seedTransfer(input: {
   status: string;
   type?: "onramp" | "offramp" | "transfer";
   counterpartyId?: string;
-  provider?: "moonpay" | "bvnk";
+  provider?: "moonpay" | "stripe";
   signature?: string;
 }) {
   const type = input.type ?? "onramp";

@@ -11,7 +11,6 @@ import {
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { providerTransferDetailRows } from "@/app/dashboard/[projectId]/payments/provider-transfer-details";
-import { walletHref } from "@/app/dashboard/[projectId]/payments/transactions/transaction-module-hrefs";
 import { EntityLink } from "@/components/entity-link";
 import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -35,33 +34,12 @@ interface CompletionDetailRow {
   iconSrc?: string;
 }
 
-/** True while a BVNK payout is still PROCESSING; completion artifacts are withheld until COMPLETE. */
-function isBvnkProcessingSettlement(
-  provider: PaymentRampQuote["provider"],
-  transfer: PaymentTransferSummary
-): boolean {
-  return (
-    provider === "bvnk" &&
-    transfer.settlement?.provider === "bvnk" &&
-    transfer.settlement.status === "PROCESSING"
-  );
-}
-
-/**
- * Derives the "Exchange rate" row from the transfer's own fiat/crypto amounts.
- * BVNK never uses this arithmetic rate: its displayed rate is the create-time
- * estimate stored in the settlement blob (settlement.exchangeRate), rendered
- * by the provider detail rows.
- */
+/** Derives the "Exchange rate" row from the transfer's fiat and crypto amounts. */
 function derivedExchangeRateRow(
-  provider: PaymentRampQuote["provider"],
   transfer: PaymentTransferSummary,
   tokenLabel: string | null | undefined,
   t: Translate
 ): CompletionDetailRow | undefined {
-  if (provider === "bvnk") {
-    return undefined;
-  }
   const fiatValue = Number(transfer.fiatAmount);
   const cryptoValue = Number(transfer.amount);
   const fiatCurrency = transfer.fiatCurrency;
@@ -112,7 +90,7 @@ function completionDetailRows(
     copyValue: transfer.id,
   });
 
-  const exchangeRateRow = derivedExchangeRateRow(quote.provider, transfer, tokenLabel, t);
+  const exchangeRateRow = derivedExchangeRateRow(transfer, tokenLabel, t);
   const exchangeRate = exchangeRateRow?.value;
   if (exchangeRateRow) {
     rows.push(exchangeRateRow);
@@ -136,13 +114,6 @@ function completionDetailRows(
       copyValue: transfer.signature,
     });
   }
-  if (onramp && quote.provider === "bvnk" && transfer.custodyWalletId) {
-    rows.push({
-      label: t("DashboardPayments.transactions.destination"),
-      value: transfer.custodyWalletId,
-      entityHref: walletHref(transfer.custodyWalletId),
-    });
-  }
   if (!onramp && transfer.destination) {
     rows.push({
       label: t("DashboardPayments.manualInstructions.depositAddress"),
@@ -156,7 +127,7 @@ function completionDetailRows(
       value: formatTimestamp(transfer.createdAt, t),
     });
   }
-  if (transfer.updatedAt && !isBvnkProcessingSettlement(quote.provider, transfer)) {
+  if (transfer.updatedAt) {
     rows.push({
       label: t("DashboardPayments.ramps.completed"),
       value: formatTimestamp(transfer.updatedAt, t),

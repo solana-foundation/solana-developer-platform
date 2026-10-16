@@ -28,7 +28,7 @@ const offrampQuoteBaseShape = {
 };
 
 export const createOfframpQuoteSchema = z.strictObject({
-  provider: z.enum(["moonpay", "bvnk", "stripe"]),
+  provider: z.enum(["moonpay", "stripe"]),
   ...offrampQuoteBaseShape,
   fiatCurrency: rampFiatCurrencySchema.optional(),
 });

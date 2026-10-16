@@ -3535,7 +3535,6 @@ The project's environment picks the mode for every request: a Sandbox project us
 | Provider | Onramp | Offramp | Sandbox | Delivery mode | Best for |
 | --- | --- | --- | --- | --- | --- |
 | [MoonPay](/docs/payments/ramps-moonpay) | ✓ | ✓ | ✓ | `hosted` | Fast sandbox iteration; broad payment-method coverage (corridor-dependent). |
-| [BVNK](/docs/payments/ramps-bvnk) | ✓ | ✓ | ✓ | `manual_instructions` | Fast sandbox iteration; travel-rule and compliance party metadata. |
 | [Stripe](/docs/payments/ramps-stripe) | ✓ | ✗ | ✓ (shared credentials) | `session_widget` | Widget/session-embedded onramp UI; onramp only. |
 
 Each provider's page covers its configuration and limits.
@@ -3585,34 +3584,6 @@ SDP holds MoonPay test-mode keys only, so MoonPay runs for sandbox projects. Pro
 | `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
 
 MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.
-
----
-
-### BVNK
-Source: https://platform.solana.com/docs/payments/ramps-bvnk
-
-> Configure BVNK as an SDP ramp provider — credentials, capabilities, and limits.
-
-BVNK is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "bvnk"`.
-
-BVNK uses Hawk auth. Compliance party details are built from the Counterparty record, not passed on the request.
-
-## Configuration
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `BVNK_WALLET_ID` | conditional | Production BVNK-side wallet used for settlement. |
-| `BVNK_HAWK_AUTH_ID` | conditional | Production Hawk auth id. Paired with `BVNK_HAWK_SECRET_KEY`. |
-| `BVNK_HAWK_SECRET_KEY` | conditional | Production Hawk secret key. |
-| `BVNK_SANDBOX_WALLET_ID` | conditional | Sandbox BVNK wallet. Required when the request resolves to sandbox. |
-| `BVNK_SANDBOX_HAWK_AUTH_ID` | conditional | Sandbox Hawk auth id. |
-| `BVNK_SANDBOX_HAWK_SECRET_KEY` | conditional | Sandbox Hawk secret key. |
-
-BVNK uses Hawk authentication. Bearer-token auth is not currently supported.
-
-BVNK is a travel-rule / compliance-sharing provider and requires party details such as name and address. Counterparties no longer store those fields, so customer creation, payment-rule creation, and off-ramp compliance payloads currently fail with a clear error at the pending just-in-time collection seam.
-
-BVNK quotes always return `deliveryMode: "manual_instructions"` — the response carries funding-account details to display to the payer.
 
 ---
 

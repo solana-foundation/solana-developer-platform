@@ -131,50 +131,6 @@ describe("ramp requirements", () => {
       ).toBe("ready");
     }
   });
-
-  it("walks BVNK's onboarding: agreements, identity check, review, account, ready", () => {
-    const path = "/v1/counterparties/demo_cpty_kai/requirements?provider=bvnk&direction=offramp";
-    const advance = (body: Record<string, unknown> = {}) =>
-      write("POST", "/v1/counterparties/demo_cpty_kai/requirements", {
-        provider: "bvnk",
-        direction: "offramp",
-        ...body,
-      });
-    const simulate = () =>
-      write("POST", "/v1/payments/demo/verifications", {
-        provider: "bvnk",
-        counterpartyId: "demo_cpty_kai",
-      });
-
-    expect(read(path).body.data.status).toBe("counterparty_collect_agreement");
-    expect(refusal(simulate())).toEqual([409, "conflict"]);
-    // Without consent the agreements are asked for again, and nothing is recorded.
-    expect(advance()?.body.data.status).toBe("counterparty_collect_agreement");
-    expect(ops).toEqual([]);
-    expect(advance({ agreementConsent: true })?.body.data.status).toBe(
-      "customer_verification_required"
-    );
-    // Accepted already: the standing is answered as it is.
-    expect(advance({ agreementConsent: true })?.body.data.status).toBe(
-      "customer_verification_required"
-    );
-    expect(simulate()?.status).toBe(200);
-    expect(refusal(simulate())).toEqual([409, "conflict"]);
-    expect(read(path).body.data.status).toBe("customer_verifying");
-    now = new Date(NOW.getTime() + 9_000);
-    expect(read(path).body.data.status).toBe("customer_funding_account_provisioning");
-    now = new Date(NOW.getTime() + 14_000);
-    expect(read(path).body.data.status).toBe("ready");
-  });
-
-  it("refuses Simulate verification for another provider or an unknown contact", () => {
-    const simulate = (provider: string, counterpartyId?: string) =>
-      write("POST", "/v1/payments/demo/verifications", { provider, counterpartyId });
-    expect(simulate("moonpay", "demo_cpty_kai")?.status).toBe(400);
-    expect(simulate("bvnk")?.status).toBe(400);
-    expect(simulate("bvnk", "demo_cpty_nobody")?.status).toBe(404);
-    expect(ops).toEqual([]);
-  });
 });
 
 /** A pair each provider runs on an asset the demo holds, from the support tables. */
@@ -194,13 +150,6 @@ function supportedPair(direction: "onramp" | "offramp", provider: RampProviderId
   return row.find(
     (entry) =>
       (entry.providers as readonly string[]).includes(provider) && isDemoRampRail(entry.rail)
-  );
-}
-
-function onboardBvnk(counterpartyId: string) {
-  ops.push(
-    { k: "consent", id: counterpartyId, at: NOW.getTime() - 60_000, provider: "bvnk" },
-    { k: "verified", id: counterpartyId, at: NOW.getTime() - 60_000, provider: "bvnk" }
   );
 }
 
@@ -289,17 +238,12 @@ describe("ramp estimates and quotes", () => {
     expect(write("POST", "/v1/payments/ramps/onramp/quote", null)?.status).toBe(400);
     expect(quote({ fiatAmount: "0" })?.status).toBe(400);
     expect(quote({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
-    expect(refusal(quote({ provider: "bvnk", counterpartyId: "demo_cpty_priya" }))).toEqual([
-      409,
-      "conflict",
-    ]);
     expect(quote({ destinationCustodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(quote({ fiatCurrency: "JPY" })?.body.error.message).toMatch(/doesn't run JPY to USDC/);
     expect(ops).toEqual([]);
   });
 
   it("quotes an on-ramp in each provider's own shape", () => {
-    onboardBvnk("demo_cpty_jane");
     const modes: Record<string, string> = {};
     for (const provider of RAMP_PROVIDERS) {
       const pair = supportedPair("onramp", provider);
@@ -317,28 +261,8 @@ describe("ramp estimates and quotes", () => {
     }
     expect(modes).toEqual({
       moonpay: "hosted",
-      bvnk: "manual_instructions",
       stripe: "session_widget",
     });
-  });
-
-  it("draws bank instructions for the deposit's currency", () => {
-    onboardBvnk("demo_cpty_jane");
-    const instructions = (provider: string, fiatCurrency: string) => {
-      const quoted = write("POST", "/v1/payments/ramps/onramp/quote", {
-        provider,
-        counterpartyId: "demo_cpty_jane",
-        destinationCustodyWalletId: TREASURY,
-        assetRail: "usdc.solana",
-        fiatCurrency,
-        fiatAmount: "100",
-      });
-      return quoted?.status === 201 ? quoted.body.data.quote.paymentInstructions[0] : null;
-    };
-    for (const fiat of ["USD", "EUR", "GBP", "MXN", "ARS"]) {
-      const instruction = instructions("bvnk", fiat);
-      if (instruction) expect(instruction.provider).toBe("bvnk");
-    }
   });
 
   it("refuses an off-ramp quote the API would", () => {
@@ -354,7 +278,6 @@ describe("ramp estimates and quotes", () => {
       });
     expect(quote({ cryptoAmount: "-1" })?.status).toBe(400);
     expect(quote({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
-    expect(quote({ provider: "bvnk", counterpartyId: "demo_cpty_priya" })?.status).toBe(409);
     expect(quote({ sourceCustodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(quote({ fiatCurrency: "JPY" })?.body.error.message).toMatch(/doesn't run SOL to JPY/);
     expect(refusal(quote({ cryptoAmount: "999999" }))).toEqual([400, "insufficient_funds"]);
@@ -362,7 +285,6 @@ describe("ramp estimates and quotes", () => {
   });
 
   it("quotes an off-ramp in each provider's own shape", () => {
-    onboardBvnk("demo_cpty_jane");
     for (const provider of RAMP_PROVIDERS) {
       const pair = supportedPair("offramp", provider);
       if (!pair) continue;
@@ -382,9 +304,8 @@ describe("ramp estimates and quotes", () => {
 
 describe("ramp pay-ins and cancels", () => {
   function deposit(counterpartyId = "demo_cpty_jane") {
-    onboardBvnk(counterpartyId);
     return write("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "bvnk",
+      provider: "moonpay",
       counterpartyId,
       destinationCustodyWalletId: TREASURY,
       assetRail: "usdc.solana",
@@ -397,10 +318,6 @@ describe("ramp pay-ins and cancels", () => {
 
   it("pays a deposit by its transfer alone, as the API takes it", () => {
     expect(simulate({})?.status).toBe(400);
-    // The provider's own sandbox payloads are not what the API takes any more.
-    expect(
-      simulate({ provider: "bvnk", payload: { counterpartyId: "demo_cpty_jane" } })?.status
-    ).toBe(400);
     expect(refusal(simulate({ transferId: "demo_xfr_nobody" }))).toEqual([404, "not_found"]);
     const { transferId } = deposit();
     expect(simulate({ transferId })?.status).toBe(204);
@@ -419,13 +336,6 @@ describe("ramp pay-ins and cancels", () => {
       write("POST", "/v1/payments/ramps/transfers/cancel", { transferId: "demo_xfr_nobody" })
         ?.status
     ).toBe(404);
-    expect(
-      refusal(
-        write("POST", "/v1/payments/ramps/transfers/cancel", {
-          transferId: "demo_xfr_offramp_orbit",
-        })
-      )
-    ).toEqual([409, "conflict"]);
     const { transferId } = deposit();
     const canceled = write("POST", "/v1/payments/ramps/transfers/cancel", { transferId });
     expect(canceled?.body.data.transfer.status).toBe("canceled");
@@ -463,9 +373,8 @@ describe("transfers and batches", () => {
   });
 
   it("funds an off-ramp's payout once, from a wallet that can cover it", () => {
-    onboardBvnk("demo_cpty_jane");
     const quoted = write("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "bvnk",
+      provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_settlement",
       assetRail: "usdc.solana",
