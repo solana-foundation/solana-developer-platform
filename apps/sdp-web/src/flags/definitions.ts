@@ -135,7 +135,7 @@ export function defineDashboardFlags({
     identify,
     defaultValue: flagDefault("SDP_FLAG_ASSET_PROFILES", true),
     description:
-      "Show the Asset Profiles issuance wizard and per-token asset management workspace. Requires the Issuance module flag.",
+      "Show the Asset Profiles issuance wizard and per-token asset management workspace. Requires Issuance in the release channel.",
     options: [
       { value: false, label: "Legacy issuance" },
       { value: true, label: "Asset Profiles" },

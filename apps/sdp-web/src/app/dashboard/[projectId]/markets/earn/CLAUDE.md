@@ -628,11 +628,11 @@ browser pass on `/dashboard/markets/embedded-yield` and
 
 ## Rules
 
-- **Flags: declare in `src/flags.ts`, gate by segment.** `markets`
-  (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
-  declarations resolved in the dashboard layout and enforced once in the
-  Markets segment layout (`../layout.tsx`). A bespoke env helper, a
-  `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong.
+- **Gate by segment on the release channel.** Markets and Earn have no flags:
+  the Markets segment layout (`../layout.tsx`) and the Earn segment layouts call
+  `isModuleInDeploymentReleaseChannel` (Earn runs on `beta` and `experimental`).
+  A bespoke env helper, a `process.env` read, or a `NEXT_PUBLIC_*` twin is
+  wrong.
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
   copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
   `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions

@@ -75,6 +75,9 @@ Independent switches, all runtime-safe:
   holds until the status is deliberately written back. See the playbook's vault
   checklist.
 - **Feature flag:** the whole `/v1/earn` family sits behind `EARN_ENABLED`.
+  *(Update 2026-10-16: `EARN_ENABLED` and `MARKETS_ENABLED` were removed; Earn
+  now runs where `SDP_RELEASE_CHANNEL` includes it, see
+  [ADR 0005](0005-release-channels.md).)*
 - **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
   registered providers SDP currently OFFERS. An un-surfaced provider keeps its
   code, credentials, crons and catalogue rows, but its strategies vanish from
@@ -193,6 +196,12 @@ Operational checklists (provider / vault / category / custodian) live in the
 [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
 
 ## Addendum — 2026-08-04 Markets/Earn flag hierarchy
+
+> **Update 2026-10-16:** `MARKETS_ENABLED`, `EARN_ENABLED` and the other module
+> enable flags (`PRIVATE_CHANNELS_ENABLED` included) were removed in favor of the
+> release channel ([ADR 0005](0005-release-channels.md)). Earn runs where
+> `SDP_RELEASE_CHANNEL` includes it (`beta` and `experimental`), and Markets runs
+> whenever Earn or DvP does. The hierarchy below is kept as history.
 
 The single `EARN_ENABLED` switch listed under enable/disable above is now a
 two-level hierarchy, because Earn ships as a sub-module of Markets and the

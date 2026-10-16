@@ -694,35 +694,11 @@ export const FIELDS: EnvField[] = [
     defaultValue: "30",
   },
   {
-    key: "PRIVATE_CHANNELS_ENABLED",
-    section: "advanced",
-    kind: "select",
-    label: "Private Channels enabled",
-    defaultValue: "false",
-    options: [
-      { value: "false", label: "Disabled" },
-      { value: "true", label: "Enabled" },
-    ],
-    help: "Gates Private Channels API routes and deposit/withdrawal reconcilers.",
-  },
-  {
     key: "PRIVATE_CHANNEL_EGRESS_ALLOWLIST",
     section: "advanced",
     kind: "text",
     label: "Private Channels egress allowlist",
     help: "Comma-separated origins (https://host[:port]) a project's Private Channels gateway or auth URL may point at. Projects supply those URLs, so anything not listed here is refused before SDP connects. The public sandbox is approved without configuring anything; a plaintext or loopback entry is honoured as written, so add one only for a destination you mean to approve.",
-  },
-  {
-    key: "HELIUS_RINGS_ENABLED",
-    section: "advanced",
-    kind: "select",
-    label: "Helius Rings enabled",
-    defaultValue: "false",
-    options: [
-      { value: "false", label: "Disabled" },
-      { value: "true", label: "Enabled" },
-    ],
-    help: "Gates the devnet-only Helius Rings shielded wallet API routes.",
   },
   {
     key: "SPC_CREDENTIAL_ENCRYPTION_KEY",

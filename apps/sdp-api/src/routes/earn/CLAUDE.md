@@ -1628,10 +1628,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   authenticated, the caller's `?environment=` or the named strategy's row
   decides (PRO-1998), never the deployment's `ENVIRONMENT`. A
   production-project dashboard session therefore drives provider production.
-- `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
-  Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
-  clearing that one flag darkens every Markets API surface. Both default off.
-  Never re-check Markets in a handler; the hierarchy lives in `isEarnEnabled`.
+- `isEarnEnabled` gates the whole family (index.ts): Earn runs where
+  `SDP_RELEASE_CHANNEL` includes it (`beta` and `experimental`). Markets is in a
+  release channel whenever Earn or DvP is, so never re-check Markets in a
+  handler; the gate lives in `isEarnEnabled`.
 - Zod schemas in schemas.ts; parse/paginate/envelope helpers in
   handlers/shared.ts — don't hand-roll either.
 - Capability gating: `supportsPortfolioWallets(client)` → NOT_IMPLEMENTED for

@@ -70,10 +70,11 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 
 ### 2. Secrets and flags
 
-- **Module flags** must be set explicitly — both default to `false` and there is
-  no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
-  by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
-  shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
+- **Release channel** decides whether Earn runs: `SDP_RELEASE_CHANNEL` must
+  include it (`beta` or `experimental`). Local dev runs `experimental` from
+  `apps/sdp-api/.env.local`, which `pnpm dev` loads for **both** apps. Under the
+  Doppler wrapper, plain shell exports are ignored unless named in
+  `DOPPLER_PRESERVE_ENV`.
 - **Keyless environment** is caller-selected on strategy lists with
   `?environment=sandbox|production` and defaults to production. Quotes and
   builds inherit the named strategy's environment. Authenticated calls continue
@@ -96,19 +97,19 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
 ### 3. Run it
 
 ```bash
-DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
+DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,SDP_RELEASE_CHANNEL \
   DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp \
   REDIS_URL=redis://127.0.0.1:6380 \
-  MARKETS_ENABLED=true EARN_ENABLED=true \
+  SDP_RELEASE_CHANNEL=experimental \
   pnpm dev:api          # API on :8787
 # add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
 # exports above to sponsor vault movements, or put it in
 # apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
 # and which its own comment calls the intended local override path.
 
-DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,MARKETS_ENABLED,EARN_ENABLED \
+DOPPLER_PRESERVE_ENV=NEXT_PUBLIC_SDP_API_BASE_URL,SDP_RELEASE_CHANNEL \
   NEXT_PUBLIC_SDP_API_BASE_URL=http://127.0.0.1:8787 \
-  MARKETS_ENABLED=true EARN_ENABLED=true \
+  SDP_RELEASE_CHANNEL=experimental \
   pnpm dev:web                # web on :3000
 ```
 
@@ -185,8 +186,8 @@ ADR 0002's 2026-08-14 addendum.
 | No "Set up Earn"/"Add strategy"/"Change strategy" buttons; `/deposit` shows a notice | correct today: no registered provider is portfolio-capable, so the custodial (program) affordances hide (§5b). The `vault_direct` deposit path is separate and unaffected |
 | `POST /v1/earn/programs` → 403 "is not currently offered" | the surfacing gate, not entitlement — no `providerOverrides` lifts it (§5b) |
 | Every request 500s | Redis missing/wrong port (rate limiter) |
-| `/v1/earn/*` → 403 | `MARKETS_ENABLED` or `EARN_ENABLED` unset/false |
-| `/dashboard/markets/embedded-yield` → 404 | same flags, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here |
+| `/v1/earn/*` → 403 | `SDP_RELEASE_CHANNEL` is `stable` (Earn runs on `beta` and `experimental`) |
+| `/dashboard/markets/embedded-yield` → 404 | same release channel, web side (segment guards); legacy `/dashboard/markets/earn/*` redirects here |
 | Dashboard "provider not configured" (503) | the named provider has no credentials in this environment |
 | "requires manual activation" | org lacks the earn provider override |
 | API waits then dies on boot | `DATABASE_URL` not preserved → Doppler's Cloud SQL URL won |
@@ -652,7 +653,7 @@ checklist.
   is a data change; do not introduce closed curator unions anywhere.
 - Env credential names follow `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`;
   a drift test in apps/sdp-api asserts turbo.json + secret-keys.mjs carry them.
-- Module gating is not this package's job. `MARKETS_ENABLED` (parent) and
-  `EARN_ENABLED` (child, requires the parent) are read only by the API gate
-  (`isEarnEnabled`) and the web flags — a client here gates on credentials
-  alone and must never read a feature flag.
+- Module gating is not this package's job. The release channel
+  (`SDP_RELEASE_CHANNEL`) is read only by the API gate (`isEarnEnabled`) and the
+  web segment layouts — a client here gates on credentials alone and must never
+  read a feature flag or the release channel.

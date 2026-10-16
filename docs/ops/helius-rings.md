@@ -38,7 +38,7 @@ configuration without changing this schema.
 
 | Variable | Meaning |
 | --- | --- |
-| `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
+| `SDP_RELEASE_CHANNEL` | Routes, dashboard and indexing poll run where it includes Helius Rings (`experimental`). |
 | `SOLANA_NETWORK` | Must be `devnet`. |
 
 ### Where the shielded keys come from
@@ -280,7 +280,7 @@ three passes per tick:
    did not complete" while custody is still holding the request. Rows with
    bytes have no grace: resending them is idempotent.
 
-Enabled when `HELIUS_RINGS_ENABLED=true`.
+Runs where the release channel includes Helius Rings (`experimental`).
 
 ## What ships
 

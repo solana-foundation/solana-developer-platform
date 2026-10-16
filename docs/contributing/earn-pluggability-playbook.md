@@ -111,8 +111,8 @@ not by hand-maintained inserts.
 
 **Add.** Nothing manual on the happy path: the catalogue-sync cron
 (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, hourly, registered in
-`cron/runner.ts` behind `isEarnEnabled` — `MARKETS_ENABLED` **and**
-`EARN_ENABLED`, both off by default) calls each provider's
+`cron/runner.ts` behind `isEarnEnabled`, true where `SDP_RELEASE_CHANNEL`
+includes Earn: `beta` and `experimental`) calls each provider's
 `listStrategies` per environment, validates every snapshot against the
 provider's `declaredSupport` (fail-closed — out-of-envelope snapshots are
 warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
@@ -120,8 +120,8 @@ warn-logged and skipped, not persisted), and upserts via `upsertStrategy`
 starts reporting appears on the next run; one provider failing (or still
 being a `NOT_IMPLEMENTED` stub) never sinks the others' pass.
 
-**Local dev.** Use sandbox provider credentials and enable both
-`MARKETS_ENABLED` and `EARN_ENABLED` before starting the API. The hourly
+**Local dev.** Use sandbox provider credentials. Local dev runs the
+`experimental` release channel, which includes Earn. The hourly
 catalogue sync is the only admitting writer, so a fresh database stays empty
 until a live provider pass succeeds. Do not insert catalogue rows by hand: that
 bypasses the provider's declared-support checks and leaves rows the delist pass
@@ -512,11 +512,11 @@ it resolves, the provider is `configured: false` and every call fails closed
 with `PROVIDER_NOT_CONFIGURED` (tests never hit the network, so they don't
 care).
 
-**Reaching Earn at all needs both module flags:** `MARKETS_ENABLED` (parent)
-and `EARN_ENABLED` (child) are off by default in *every* environment, local dev
-included — there is no development default-on. Without both, `/v1/earn` answers
-403 and the dashboard segment `notFound()`s. Set them for `sdp-api` **and**
-`sdp-web` (same unprefixed names; see each app's `.env.local.example`).
+**Reaching Earn at all needs the release channel:** Earn runs where
+`SDP_RELEASE_CHANNEL` includes it (`beta` and `experimental`; Markets follows
+whenever Earn or DvP is in). On `stable`, `/v1/earn` answers 403 and the
+dashboard segment `notFound()`s. Local dev runs `experimental`
+(`apps/sdp-api/.env.local`, which `pnpm dev` loads for both apps).
 
 ## 4c. Implementing the live-metrics capability — fresh rates
 

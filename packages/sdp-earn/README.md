@@ -149,16 +149,13 @@ Deeper docs: gates and scoping in
 
 ## Rollout gating (pre-release)
 
-Earn is the child in a two-level module flag hierarchy: `MARKETS_ENABLED`
-(parent — the whole Markets module) and `EARN_ENABLED` (child — the Earn
-sub-module). Earn needs **both**, and both default to **false** everywhere, so
-a deployed environment stays dark until it is switched on. `sdp-api` and
-`sdp-web` read the same unprefixed names; there is no `NEXT_PUBLIC_*` twin.
-API-side the hierarchy is owned by `isEarnEnabled`
-(`apps/sdp-api/src/lib/feature-flags.ts`); web-side the two flags declared in
-`apps/sdp-web/src/flags.ts` gate the nested route segments
-(`dashboard/markets/layout.tsx`). The flags are
-module visibility, not the provider on/off lever — see the ADR 0002 addendum.
+Earn runs where `SDP_RELEASE_CHANNEL` includes it: `beta` and `experimental`
+(stage in `packages/sdp-types/src/release-channels.ts`; Markets runs whenever
+Earn or DvP does). There is no Earn or Markets enable flag. API-side the gate is
+`isEarnEnabled` (`apps/sdp-api/src/lib/feature-flags.ts`); web-side the segment
+layouts call `isModuleInDeploymentReleaseChannel` (`dashboard/markets/layout.tsx`
+and the Earn segments under it). The release channel is module visibility, not
+the provider on/off lever — see the ADR 0002 addendum and ADR 0005.
 
 ## Architecture: where everything lives
 

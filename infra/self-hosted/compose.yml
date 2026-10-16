@@ -56,8 +56,7 @@ services:
       API_KEY_PEPPER: ${API_KEY_PEPPER:?set API_KEY_PEPPER in .env (openssl rand -hex 32)}
       CUSTODY_ENCRYPTION_KEY: ${CUSTODY_ENCRYPTION_KEY:?set CUSTODY_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
-      PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
-      # Only required when PRIVATE_CHANNELS_ENABLED is true (openssl rand -base64 32).
+      # Only required when the release channel includes Private Channels (`experimental`; openssl rand -base64 32).
       SPC_CREDENTIAL_ENCRYPTION_KEY: ${SPC_CREDENTIAL_ENCRYPTION_KEY:-}
       # Comma-separated origins (https://host[:port]) a project's Private
       # Channels gateway or auth URL may point at. Projects supply those URLs,
@@ -83,8 +82,6 @@ services:
       NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env}
       SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
-      PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
-      ISSUANCE_ENABLED: ${ISSUANCE_ENABLED:-false}
       SDP_API_BASE_URL: ${SDP_API_BASE_URL:-http://sdp-api:8787}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set CLERK_SECRET_KEY in .env}
       SDP_FLAG_ASSET_PROFILES: ${SDP_FLAG_ASSET_PROFILES:-true}

@@ -79,6 +79,14 @@ the providers you enable.
 For provider-managed co-signer runtimes that live outside the default stack, see
 [External co-signers](/docs/self-hosting/external-co-signers).
 
+## Modules
+
+Modules have no enable flags. `SDP_RELEASE_CHANNEL` decides which ones run:
+`stable` runs only released modules, `beta` adds the beta ones, and
+`experimental` runs every module, Private Channels and Helius Rings included.
+`compose.yml` defaults it to `experimental`; set it in `.env` to run fewer
+modules. The configurator does not write it.
+
 ## Advanced
 
 | Variable | Default | Description |

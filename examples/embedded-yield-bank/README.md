@@ -135,16 +135,12 @@ development configuration described in
    ```dotenv
    DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5432/sdp
    REDIS_URL=redis://127.0.0.1:6379
-   MARKETS_ENABLED=true
-   EARN_ENABLED=true
+   SDP_RELEASE_CHANNEL=experimental
    ```
 
-   Also enable the comparison dashboard in `apps/sdp-web/.env.local`:
-
-   ```dotenv
-   MARKETS_ENABLED=true
-   EARN_ENABLED=true
-   ```
+   Earn runs where `SDP_RELEASE_CHANNEL` includes it (`beta` and
+   `experimental`); `pnpm dev` loads this file for the dashboard too, so the
+   comparison dashboard follows the same channel.
 
 3. Start the local SDP stack:
 
@@ -268,7 +264,7 @@ transaction. It also refuses to select a strategy from the wrong cluster.
 - Run SDP through a root Doppler-wrapped command such as `pnpm dev`.
 - Keep the SDP database and Redis overrides pointed at `127.0.0.1` for local
   development.
-- Enable both `MARKETS_ENABLED` and `EARN_ENABLED`.
+- Keep `SDP_RELEASE_CHANNEL` at `experimental` or `beta` so Earn runs.
 - Use an API key from the exact sandbox project selected in the SDP dashboard.
 - Restart Northstar after changing `.env.local`.
 - Positions in strategies other than the featured one are hidden. Set
