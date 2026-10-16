@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { walletBalancesSchema } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -17,6 +19,10 @@ import {
   seedCustodyWalletFixture,
 } from "@/test/helpers/payments-transfers";
 
+const balanceIdentityResponseSchema = z.object({
+  data: z.object({ walletBalances: walletBalancesSchema.pick({ custodyWalletId: true }).loose() }),
+});
+
 const readBalances = (walletId: string) =>
   app.request(
     `/v1/payments/wallets/${walletId}/balances`,
@@ -27,7 +33,7 @@ const readBalances = (walletId: string) =>
 describe("Payments wallet balance identity", () => {
   installPaymentsRouteTestHooks();
 
-  it("reads the exact SDP wallet and returns both compatible identities", async () => {
+  it("reads the exact SDP wallet without exposing its provider wallet reference", async () => {
     const response = await app.request(
       `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/balances`,
       { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
@@ -35,29 +41,27 @@ describe("Payments wallet balance identity", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const body = balanceIdentityResponseSchema.parse(await response.json());
+    expect(body).toMatchObject({
       data: {
         walletBalances: {
           custodyWalletId: TEST_CUSTODY_WALLET_ID,
-          walletId: TEST_WALLET_ID,
           balances: expect.arrayContaining([
             expect.objectContaining({ token: "SOL", amount: "4200000000", uiAmount: "4.2" }),
           ]),
         },
       },
     });
+    expect(body.data.walletBalances).not.toHaveProperty("walletId");
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an unambiguous Provider ID compatible and returns its exact identity", async () => {
+  it("rejects a provider wallet reference before reading balances", async () => {
     const response = await readBalances(TEST_WALLET_ID);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: {
-        walletBalances: { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
-      },
-    });
+    expect(response.status).toBe(404);
+    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
   it("uses an unambiguous selected-key binding and rejects a wallet without read permission", async () => {
@@ -83,7 +87,11 @@ describe("Payments wallet balance identity", () => {
     expect(await exact.json()).toMatchObject({
       data: { walletBalances: { custodyWalletId: TEST_CUSTODY_WALLET_ID } },
     });
-    expect((await readBalances(unboundCustodyWalletId)).status).toBe(403);
+    const forbidden = await readBalances(unboundCustodyWalletId);
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "api_key_wallet_access_denied" } },
+    });
     await seedCachedKey({
       walletScope: "selected",
       walletBindings: [
@@ -121,24 +129,33 @@ describe("Payments wallet balance identity", () => {
       const response = await readBalances(id);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        data: { walletBalances: { custodyWalletId: id, walletId: TEST_WALLET_ID, address } },
+        data: { walletBalances: { custodyWalletId: id, address } },
       });
     }
-    expect((await readBalances(TEST_WALLET_ID)).status).toBe(409);
+    expect((await readBalances(TEST_WALLET_ID)).status).toBe(404);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(2);
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(2);
   });
 
-  it("fails closed when a Provider ID collides with an active exact wallet ID", async () => {
+  it("reads only the exact wallet when its ID is another wallet's provider reference", async () => {
     await seedCustodyWalletFixture({
       id: "cwlt_balance_collision",
       walletId: TEST_CUSTODY_WALLET_ID,
       publicKey: TEST_SOLANA_ADDRESSES.wallet2,
       label: "Namespace collision",
     });
-    expect((await readBalances(TEST_CUSTODY_WALLET_ID)).status).toBe(409);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
-    expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
+    const response = await readBalances(TEST_CUSTODY_WALLET_ID);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        walletBalances: {
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          address: TEST_SOLANA_ADDRESSES.wallet1,
+        },
+      },
+    });
+    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not reinterpret an inactive exact ID as another wallet's Provider ID", async () => {

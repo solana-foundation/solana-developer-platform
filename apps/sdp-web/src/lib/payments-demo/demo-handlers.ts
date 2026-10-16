@@ -12,10 +12,14 @@ import { getRampProviderLabel } from "../ramps";
 import {
   DEMO_TOKENS,
   type DemoTokenKey,
+  type DemoWallet,
   type DemoWorld,
   findWallet,
+  findWalletByCustodyWalletId,
   fromBaseUnits,
   MINUTE_MS,
+  publicDemoBatch,
+  publicDemoTransfer,
   symbolForMint,
   toBaseUnits,
 } from "./demo-fixtures";
@@ -65,6 +69,19 @@ const amountSchema = z
   .refine((value) => Number(value) > 0, "Enter an amount greater than zero.");
 const addressSchema = z.string().trim().regex(SOLANA_ADDRESS, "Enter a valid Solana address.");
 
+const legacyProviderWalletSelectors = {
+  wallet: z.never().optional(),
+  sourceWallet: z.never().optional(),
+  source: z.never().optional(),
+  sourceWalletId: z.never().optional(),
+  sourceProviderWalletId: z.never().optional(),
+  providerWalletId: z.never().optional(),
+  walletId: z.never().optional(),
+  destinationWallet: z.never().optional(),
+  destinationWalletId: z.never().optional(),
+  destinationProviderWalletId: z.never().optional(),
+};
+
 function ok(body: unknown, status = 200): DemoAnswer {
   return { status, body };
 }
@@ -95,8 +112,7 @@ function tokenSymbol(mint: string): string {
 }
 
 /** Null when the wallet holds enough of the token; otherwise why it cannot pay. */
-function shortfall(world: DemoWorld, walletId: string, mint: string, amount: string) {
-  const wallet = findWallet(world, walletId);
+function shortfall(wallet: DemoWallet | undefined, mint: string, amount: string) {
   const key = tokenKeyForMint(mint);
   if (!wallet) return "That wallet is not in this project.";
   if (!key) return "The demo wallets don't hold that token.";
@@ -228,6 +244,9 @@ function requirementsFor(world: DemoWorld, params: URLSearchParams): DemoAnswer 
 }
 
 const advanceSchema = z.object({
+  ...legacyProviderWalletSelectors,
+  destination: z.never().optional(),
+  destinationCustodyWalletId: z.string().min(1).optional(),
   provider: z.string(),
   direction: z.enum(["onramp", "offramp"]),
 });
@@ -237,6 +256,12 @@ function advanceRequirements({ segments, body, world }: WriteContext): DemoWrite
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   const input = parse(advanceSchema, body);
   if ("failure" in input) return input.failure;
+  if (
+    input.data.destinationCustodyWalletId !== undefined &&
+    !findWalletByCustodyWalletId(world, input.data.destinationCustodyWalletId)
+  ) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   const { provider, direction } = input.data;
   if (!isOfferedRampProvider(world, provider))
     return error(400, "That provider isn't part of the demo.");
@@ -365,6 +390,8 @@ function estimate({ segments, body, now }: WriteContext): DemoWriteResult {
 }
 
 const onrampQuoteSchema = z.object({
+  ...legacyProviderWalletSelectors,
+  destination: z.never().optional(),
   provider: z.string(),
   counterpartyId: z.string().min(1),
   destinationCustodyWalletId: z.string().min(1),
@@ -374,6 +401,7 @@ const onrampQuoteSchema = z.object({
 });
 
 const offrampQuoteSchema = z.object({
+  ...legacyProviderWalletSelectors,
   provider: z.string(),
   counterpartyId: z.string().min(1),
   sourceCustodyWalletId: z.string().min(1),
@@ -459,8 +487,10 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     const tokenKey = tokenKeyForRail(assetRail);
     if (!tokenKey) return assetRefusal(assetRail);
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
-    const wallet = findWallet(world, destinationCustodyWalletId);
-    if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+    const wallet = findWalletByCustodyWalletId(world, destinationCustodyWalletId);
+    if (!wallet) {
+      return error(404, "That wallet is not in this project.", "not_found");
+    }
     if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
       return pairRefusal(
         provider,
@@ -505,13 +535,15 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const tokenKey = tokenKeyForRail(assetRail);
   if (!tokenKey) return assetRefusal(assetRail);
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
-  const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+  const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+  if (!wallet) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
     return pairRefusal(provider, getCryptoRailAssetLabel(assetRail as CryptoRailId), fiatCurrency);
   }
   const amounts = rampAmounts(provider, direction, fiatCurrency, tokenKey, Number(cryptoAmount));
-  const notEnough = shortfall(world, sourceCustodyWalletId, amounts.mint, cryptoAmount);
+  const notEnough = shortfall(wallet, amounts.mint, cryptoAmount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
   const offrampQuote = offrampQuoteFor(provider, context);
   return record(
@@ -554,6 +586,9 @@ function simulatePayIn({ body, world, ops, now }: WriteContext): DemoWriteResult
   if (target.status !== "awaiting_payment") {
     return error(409, "That deposit has already been paid.", "conflict");
   }
+  if (!findWalletByCustodyWalletId(world, target.custodyWalletId)) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   return record([{ k: "ramp-paid", id: target.id, at: now.getTime() }], () => ({ status: 204 }));
 }
 
@@ -569,13 +604,14 @@ function cancelRamp({ body, world, now }: WriteContext): DemoWriteResult {
   }
   const id = transfer.id;
   return record([{ k: "ramp-cancel", id, at: now.getTime() }], (after) =>
-    ok({ data: { transfer: transferById(after, id) } })
+    ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } })
   );
 }
 
 // ─── Transfers and batches ───────────────────────────────────────────────────
 
 const transferSchema = z.object({
+  ...legacyProviderWalletSelectors,
   transferId: z.string().trim().min(1).max(80).optional(),
   sourceCustodyWalletId: z.string().min(1),
   destination: addressSchema,
@@ -590,37 +626,47 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
   const { transferId, sourceCustodyWalletId, destination, token, amount, memo } = input.data;
   const existing = transferId === undefined ? undefined : transferById(world, transferId);
   const at = now.getTime();
+  if (existing && existing.custodyWalletId !== sourceCustodyWalletId) {
+    return error(409, "This payment belongs to a different SDP wallet.", "conflict");
+  }
 
   // Funding an off-ramp: the crypto goes to the provider's deposit address.
   if (existing?.type === "offramp") {
     if (existing.status !== "awaiting_payment") {
       return error(409, "This payout has already been funded.", "conflict");
     }
-    const notEnough = shortfall(world, sourceCustodyWalletId, token, amount);
+    const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+    if (!wallet) {
+      return error(404, "That wallet is not in this project.", "not_found");
+    }
+    const notEnough = shortfall(wallet, token, amount);
     if (notEnough) return error(400, notEnough, "insufficient_funds");
     const id = existing.id;
     return record([{ k: "ramp-paid", id, at }], (after) =>
-      ok({ data: { transfer: transferById(after, id) } }, 201)
+      ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } }, 201)
     );
   }
   // The same payment sent again answers with the first one.
-  if (existing) return record([], () => ok({ data: { transfer: existing } }));
+  if (existing) return record([], () => ok({ data: { transfer: publicDemoTransfer(existing) } }));
 
-  const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+  const wallet = findWalletByCustodyWalletId(world, sourceCustodyWalletId);
+  if (!wallet) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   if (destination === wallet.publicKey) {
     return error(400, "Choose an address other than the wallet sending the payment.");
   }
-  const notEnough = shortfall(world, wallet.id, token, amount);
+  const notEnough = shortfall(wallet, token, amount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
   const id = transferId?.startsWith("demo_") ? transferId : newDemoId("xfr");
   return record(
     [{ k: "send", id, at, wallet: wallet.id, to: destination, token, amount, memo: memo || null }],
-    (after) => ok({ data: { transfer: transferById(after, id) } }, 201)
+    (after) => ok({ data: { transfer: publicDemoTransfer(transferById(after, id)) } }, 201)
   );
 }
 
 const batchSchema = z.object({
+  ...legacyProviderWalletSelectors,
   externalId: z.string().trim().max(80).nullish(),
   sourceCustodyWalletId: z.string().min(1),
   token: z.string().min(1),
@@ -646,7 +692,8 @@ function batchTotal(amounts: readonly string[], mint: string): string {
 }
 
 function checkBatch(world: DemoWorld, input: z.infer<typeof batchSchema>): DemoWriteResult | null {
-  if (!findWallet(world, input.sourceCustodyWalletId)) {
+  const wallet = findWalletByCustodyWalletId(world, input.sourceCustodyWalletId);
+  if (!wallet) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   for (const recipient of input.recipients) {
@@ -659,7 +706,7 @@ function checkBatch(world: DemoWorld, input: z.infer<typeof batchSchema>): DemoW
     input.recipients.map((recipient) => recipient.amount),
     input.token
   );
-  const notEnough = shortfall(world, input.sourceCustodyWalletId, input.token, total);
+  const notEnough = shortfall(wallet, input.token, total);
   return notEnough ? error(400, notEnough, "insufficient_funds") : null;
 }
 
@@ -716,11 +763,12 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
       return ok(
         {
           data: {
-            batch: entry?.batch,
+            batch: publicDemoBatch(entry?.batch),
             recipients: entry?.recipients ?? [],
             transfers: after.transfers
               .map((row) => row.transfer)
-              .filter((transfer) => transferIds.has(transfer.id)),
+              .filter((transfer) => transferIds.has(transfer.id))
+              .map(publicDemoTransfer),
           },
         },
         201
@@ -894,8 +942,7 @@ function scheduleActionRefusal(
         return error(409, "The next run isn't due yet.", "conflict");
       }
       const notEnough = shortfall(
-        world,
-        schedule.sourceCustodyWalletId ?? "",
+        findWallet(world, schedule.sourceCustodyWalletId ?? ""),
         schedule.token,
         schedule.amount
       );
@@ -974,10 +1021,35 @@ export function demoFlowRead(
   world: DemoWorld,
   now: Date
 ): DemoAnswer | undefined {
-  if (matchesShape(segments, "counterparties/*/requirements")) {
+  const requirementsRead = matchesShape(segments, "counterparties/*/requirements");
+  const walletSelectorRead =
+    matchesShape(segments, "payments/transfers") ||
+    matchesShape(segments, "payments/transfer-batches") ||
+    requirementsRead;
+  if (
+    (walletSelectorRead &&
+      Object.keys(legacyProviderWalletSelectors).some((field) => params.has(field))) ||
+    (requirementsRead && params.has("destination"))
+  ) {
+    return {
+      status: 400,
+      body: { error: { code: "invalid_request", message: "Use the SDP wallet ID selector." } },
+    };
+  }
+  if (requirementsRead) {
     const counterpartyId = segments[1] ?? "";
     if (!contactById(world, counterpartyId)) {
       return { status: 404, body: { error: { code: "not_found", message: "Contact not found." } } };
+    }
+    const destinationCustodyWalletId = params.get("destinationCustodyWalletId");
+    if (
+      destinationCustodyWalletId !== null &&
+      !findWalletByCustodyWalletId(world, destinationCustodyWalletId)
+    ) {
+      return {
+        status: 404,
+        body: { error: { code: "not_found", message: "That wallet is not in this project." } },
+      };
     }
     return requirementsFor(world, params);
   }

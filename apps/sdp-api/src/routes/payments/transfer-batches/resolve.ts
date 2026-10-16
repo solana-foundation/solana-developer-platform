@@ -7,7 +7,6 @@ import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -17,7 +16,12 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getCounterpartyAccountsRepository } from "../context";
 import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
-import { type ResolvedScope, resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
+import {
+  assertPaymentWalletExactAccess,
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
@@ -163,7 +167,7 @@ export async function authorizeBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
   /** Null when the caller already checked the source wallet's binding fresh. */
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2] | null,
+  requiredWalletPermissions: Parameters<typeof assertPaymentWalletExactAccess>[2] | null,
   retainedCustodyWalletId?: string
 ): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
@@ -172,7 +176,7 @@ export async function authorizeBatchRequest(
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
   if (requiredWalletPermissions !== null) {
-    assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
+    assertPaymentWalletExactAccess(c, sourceWallet.id, requiredWalletPermissions);
   }
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 
@@ -235,7 +239,7 @@ export async function resolveBatchMovement(
 export async function resolveBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2]
+  requiredWalletPermissions: Parameters<typeof assertPaymentWalletExactAccess>[2]
 ): Promise<ResolvedBatchRequest> {
   return resolveBatchMovement(
     input,

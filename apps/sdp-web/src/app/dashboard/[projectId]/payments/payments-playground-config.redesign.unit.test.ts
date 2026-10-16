@@ -44,11 +44,11 @@ describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
     expect(field?.options).toBeUndefined();
     expect(field?.required).toBe(true);
   });
-  it("selects exact wallet IDs and keeps the provider reference in the balance DTO", () => {
+  it("selects exact wallet IDs without provider metadata in the balance DTO", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
       {
         transfers: [],
-        wallets: [{ id: "cwlt_1", walletId: "privy_1", publicKey: "address_1", label: "Treasury" }],
+        wallets: [{ id: "cwlt_1", publicKey: "address_1", label: "Treasury" }],
         rampProviders: [],
       },
       t
@@ -56,7 +56,8 @@ describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
     const balance = configs.find(({ id }) => id === "wallet-balances");
     expect(balance?.pathFields[0]?.defaultValue).toBe("cwlt_1");
     expect(balance?.expectedResponse).toMatchObject({
-      data: { walletBalances: { custodyWalletId: "cwlt_1", walletId: "privy_1" } },
+      data: { walletBalances: { custodyWalletId: "cwlt_1" } },
     });
+    expect(balance?.expectedResponse).not.toHaveProperty("data.walletBalances.walletId");
   });
 });

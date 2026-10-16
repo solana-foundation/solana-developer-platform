@@ -6,6 +6,8 @@ import {
   fetchDashboardPaymentTransfersForWallets,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
+  fetchTransferBatches,
+  fetchTransferBatchRecipients,
   WALLET_TRANSFERS_DEADLINE_MS,
 } from "./payments-page.data";
 
@@ -509,7 +511,148 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
   });
 });
 
+describe("fetchTransferBatchRecipients", () => {
+  it("keeps the previous empty fallback for missing batch recipients", async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({}));
+    expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({ ok: true, data: [] });
+  });
+
+  it.each(["wallet-a", null])(
+    "keeps valid empty recipients with nullable exact pin %s",
+    async (sourceCustodyWalletId) => {
+      const request = vi.fn().mockResolvedValue(
+        Response.json({
+          data: { batch: { id: "batch-a", sourceCustodyWalletId }, recipients: [] },
+        })
+      );
+      expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({
+        ok: true,
+        data: [],
+      });
+    }
+  );
+
+  it.each([
+    {
+      data: { batch: { id: "batch-b", sourceCustodyWalletId: "wallet-a" }, recipients: [] },
+      expected: [],
+    },
+    { data: { batch: { id: "batch-a" }, recipients: [] }, expected: [] },
+    { data: { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" } }, expected: [] },
+    {
+      data: { recipients: [{ id: "recipient-a", status: "pending" }] },
+      expected: [{ id: "recipient-a", status: "pending" }],
+    },
+  ])(
+    "keeps the previous recipients parsing without batch identity validation: %j",
+    async ({ data, expected }) => {
+      const request = vi.fn().mockResolvedValue(Response.json({ data }));
+      expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({
+        ok: true,
+        data: expected,
+      });
+    }
+  );
+});
+
+describe("fetchTransferBatches", () => {
+  it("preserves exact and nullable batch sources with retained provider metadata", async () => {
+    const batches = [
+      {
+        id: "batch-a",
+        sourceCustodyWalletId: "wallet-a",
+        sourceProviderWalletId: "provider-wallet",
+        sourceAddress: "saved-address-a",
+      },
+      {
+        id: "batch-null",
+        sourceCustodyWalletId: null,
+        sourceProviderWalletId: "provider-wallet",
+        sourceAddress: "saved-address-null",
+      },
+    ];
+    const request = vi.fn().mockResolvedValue(Response.json({ data: batches }));
+
+    expect(await fetchTransferBatches(request, 5)).toEqual({ ok: true, data: batches });
+  });
+
+  it.each([
+    { body: {}, expected: [] },
+    { body: { data: [{}] }, expected: [] },
+    { body: { data: [{ id: "batch-a" }] }, expected: [{ id: "batch-a" }] },
+    {
+      body: { data: [{ id: "batch-a", sourceProviderWalletId: "retained provider reference" }] },
+      expected: [{ id: "batch-a", sourceProviderWalletId: "retained provider reference" }],
+    },
+  ])("keeps the previous batch list fallback and filtering: %j", async ({ body, expected }) => {
+    const request = vi.fn().mockResolvedValue(Response.json(body));
+
+    expect(await fetchTransferBatches(request, 5)).toEqual({ ok: true, data: expected });
+  });
+});
+
 describe("fetchPaymentTransfers", () => {
+  it.each([
+    { body: {}, expected: [] },
+    { body: { data: [{}] }, expected: [] },
+    {
+      body: {
+        data: [{ id: "", custodyWalletId: null, providerWalletId: "wallet-a", rampsMemo: {} }],
+      },
+      expected: [{ id: "", custodyWalletId: null }],
+    },
+    {
+      body: {
+        data: [
+          {},
+          {
+            id: "transfer-a",
+            custodyWalletId: "wallet-a",
+            providerWalletId: "provider-wallet",
+            rampsMemo: {},
+          },
+        ],
+      },
+      expected: [{ id: "transfer-a", custodyWalletId: "wallet-a" }],
+    },
+  ])(
+    "keeps the previous transfer history fallback and filtering: %j",
+    async ({ body, expected }) => {
+      const request = vi.fn().mockResolvedValue(Response.json(body));
+
+      expect(await fetchPaymentTransfers(request)).toMatchObject({ ok: true, data: expected });
+    }
+  );
+
+  it("keeps exact and unresolved history with the same retained provider reference", async () => {
+    const request = vi.fn().mockResolvedValue(
+      transfersResponse([
+        {
+          id: "exact",
+          custodyWalletId: "wallet-a",
+          providerWalletId: "provider-wallet",
+          status: "confirmed",
+          rampsMemo: {},
+        },
+        {
+          id: "unresolved",
+          custodyWalletId: null,
+          providerWalletId: "provider-wallet",
+          status: "confirmed",
+          rampsMemo: {},
+        },
+      ])
+    );
+
+    expect(await fetchPaymentTransfers(request)).toMatchObject({
+      ok: true,
+      data: [
+        { id: "exact", custodyWalletId: "wallet-a" },
+        { id: "unresolved", custodyWalletId: null },
+      ],
+    });
+  });
+
   it("uses one bounded database-backed request for the overview preview", async () => {
     const request = vi.fn(
       async () =>
@@ -559,7 +702,6 @@ describe("fetchPaymentTransfers", () => {
 
     expect(result.data?.[0]).toMatchObject({
       custodyWalletId: null,
-      providerWalletId: "wallet-1",
       provider: "moonpay",
       counterpartyId: "counterparty-1",
       counterpartyDisplayName: "Northstar Labs",
@@ -571,7 +713,7 @@ describe("fetchPaymentTransfers", () => {
   });
 
   it.each([undefined, "", "   ", " wallet-1 "])(
-    "fails closed when providerWalletId is %j",
+    "ignores obsolete provider wallet metadata in history: %j",
     async (providerWalletId) => {
       const request = vi.fn(
         async () =>
@@ -594,8 +736,16 @@ describe("fetchPaymentTransfers", () => {
       const result = await fetchPaymentTransfers(request, 5, { includeObserved: false });
 
       expect(result).toEqual({
-        ok: false,
-        error: "Malformed transfer response: required fields are missing or invalid",
+        ok: true,
+        data: [
+          {
+            id: "transfer-1",
+            custodyWalletId: null,
+            status: "confirmed",
+            signature: null,
+            rampsMemo: {},
+          },
+        ],
       });
     }
   );

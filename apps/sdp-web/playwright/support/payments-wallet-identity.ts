@@ -15,14 +15,18 @@ function getLocalDatabaseUrl(): string {
   const databaseUrl = getPlaywrightDatabaseUrl();
   const database = new URL(databaseUrl);
   const apiUrl = new URL(getBootstrapApiBaseUrl());
+  const rpcUrl = new URL(process.env.SOLANA_RPC_URL ?? "");
   if (
     getE2EEnv().useExternalApi ||
     !["http:", "https:"].includes(apiUrl.protocol) ||
     !["postgres:", "postgresql:"].includes(database.protocol) ||
     !["127.0.0.1", "localhost"].includes(apiUrl.hostname) ||
-    !["127.0.0.1", "localhost"].includes(database.hostname)
+    !["127.0.0.1", "localhost"].includes(database.hostname) ||
+    !["http:", "https:"].includes(rpcUrl.protocol) ||
+    !["127.0.0.1", "localhost"].includes(rpcUrl.hostname) ||
+    process.env.KORA_SURFPOOL_SHIM !== "true"
   ) {
-    throw new Error("Wallet identity E2E requires loopback API and Postgres");
+    throw new Error("Wallet identity E2E requires loopback API, Postgres and Surfpool");
   }
 
   return databaseUrl;
@@ -76,7 +80,8 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
     provider: "local",
     walletLabel: "Wallet Identity A",
     walletCount: 1,
-    fundSourceWallet: false,
+    fundSourceWallet: true,
+    fundSourceAmountSol: 0.05,
     tier: "enterprise",
   });
   const walletA = fixture.wallets[0];
@@ -171,6 +176,7 @@ export async function bootstrapWalletIdentityFixtures(browser: Browser) {
     expect(walletB.publicKey).toBe(walletA.publicKey);
     return {
       admin,
+      organizationId: fixture.organization.localOrgId,
       api,
       otherApi,
       projectId,

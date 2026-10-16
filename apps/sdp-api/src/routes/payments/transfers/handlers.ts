@@ -249,7 +249,6 @@ async function updateOnchainTransferForRamp(
     existing.type !== "offramp" ||
     existing.direction !== "outbound" ||
     existing.custody_wallet_id !== operation.sourceWallet.id ||
-    existing.wallet_id !== operation.sourceWallet.walletId ||
     existing.source_address !== operation.sourceWallet.publicKey ||
     existing.token !== operation.token ||
     existing.amount === null ||
@@ -275,7 +274,7 @@ async function updateOnchainTransferForRamp(
   ).updateOnchainTransferForRamp({
     ...tenant,
     custodyWalletId: operation.sourceWallet.id,
-    walletId: operation.sourceWallet.walletId,
+    walletId: existing.wallet_id,
     sourceAddress: operation.sourceWallet.publicKey,
     destinationAddress,
     token: operation.token,

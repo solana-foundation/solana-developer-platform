@@ -316,7 +316,6 @@ export interface RampCryptoDeposit {
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
-  providerWalletId: string;
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
@@ -371,20 +370,27 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export type PaymentTransferBatchStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "partially_failed"
-  | "archived";
+export const PAYMENT_TRANSFER_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "partially_failed",
+  "archived",
+] as const;
+
+export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
+
+export const PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "archived",
+] as const;
 
 export type PaymentTransferBatchRecipientStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "archived";
+  (typeof PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES)[number];
 
 export interface PaymentTransferBatchRecipientRequest {
   externalId?: string;
@@ -416,7 +422,6 @@ export interface PaymentTransferBatch {
   projectId: string;
   externalId: string | null;
   sourceCustodyWalletId: string | null;
-  sourceProviderWalletId: string;
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;

@@ -27,7 +27,17 @@ afterEach(() => vi.unstubAllGlobals());
 describe("off-ramp deposit feedback", () => {
   it("posts the deposit under the quote's transfer id", async () => {
     const request = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: submission.transferId, status: "processing" } } })
+      Response.json({
+        data: {
+          transfer: {
+            id: submission.transferId,
+            custodyWalletId: submission.sourceCustodyWalletId,
+            rampsMemo: {},
+            status: "processing",
+            signature: null,
+          },
+        },
+      })
     );
     vi.stubGlobal("fetch", request);
     await submitOfframpDeposit(submission, send, t);
@@ -48,6 +58,8 @@ describe("off-ramp deposit feedback", () => {
             data: {
               transfer: {
                 id: submission.transferId,
+                custodyWalletId: submission.sourceCustodyWalletId,
+                rampsMemo: {},
                 status: "processing",
                 signature,
               },
@@ -72,7 +84,19 @@ describe("off-ramp deposit feedback", () => {
   it("refuses a response naming a different quote transfer", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => Response.json({ data: { transfer: { id: "xfr_other" } } }))
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            transfer: {
+              id: "xfr_other",
+              custodyWalletId: submission.sourceCustodyWalletId,
+              rampsMemo: {},
+              status: "processing",
+              signature: null,
+            },
+          },
+        })
+      )
     );
     await submitOfframpDeposit(submission, send, t);
     expect(feedback.error).toHaveBeenCalledWith(

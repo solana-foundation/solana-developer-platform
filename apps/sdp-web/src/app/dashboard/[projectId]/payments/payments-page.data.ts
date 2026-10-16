@@ -47,7 +47,6 @@ export const paymentsWalletsResponseSchema = z.object({
 
 const paymentTransferRequiredFieldsSchema = z.object({
   custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
-  providerWalletId: z.string().min(1).regex(/^\S+$/),
   rampsMemo: z.record(z.string(), z.string()),
 });
 
@@ -170,13 +169,12 @@ function normalizePaymentTransfer(
     createdAt,
     updatedAt,
   } = transfer;
-  const { custodyWalletId, providerWalletId, rampsMemo } = requiredFields.data;
+  const { custodyWalletId, rampsMemo } = requiredFields.data;
 
   return Object.fromEntries(
     Object.entries({
       id: id ?? "",
       custodyWalletId,
-      providerWalletId,
       status: status ?? "pending",
       signature: signature ?? null,
       type,

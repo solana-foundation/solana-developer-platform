@@ -734,6 +734,7 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
 export type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
 
 export type DemoTransfer = PaymentTransferSummary & {
+  providerWalletId: string;
   organizationId: string;
   projectId: string;
   type: PaymentTransferType;
@@ -750,7 +751,7 @@ export interface DemoTransferRow {
 }
 
 export interface DemoBatch {
-  batch: PaymentTransferBatch;
+  batch: PaymentTransferBatch & { sourceProviderWalletId: string };
   recipients: PaymentTransferRecipient[];
 }
 
@@ -1268,6 +1269,13 @@ export function findWallet(
   return walletList(world).find((wallet) => wallet.id === id || wallet.walletId === id);
 }
 
+export function findWalletByCustodyWalletId(
+  world: DemoWorld,
+  id: string | null | undefined
+): DemoWallet | undefined {
+  return walletList(world).find((wallet) => wallet.id === id);
+}
+
 function walletsBody(world: DemoWorld, params: URLSearchParams) {
   const includeBalances = params.get("includeBalances") === "true";
   return {
@@ -1311,14 +1319,13 @@ function walletsRoute(rest: string[], params: URLSearchParams, world: DemoWorld)
   return undefined;
 }
 
-function walletBalancesBody(world: DemoWorld, walletId: string) {
-  const wallet = findWallet(world, walletId);
+function walletBalancesBody(world: DemoWorld, custodyWalletId: string) {
+  const wallet = findWalletByCustodyWalletId(world, custodyWalletId);
   if (!wallet) return undefined;
   return {
     data: {
       walletBalances: {
         custodyWalletId: wallet.id,
-        walletId: wallet.walletId,
         address: wallet.publicKey,
         balances: wallet.balances,
       },
@@ -1386,7 +1393,8 @@ function inTransferScope(
 
 function transfersBody(world: DemoWorld, params: URLSearchParams) {
   const custodyWalletId = params.get("custodyWalletId");
-  const wallet = custodyWalletId === null ? undefined : findWallet(world, custodyWalletId);
+  const wallet =
+    custodyWalletId === null ? undefined : findWalletByCustodyWalletId(world, custodyWalletId);
   const unknownWallet = custodyWalletId !== null && wallet?.id !== custodyWalletId;
   const includeObserved = params.get("includeObserved") === "true";
   const filters = transferFilters(params);
@@ -1397,12 +1405,24 @@ function transfersBody(world: DemoWorld, params: URLSearchParams) {
         .map((row) => row.transfer)
         .filter((transfer) => filters.every((filter) => filter(transfer)));
   const page = pageOf(rows, params);
-  return { data: page.rows, meta: paginatedMeta(page) };
+  return { data: page.rows.map(publicDemoTransfer), meta: paginatedMeta(page) };
 }
 
 function transferBody(world: DemoWorld, transferId: string) {
   const transfer = world.transfers.find((row) => row.transfer.id === transferId)?.transfer;
-  return transfer ? { data: { transfer } } : undefined;
+  return transfer ? { data: { transfer: publicDemoTransfer(transfer) } } : undefined;
+}
+
+export function publicDemoTransfer(transfer: DemoTransfer | undefined) {
+  if (!transfer) return undefined;
+  const { providerWalletId: _providerWalletId, ...result } = transfer;
+  return result;
+}
+
+export function publicDemoBatch(batch: DemoBatch["batch"] | undefined) {
+  if (!batch) return undefined;
+  const { sourceProviderWalletId: _sourceProviderWalletId, ...result } = batch;
+  return result;
 }
 
 // ─── Unified transactions ────────────────────────────────────────────────────
@@ -1418,7 +1438,7 @@ function toUnifiedTransaction(transfer: DemoTransfer, world: DemoWorld): Unified
     organizationId: transfer.organizationId,
     projectId: transfer.projectId,
     custodyWalletId: transfer.custodyWalletId,
-    custodyWalletLabel: findWallet(world, transfer.custodyWalletId)?.label ?? null,
+    custodyWalletLabel: findWalletByCustodyWalletId(world, transfer.custodyWalletId)?.label ?? null,
     token: transfer.token ?? null,
     amount: transfer.amount ?? null,
     counterpartyId: transfer.counterpartyId ?? null,
@@ -1479,11 +1499,17 @@ function transactionsBody(world: DemoWorld, params: URLSearchParams) {
 // ─── Batches, requests, schedules ────────────────────────────────────────────
 
 function batchesBody(world: DemoWorld, params: URLSearchParams) {
+  const sourceCustodyWalletId = params.get("sourceCustodyWalletId");
   const page = pageOf(
-    world.batches.map((entry) => entry.batch),
+    world.batches
+      .map((entry) => entry.batch)
+      .filter(
+        (batch) =>
+          sourceCustodyWalletId === null || batch.sourceCustodyWalletId === sourceCustodyWalletId
+      ),
     params
   );
-  return { data: page.rows, meta: paginatedMeta(page) };
+  return { data: page.rows.map(publicDemoBatch), meta: paginatedMeta(page) };
 }
 
 function batchBody(world: DemoWorld, batchId: string) {
@@ -1492,11 +1518,12 @@ function batchBody(world: DemoWorld, batchId: string) {
   const transferIds = new Set(entry.recipients.map((recipient) => recipient.transferId));
   return {
     data: {
-      batch: entry.batch,
+      batch: publicDemoBatch(entry.batch),
       recipients: entry.recipients,
       transfers: world.transfers
         .map((row) => row.transfer)
-        .filter((transfer) => transferIds.has(transfer.id)),
+        .filter((transfer) => transferIds.has(transfer.id))
+        .map(publicDemoTransfer),
     },
   };
 }

@@ -29,7 +29,7 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
       {
         transfers: [],
-        wallets: [{ id: "cwlt_1", walletId: "privy_1", publicKey: "address_1", label: "Treasury" }],
+        wallets: [{ id: "cwlt_1", publicKey: "address_1", label: "Treasury" }],
       },
       t
     );
@@ -37,8 +37,9 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
     const balance = configs.find(({ id }) => id === "wallet-balances");
     expect(balance?.pathFields[0]?.defaultValue).toBe("cwlt_1");
     expect(balance?.expectedResponse).toMatchObject({
-      data: { walletBalances: { custodyWalletId: "cwlt_1", walletId: "privy_1" } },
+      data: { walletBalances: { custodyWalletId: "cwlt_1" } },
     });
+    expect(balance?.expectedResponse).not.toHaveProperty("data.walletBalances.walletId");
     const execute = configs.find(({ id }) => id === "execute-transfer");
     const onramp = configs.find(({ id }) => id === "create-onramp-quote");
     const offramp = configs.find(({ id }) => id === "create-offramp-quote");

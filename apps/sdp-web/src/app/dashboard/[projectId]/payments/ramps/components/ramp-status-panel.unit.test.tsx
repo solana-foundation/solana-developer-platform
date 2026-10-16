@@ -15,7 +15,6 @@ function renderStatus(status: PaymentTransferStatus, direction: RampDirection): 
         transfer={{
           id: "xfr_status",
           custodyWalletId: "cwlt_status",
-          providerWalletId: "wallet_status",
           status,
           signature: null,
           rampsMemo: {},

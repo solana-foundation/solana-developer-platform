@@ -4,7 +4,6 @@ import type { Permission } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
-import { findAuthorizedOperationalWallet } from "@/routes/custody/handlers/wallets";
 import {
   assertApiKeyCustodyWalletAccess,
   assertApiKeyWalletAccess,
@@ -112,7 +111,7 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
 /**
- * Resolve an exact SDP wallet or a compatible unambiguous provider selector,
+ * Resolve an exact SDP wallet,
  * honoring the API key's wallet binding. Used by the wallet balances route.
  *
  * @param c - Request context.
@@ -128,17 +127,25 @@ export async function resolveWalletFromParams(
   if (!walletId) {
     throw walletNotFound();
   }
-  const wallet = await findAuthorizedOperationalWallet(
-    c,
-    walletId,
-    requiredWalletPermissions,
-    true
+  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
+    auth,
+    requiredWalletPermissions
   );
-  if (
-    !wallet ||
-    (wallet.id !== walletId &&
-      (walletId.startsWith("cwlt_") || (await findRetainedPaymentWallet(c, walletId))))
-  ) {
+  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(walletId)) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet", {
+      reason: "api_key_wallet_access_denied",
+    });
+  }
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(c.env),
+    c.env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    custodyWalletId: walletId,
+  });
+  if (!wallet) {
     throw walletNotFound();
   }
   return { auth, wallet };

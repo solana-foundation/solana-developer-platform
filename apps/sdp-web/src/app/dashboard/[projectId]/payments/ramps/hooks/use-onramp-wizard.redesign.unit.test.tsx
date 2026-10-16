@@ -69,7 +69,6 @@ function transferFixture(
   return {
     id: TRANSFER_ID,
     custodyWalletId: WALLET.id,
-    providerWalletId: WALLET.walletId,
     status,
     signature: null,
     rampsMemo: {},

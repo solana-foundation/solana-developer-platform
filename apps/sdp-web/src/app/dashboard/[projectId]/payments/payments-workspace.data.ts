@@ -11,21 +11,23 @@ import type {
   ListProjectCounterpartyAccountsResponse,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
-  PaymentTransferBatch,
-  PaymentTransferBatchEnvelope,
   PaymentTransferBatchEstimate,
   PaymentTransferBatchEstimateEnvelope,
   PaymentTransferBatchRequest,
-  PaymentTransferRecipient,
   RampDirection,
   RampFiatCurrency,
   RampProviderEstimateResult,
-  PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import {
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
+  PAYMENT_TRANSFER_STATUSES,
+} from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -62,7 +64,6 @@ export interface PaymentWalletBalance {
 
 export interface PaymentWalletBalancesSnapshot {
   custodyWalletId: string;
-  walletId?: string;
   address: string;
   balances: PaymentWalletBalance[];
 }
@@ -395,12 +396,12 @@ export async function fetchRampEstimates(
 }
 
 export async function fetchWalletBalances(
-  walletId: string,
+  custodyWalletId: string,
   t: Translate,
   signal?: AbortSignal
 ): Promise<PaymentWalletBalancesSnapshot> {
   const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    `/api/dashboard/payments/wallets/${encodeURIComponent(custodyWalletId)}/balances`,
     {
       method: "GET",
       cache: "no-store",
@@ -417,7 +418,7 @@ export async function fetchWalletBalances(
     );
   }
 
-  return parseWalletBalanceResponse(body, walletId);
+  return parseWalletBalanceResponse(body, custodyWalletId);
 }
 
 export interface CreateTransferInput {
@@ -480,6 +481,19 @@ function parseRefusalBody(text: string): ApiErrorBody {
   return parsed.success ? parsed.data : {};
 }
 
+const createdTransferSchema = z.looseObject({
+  id: z.string(),
+  custodyWalletId: z.string(),
+  status: z.enum(PAYMENT_TRANSFER_STATUSES),
+  signature: z.string().nullable(),
+});
+
+const createdTransferResponseSchema = z.object({
+  data: z.object({ transfer: createdTransferSchema }),
+});
+
+export type CreatedTransfer = z.infer<typeof createdTransferSchema>;
+
 /**
  * Creates one transfer.
  *
@@ -492,7 +506,7 @@ export async function createTransfer(
   input: CreateTransferInput,
   t: Translate,
   idempotencyKey: CallerIdempotencyKey | null
-): Promise<TransferRecord> {
+): Promise<CreatedTransfer> {
   const path = "/api/dashboard/payments/transfers";
   const init: RequestInit = {
     method: "POST",
@@ -528,15 +542,19 @@ export async function createTransfer(
     );
   }
 
-  const body: unknown = await response.json().catch(() => null);
-  // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
-  // (`@sdp/types`); only the presence of the transfer is checked here, as before.
-  const envelope = body as TransferEnvelope | null;
-  if (!envelope?.data?.transfer) {
+  const parsed = createdTransferResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.transferMissing"), { cause });
+    })
+  );
+  if (
+    !parsed.success ||
+    parsed.data.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
+  ) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
-  return envelope.data.transfer;
+  return parsed.data.data.transfer;
 }
 
 export async function fetchBatchRecipients(
@@ -602,11 +620,30 @@ export async function estimateTransferBatch(
   return body.data.estimate;
 }
 
-export interface CreateTransferBatchResult {
-  batch: PaymentTransferBatch;
-  recipients: PaymentTransferRecipient[];
-  transfers: TransferRecord[];
-}
+const createdTransferBatchResponseSchema = z.object({
+  data: z.object({
+    batch: z.looseObject({
+      id: z.string(),
+      sourceCustodyWalletId: z.string(),
+      status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES),
+      recipientCount: z.number(),
+      transactionCount: z.number(),
+    }),
+    recipients: z.array(
+      z.looseObject({
+        id: z.string(),
+        transferId: z.string().nullable(),
+        counterpartyAccountId: z.string(),
+        amount: z.string(),
+        destination: z.string(),
+        status: z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES),
+      })
+    ),
+    transfers: z.array(createdTransferSchema),
+  }),
+});
+
+export type CreateTransferBatchResult = z.infer<typeof createdTransferBatchResponseSchema>["data"];
 
 /**
  * An HTTP refusal from the batch endpoint, carrying the status and the replay
@@ -666,15 +703,21 @@ export async function createTransferBatch(
       code
     );
   }
-  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
-  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+  const parsed = createdTransferBatchResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.batchTransferMissing"), { cause });
+    })
+  );
+  if (
+    !parsed.success ||
+    parsed.data.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||
+    parsed.data.data.transfers.some(
+      (transfer) => transfer.custodyWalletId !== input.sourceCustodyWalletId
+    )
+  ) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
-  return {
-    batch: body.data.batch,
-    recipients: body.data.recipients,
-    transfers: body.data.transfers,
-  };
+  return parsed.data.data;
 }
 
 export async function fetchCounterpartyAccounts(

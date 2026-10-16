@@ -6,12 +6,18 @@ import {
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
+import {
+  parseWalletBalanceResponse,
+  walletBalanceResponseSchema,
+} from "@/lib/wallet-balance-response";
 import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
 import { bootstrapWalletIdentityFixtures } from "../support/payments-wallet-identity";
 
 const TIMEOUT = 120_000;
 const expect = playwrightExpect.configure({ timeout: TIMEOUT });
+const balanceDataSchema = walletBalanceResponseSchema.shape.data.extend({
+  walletBalances: walletBalanceResponseSchema.shape.data.shape.walletBalances.loose(),
+});
 
 test.describe
   .serial("Payments exact wallet balance journeys", () => {
@@ -30,16 +36,17 @@ test.describe
       const { api, projectId, walletA, walletB } = fixture;
       const snapshots: Array<ReturnType<typeof parseWalletBalanceResponse>> = [];
       for (const wallet of [walletA, walletB]) {
-        const walletBalances = parseWalletBalanceResponse(
-          {
-            data: await api.get<unknown>(
-              `/v1/payments/wallets/${encodeURIComponent(wallet.id)}/balances`
-            ),
-          },
-          wallet.id
+        const data = balanceDataSchema.parse(
+          await api.get<unknown>(`/v1/payments/wallets/${encodeURIComponent(wallet.id)}/balances`)
         );
-        expect(walletBalances.walletId).toBe(wallet.walletId);
+        expect(data.walletBalances).not.toHaveProperty("walletId");
+        const walletBalances = parseWalletBalanceResponse({ data }, wallet.id);
+        expect(walletBalances.custodyWalletId).toBe(wallet.id);
         expect(walletBalances.address).toBe(wallet.publicKey);
+        const nativeSol = walletBalances.balances.find(isSolBalance);
+        expect(nativeSol).toBeDefined();
+        expect(Number(nativeSol?.uiAmount)).toBeGreaterThan(0);
+        expect(Number(nativeSol?.amount)).toBeGreaterThan(0);
         snapshots.push(walletBalances);
       }
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
@@ -141,16 +148,18 @@ test.describe
       page,
     }) => {
       const { otherApi, otherProjectId, otherWallet } = fixture;
-      const walletBalances = parseWalletBalanceResponse(
-        {
-          data: await otherApi.get<unknown>(
-            `/v1/payments/wallets/${encodeURIComponent(otherWallet.walletId)}/balances`
-          ),
-        },
-        otherWallet.id
+      await expect(
+        otherApi.get(`/v1/payments/wallets/${encodeURIComponent(otherWallet.walletId)}/balances`)
+      ).rejects.toThrow("(404)");
+      const data = balanceDataSchema.parse(
+        await otherApi.get<unknown>(
+          `/v1/payments/wallets/${encodeURIComponent(otherWallet.id)}/balances`
+        )
       );
+      expect(data.walletBalances).not.toHaveProperty("walletId");
+      const walletBalances = parseWalletBalanceResponse({ data }, otherWallet.id);
       expect(walletBalances.custodyWalletId).toBe(otherWallet.id);
-      expect(walletBalances.walletId).toBe(otherWallet.walletId);
+      expect(walletBalances.address).toBe(otherWallet.publicKey);
       const newDesignWallets =
         process.env.SDP_FLAG_NEW_DESIGN === "true" &&
         process.env.SDP_FLAG_NEW_DESIGN_WALLETS === "true";

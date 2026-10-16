@@ -28,6 +28,25 @@ import { seedRateLimit } from "@/test/mocks/kv";
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
 
+  it.each(["wallet", "walletId", "providerWalletId"])(
+    "rejects retired %s history filters even alongside the exact filter",
+    async (selector) => {
+      for (const includeExact of [false, true]) {
+        const query = new URLSearchParams({
+          [selector]: TEST_WALLET_ID,
+        });
+        if (includeExact) query.set("custodyWalletId", TEST_CUSTODY_WALLET_ID);
+        const response = await app.request(
+          `/v1/payments/transfers?${query}`,
+          { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    }
+  );
+
   beforeEach(async () => {
     await seedProjectApiKey(getDb(env), env, {
       key: TEST_PRODUCTION_API_KEY,
@@ -162,6 +181,9 @@ describe("Payments routes — list transfers", () => {
         meta: { total: number };
       };
       expect(body.meta.total).toBe(2);
+      for (const transfer of body.data) {
+        expect(transfer).not.toHaveProperty("providerWalletId");
+      }
       expect(body.data).toHaveLength(2);
       const statuses = body.data.map((t) => t.status).sort();
       expect(statuses).toEqual(["confirmed", "pending"]);
@@ -859,6 +881,9 @@ describe("Payments routes — list transfers", () => {
         "xfr_legacy_authorized",
       ]);
       expect(body.meta.total).toBe(2);
+      const legacy = body.data.find((transfer) => transfer.id === "xfr_legacy_authorized");
+      expect(legacy).toMatchObject({ custodyWalletId: null });
+      expect(legacy).not.toHaveProperty("providerWalletId");
       const nextPage = await app.request(
         "/v1/payments/transfers?includeObserved=false&pageSize=1&page=2",
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
@@ -1203,17 +1228,17 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ custodyWalletId: string | null; id: string; providerWalletId: string }>;
+        data: Array<{ custodyWalletId: string | null; id: string }>;
         meta: { total: number; page: number; pageSize: number; hasMore: boolean };
       };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]).toMatchObject({
         id: "xfr_search_new",
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        providerWalletId: TEST_WALLET_ID,
         counterpartyId,
         counterpartyDisplayName: "MoonPay Test Counterparty",
       });
+      expect(body.data[0]).not.toHaveProperty("providerWalletId");
       expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
     });
 
@@ -1417,7 +1442,6 @@ describe("Payments routes — list transfers", () => {
         id: "xfr_single_1",
         organizationId: TEST_ORG.id,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        providerWalletId: TEST_WALLET_ID,
         projectId: TEST_PROJECT.id,
         type: "transfer",
         kind: "pay",

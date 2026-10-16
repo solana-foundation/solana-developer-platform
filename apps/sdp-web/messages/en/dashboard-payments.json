@@ -689,10 +689,10 @@
     },
     "playground": {
       "moonPay": "MoonPay",
-      "walletIdPlaceholder": "Wallet ID (e.g. wal_ops_123)",
+      "walletIdPlaceholder": "SDP wallet ID (e.g. cwlt_ops_123)",
       "transferIdPlaceholder": "Transfer ID (e.g. xfr_123)",
-      "custodyWalletIdPlaceholder": "Custody wallet ID (e.g. wal_ops_123)",
-      "destinationWalletIdPlaceholder": "Destination wallet ID",
+      "custodyWalletIdPlaceholder": "SDP wallet ID (e.g. cwlt_ops_123)",
+      "destinationWalletIdPlaceholder": "Destination SDP wallet ID",
       "sourceWalletIdPlaceholder": "Source wallet ID",
       "getWalletBalances": "Get Wallet Balances",
       "executeTransfer": "Execute Transfer",

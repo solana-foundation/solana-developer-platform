@@ -1,11 +1,7 @@
 "use client";
 
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type {
-  CounterpartyAccount,
-  PaymentsDashboardWallet,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { CounterpartyAccount, PaymentsDashboardWallet } from "@sdp/types";
 import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -13,7 +9,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import type {
+  CreatedTransfer,
+  CreateTransferInput,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -147,7 +146,7 @@ export interface UseOnchainSendWizardProps {
 
 function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
   const [submitting, setSubmitting] = useState(false);
-  const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
+  const [transferResult, setTransferResult] = useState<CreatedTransfer | null>(null);
   const finished = transferResult !== null;
 
   const submitTransfer = async (submission: CreateTransferInput) => {

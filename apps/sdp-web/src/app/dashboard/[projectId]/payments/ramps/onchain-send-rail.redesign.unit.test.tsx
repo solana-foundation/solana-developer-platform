@@ -129,7 +129,6 @@ describe("OnchainSendRail heading", () => {
       transferResult: {
         id: "xfr_test",
         custodyWalletId: "cwlt_treasury",
-        providerWalletId: "wallet_treasury",
         status: "confirmed",
         signature: "Signature111111111111111111111111111111111111",
         rampsMemo: {},

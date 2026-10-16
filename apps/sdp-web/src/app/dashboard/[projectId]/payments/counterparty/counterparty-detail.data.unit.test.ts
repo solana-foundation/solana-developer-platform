@@ -7,7 +7,6 @@ function transfer(id: string): PaymentTransferSummary {
   return {
     id,
     custodyWalletId: null,
-    providerWalletId: "pw_1",
     status: "completed",
     signature: null,
     direction: "outbound",
