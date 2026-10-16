@@ -26,7 +26,17 @@ interface MockPool {
   end: ReturnType<typeof vi.fn>;
 }
 
-const pgMock = vi.hoisted(() => {
+interface PgMockState {
+  DatabaseError: new (message: string) => Error & { code: string | undefined };
+  pools: MockPool[];
+  connectError: Error | undefined;
+  lastClientQuery: SentInput | undefined;
+  poolQuery: () => Promise<MockQueryResult>;
+  poolClientQuery: () => Promise<MockQueryResult>;
+  poolEnd: () => Promise<void>;
+}
+
+const pgMock = vi.hoisted((): PgMockState => {
   // One class for every evaluation of the "pg" mock factory below, so
   // `instanceof` agrees between the client under test and the errors built here.
   class DatabaseError extends Error {
@@ -35,12 +45,12 @@ const pgMock = vi.hoisted(() => {
 
   return {
     DatabaseError,
-    pools: [] as MockPool[],
-    connectError: undefined as Error | undefined,
-    lastClientQuery: undefined as SentInput | undefined,
-    poolQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
-    poolClientQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
-    poolEnd: async (): Promise<void> => {},
+    pools: [],
+    connectError: undefined,
+    lastClientQuery: undefined,
+    poolQuery: async () => ({ rows: [], rowCount: 0 }),
+    poolClientQuery: async () => ({ rows: [], rowCount: 0 }),
+    poolEnd: async () => {},
   };
 });
 
@@ -74,10 +84,11 @@ vi.mock("pg", () => {
       if (pgMock.connectError) {
         throw pgMock.connectError;
       }
+      const queries: [SentInput][] = [];
       const client = {
-        queries: [] as [SentInput][],
+        queries,
         query: async (input: SentInput): Promise<MockQueryResult> => {
-          client.queries.push([input]);
+          queries.push([input]);
           pgMock.lastClientQuery = input;
           return pgMock.poolClientQuery();
         },

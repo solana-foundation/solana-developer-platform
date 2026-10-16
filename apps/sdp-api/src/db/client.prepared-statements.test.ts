@@ -132,7 +132,7 @@ describe("named prepared statements", () => {
         "SELECT COUNT(*) AS n FROM counterparties WHERE organization_id IN (?, ?)",
         [ORG_A, ORG_B]
       );
-    const as = {
+    const runAs = {
       tenantA: () => runWithTenantDatabaseIdentity({ organizationId: ORG_A }, countParties),
       tenantB: () => runWithTenantDatabaseIdentity({ organizationId: ORG_B }, countParties),
       system: () => runWithSystemDatabaseIdentity("vitest-prepared-statements", countParties),
@@ -143,10 +143,10 @@ describe("named prepared statements", () => {
     // and then adopts one generic plan; interleaving every identity well past
     // that point on one connection is what would leak a plan built for one.
     for (let round = 0; round < 10; round += 1) {
-      expect(await as.tenantA()).toEqual({ n: 1 });
-      expect(await as.system()).toEqual({ n: 2 });
-      expect(await as.nobody()).toEqual({ n: 0 });
-      expect(await as.tenantB()).toEqual({ n: 1 });
+      expect(await runAs.tenantA()).toEqual({ n: 1 });
+      expect(await runAs.system()).toEqual({ n: 2 });
+      expect(await runAs.nobody()).toEqual({ n: 0 });
+      expect(await runAs.tenantB()).toEqual({ n: 1 });
     }
 
     const reused = (await preparedStatements()).filter((row) =>
