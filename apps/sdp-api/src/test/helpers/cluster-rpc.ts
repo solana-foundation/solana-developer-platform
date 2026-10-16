@@ -11,6 +11,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
@@ -372,6 +373,27 @@ export function tokenAccountsByOwnerResult(
         },
       },
     })),
+  };
+}
+
+/**
+ * A base64 `getAccountInfo` result for a data-less System account holding `lamports`.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param lamports - The account's balance, a safe integer; kit decodes it as a bigint.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function systemAccountInfoResult(slot: number, lamports: number): JsonRpcResult {
+  return {
+    context: { slot },
+    value: {
+      data: ["", "base64"],
+      executable: false,
+      lamports,
+      owner: SYSTEM_PROGRAM_ADDRESS,
+      rentEpoch: 0,
+      space: 0,
+    },
   };
 }
 

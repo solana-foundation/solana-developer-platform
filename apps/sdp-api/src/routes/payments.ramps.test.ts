@@ -1,5 +1,11 @@
 import { createHmac } from "node:crypto";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpEnvironment } from "@sdp/types";
+import {
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpEnvironment,
+  SOL_MINT,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import type { Address } from "@solana/addresses";
 import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -8,12 +14,15 @@ import { createApp } from "@/app";
 import { getDb } from "@/db";
 import app from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
+import * as tokenLabels from "@/routes/payments/token-labels";
 import { noopObservability } from "@/runtime/observability";
+import * as jupiterPriceService from "@/services/jupiter-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
   ENVIRONMENT_CLUSTER_CASES,
   installClusterRpcResponder,
+  systemAccountInfoResult,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -354,6 +363,7 @@ describe("Payments routes — ramps", () => {
 
   describe("wallet balances", () => {
     const rpc = installClusterRpcResponder();
+    const tokenAccountsFilterSchema = z.object({ programId: z.string() });
 
     const BALANCE_WALLET_BY_ENVIRONMENT = {
       sandbox: async () => TEST_WALLET_ID,
@@ -425,11 +435,66 @@ describe("Payments routes — ramps", () => {
       "reads a $environment wallet's balances on $cluster only",
       async ({ environment, cluster }) => {
         const walletId = await BALANCE_WALLET_BY_ENVIRONMENT[environment]();
+        const usdc = WELL_KNOWN_TOKENS.USDC.mints[cluster];
+        rpc.answer("getAccountInfo", systemAccountInfoResult(101, 2_500_000_000));
+        rpc.respond("getTokenAccountsByOwner", (request) => ({
+          result: tokenAccountsByOwnerResult(
+            101,
+            tokenAccountsFilterSchema.parse(request.params[1]).programId ===
+              SPL_TOKEN_PROGRAMS["spl-token"]
+              ? [
+                  {
+                    pubkey: TEST_SOLANA_ADDRESSES.wallet1,
+                    mint: usdc.address,
+                    amount: "12500000",
+                    decimals: usdc.decimals,
+                    uiAmountString: "12.5",
+                  },
+                ]
+              : []
+          ),
+        }));
+        const jupiterPrices = vi
+          .spyOn(jupiterPriceService, "fetchJupiterUsdPrices")
+          .mockResolvedValue(new Map([[SOL_MINT, 150]]));
+        onTestFinished(() => jupiterPrices.mockRestore());
 
         const res = await requestBalances(walletId, "");
 
         expect(res.status).toBe(200);
-        expect(balanceReads()).toHaveLength(3);
+        const body = await res.json();
+        expect(body).not.toHaveProperty("data.balanceReadContext");
+        expect(body).toHaveProperty("data.walletBalances.balances", [
+          {
+            token: "SOL",
+            mint: SOL_MINT,
+            amount: "2500000000",
+            uiAmount: "2.5",
+            decimals: 9,
+            usdPrice: 150,
+            usdValue: 375,
+          },
+          {
+            token: "USDC",
+            mint: usdc.address,
+            amount: "12500000",
+            uiAmount: "12.5",
+            decimals: 6,
+            usdPrice: 1,
+            usdValue: 12.5,
+          },
+        ]);
+        expect(balanceReadConfigs()).toEqual([
+          { method: "getAccountInfo", config: { encoding: "base64", commitment: "confirmed" } },
+          {
+            method: "getTokenAccountsByOwner",
+            config: { encoding: "jsonParsed", commitment: "confirmed" },
+          },
+          {
+            method: "getTokenAccountsByOwner",
+            config: { encoding: "jsonParsed", commitment: "confirmed" },
+          },
+        ]);
         expect(new Set(rpc.calls.map((call) => call.cluster))).toEqual(new Set([cluster]));
       }
     );
@@ -451,24 +516,6 @@ describe("Payments routes — ramps", () => {
         {
           method: "getTokenAccountsByOwner",
           config: { encoding: "jsonParsed", commitment: "confirmed", minContextSlot: 101 },
-        },
-      ]);
-    });
-
-    it("sends no minContextSlot when ?minimumSlot is absent", async () => {
-      const res = await requestBalances(TEST_WALLET_ID, "");
-
-      expect(res.status).toBe(200);
-      expect(await res.json()).not.toHaveProperty("data.balanceReadContext");
-      expect(balanceReadConfigs()).toEqual([
-        { method: "getAccountInfo", config: { encoding: "base64", commitment: "confirmed" } },
-        {
-          method: "getTokenAccountsByOwner",
-          config: { encoding: "jsonParsed", commitment: "confirmed" },
-        },
-        {
-          method: "getTokenAccountsByOwner",
-          config: { encoding: "jsonParsed", commitment: "confirmed" },
         },
       ]);
     });
@@ -496,19 +543,38 @@ describe("Payments routes — ramps", () => {
       }
     );
 
-    it("returns unavailable once the balance read deadline elapses, before any read is answered", async () => {
-      const timeout = vi
-        .spyOn(AbortSignal, "timeout")
-        .mockReturnValueOnce(
-          AbortSignal.abort(new DOMException("The operation timed out", "TimeoutError"))
+    it("starts the balance read deadline after the token labels resolve and answers unavailable once it elapses mid-read", async () => {
+      const events: string[] = [];
+      const deadline = new AbortController();
+      const resolveLabels = tokenLabels.resolveIssuedTokenLabelsByMint;
+      const labels = vi
+        .spyOn(tokenLabels, "resolveIssuedTokenLabelsByMint")
+        .mockImplementation(async (c) => {
+          const labelsByMint = await resolveLabels(c);
+          events.push("labels-resolved");
+          return labelsByMint;
+        });
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+        events.push("deadline-started");
+        return deadline.signal;
+      });
+      onTestFinished(() => {
+        labels.mockRestore();
+        timeout.mockRestore();
+      });
+      rpc.respond("getAccountInfo", () => {
+        queueMicrotask(() =>
+          deadline.abort(new DOMException("The operation timed out", "TimeoutError"))
         );
-      onTestFinished(() => timeout.mockRestore());
+        return { result: { context: { slot: 101 }, value: null } };
+      });
 
       const res = await requestBalances(TEST_WALLET_ID, "");
 
-      expect(timeout).toHaveBeenCalledWith(3_000);
+      expect(events).toEqual(["labels-resolved", "deadline-started"]);
+      expect(timeout.mock.calls).toEqual([[3_000]]);
       expect(res.status).toBe(503);
-      expect(balanceReads()).toEqual([]);
+      expect(await res.json()).not.toHaveProperty("data.walletBalances");
     });
   });
 

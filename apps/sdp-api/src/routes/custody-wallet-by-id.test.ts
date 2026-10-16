@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import * as solanaRpc from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +7,7 @@ import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder, systemAccountInfoResult } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -24,7 +23,6 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const attachUsdValuesMock = vi.spyOn(heliusDasService, "attachUsdValuesToBalances");
 
 const TEST_ORG = {
@@ -157,12 +155,8 @@ describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
-    getAccountInfoMock.mockReset();
     attachUsdValuesMock.mockReset();
-
-    getAccountInfoMock.mockResolvedValue({
-      lamports: 4200000000n,
-    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    clusterRpc.answer("getAccountInfo", systemAccountInfoResult(1, 4_200_000_000));
     attachUsdValuesMock.mockImplementation(async (_env, balances) => balances);
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
@@ -171,6 +165,10 @@ describe("Custody wallet by ID route", () => {
   afterEach(async () => {
     await clearKVStores(env);
   });
+
+  function accountInfoReads() {
+    return clusterRpc.requests.filter(({ method }) => method === "getAccountInfo");
+  }
 
   it("reads and labels a Connection wallet without exposing a Config owner", async () => {
     const connection = await seedConnectionWallet();
@@ -342,98 +340,49 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    expect(await res.json()).toMatchObject({
       data: {
         wallet: {
-          id: string;
-          custodyConfigId: string;
-          provider: string;
-          walletId: string;
-          publicKey: string;
-          balance: {
-            token: string;
-            amount: string;
-            decimals: number;
-          };
-        };
-      };
-    };
-
-    expect(body.data.wallet.id).toBe("cwlt_wallet_by_id_para_a");
-    expect(body.data.wallet.custodyConfigId).toBe(PARA_CONFIG_ID);
-    expect(body.data.wallet.provider).toBe("para");
-    expect(body.data.wallet.walletId).toBe("para_wallet_a");
-    expect(body.data.wallet.publicKey).toBe(TEST_SOLANA_ADDRESSES.wallet2);
-    expect(body.data.wallet.balance).toMatchObject({
-      token: "SOL",
-      amount: "4200000000",
-      decimals: 9,
+          id: "cwlt_wallet_by_id_para_a",
+          custodyConfigId: PARA_CONFIG_ID,
+          provider: "para",
+          walletId: "para_wallet_a",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+          balance: { token: "SOL", amount: "4200000000", uiAmount: "4.2", decimals: 9 },
+        },
+      },
     });
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(accountInfoReads()).toEqual([
+      {
+        cluster: "devnet",
+        method: "getAccountInfo",
+        params: [TEST_SOLANA_ADDRESSES.wallet2, { encoding: "base64", commitment: "confirmed" }],
+      },
+    ]);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns metadata without entering RPC or pricing when includeBalance=false", async () => {
-    let signalRpcStarted!: () => void;
-    const rpcStarted = new Promise<void>((resolve) => {
-      signalRpcStarted = resolve;
-    });
-
-    let releaseRpc!: (accountInfo: Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>) => void;
-    const rpcGate = new Promise<Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>>((resolve) => {
-      releaseRpc = resolve;
-    });
-
-    getAccountInfoMock.mockImplementationOnce(async () => {
-      signalRpcStarted();
-      return rpcGate;
-    });
-
-    const request = Promise.resolve(
-      app.request(
-        "/v1/wallets/para_wallet_a?includeBalance=false",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      )
+  it("returns metadata without reading the chain or pricing when includeBalance=false", async () => {
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a?includeBalance=false",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
     );
 
-    const firstCompleted = await Promise.race([
-      request.then((response) => ({ kind: "response" as const, response })),
-      rpcStarted.then(() => ({ kind: "rpc" as const })),
-    ]);
-
-    if (firstCompleted.kind === "rpc") {
-      releaseRpc({
-        lamports: 4200000000n,
-      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-      await request;
-    }
-
-    expect(firstCompleted.kind).toBe("response");
-    if (firstCompleted.kind !== "response") {
-      return;
-    }
-
-    expect(firstCompleted.response.status).toBe(200);
-    const body = (await firstCompleted.response.json()) as {
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
       data: {
-        wallet: Record<string, unknown>;
-      };
-    };
-
-    expect(body.data.wallet).toMatchObject({
-      id: "cwlt_wallet_by_id_para_a",
-      provider: "para",
-      walletId: "para_wallet_a",
-      publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+        wallet: {
+          id: "cwlt_wallet_by_id_para_a",
+          provider: "para",
+          walletId: "para_wallet_a",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+        },
+      },
     });
-    expect(body.data.wallet).not.toHaveProperty("balance");
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty("data.wallet.balance");
+    expect(accountInfoReads()).toEqual([]);
     expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
 
@@ -450,15 +399,8 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        wallet: {
-          balance?: { amount: string };
-        };
-      };
-    };
-    expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toHaveProperty("data.wallet.balance.amount", "4200000000");
+    expect(accountInfoReads()).toHaveLength(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
@@ -475,15 +417,8 @@ describe("Custody wallet by ID route", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      data: {
-        wallet: {
-          balance?: { amount: string };
-        };
-      };
-    };
-    expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toHaveProperty("data.wallet.balance.amount", "4200000000");
+    expect(accountInfoReads()).toHaveLength(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
 
@@ -558,7 +493,6 @@ describe("Custody wallet by ID route", () => {
   });
 
   it("answers 503 instead of a zero balance when the balance read fails", async () => {
-    getAccountInfoMock.mockReset();
     clusterRpc.respond("getAccountInfo", () => ({
       error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
     }));
@@ -577,7 +511,7 @@ describe("Custody wallet by ID route", () => {
       },
       meta: { requestId: expect.any(String) },
     });
-    expect(clusterRpc.requests.filter(({ method }) => method === "getAccountInfo")).toEqual([
+    expect(accountInfoReads()).toEqual([
       {
         cluster: "devnet",
         method: "getAccountInfo",
@@ -588,7 +522,6 @@ describe("Custody wallet by ID route", () => {
   });
 
   it("reads a zero SOL balance for a wallet with no account on chain", async () => {
-    getAccountInfoMock.mockReset();
     clusterRpc.answer("getAccountInfo", { context: { slot: 1 }, value: null });
 
     const res = await app.request(

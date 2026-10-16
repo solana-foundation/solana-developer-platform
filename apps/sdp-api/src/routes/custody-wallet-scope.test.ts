@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, SdpEnvironment, SignerCheckRequest, SolanaCluster } from "@sdp/types";
+import type { CachedApiKey, SdpEnvironment, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -288,12 +288,6 @@ async function requestAsMember(path: string, projectId: string, init: RequestIni
   return app.request(path, { ...init, headers }, env);
 }
 
-function rpcClusters(
-  calls: readonly (readonly [solanaRpc.SolanaRpc, ...unknown[]])[]
-): (SolanaCluster | undefined)[] {
-  return calls.map(([client]) => clusterOfRpcClient(client));
-}
-
 async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "clerk") {
   const headers = new Headers({
     "Content-Type": "application/json",
@@ -551,8 +545,12 @@ describe("Custody wallet scope routes", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(rpcClusters(getRecentBlockhashMock.mock.calls)).toEqual([cluster]);
-      expect(rpcClusters(simulateTransactionMock.mock.calls)).toEqual([cluster]);
+      expect(
+        getRecentBlockhashMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
+      expect(
+        simulateTransactionMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
     }
   );
 
@@ -986,8 +984,12 @@ describe("Custody wallet scope routes", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(rpcClusters(getMultipleAccountsLamportsMock.mock.calls)).toEqual([cluster]);
-      expect(new Set(rpcClusters(getSplTokenBalancesMock.mock.calls))).toEqual(new Set([cluster]));
+      expect(
+        getMultipleAccountsLamportsMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+      ).toEqual([cluster]);
+      expect(
+        new Set(getSplTokenBalancesMock.mock.calls.map(([client]) => clusterOfRpcClient(client)))
+      ).toEqual(new Set([cluster]));
     }
   );
 
@@ -1001,7 +1003,9 @@ describe("Custody wallet scope routes", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(rpcClusters(getAccountInfoMock.mock.calls)).toEqual([cluster]);
+      expect(getAccountInfoMock.mock.calls.map(([client]) => clusterOfRpcClient(client))).toEqual([
+        cluster,
+      ]);
     }
   );
 

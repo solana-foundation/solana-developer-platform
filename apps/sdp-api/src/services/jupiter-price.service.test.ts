@@ -2,10 +2,14 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
+import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { clearJupiterPriceCacheForTests, fetchJupiterUsdPrices } from "./jupiter-price.service";
 
-const env = {} as Env;
+type JupiterPriceBody = Readonly<
+  Record<string, { readonly usdPrice: number | string; readonly decimals?: number } | null>
+>;
 
 function fetchPricesIn(
   environment: SdpEnvironment,
@@ -17,11 +21,16 @@ function fetchPricesIn(
   );
 }
 
-function priceResponse(body: unknown, status = 200): Response {
+function priceResponse(body: JupiterPriceBody, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function requestedMints(input: Parameters<typeof fetch>[0]): string[] {
+  const requestUrl = input instanceof Request ? input.url : input;
+  return required(new URL(requestUrl).searchParams.get("ids")).split(",");
 }
 
 afterEach(() => {
@@ -33,10 +42,13 @@ afterEach(() => {
 describe("fetchJupiterUsdPrices", () => {
   it("reads usdPrice per mint", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      priceResponse({
-        MintA: { usdPrice: 1.0001, decimals: 6 },
-        MintB: { usdPrice: 74.19, decimals: 9 },
-      })
+      priceResponse(
+        {
+          MintA: { usdPrice: 1.0001, decimals: 6 },
+          MintB: { usdPrice: 74.19, decimals: 9 },
+        },
+        200
+      )
     );
 
     const prices = await fetchPricesIn("sandbox", env, ["MintA", "MintB"]);
@@ -46,8 +58,7 @@ describe("fetchJupiterUsdPrices", () => {
   });
 
   it("omits a mint Jupiter could not price rather than pricing it at zero", async () => {
-    // Jupiter drops unreliable mints from the object entirely: no key, no null, no error.
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({ MintA: { usdPrice: 2 } }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({ MintA: { usdPrice: 2 } }, 200));
 
     const prices = await fetchPricesIn("sandbox", env, ["MintA", "MintUnknown"]);
 
@@ -69,12 +80,15 @@ describe("fetchJupiterUsdPrices", () => {
 
   it("ignores non-numeric and negative prices", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      priceResponse({
-        MintA: { usdPrice: "1.5" },
-        MintB: { usdPrice: -3 },
-        MintC: { usdPrice: Number.NaN },
-        MintD: null,
-      })
+      priceResponse(
+        {
+          MintA: { usdPrice: "1.5" },
+          MintB: { usdPrice: -3 },
+          MintC: { usdPrice: Number.NaN },
+          MintD: null,
+        },
+        200
+      )
     );
 
     await expect(
@@ -85,14 +99,14 @@ describe("fetchJupiterUsdPrices", () => {
   it("chunks large mint lists and merges the results", async () => {
     const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : (input as Request).url;
-      const ids = new URL(url).searchParams.get("ids")?.split(",") ?? [];
-      return priceResponse(Object.fromEntries(ids.map((id) => [id, { usdPrice: 1 }])));
+      return priceResponse(
+        Object.fromEntries(requestedMints(input).map((id) => [id, { usdPrice: 1 }])),
+        200
+      );
     });
 
     const prices = await fetchPricesIn("sandbox", env, mints);
 
-    // 120 mints at 50 per request.
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     expect(prices.size).toBe(120);
   });
@@ -105,9 +119,10 @@ describe("fetchJupiterUsdPrices", () => {
       if (call === 1) {
         throw new Error("first batch failed");
       }
-      const url = typeof input === "string" ? input : (input as Request).url;
-      const ids = new URL(url).searchParams.get("ids")?.split(",") ?? [];
-      return priceResponse(Object.fromEntries(ids.map((id) => [id, { usdPrice: 5 }])));
+      return priceResponse(
+        Object.fromEntries(requestedMints(input).map((id) => [id, { usdPrice: 5 }])),
+        200
+      );
     });
 
     const prices = await fetchPricesIn("sandbox", env, mints);
@@ -116,19 +131,19 @@ describe("fetchJupiterUsdPrices", () => {
   });
 
   it("sends the api key only when one is configured", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
 
     await fetchPricesIn("sandbox", env, ["MintA"]);
-    expect(fetchSpy.mock.calls[0]?.[1]?.headers).toBeUndefined();
+    expect(required(required(fetchSpy.mock.calls[0])[1]).headers).toBeUndefined();
 
     await fetchPricesIn(
       "sandbox",
-      { JUPITER_PRICE_API_URL: "https://api.jup.ag/price/v3", JUPITER_PRICE_API_KEY: "k" } as Env,
+      { ...env, JUPITER_PRICE_API_URL: "https://api.jup.ag/price/v3", JUPITER_PRICE_API_KEY: "k" },
       ["MintA"]
     );
-    const [url, init] = fetchSpy.mock.calls[1] ?? [];
+    const [url, init] = required(fetchSpy.mock.calls[1]);
     expect(String(url)).toContain("https://api.jup.ag/price/v3");
-    expect(init?.headers).toEqual({ "x-api-key": "k" });
+    expect(required(init).headers).toEqual({ "x-api-key": "k" });
   });
 
   it("makes no request when there is nothing to price", async () => {
@@ -142,7 +157,7 @@ describe("fetchJupiterUsdPrices", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
 
     await fetchPricesIn("sandbox", env, ["MintA"]);
     vi.advanceTimersByTime(29_000);
@@ -160,7 +175,7 @@ describe("fetchJupiterUsdPrices", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("network down"))
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
 
     await expect(fetchPricesIn("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
     await expect(fetchPricesIn("sandbox", env, ["MintA"])).resolves.toEqual(
@@ -172,7 +187,7 @@ describe("fetchJupiterUsdPrices", () => {
   it("sends one request for two callers pricing the same mint at once", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
 
     const [first, second] = await Promise.all([
       fetchPricesIn("sandbox", env, ["MintA"]),
@@ -187,8 +202,8 @@ describe("fetchJupiterUsdPrices", () => {
   it("prices a mint again on another cluster instead of reusing the first cluster's price", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(priceResponse({ MintA: { usdPrice: 2 } }))
-      .mockResolvedValueOnce(priceResponse({ MintA: { usdPrice: 3 } }));
+      .mockResolvedValueOnce(priceResponse({ MintA: { usdPrice: 2 } }, 200))
+      .mockResolvedValueOnce(priceResponse({ MintA: { usdPrice: 3 } }, 200));
 
     const pricesByEnvironment: Map<string, number>[] = [];
     for (const { environment } of ENVIRONMENT_CLUSTER_CASES) {
