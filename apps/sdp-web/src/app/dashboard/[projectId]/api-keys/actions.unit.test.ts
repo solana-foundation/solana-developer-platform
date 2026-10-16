@@ -174,7 +174,7 @@ describe("deactivateApiKeyInlineAction", () => {
     const result = await deactivateApiKeyInlineAction(revoke);
 
     expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
-    expect(lastBody()).toEqual({ confirmation: "Payouts worker" });
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: false });
     expect(result).toEqual({ ok: true, message: "DashboardCustody.apiKeyDeactivated" });
   });
 

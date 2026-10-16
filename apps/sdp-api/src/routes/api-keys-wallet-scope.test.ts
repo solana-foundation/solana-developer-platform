@@ -1,5 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -174,6 +175,8 @@ function patchKey(keyId: string, body: Record<string, unknown>) {
   );
 }
 
+const errorMessageSchema = z.object({ error: z.object({ message: z.string() }) });
+
 async function readKey(keyId: string) {
   const response = await app.request(
     `/v1/api-keys/${keyId}`,
@@ -181,16 +184,24 @@ async function readKey(keyId: string) {
     env
   );
   expect(response.status).toBe(200);
-  const body = (await response.json()) as {
-    data: { name: string; walletScope: string; walletIds: string[] };
-  };
+  const body = z
+    .object({
+      data: z.object({
+        name: z.string(),
+        walletScope: z.enum(["all", "selected"]),
+        walletIds: z.array(z.string()),
+      }),
+    })
+    .parse(await response.json());
   return body.data;
 }
 
 async function createKey(body: Record<string, unknown>): Promise<string> {
   const response = await postKey({ name: "Scoped key", ...body });
   expect(response.status).toBe(201);
-  return ((await response.json()) as { data: { apiKey: { id: string } } }).data.apiKey.id;
+  return z
+    .object({ data: z.object({ apiKey: z.object({ id: z.string() }) }) })
+    .parse(await response.json()).data.apiKey.id;
 }
 
 // HOO-2099: a key's wallet scope is explicit, and a selected key lists exact
@@ -220,7 +231,7 @@ describe("API key wallet scope routes", () => {
     });
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorMessageSchema.parse(await response.json());
     expect(body.error.message).toContain("walletScope 'all'");
   });
 
@@ -262,7 +273,7 @@ describe("API key wallet scope routes", () => {
     });
 
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = errorMessageSchema.parse(await response.json());
     expect(body.error.message).toBe("Unknown wallet ids for this project: wal_scope_a");
   });
 
@@ -343,7 +354,9 @@ describe("API key wallet scope routes", () => {
     const listed = async () => {
       const response = await asKey("/v1/wallets?view=summary");
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: { wallets: Array<{ id: string }> } };
+      const body = z
+        .object({ data: z.object({ wallets: z.array(z.object({ id: z.string() })) }) })
+        .parse(await response.json());
       return body.data.wallets.map((wallet) => wallet.id).sort();
     };
 

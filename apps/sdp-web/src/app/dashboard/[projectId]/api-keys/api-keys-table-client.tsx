@@ -59,8 +59,26 @@ function effectiveExpiry(key: ApiKeyRecord): string | null {
   return key.rotationDeadline ?? key.expiresAt;
 }
 
+/** A rotated key that still works until its deadline. Revocation keeps the deadline. */
+function isRotating(key: ApiKeyRecord): boolean {
+  return key.status === "active" && key.rotationDeadline !== null;
+}
+
 function statusLabel(key: ApiKeyRecord, t: ReturnType<typeof useTranslations>): string {
-  return key.rotationDeadline ? t("DashboardCustody.apiKeyRotatingStatus") : key.status;
+  return isRotating(key) ? t("DashboardCustody.apiKeyRotatingStatus") : key.status;
+}
+
+/**
+ * The rotation deadline with its time, in UTC: the table renders on the
+ * server too, so a viewer-local time zone would not hydrate.
+ */
+function formatRotationDeadline(value: string, locale: string): string {
+  return new Date(value).toLocaleString(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
 }
 
 function formatDate(
@@ -235,9 +253,9 @@ export function ApiKeysTableClient({
                 <span
                   className="block truncate"
                   title={
-                    key.rotationDeadline
+                    key.rotationDeadline && isRotating(key)
                       ? t("DashboardCustody.apiKeyRotatingUntil", {
-                          date: new Date(key.rotationDeadline).toLocaleString(locale),
+                          date: formatRotationDeadline(key.rotationDeadline, locale),
                         })
                       : undefined
                   }

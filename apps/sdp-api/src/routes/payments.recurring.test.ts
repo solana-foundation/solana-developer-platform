@@ -3557,7 +3557,7 @@ describe("Payments routes — recurring", () => {
       expect(await collectionAttempts(recurringPayment.subscriptionId)).toEqual([]);
     });
 
-    it("fails a refused activation back to pending_activation without signing", async () => {
+    it("refuses an activation before claiming it, signing and recording nothing", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await createRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,
@@ -3580,10 +3580,10 @@ describe("Payments routes — recurring", () => {
         )
         .bind(recurringPayment.id)
         .first<{ status: string; error: string | null }>();
-      expect(attempt).toMatchObject({ status: "failed", error: "Organization is not active" });
+      expect(attempt).toBeNull();
     });
 
-    it("returns a refused resume to canceled without signing", async () => {
+    it("refuses a resume before claiming it, leaving it canceled", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       signAndSendMock.mockResolvedValue(
         signature(
@@ -3617,11 +3617,7 @@ describe("Payments routes — recurring", () => {
         )
         .bind(activated.id)
         .first<{ status: string; signature: string | null; error: string | null }>();
-      expect(attempt).toMatchObject({
-        status: "failed",
-        signature: null,
-        error: "Organization is not active",
-      });
+      expect(attempt).toBeNull();
     });
 
     it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
@@ -4454,19 +4450,16 @@ describe("Payments routes — recurring", () => {
     );
 
     await expectWalletOutOfScope(response);
-    // The refused attempt is recorded; the row is back in pending_activation with no activator.
-    const after = await recurringExecutionSnapshot(payment.id);
-    expect(after).toMatchObject({
-      recurring_payment: {
-        status: "pending_activation",
-        activated_by_api_key_id: null,
-        activated_by_user_id: null,
-        subscription_id: null,
-      },
-      subscription: null,
-      collection_attempts: before?.collection_attempts,
-      collection_transfers: before?.collection_transfers,
-    });
+    // Refused before the claim commits, so no activation exists for the job
+    // to recover as the mandate: the row is exactly as it was.
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    const attempts = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*)::int AS count FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(payment.id)
+      .first<{ count: number }>();
+    expect(attempts).toEqual({ count: 0 });
     expect(recurringExecutionCallCounts()).toEqual(executionCalls);
   });
 
@@ -4581,6 +4574,22 @@ describe("Payments routes — recurring", () => {
         canceled: [activated.id],
         failed: [],
       });
+    });
+
+    it("reports one with an operation in flight as failed, and leaves it", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      // A resume that has signed but not yet recorded its result: it becomes
+      // active when it settles, so the revoke must surface it.
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET status = 'resuming' WHERE id = ?")
+        .bind(activated.id)
+        .run();
+
+      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [], failed: [activated.id] });
+      expect(await statusOf(activated.id)).toBe("resuming");
     });
 
     it("cancels nothing for an unrelated key", async () => {

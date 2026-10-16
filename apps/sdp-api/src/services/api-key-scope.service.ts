@@ -86,8 +86,8 @@ export function assertApiKeyGrantsInReleaseChannel(
 
 /**
  * The wallet scope a create or update asks for (HOO-2099). `all` lists no
- * wallets; `selected` lists exactly `walletIds` (none: the key signs nothing)
- * plus a wallet provisioned for the key. An update that names wallets must
+ * wallets; `selected` lists exactly `walletIds` (none: the key signs
+ * nothing). An update that names wallets must
  * name the scope too, so a list is never applied to an `all` key by accident.
  */
 export function parseRequestedWalletScope(input: {

@@ -100,9 +100,9 @@ function withoutIncludedReads(grants: readonly Action[]): Action[] {
     grants.filter(
       (grant) =>
         actionVerbOf(grant) !== "read" ||
-        !grants.some(
-          (other) =>
-            actionModuleOf(other) === actionModuleOf(grant) && actionVerbOf(other) !== "read"
+        !grantsCoverAction(
+          grants.filter((other) => other !== grant),
+          grant
         )
     )
   );
@@ -114,21 +114,22 @@ function withoutIncludedReads(grants: readonly Action[]): Action[] {
  * module's `manage` or `execute`, which include it; an included read cannot
  * be turned off on its own. Turning off a module's last `manage` or
  * `execute` leaves its `read`: unticking a write narrows the key to reading
- * that module rather than dropping it.
+ * that module rather than dropping it. Other verbs (issuance `enforce` and
+ * `authority`) include nothing, so a read stays next to them.
  */
 export function toggleGrant(grants: readonly Action[], action: Action): Action[] {
   const module = actionModuleOf(action);
   if (grants.includes(action)) {
     const next = grants.filter((grant) => grant !== action);
-    const verb = actionVerbOf(action);
-    const stillWrites = next.some(
-      (grant) => actionModuleOf(grant) === module && actionVerbOf(grant) !== "read"
-    );
-    if ((verb === "manage" || verb === "execute") && !stillWrites) {
-      const read = `${module}.read`;
-      if (isAction(read) && API_KEY_GRANTABLE_ACTIONS.includes(read)) {
-        return normalizeGrants([...next, read]);
-      }
+    const read = `${module}.read`;
+    if (
+      action !== read &&
+      isAction(read) &&
+      API_KEY_GRANTABLE_ACTIONS.includes(read) &&
+      grantsCoverAction(grants, read) &&
+      !grantsCoverAction(next, read)
+    ) {
+      return normalizeGrants([...next, read]);
     }
     return next;
   }
@@ -218,4 +219,25 @@ export function buildEndpointWalletPayload(draft: ApiKeyAuthoringDraft): Endpoin
     return { walletScope: "all" };
   }
   return { walletScope: "selected", walletIds: Array.from(new Set(draft.selectedWalletIds)) };
+}
+
+/** Whether the draft has what a step needs before the next one opens. */
+export function isAuthoringStepComplete(
+  step: ApiKeyAuthoringStep,
+  draft: ApiKeyAuthoringDraft
+): boolean {
+  switch (step) {
+    case "details":
+      return draft.name.trim().length > 0;
+    case "permissions":
+      return draft.grants.length > 0;
+    case "wallets":
+      return draft.walletScope === "all" || draft.selectedWalletIds.length > 0;
+    case "review":
+      return true;
+    default: {
+      const unknownStep: never = step;
+      throw new Error(`Unknown API-key authoring step: ${String(unknownStep)}`);
+    }
+  }
 }
