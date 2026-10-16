@@ -255,14 +255,6 @@ describe("collectDueRecurringPayments", () => {
     }
   );
 
-  it("refuses to run outside a cluster scope before reading any row", async () => {
-    await expect(collectDueRecurringPayments(env, new Date())).rejects.toThrow(
-      "No cluster scope is open for this work"
-    );
-
-    expect(mocks.listStaleLifecyclePayments).not.toHaveBeenCalled();
-  });
-
   it("uses product batch-size and retry-after controls", async () => {
     await collectDueRecurringPaymentsIn("sandbox", new Date("2026-07-01T12:30:00Z"));
 

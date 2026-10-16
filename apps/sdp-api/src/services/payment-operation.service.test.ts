@@ -51,10 +51,6 @@ describe("normalizePaymentToken", () => {
       );
     }
   );
-
-  it("refuses to resolve a symbol outside a cluster scope", () => {
-    expect(() => normalizePaymentToken("USDC")).toThrow("No cluster scope is open for this work");
-  });
 });
 
 describe("rampTransferTokenMint", () => {

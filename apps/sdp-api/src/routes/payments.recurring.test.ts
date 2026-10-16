@@ -3785,7 +3785,10 @@ describe("Payments routes — recurring", () => {
       expect(attempts).toEqual([
         expect.objectContaining({
           status: "confirmed",
-          metadata: expect.objectContaining({ source: "automated" }),
+          metadata: expect.objectContaining({
+            source: "linked_transfer",
+            initialSource: "automated",
+          }),
         }),
       ]);
       const [attempt] = attempts;
