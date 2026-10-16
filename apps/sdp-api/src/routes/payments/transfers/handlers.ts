@@ -1,4 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
+// biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";

@@ -265,53 +265,10 @@
                       "runInClusterScope"
                     ],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": ["**/apps/sdp-api/src/services/helius-das.service.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "paths": {
-                  "@sdp/rpc/scope": {
-                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
-                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
                     "importNames": ["createClusterHistoryRpc"],
                     "message": "Only observed transfers (observed-transfers.ts and the transfers list in transfers/handlers.ts) may read through createClusterHistoryRpc (the Helius-first pool for wallet signature history). Everything else uses createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "includes": [
-        "**/apps/sdp-api/src/routes/payments/transfers/observed-transfers.ts",
-        "**/apps/sdp-api/src/routes/payments/transfers/handlers.ts"
-      ],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": {
-              "level": "error",
-              "options": {
-                "paths": {
-                  "@sdp/rpc/scope": {
-                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
-                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
                 }

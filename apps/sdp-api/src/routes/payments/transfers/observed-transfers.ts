@@ -1,3 +1,4 @@
+// biome-ignore lint/style/noRestrictedImports: observed transfers read wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";

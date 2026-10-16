@@ -1,3 +1,4 @@
+// biome-ignore lint/style/noRestrictedImports: the one module that sends Helius DAS requests
 import { fetchHeliusDas, isHeliusDasConfigured } from "@sdp/rpc/helius-das";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
