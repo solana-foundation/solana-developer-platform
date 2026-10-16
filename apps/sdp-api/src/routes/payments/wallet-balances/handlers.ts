@@ -24,9 +24,9 @@ export async function getWalletBalances(c: AppContext) {
   if (!parsed.success) throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
   const { minimumSlot } = parsed.data;
   const rpc = createClusterRpc();
-  const abortSignal = AbortSignal.timeout(BALANCE_READ_TIMEOUT_MS);
   const minContextSlot = minimumSlot === undefined ? undefined : BigInt(minimumSlot);
   const tokenLabelsByMint = await resolveIssuedTokenLabelsByMint(c);
+  const abortSignal = AbortSignal.timeout(BALANCE_READ_TIMEOUT_MS);
 
   const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
     rpc
