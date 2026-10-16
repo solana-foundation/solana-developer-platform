@@ -1,14 +1,22 @@
+import type { z } from "zod";
 import { canonicalizeDecimalFields, canonicalJson, type JsonValue } from "@/lib/idempotency";
+import type { transferBatchOptionsSchema } from "./schemas";
 import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
 /**
  * Option values the create route applies when an option is omitted
  * (`create.ts`), so sending one explicitly is the same batch (APE-665).
  */
-const OPTION_DEFAULTS: Readonly<Record<string, JsonValue>> = {
+const OPTION_DEFAULTS = {
   maxRecipientsPerTransaction: DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   preflight: true,
-};
+} as const satisfies Partial<Record<keyof z.infer<typeof transferBatchOptionsSchema>, JsonValue>>;
+
+type DefaultedOption = keyof typeof OPTION_DEFAULTS;
+
+function isDefaultedOption(name: string): name is DefaultedOption {
+  return Object.hasOwn(OPTION_DEFAULTS, name);
+}
 
 /**
  * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918):
@@ -52,7 +60,9 @@ function withoutDefaultOptions(options: JsonValue | undefined): JsonValue | unde
     return options;
   }
   return Object.fromEntries(
-    Object.entries(options).filter(([name, value]) => OPTION_DEFAULTS[name] !== value)
+    Object.entries(options).filter(
+      ([name, value]) => !(isDefaultedOption(name) && OPTION_DEFAULTS[name] === value)
+    )
   );
 }
 

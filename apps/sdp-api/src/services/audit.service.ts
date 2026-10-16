@@ -13,6 +13,7 @@ import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "./audit-ledger-timeout";
 
 // Runtime list is the source of truth for the AuditAction type so callers can
 // validate arbitrary input (e.g. an ?action= query filter) at runtime.
@@ -151,21 +152,6 @@ export interface CriticalAuditOutcome {
 export const AUDIT_LEDGER_CHECKPOINT_KEY = "audit-ledger:checkpoint:v1";
 export const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
 
-/**
- * How long one ledger checkpoint call may wait on Redis (HOO-2089). The writer
- * awaits Redis inside the transaction that holds the global audit lock, where
- * every other audit writer queues; the shared ioredis client sets no
- * `commandTimeout`, so without this a stalled Redis would hold the lock until
- * each waiting writer hit its 30s `statement_timeout`. A call that times out
- * fails the write like any Redis error, so the transaction rolls back.
- *
- * The calls stay under the lock: the pending witness must be published after
- * the insert seals the next head and before COMMIT, and the lock is what keeps
- * the Redis checkpoint and the PostgreSQL head moving together. Taking Redis
- * out from under it would let two writers interleave witnesses.
- */
-export const AUDIT_LEDGER_REDIS_TIMEOUT_MS = 5_000;
-
 /** The checkpoint operations the ledger uses. */
 type AuditCheckpointStore = Pick<KVStore, "compareAndSet" | "compareAndDelete"> & {
   get(key: string): Promise<string | null>;
@@ -174,22 +160,21 @@ type AuditCheckpointStore = Pick<KVStore, "compareAndSet" | "compareAndDelete"> 
 /**
  * The checkpoint store with each call bounded by
  * {@link AUDIT_LEDGER_REDIS_TIMEOUT_MS}. A call that times out may still run
- * on Redis later; it runs before any later call on the same connection, so a
- * restore issued after it still sees its effect.
+ * on Redis later, and not as one command: `RedisKVStore.compareAndSet` sends
+ * EVALSHA, then EVAL on NOSCRIPT. So nothing may assume a later call runs
+ * after it; the witness write waits for its own call to settle before the
+ * restore ({@link recoverFailedWitness}).
  */
-function boundedAuditCheckpointStore(
-  store: AuditCheckpointStore,
-  timeoutMs: number = AUDIT_LEDGER_REDIS_TIMEOUT_MS
-): AuditCheckpointStore {
+function boundedAuditCheckpointStore(store: AuditCheckpointStore): AuditCheckpointStore {
   return {
-    get: (key) => withAuditRedisTimeout(store.get(key), timeoutMs),
-    compareAndSet: (...args) => withAuditRedisTimeout(store.compareAndSet(...args), timeoutMs),
-    compareAndDelete: (...args) =>
-      withAuditRedisTimeout(store.compareAndDelete(...args), timeoutMs),
+    get: (key) => withAuditRedisTimeout(store.get(key)),
+    compareAndSet: (...args) => withAuditRedisTimeout(store.compareAndSet(...args)),
+    compareAndDelete: (...args) => withAuditRedisTimeout(store.compareAndDelete(...args)),
   };
 }
 
-function withAuditRedisTimeout<T>(call: Promise<T>, timeoutMs: number): Promise<T> {
+function withAuditRedisTimeout<T>(call: Promise<T>): Promise<T> {
+  const timeoutMs = AUDIT_LEDGER_REDIS_TIMEOUT_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -198,6 +183,51 @@ function withAuditRedisTimeout<T>(call: Promise<T>, timeoutMs: number): Promise<
     );
   });
   return Promise.race([call, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Restores the predecessor checkpoint after this writer's pending-witness
+ * write failed (HOO-2089). The transaction never reaches COMMIT, so a witness
+ * that lands late would lock every later write. The restore therefore waits,
+ * for one more bounded interval, until the witness call itself has settled
+ * (its EVALSHA and any NOSCRIPT fallback EVAL included), then runs; if the
+ * witness never landed it is a no-op. Neither outcome it cannot repair is
+ * silent: a witness still unsettled, or a restore that did not put the
+ * predecessor back, is logged as the event that locks audit writes until an
+ * operator restores the checkpoint.
+ */
+async function recoverFailedWitness(
+  witnessCall: Promise<boolean>,
+  checkpointStore: AuditCheckpointStore,
+  expectedCheckpoint: string | null,
+  pendingCheckpoint: string
+): Promise<void> {
+  const witnessSettled = await withAuditRedisTimeout(
+    witnessCall.then(
+      () => true,
+      () => true
+    )
+  ).catch(() => false);
+  if (!witnessSettled) {
+    getLogger().error(
+      { event: "audit_ledger_witness_unsettled", pendingCheckpoint },
+      "Audit-ledger pending witness did not settle; if it lands, audit writes stay locked until an operator restores the checkpoint"
+    );
+  }
+  const restored = await restorePendingWitness(
+    checkpointStore,
+    expectedCheckpoint,
+    pendingCheckpoint
+  ).catch((restoreError: unknown) => {
+    getLogger().error({ error: restoreError }, "Audit-ledger witness restore failed");
+    return false;
+  });
+  if (!restored) {
+    getLogger().error(
+      { event: "audit_ledger_witness_restore_failed", pendingCheckpoint },
+      "Audit-ledger pending witness was not restored after a failed witness write; audit writes are locked until an operator restores the checkpoint"
+    );
+  }
 }
 
 interface AuditLedgerCheckpoint {
@@ -444,8 +474,7 @@ function resolveUserActorLabel(name: string | null, email: string | null): strin
 export class AuditService {
   constructor(
     private db: DatabaseClient,
-    private checkpointStore?: KVStore,
-    private checkpointTimeoutMs: number = AUDIT_LEDGER_REDIS_TIMEOUT_MS
+    private checkpointStore?: KVStore
   ) {}
 
   async log(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<void> {
@@ -770,10 +799,7 @@ export class AuditService {
     id: string,
     metadata: Record<string, unknown> | null
   ): Promise<void> {
-    const checkpointStore = boundedAuditCheckpointStore(
-      unboundedCheckpointStore,
-      this.checkpointTimeoutMs
-    );
+    const checkpointStore = boundedAuditCheckpointStore(unboundedCheckpointStore);
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
         this.db
@@ -878,29 +904,22 @@ export class AuditService {
           // with the predecessor checkpoint. A confirmed rollback restores this
           // exact witness while the session lock remains held; an ambiguous crash
           // or lost commit outcome remains locked for operator investigation.
+          // Sent unbounded so the recovery can wait for this exact call.
+          const witnessCall = unboundedCheckpointStore.compareAndSet(
+            AUDIT_LEDGER_CHECKPOINT_KEY,
+            expectedCheckpoint,
+            pendingCheckpoint
+          );
           let witnessed: boolean;
           try {
-            witnessed = await checkpointStore.compareAndSet(
-              AUDIT_LEDGER_CHECKPOINT_KEY,
-              expectedCheckpoint,
-              pendingCheckpoint
-            );
+            witnessed = await withAuditRedisTimeout(witnessCall);
           } catch (witnessError) {
-            // A timed-out witness may still land on Redis after this write
-            // gives up, and this transaction never reaches COMMIT, so a late
-            // witness would lock every later write. Queue the restore behind
-            // it on the same connection before the lock is released; if the
-            // witness never landed the restore is a no-op.
-            await restorePendingWitness(
+            await recoverFailedWitness(
+              witnessCall,
               checkpointStore,
               expectedCheckpoint,
               pendingCheckpoint
-            ).catch((restoreError: unknown) => {
-              getLogger().error(
-                { error: restoreError },
-                "Failed to restore the audit-ledger witness after a failed witness write"
-              );
-            });
+            );
             throw witnessError;
           }
           if (!witnessed) {

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { MoneyMovementStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";
@@ -81,20 +82,23 @@ describe("settleMoneyIdempotencyKey on a movement still under way", () => {
     ["a batch partially failed", "partially_failed", true],
     ["a recurring schedule active", "active", true],
     ["an answer naming no movement", null, true],
-  ])("%s (%s): retired %s", (_label, movementStatus, retired) => {
-    const { key } = store.claim(fingerprint);
-    for (const replayed of [false, true]) {
-      expect(
-        settleMoneyIdempotencyKey(store, fingerprint, key, {
-          status: 201,
-          replayed,
-          code: null,
-          movementStatus,
-        })
-      ).toBe(retired);
+  ] as const satisfies readonly (readonly [string, MoneyMovementStatus | null, boolean])[])(
+    "%s (%s): retired %s",
+    (_label, movementStatus, retired) => {
+      const { key } = store.claim(fingerprint);
+      for (const replayed of [false, true]) {
+        expect(
+          settleMoneyIdempotencyKey(store, fingerprint, key, {
+            status: 201,
+            replayed,
+            code: null,
+            movementStatus,
+          })
+        ).toBe(retired);
+      }
+      expect(store.claim(fingerprint).key === key).toBe(!retired);
     }
-    expect(store.claim(fingerprint).key === key).toBe(!retired);
-  });
+  );
 
   it("reads the in-flight record from a success body", () => {
     expect(movementStatusOf({ data: { transfer: { status: "processing" } } })).toBe("processing");

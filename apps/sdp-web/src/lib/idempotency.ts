@@ -1,11 +1,8 @@
 import {
   isIdempotencyKeyOutcomeUnknown,
-  isPrivateChannelDepositTerminal,
-  isSuccessfulPaymentTransferStatus,
-  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
-  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
-  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
-  RECURRING_PAYMENT_UPDATE_TRANSITION,
+  isMoneyMovementInFlight,
+  isMoneyMovementStatus,
+  type MoneyMovementStatus,
 } from "@sdp/types";
 import { z } from "zod";
 
@@ -57,31 +54,15 @@ export interface ApiAnswer {
   status: number | null;
   replayed: boolean;
   code: string | null;
-  movementStatus?: string | null;
+  movementStatus?: MoneyMovementStatus | null;
 }
 
 /**
- * Statuses that mean the movement a money route answered with is still under
- * way (APE-461), derived from `@sdp/types` as the Postman collection's are
- * (`generate-postman-collection.mjs`): a transfer not yet in a terminal or
- * successful status (a batch and a collection attempt use the same in-flight
- * names), a recurring schedule mid-transition, and a private-channel transfer
- * without a verdict (APE-593).
+ * Whether a money movement in this status is still under way, so its key is
+ * kept (`NON_FINAL_MONEY_MOVEMENT_STATUSES` in `@sdp/types`, APE-461).
  */
-const NON_FINAL_MOVEMENT_STATUSES: ReadonlySet<string> = new Set<string>([
-  ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
-    (status) => !isSuccessfulPaymentTransferStatus(status)
-  ),
-  ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
-  RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
-  ...PRIVATE_CHANNEL_TRANSACTION_STATUSES.filter(
-    (status) => !isPrivateChannelDepositTerminal(status)
-  ),
-]);
-
-/** Whether a money movement in this status is still under way, so its key is kept. */
-export function isMovementInFlight(status: string | null | undefined): boolean {
-  return status !== null && status !== undefined && NON_FINAL_MOVEMENT_STATUSES.has(status);
+export function isMovementInFlight(status: MoneyMovementStatus | null | undefined): boolean {
+  return status !== null && status !== undefined && isMoneyMovementInFlight(status);
 }
 
 /** The movement records a money route's `data` can carry, each with a `status`. */
@@ -101,12 +82,12 @@ const movementBodySchema = z.object({
  *
  * @param json - The parsed response body.
  */
-export function movementStatusOf(json: unknown): string | null {
+export function movementStatusOf(json: unknown): MoneyMovementStatus | null {
   const parsed = movementBodySchema.safeParse(json);
   if (!parsed.success) return null;
   const { transfer, batch, recurringPayment, collectionAttempt } = parsed.data.data;
   const statuses = [transfer, batch, recurringPayment, collectionAttempt].flatMap((record) =>
-    record === undefined ? [] : [record.status]
+    record !== undefined && isMoneyMovementStatus(record.status) ? [record.status] : []
   );
   return statuses.find((status) => isMovementInFlight(status)) ?? statuses[0] ?? null;
 }
@@ -160,9 +141,10 @@ export function answerRetiresKey(answer: ApiAnswer): boolean {
  * keeps the key, so a fresh key never sends the payment a second time while
  * the first one may have landed. sdp-api's money routes recover from their own
  * row and never send the first code; this holds if one ever does. So does a
- * success or replay that shows the movement still under way (APE-461): the
- * next identical send is answered by the replay, which reads the row, and the
- * key retires once that shows a final status.
+ * success or replay that shows the movement still under way (APE-461). A
+ * replay repeats the key's first answer verbatim, so the key retires only once
+ * a read of the movement's current state shows it final
+ * (`settleWhenMovementFinal` in `dashboard-fetch.ts`).
  */
 export function moneyAnswerRetiresKey(answer: ApiAnswer): boolean {
   return answerRetiresKey(answer) && uncertainMoneyAnswerMessage(answer) === null;

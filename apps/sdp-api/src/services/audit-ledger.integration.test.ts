@@ -1,10 +1,14 @@
 import pg from "pg";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { KVStore, SlidingWindowAdmission, SlidingWindowOptions } from "@/runtime/kv";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { AUDIT_LEDGER_CHECKPOINT_KEY, AuditService } from "./audit.service";
+
+// Every checkpoint call in this file answers at once unless a test stalls it,
+// so a short bound only matters to the HOO-2089 stall cases.
+vi.mock("./audit-ledger-timeout", () => ({ AUDIT_LEDGER_REDIS_TIMEOUT_MS: 50 }));
 
 /**
  * Privileged tampering must be simulated as a genuine superuser: the runtime
@@ -31,6 +35,7 @@ class MemoryCheckpointStore implements KVStore {
   private rejectAtCall: number | null = null;
   private stallAtCall: number | null = null;
   private stalledEffect: (() => void) | null = null;
+  private lateAtCall: { call: number; delayMs: number } | null = null;
 
   reset() {
     this.value = null;
@@ -38,6 +43,16 @@ class MemoryCheckpointStore implements KVStore {
     this.rejectAtCall = null;
     this.stallAtCall = null;
     this.stalledEffect = null;
+    this.lateAtCall = null;
+  }
+
+  /**
+   * The next compare-and-set answers, and takes effect, only after `delayMs`,
+   * and after any command sent meanwhile: `RedisKVStore.compareAndSet`'s
+   * EVALSHA came back NOSCRIPT and its fallback EVAL is sent behind them.
+   */
+  answerNextCompareAndSetLate(delayMs: number) {
+    this.lateAtCall = { call: this.compareAndSetCalls + 1, delayMs };
   }
 
   /**
@@ -84,6 +99,17 @@ class MemoryCheckpointStore implements KVStore {
         if (this.value === expected) this.value = value;
       };
       return new Promise<boolean>(() => {});
+    }
+    if (this.compareAndSetCalls === this.lateAtCall?.call) {
+      const { delayMs } = this.lateAtCall;
+      this.lateAtCall = null;
+      return new Promise<boolean>((resolve) => {
+        setTimeout(() => {
+          if (this.value !== expected) return resolve(false);
+          this.value = value;
+          resolve(true);
+        }, delayMs);
+      });
     }
     if (this.compareAndSetCalls === this.rejectAtCall) {
       this.rejectAtCall = null;
@@ -232,7 +258,7 @@ describe("tamper-evident audit ledger", () => {
   });
 
   it("fails the write and frees the audit lock when Redis stalls inside it (HOO-2089)", async () => {
-    const bounded = new AuditService(db, checkpoint, 50);
+    const bounded = audit;
     await bounded.logSystem({
       action: "maintenance",
       resourceType: "audit_ledger",
@@ -256,6 +282,39 @@ describe("tamper-evident audit ledger", () => {
         action: "maintenance",
         resourceType: "audit_ledger",
         resourceId: "after_stall",
+      })
+    ).resolves.toBeUndefined();
+    await expect(audit.verifyIntegrity()).resolves.toMatchObject({
+      valid: true,
+      checkedEntries: 2,
+      externalCheckpointMatches: true,
+    });
+  });
+
+  it("restores the predecessor only after a late NOSCRIPT fallback witness lands (HOO-2089)", async () => {
+    await audit.logSystem({
+      action: "maintenance",
+      resourceType: "audit_ledger",
+      resourceId: "before_late_witness",
+    });
+    // The witness outlives the 50ms bound and lands at 80ms, behind any restore
+    // sent at once; the writer waits for it before restoring.
+    checkpoint.answerNextCompareAndSetLate(80);
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "late_witness",
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+    // Past the late witness, so a restore sent before it had already lost.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    await expect(
+      audit.logSystem({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        resourceId: "after_late_witness",
       })
     ).resolves.toBeUndefined();
     await expect(audit.verifyIntegrity()).resolves.toMatchObject({

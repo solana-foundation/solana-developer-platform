@@ -47,7 +47,7 @@
           "  const code = body && body.error ? body.error.code : undefined;",
           "  const rejected = status === 422 && code !== \"IDEMPOTENCY_KEY_REUSED\";",
           "  const data = body && typeof body.data === 'object' ? body.data : null;",
-          "  const moving = new Set([\"pending\",\"processing\",\"awaiting_payment\",\"settling\",\"activating\",\"canceling\",\"resuming\",\"updating\"]);",
+          "  const moving = new Set([\"pending\",\"processing\",\"awaiting_payment\",\"settling\",\"activating\",\"canceling\",\"resuming\",\"updating\",\"submitted\"]);",
           "  const inFlight = data !== null && [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
           "    .some((record) => record && moving.has(record.status));",
           "  // A 2xx whose body is unreadable or names no data says nothing final: keep the key.",
