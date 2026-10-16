@@ -222,12 +222,13 @@ function IssuanceListToolbar({
   const { query, updateQuery, search, setSearch } = list;
   return (
     <ListToolbar
-      // On a phone the design keeps Filter, sort and page size on one row and gives the search
-      // the next one, full width: the controls' group gives way so all four wrap as one row.
+      // Below a wide screen (the sidebar takes a third of a tablet) the design keeps Filter, sort
+      // and page size on one row and gives the search the next one, full width: the controls'
+      // group gives way so all four wrap as one row.
       // 40px under the tabs, 4 more than the panel's 36, as the design sets the list's toolbar.
       className={cn(
         ISSUANCE_TOOLBAR_CONTROLS,
-        "mt-1 max-sm:flex-wrap max-sm:[&>:last-child]:contents"
+        "mt-1 max-lg:flex-wrap max-lg:[&>:last-child]:contents"
       )}
       filters={
         <FilterMenu
@@ -267,7 +268,7 @@ function IssuanceListToolbar({
         }}
         placeholder={t("DashboardIssuance.newDesign.list.searchPlaceholder")}
         aria-label={t("DashboardIssuance.newDesign.list.searchLabel")}
-        className="min-w-0 flex-1 max-sm:basis-full sm:w-56 sm:flex-none"
+        className="min-w-0 flex-1 max-lg:basis-full lg:w-56 lg:flex-none"
       />
     </ListToolbar>
   );
