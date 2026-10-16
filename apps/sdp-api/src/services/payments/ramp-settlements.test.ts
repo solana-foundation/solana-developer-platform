@@ -246,7 +246,8 @@ describe("applyRampSettlementEvent", () => {
       { provider: "moonpay", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
-    await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
+    const results = await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
+    expect(results.map((result) => result.outcome).sort()).toEqual(["applied", "ignored"]);
 
     const transfer = await readTransfer("xfr_race");
     expect(["completed", "failed"]).toContain(transfer?.status);
@@ -336,8 +337,14 @@ describe("applyRampSettlementEvent", () => {
       receivedAmount: "9",
     };
 
-    await applyRampSettlementEvent(env, event);
-    await applyRampSettlementEvent(env, { ...event, receivedAmount: "999" });
+    expect(await applyRampSettlementEvent(env, event)).toEqual({
+      applied: true,
+      outcome: "applied",
+    });
+    expect(await applyRampSettlementEvent(env, { ...event, receivedAmount: "999" })).toEqual({
+      applied: false,
+      outcome: "ignored",
+    });
 
     expect(await readTransfer("xfr_retry")).toMatchObject({
       status: "completed",

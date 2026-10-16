@@ -152,11 +152,6 @@ export async function applyRampSettlementEvent(
   if (!isRampTransferType(transfer.type)) {
     return { applied: false, outcome: "refused" };
   }
-  // Out-of-order or redelivered events must not regress a settled transfer
-  // (e.g. a retried PENDING arriving after COMPLETED).
-  if (isSettlementFinalStatus(transfer.status)) {
-    return { applied: false, outcome: "refused" };
-  }
   // A lock the provider did not enforce must not write another asset's amount
   // onto the row, so a delivery the provider reports must be the transfer's asset.
   if (
@@ -177,12 +172,17 @@ export async function applyRampSettlementEvent(
     });
     return { applied: false, outcome: "refused" };
   }
+  // Out-of-order or redelivered events must not regress a settled transfer
+  // (e.g. a retried PENDING arriving after COMPLETED).
+  if (isSettlementFinalStatus(transfer.status)) {
+    return { applied: false, outcome: "ignored" };
+  }
 
   const update = buildRampSettlementUpdate(transfer, event);
 
   // The status transition and the provider-customer link derive from one
   // provider event, so they land or roll back together — and an event whose
-  // transition was refused (lost race, out-of-order redelivery) has no
+  // transition was ignored (lost race, out-of-order redelivery) has no
   // effects at all: no link write.
   const { applied, linkedReference } = await getDb(env).transaction(async (tx) => {
     const client = asTransactionalClient(tx);
@@ -229,10 +229,8 @@ export async function applyRampSettlementEvent(
     });
   }
 
-  // Refused covers both an illegal source status and a lost race: the CAS
-  // cannot tell them apart, and neither wrote anything.
   logEvent("info", {
-    event: applied ? "sdp_api_ramp_settlement_applied" : "sdp_api_ramp_settlement_refused",
+    event: applied ? "sdp_api_ramp_settlement_applied" : "sdp_api_ramp_settlement_ignored",
     flow: "ramp-settlement",
     organization_id: transfer.organization_id,
     project_id: transfer.project_id,
@@ -243,5 +241,5 @@ export async function applyRampSettlementEvent(
     from_status: transfer.status,
     to_status: RAMP_TRANSFER_TRANSITIONS[update.transition].to,
   });
-  return { applied, outcome: applied ? "applied" : "refused" };
+  return { applied, outcome: applied ? "applied" : "ignored" };
 }

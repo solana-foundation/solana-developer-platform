@@ -142,6 +142,18 @@ export async function applyStoredRampWebhookEvent(
 
     const outcome = await processor.process(env, row.environment, parsed);
     if (outcome === "unmatched" || outcome === "refused") {
+      if (row.environment === "sandbox") {
+        await events.dischargeEvent(row.id, "discarded", `provider event ${outcome}`);
+        logEvent("warn", {
+          event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
+          flow: "ramp-settlement",
+          webhook_event_id: row.id,
+          provider: row.provider,
+          environment: row.environment,
+          outcome,
+        });
+        return false;
+      }
       const terminal = outcome === "refused";
       const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
       await events.recordFailure({
@@ -171,6 +183,18 @@ export async function applyStoredRampWebhookEvent(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const failureKind = classifyFailure(error);
+    if (row.environment === "sandbox" && failureKind === "terminal") {
+      await events.dischargeEvent(row.id, "discarded", message);
+      logEvent("warn", {
+        event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
+        flow: "ramp-settlement",
+        webhook_event_id: row.id,
+        provider: row.provider,
+        environment: row.environment,
+        outcome: "refused",
+      });
+      return false;
+    }
     const terminal = failureKind !== "retryable";
     const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
     await events.recordFailure({

@@ -127,4 +127,23 @@ describe("applyRampSettlementEvent delivered asset", () => {
     expect(result).toEqual({ applied: false, outcome: "refused" });
     expect(await readRow("xfr_asset_unknown")).toEqual({ status: "settling", amount: null });
   });
+
+  it("still refuses an asset mismatch after another event finalized the transfer", async () => {
+    vi.spyOn(events, "logEvent").mockImplementation(() => {});
+    await seedStripeOnramp("xfr_asset_final", "cos_asset_final");
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET status = 'completed' WHERE id = ?")
+      .bind("xfr_asset_final")
+      .run();
+
+    const result = await applyRampSettlementEvent(env, {
+      provider: "stripe",
+      kind: "settled",
+      reference: "cos_asset_final",
+      deliveredAssetRail: "sol.solana",
+    });
+
+    expect(result).toEqual({ applied: false, outcome: "refused" });
+    expect(await readRow("xfr_asset_final")).toEqual({ status: "completed", amount: null });
+  });
 });

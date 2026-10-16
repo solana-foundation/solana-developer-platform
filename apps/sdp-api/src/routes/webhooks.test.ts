@@ -1044,6 +1044,14 @@ describe("BVNK ramp webhook", () => {
       last_error: expect.stringContaining(errorFragment),
     });
   }
+  async function expectDiscardedSandboxWebhookEvent(errorFragment: string) {
+    expect(await readLastWebhookEvent("sandbox")).toEqual({
+      status: "discharged",
+      terminal: false,
+      attempts: 0,
+      last_error: expect.stringContaining(errorFragment),
+    });
+  }
   async function expectNoBvnkWebhookEvents() {
     const pending = await getDb(env)
       .prepare(
@@ -1317,7 +1325,7 @@ describe("BVNK ramp webhook", () => {
     expect(res.status).toBe(200);
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
-  it("parks a customer-mismatched funding wallet event as terminal and leaves the row untouched", async () => {
+  it("discards a customer-mismatched sandbox wallet event and leaves the row untouched", async () => {
     const FUNDING_ROW_ID = "cpa_bvnk_funding_status_customer";
     const FUNDING_WALLET_ID = "a:funding:wallet:status:4";
     await seedBvnkFundingWallet(getDb(env), {
@@ -1335,10 +1343,10 @@ describe("BVNK ramp webhook", () => {
       fundingWalletEvent(FUNDING_WALLET_ID, { customerId: "another-customer" }),
       { headers: {}, environment: "sandbox" }
     );
-    await expectTerminalWebhookEvent("sandbox", "belongs to another customer");
+    await expectDiscardedSandboxWebhookEvent("belongs to another customer");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
-  it("parks an orphan duplicate wallet event as terminal and leaves the row untouched", async () => {
+  it("discards an orphan duplicate sandbox wallet event and leaves the row untouched", async () => {
     const FUNDING_ROW_ID = "cpa_bvnk_funding_status_wallet";
     const FUNDING_WALLET_ID = "a:funding:wallet:status:5";
     await seedBvnkFundingWallet(getDb(env), {
@@ -1359,7 +1367,7 @@ describe("BVNK ramp webhook", () => {
         environment: "sandbox",
       }
     );
-    await expectTerminalWebhookEvent("sandbox", "targets a different wallet");
+    await expectDiscardedSandboxWebhookEvent("targets a different wallet");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
   it("records an unassigned-reference funding wallet event and leaves the row untouched", async () => {
@@ -2340,12 +2348,12 @@ describe("BVNK ramp webhook", () => {
       status: "collect_counterparty",
     });
   });
-  it("parks a SIGNED agreement session webhook with an unknown reference as terminal", async () => {
+  it("discards a sandbox SIGNED agreement session with an unknown reference", async () => {
     const event = bvnkAgreementSessionStatusChangeEvent({
       data: { status: "SIGNED", reference: "unknown-agreement-session" },
     });
     await sendBvnkWebhook(event, { headers: {}, environment: "sandbox" });
-    await expectTerminalWebhookEvent("sandbox", "unknown-agreement-session");
+    await expectDiscardedSandboxWebhookEvent("unknown-agreement-session");
   });
   it("acknowledges a non-SIGNED agreement session without changing the row", async () => {
     await seedAgreementSession();
