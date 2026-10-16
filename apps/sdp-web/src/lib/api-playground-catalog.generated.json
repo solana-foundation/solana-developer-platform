@@ -7842,7 +7842,7 @@
       "owner": "compliance"
     },
     {
-      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
+      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground|internal\\/dashboard\\/network)(\\/|$)",
       "owner": "core"
     },
     {

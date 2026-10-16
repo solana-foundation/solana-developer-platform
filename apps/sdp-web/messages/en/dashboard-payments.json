@@ -1255,6 +1255,7 @@
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",
+      "staleRetryCheckList": "The earlier attempt may have created this request, and its expiry has passed. Check the list before creating it again.",
       "awaitingPayment": "Awaiting payment",
       "paid": "Paid",
       "canceled": "Canceled",

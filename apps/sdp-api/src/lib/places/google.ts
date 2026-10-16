@@ -1,56 +1,29 @@
-import { providerErrorMessageSchema } from "@sdp/payments/ramps/fetch";
 import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { PlaceSuggestion, ResolvedPlace } from "@sdp/types";
 import { z } from "zod";
 import { providerUnavailable } from "@/lib/errors";
-import { getLogger } from "@/runtime/logger";
+import { fetchProviderJson, type ProviderJsonRequest } from "@/lib/provider-json";
 
 const PLACES_API_BASE_URL = "https://places.googleapis.com/v1";
 const STATIC_MAPS_API_BASE_URL = "https://maps.googleapis.com/maps/api/staticmap";
 const PLACE_DETAILS_FIELD_MASK = "id,formattedAddress,location,addressComponents";
 const API_KEY_ENV = "GOOGLE_ADDRESS_COMPLETION_API_KEY";
 
-async function googleJson<TSchema extends z.ZodTypeAny>(
+/** An address lookup waits on the person typing; a stalled call fails rather than holding it. */
+const REQUEST_TIMEOUT_MS = 10_000;
+/** Suggestions and a place's details are a few kilobytes. */
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+function googleJson<TSchema extends z.ZodType>(
   schema: TSchema,
   url: string,
-  init: RequestInit
+  init: Pick<ProviderJsonRequest, "method" | "headers" | "body">
 ): Promise<z.output<TSchema>> {
-  const response = await fetch(url, init);
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = undefined;
-  }
-  if (!response.ok) {
-    // Google's wording stays in the logs; callers get the status alone (ADR 0008).
-    getLogger().warn(
-      {
-        event: "sdp_api_places_provider_error",
-        provider_status: response.status,
-        error_diagnostics: { providerMessage: providerErrorMessageSchema.parse(payload) },
-      },
-      "sdp_api_places_provider_error"
-    );
-    throw providerUnavailable(`Google Maps request failed with status ${response.status}`, {
-      provider: "google",
-      providerStatus: response.status,
-    });
-  }
-  if (payload === undefined) {
-    throw providerUnavailable("Google Maps returned an unparseable response", {
-      provider: "google",
-      providerStatus: response.status,
-    });
-  }
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) {
-    throw providerUnavailable("Google Maps returned an unexpected response shape", {
-      provider: "google",
-      providerStatus: response.status,
-    });
-  }
-  return parsed.data;
+  return fetchProviderJson("google", url, schema, {
+    ...init,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    maxBytes: MAX_RESPONSE_BYTES,
+  });
 }
 
 const autocompleteResponseSchema = z.object({

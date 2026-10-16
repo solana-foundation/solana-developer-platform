@@ -26,7 +26,7 @@ export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
   [/^\/(v1\/wallets|internal\/dashboard\/custody)(\/|$)/, "custody"],
   [/^\/v1\/compliance(\/|$)/, "compliance"],
   [
-    /^\/(health|docs|openapi\.json|llms\.txt|admin|webhooks\/clerk|internal\/playground)(\/|$)/,
+    /^\/(health|docs|openapi\.json|llms\.txt|admin|webhooks\/clerk|internal\/playground|internal\/dashboard\/network)(\/|$)/,
     "core",
   ],
   [/^\/v1\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\/|$)/, "core"],

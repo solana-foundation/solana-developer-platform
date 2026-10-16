@@ -91,28 +91,6 @@ export interface SponsorshipProviderConfiguration {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Extended Interface (Optional Capabilities)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Extended fee payment port with additional capabilities.
- * Some providers may support fee estimation and token-based fee payment.
- */
-export interface ExtendedFeePaymentPort extends FeePaymentPort {
-  /**
-   * Estimate the fee for a transaction.
-   * Returns fee in lamports.
-   */
-  estimateFee?(transaction: Uint8Array): Promise<bigint>;
-
-  /**
-   * Get supported fee payment tokens (if provider supports non-SOL fees).
-   * Returns list of SPL token mints that can be used to pay fees.
-   */
-  getSupportedTokens?(): Promise<Address[]>;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Error Types
 // ═══════════════════════════════════════════════════════════════════════════
 

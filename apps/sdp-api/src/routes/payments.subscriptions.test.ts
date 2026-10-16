@@ -1,5 +1,5 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import app from "@/index";
@@ -16,16 +16,20 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
-  mockTokenSupplyDecimalsOnce,
+  MAINNET_USDC_MINT,
   seedCachedKey,
+  seedProductionPrivyWallet,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { required } from "@/test/helpers/required";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const SUBSCRIPTION_HEADERS = {
@@ -74,6 +78,48 @@ function expectPreparedSubscriptionTransaction(
 
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  beforeEach(() => {
+    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+  });
+
+  it("stores a Production plan's USDC as the mainnet mint", async () => {
+    await seedProductionPrivyWallet({
+      custodyWalletId: "cwlt_subscription_plan_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    const ownerWallet = required(
+      await getDb(env)
+        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
+        .bind("cwlt_subscription_plan_production")
+        .first<{ wallet_id: string }>()
+    );
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: { ...SUBSCRIPTION_HEADERS, "Idempotency-Key": "plan-production-usdc" },
+        body: JSON.stringify({
+          ownerWalletId: ownerWallet.wallet_id,
+          token: "USDC",
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+
+    expect(planRes.status).toBe(201);
+    const planBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await planRes.json()
+    );
+    expect(planBody.data.subscriptionPlan).toMatchObject({
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      token: MAINNET_USDC_MINT,
+    });
+  });
 
   it("requires owner wallet access when updating subscription plans", async () => {
     const planRes = await app.request(
@@ -318,7 +364,6 @@ describe("Payments routes — subscriptions", () => {
       status: "active",
     });
 
-    mockTokenSupplyDecimalsOnce();
     const preparePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -426,7 +471,6 @@ describe("Payments routes — subscriptions", () => {
       status: "pending_authorization",
     });
 
-    mockTokenSupplyDecimalsOnce();
     const prepareAuthorizationRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
       {
@@ -525,7 +569,6 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(amountOverrideRes.status).toBe(400);
 
-    mockTokenSupplyDecimalsOnce();
     const prepareCollectionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
       {

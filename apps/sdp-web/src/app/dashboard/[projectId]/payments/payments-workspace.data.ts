@@ -32,11 +32,16 @@ import {
   type ComplianceProviderResult,
   screenAddressCompliance,
 } from "@/lib/compliance";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import {
+  type CallerIdempotencyKey,
+  dashboardRequest,
+  dashboardRequestUnderOwnKey,
+} from "@/lib/dashboard-fetch";
+import { apiErrorCode } from "@/lib/idempotency";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
+  paymentApiErrorBodySchema,
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
@@ -469,39 +474,73 @@ export interface CreateTransferInput {
 }
 
 /**
- * An HTTP refusal from the transfer endpoint, carrying the status so the caller
- * can decide the idempotency key's fate the way batches do: a 4xx retires it,
- * a 5xx or a network failure keeps it.
+ * An HTTP refusal from the transfer endpoint, carrying the status and the
+ * replay mark so the caller can decide the idempotency key's fate on the
+ * shared rule (`answerRetiresKey`).
  */
 export class TransferRequestError extends Error {
   readonly status: number;
+  readonly replayed: boolean;
+  /** sdp-api's error code, or `null` when the body names none. */
+  readonly code: string | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, replayed: boolean, code: string | null) {
     super(message);
     this.name = "TransferRequestError";
     this.status = status;
+    this.replayed = replayed;
+    this.code = code;
   }
+}
+
+/** Whether sdp-api answered from a stored result (relayed by the proxy). */
+function isReplayed(response: Response): boolean {
+  return response.headers.get("Idempotent-Replayed") === "true";
+}
+
+/**
+ * A refusal's body, read once. A body that fails to download is no answer at
+ * all, like a lost response (`unreadable` in `dashboard-fetch`): it throws a
+ * plain error, never a request error with a status, so the caller keeps the
+ * money key for the retry instead of retiring it on a refusal it never read.
+ */
+async function readRefusalText(response: Response, failedMessage: string): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw new Error(failedMessage, { cause: error });
+  }
+}
+
+/** A readable refusal's error fields; a body that is not JSON, or not an object, has none. */
+function parseRefusalBody(text: string): ApiErrorBody {
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+  const parsed = paymentApiErrorBodySchema.safeParse(json);
+  return parsed.success ? parsed.data : {};
 }
 
 /**
  * Creates one transfer.
  *
  * The idempotency key is transport metadata, sent as a header and never in the
- * body. Null for a caller whose request is already single-shot (a ramp transfer
- * named by `transferId`).
+ * body; a key its store could not persist is refused (428) before anything is
+ * sent. Null for a caller whose request is already single-shot (a ramp transfer
+ * named by `transferId`), which `dashboardRequest` keys per user action.
  */
 export async function createTransfer(
   input: CreateTransferInput,
   t: Translate,
-  idempotencyKey: string | null
+  idempotencyKey: CallerIdempotencyKey | null
 ): Promise<TransferRecord> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (idempotencyKey !== null) {
-    headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
-  }
-  const response = await dashboardRequest("/api/dashboard/payments/transfers", {
+  const path = "/api/dashboard/payments/transfers";
+  const init: RequestInit = {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
@@ -510,15 +549,26 @@ export async function createTransfer(
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),
     }),
-  });
+  };
+  const response =
+    idempotencyKey === null
+      ? await dashboardRequest(path, init)
+      : await dashboardRequestUnderOwnKey(path, init, idempotencyKey);
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
+    const text = await readRefusalText(
+      response,
+      t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
+    );
+    const code = apiErrorCode(text);
+    const body = parseRefusalBody(text);
     throw new TransferRequestError(
       getApiError(
         body,
         t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
       ),
-      response.status
+      response.status,
+      isReplayed(response),
+      code
     );
   }
 
@@ -603,44 +653,61 @@ export interface CreateTransferBatchResult {
 }
 
 /**
- * An HTTP refusal from the batch endpoint, carrying the status so the caller
- * can decide the idempotency key's fate: a 4xx is a definitive answer and
- * retires the key, while a 5xx or a network failure (a plain Error) keeps it —
+ * An HTTP refusal from the batch endpoint, carrying the status and the replay
+ * mark so the caller can decide the idempotency key's fate on the shared rule
+ * (`answerRetiresKey`). A network failure is a plain Error and keeps the key:
  * the API may have recorded the batch before the response was lost, and only
  * a replay with the SAME key can find out without moving the money again.
  */
 export class TransferBatchRequestError extends Error {
   readonly status: number;
+  readonly replayed: boolean;
+  /** sdp-api's error code, or `null` when the body names none. */
+  readonly code: string | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, replayed: boolean, code: string | null) {
     super(message);
     this.name = "TransferBatchRequestError";
     this.status = status;
+    this.replayed = replayed;
+    this.code = code;
   }
 }
 
 /**
  * The caller's idempotency key is transport metadata and is never copied into
- * the JSON body; the proxy route forwards that single header upstream.
+ * the JSON body; the proxy route forwards that single header upstream. A key
+ * its store could not persist is refused (428) before anything is sent.
  */
 export async function createTransferBatch(
   input: PaymentTransferBatchRequest,
   t: Translate,
-  idempotencyKey: string
+  idempotencyKey: CallerIdempotencyKey
 ): Promise<CreateTransferBatchResult> {
-  const response = await dashboardRequest("/api/dashboard/payments/transfers/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-    body: JSON.stringify(input),
-  });
+  const response = await dashboardRequestUnderOwnKey(
+    "/api/dashboard/payments/transfers/batch",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    idempotencyKey
+  );
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+    const text = await readRefusalText(
+      response,
+      t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
+    );
+    const code = apiErrorCode(text);
+    const body = parseRefusalBody(text);
     throw new TransferBatchRequestError(
       getApiError(
         body,
         t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
       ),
-      response.status
+      response.status,
+      isReplayed(response),
+      code
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;

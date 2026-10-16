@@ -298,3 +298,51 @@ export async function seedTestPrivyConnection(
     });
   }
 }
+
+/**
+ * Seed one active BYOK Privy wallet in a project, the only custody a Production project allows,
+ * over a stored credential nothing reads. For suites that need the wallet rows rather than a
+ * working signer; the connection, credential and fingerprint derive from `wallet.custodyWalletId`.
+ * @param db - Executor the writes run on.
+ * @param wallet - The project's owner and the wallet to seed.
+ * @param wallet.organizationId - The organization that owns the project.
+ * @param wallet.projectId - The project the connection belongs to.
+ * @param wallet.createdBy - The user recorded as the connection's creator.
+ * @param wallet.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
+ * @param wallet.walletId - The provider's wallet id.
+ * @param wallet.publicKey - The wallet's address.
+ * @returns Resolves once the connection is active with its wallet.
+ */
+export async function seedUnreadPrivyWallet(
+  db: DatabaseExecutor,
+  wallet: {
+    organizationId: string;
+    projectId: string;
+    createdBy: string;
+    custodyWalletId: string;
+    walletId: string;
+    publicKey: string;
+  }
+): Promise<void> {
+  await seedTestPrivyConnection(db, {
+    organizationId: wallet.organizationId,
+    projectId: wallet.projectId,
+    connectionId: `cconn_${wallet.custodyWalletId}`,
+    credentialId: `pcred_${wallet.custodyWalletId}`,
+    createdBy: wallet.createdBy,
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+    providerAccountFingerprint: `sha256:${wallet.custodyWalletId}`,
+    wallets: [
+      {
+        id: wallet.custodyWalletId,
+        walletId: wallet.walletId,
+        publicKey: wallet.publicKey,
+        label: null,
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: wallet.custodyWalletId,
+  });
+}

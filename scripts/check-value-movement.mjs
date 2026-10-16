@@ -139,7 +139,6 @@ export const CAPABILITIES = [
     why: "Signs as fee payer with a process key and no budget; the sponsorship waist builds fee payers.",
     symbols: [
       { file: `${FEE_PAYMENT}/native.adapter.ts`, name: "NativeAdapter" },
-      { file: `${FEE_PAYMENT}/index.ts`, name: "createNativeAdapter" },
       { file: `${FEE_PAYMENT}/index.ts`, name: "KoraClient" },
     ],
     owners: [FEE_PAYMENT_PACKAGE],

@@ -286,17 +286,16 @@ nothing else; the program create still sends the body `requestId` form.
     request whether or not the component survives it. The key is already pinned
     before posting, and the store still needs the parsed response to know the
     intent was recorded. Aborting on unmount would hide that acknowledgment. The controller gates state updates and the outcome
-    screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
-    unconditionally, before the abort check.
-  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire on a parsed recorded result or a first-attempt 4xx. A later 4xx cannot resolve an earlier uncertain attempt.** A 5xx is the dangerous one — a gateway timing
-    out downstream of an API that already recorded and broadcast looks exactly
-    like a provider being unavailable before it did. A key released too early is
-    a double deposit; a key held too long is a replay the API reports honestly.
-  - The 15-minute TTL applies only to drafts that never submitted. `beginSubmission` must durably pin the key before every Earn POST; a storage failure blocks submission. Unknown outcomes have no TTL. A parsed acknowledgment releases the key so the same amount can intentionally be submitted again.
-  - The cap has a floor of ONE expiring entry, because callers write the entry
-    they just claimed as the last element — a budget of zero would evict the key
-    `claim` is about to return, and a key handed out but never stored is one the
-    next call silently replaces.
+    screen; key bookkeeping (`settleIdempotencyKey`) runs unconditionally, before
+    the abort check.
+  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint and
+    writes it before the POST; a storage failure (`persisted: false`) blocks
+    submission. **The dashboard-wide rule (`answerRetiresKey`) retires it: a
+    success, a replay or a 422. Anything else keeps it.** A 5xx is the dangerous
+    one — a gateway timing out downstream of an API that already recorded and
+    broadcast looks exactly like a provider being unavailable before it did. A
+    key released too early is a double deposit; a key held too long is a replay
+    the API reports honestly. Kept keys never expire and are never evicted.
   - Entries are zod-parsed per row on read, and the row type is derived from that
     schema — same convention as `deposit/earn-funding-wallets.ts`, and for the same
     reason: this store is untrusted JSON written as often by an older build of the
@@ -385,8 +384,8 @@ nothing else; the program create still sends the body `requestId` form.
   resolving "did my submission move anything" differently is how a double-count
   ships.
 - `@/lib/idempotency-key-store.ts` — the shared machinery behind BOTH tracking
-  modules (storage tiers, quota divergence, entry bounds), plus
-  `answerRetiresIdempotencyKey`, the shared retire-decision rule. Extracted
+  modules (storage tiers, quota divergence), plus `settleIdempotencyKey`, which
+  applies the shared retire rule (`answerRetiresKey`). Extracted
   when the withdrawal flow arrived; two copies of a double-spend guard is how
   one drifts.
 - **The withdrawal outcome poll uses the UNIFIED ledger vocabulary**:

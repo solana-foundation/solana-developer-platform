@@ -4,8 +4,8 @@ import {
   type FeePaymentPort,
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment";
-import { resolveDefaultCluster } from "@sdp/rpc";
-import { createClusterRpc, createRpc, getTransactionNetworkFee } from "@sdp/rpc/solana";
+import { createRpc, getTransactionNetworkFee, type SolanaRpc } from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -44,6 +44,7 @@ import type {
   OwnedSubmissionLifecycle,
   PreparedOwnedSubmission,
   SponsorshipFeePayment,
+  SponsorshipMovementScope,
   SponsorshipScope,
 } from "./sponsorship.service";
 import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
@@ -116,28 +117,59 @@ type AdmissionContext = {
 };
 
 /**
- * The budget network a scope draws from: the scope's cluster when the caller
- * named one (Earn movements execute per cluster), else the process default.
- * A mainnet movement on a devnet-default process must reserve against the
- * mainnet policies and trip the mainnet breaker, not devnet's.
+ * The budget network a scope draws from: its project environment's cluster, never the process
+ * default. A production movement on a devnet-default process must reserve against the mainnet
+ * policies and trip the mainnet breaker, not devnet's.
+ *
+ * @param scope - The sponsorship scope.
+ * @param scope.environment - The project environment that decides the cluster.
+ * @returns The budget network.
  */
-function resolveNetwork(
-  env: Pick<Env, "SOLANA_NETWORK">,
-  scope: Pick<SponsorshipScope, "cluster">
-): SponsorshipNetwork {
-  return sponsorshipNetworkForCluster(scope.cluster ?? resolveDefaultCluster(env));
+function resolveNetwork(scope: Pick<SponsorshipScope, "environment">): SponsorshipNetwork {
+  return sponsorshipNetworkForCluster(CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
+}
+
+/** Each cluster's Kora upstream Solana RPC, the node that cluster's Kora simulates and sends on. */
+const KORA_RPC_URL_ENV_KEYS = {
+  devnet: "KORA_DEVNET_RPC_URL",
+  "mainnet-beta": "KORA_MAINNET_RPC_URL",
+} as const satisfies Record<SolanaCluster, keyof Env>;
+
+/**
+ * The Solana RPC a cluster's Kora reads and sends on, so sponsorship prices and settles against
+ * the same chain view the paymaster signs against. An unconfigured cluster refuses: it never
+ * falls back to the process RPC or another cluster.
+ *
+ * @param env - API environment naming each cluster's `KORA_<CLUSTER>_RPC_URL`.
+ * @param cluster - The cluster the sponsored transaction executes on.
+ * @returns An RPC client for that cluster's Kora upstream.
+ * @throws FeePaymentError `PROVIDER_NOT_AVAILABLE` when the cluster's Kora RPC is unset.
+ */
+export function createKoraClusterRpc(env: Env, cluster: SolanaCluster): SolanaRpc {
+  const envKey = KORA_RPC_URL_ENV_KEYS[cluster];
+  const rpcUrl = env[envKey]?.trim();
+  if (!rpcUrl) {
+    throw new FeePaymentError(
+      `No Kora RPC is configured for ${cluster}: set ${envKey}`,
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  return createRpc(env, { rpcUrl });
 }
 
 /**
- * The RPC that prices the network fee for a scope: the process RPC by default,
- * the cluster's own endpoint when the scope names one. A fee quoted on the
- * wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash
- * answers null anyway. An unconfigured cluster throws here and surfaces as
- * "Sponsorship preflight is unavailable", the same fail-closed answer as a
- * dead RPC.
+ * The RPC that prices the network fee on the scope's cluster: that cluster's Kora upstream. A fee
+ * quoted on the wrong chain is not a fee, and `getFeeForMessage` for a foreign blockhash answers
+ * null anyway. An unconfigured cluster throws here and surfaces as "Sponsorship preflight is
+ * unavailable", the same fail-closed answer as a dead RPC.
+ *
+ * @param env - API environment for RPC configuration.
+ * @param scope - The sponsorship scope.
+ * @param scope.environment - The project environment that decides the cluster.
+ * @returns An RPC client for the scope's cluster.
  */
-function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "cluster">) {
-  return scope.cluster ? createClusterRpc(env, scope.cluster) : createRpc(env);
+function createNetworkFeeRpc(env: Env, scope: Pick<SponsorshipScope, "environment">) {
+  return createKoraClusterRpc(env, CLUSTER_BY_SDP_ENVIRONMENT[scope.environment]);
 }
 
 function encodeBase64(value: Uint8Array): string {
@@ -212,17 +244,17 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   constructor(
     private readonly env: Env,
-    private readonly scope: SponsorshipScope,
+    private readonly scope: SponsorshipMovementScope,
     private readonly provider: FeePaymentPort,
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
-    this.network = resolveNetwork(env, scope);
+    this.network = resolveNetwork(scope);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
     this.getNetworkFee =
       dependencies.getNetworkFee ??
-      ((transaction) =>
+      (async (transaction) =>
         getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
   }

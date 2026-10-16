@@ -54,7 +54,7 @@ Then verify `https://api-dev.solana.com/health` and the affected API behavior. D
 | Environment | GCP project | Service | Cron job | Trigger |
 | --- | --- | --- | --- | --- |
 | Dev | `solana-developer-platform-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-cron` | Push to `main`, or manual dispatch |
-| Production | `solana-developer-platform` | `sdp-prod-api-public` | `sdp-prod-api-public-cron` | Push to `main` with `CONTINUOUS_PROD_DEPLOY=true`, an approved `Apply pending migrations to prod` run, or manual dispatch of an existing SHA image from `main` |
+| Production | `solana-developer-platform` | `sdp-prod-api-public` | `sdp-prod-api-public-cron` | Push to `main` with `CONTINUOUS_PROD_DEPLOY=true`, an approved `Apply pending migrations to prod` run, manual dispatch of an existing SHA image from `main`, or `Roll back sdp-api prod to the previous build` |
 
 The migration jobs are `sdp-dev-api-public-migrate` and `sdp-prod-api-public-migrate`.
 

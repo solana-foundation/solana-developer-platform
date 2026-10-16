@@ -1,18 +1,21 @@
 import type { Address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
+import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 
-const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createProjectSponsorshipFeePayment,
-}));
-
-const { resolveVaultSponsorship, vaultRentPayer } = await import("./vault-sponsorship");
+const resolveProjectSponsorshipScope = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 
 const SPONSOR = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q" as Address;
+
+const WALLET_SCOPE = {
+  environment: "sandbox",
+  organizationId: "org_1",
+  projectId: "prj_1",
+  actor: { type: "wallet", id: "cwlt_1" },
+} as const;
 
 function scope(env: Partial<Env> = {}) {
   return {
@@ -34,7 +37,14 @@ function scope(env: Partial<Env> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  createProjectSponsorshipFeePayment.mockResolvedValue({
+  vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
+    resolveProjectSponsorshipScope
+  );
+  vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+    createSponsorshipFeePayment
+  );
+  resolveProjectSponsorshipScope.mockResolvedValue(WALLET_SCOPE);
+  createSponsorshipFeePayment.mockReturnValue({
     getFeePayer: vi.fn().mockResolvedValue(SPONSOR),
   });
 });
@@ -60,7 +70,7 @@ describe("resolveVaultSponsorship", () => {
       expect(vaultRentPayer(fee)).toBeUndefined();
       // Turning sponsorship off must not even construct a provider: the
       // acceptance criterion is that the route reverts with no code change.
-      expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+      expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     }
   );
 
@@ -84,7 +94,7 @@ describe("resolveVaultSponsorship", () => {
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toEqual({ kind: "wallet-pays" });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
   });
 
   it("sponsors mainnet once its own paymaster is wired (PRO-1738)", async () => {
@@ -94,15 +104,13 @@ describe("resolveVaultSponsorship", () => {
       KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
     });
 
+    const productionScope = { ...WALLET_SCOPE, environment: "production" } as const;
+    resolveProjectSponsorshipScope.mockResolvedValue(productionScope);
+
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
-    // The cluster rides the scope so the mainnet Kora signs and the mainnet
-    // budget is charged, not the process default's.
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ cluster: "mainnet-beta" })
-    );
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, productionScope, "earn.deposit");
   });
 
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
@@ -113,18 +121,17 @@ describe("resolveVaultSponsorship", () => {
 
     await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
 
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
+    expect(resolveProjectSponsorshipScope).toHaveBeenCalledWith(env, {
       organizationId: "org_1",
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "devnet",
-      movement: "earn.deposit",
     });
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, WALLET_SCOPE, "earn.deposit");
   });
 
   it("bounds sponsor resolution with the caller's deadline", async () => {
     vi.useFakeTimers();
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createSponsorshipFeePayment.mockReturnValue({
       getFeePayer: vi.fn(() => new Promise(() => undefined)),
     });
     const { env, input } = scope();

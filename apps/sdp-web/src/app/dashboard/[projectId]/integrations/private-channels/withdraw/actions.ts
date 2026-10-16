@@ -3,6 +3,7 @@
 import type { PrivateChannelWithdrawal } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import type { MessageKey } from "@/i18n/messages";
+import type { ApiAnswer } from "@/lib/idempotency";
 import {
   createPrivateChannelWithdrawal,
   fetchPrivateChannelWithdrawal,
@@ -11,7 +12,7 @@ import {
   createSdpApiClient,
   extractSdpApiErrorMessage,
   requestProjectHref,
-  SdpApiResponseError,
+  sdpApiAnswer,
 } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
@@ -40,7 +41,7 @@ export interface CreateWithdrawalInput {
 export type CreateWithdrawalResult =
   | { ok: true; withdrawal: PrivateChannelWithdrawal }
   | { ok: false; kind: "validation"; messageKey: MessageKey }
-  | { ok: false; kind: "server"; message: string; status: number | null };
+  | { ok: false; kind: "server"; message: string; answer: ApiAnswer };
 
 export async function createWithdrawalAction(
   input: CreateWithdrawalInput
@@ -76,7 +77,7 @@ export async function createWithdrawalAction(
       ok: false,
       kind: "server",
       message: extractSdpApiErrorMessage(error),
-      status: error instanceof SdpApiResponseError ? error.status : null,
+      answer: sdpApiAnswer(error),
     };
   }
 }

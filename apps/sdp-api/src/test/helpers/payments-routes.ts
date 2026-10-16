@@ -16,11 +16,16 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
@@ -157,6 +162,8 @@ export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
 export const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
+export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
@@ -261,6 +268,102 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
   });
 }
 
+/**
+ * Give a project a BYOK Privy wallet, the only custody Production allows (HOO-1970), with the
+ * custody encryption key the connection's stored credential needs set for the current test.
+ *
+ * @param tenant - The project's owner and the wallet to seed.
+ * @param tenant.organizationId - The organization that owns the project.
+ * @param tenant.projectId - The project the connection belongs to.
+ * @param tenant.createdBy - The user recorded as the connection's creator.
+ * @param tenant.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
+ * @param tenant.publicKey - The address the wallet's signer signs as.
+ * @returns Resolves once the wallet and its connection are seeded.
+ */
+export async function seedProjectPrivyWallet(tenant: {
+  organizationId: string;
+  projectId: string;
+  createdBy: string;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+  onTestFinished(() => {
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  });
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: tenant.organizationId,
+    projectId: tenant.projectId,
+    connectionId: `cconn_${tenant.custodyWalletId}`,
+    credentialId: `pcred_${tenant.custodyWalletId}`,
+    createdBy: tenant.createdBy,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: tenant.organizationId,
+      credentialId: `pcred_${tenant.custodyWalletId}`,
+      appId: `app_${tenant.custodyWalletId}`,
+      appSecret: `secret_${tenant.custodyWalletId}`,
+    }),
+    providerAccountFingerprint: `sha256:${tenant.custodyWalletId}`,
+    wallets: [
+      {
+        id: tenant.custodyWalletId,
+        walletId: `privy_${tenant.custodyWalletId}`,
+        publicKey: tenant.publicKey,
+        label: "Production Payments Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: tenant.custodyWalletId,
+  });
+}
+
+/**
+ * Re-home the seeded API key onto the organization's Production project and give that project a
+ * BYOK Privy wallet.
+ *
+ * @param wallet - The Production wallet to seed.
+ * @param wallet.custodyWalletId - The SDP custody wallet id, also the connection's default wallet.
+ * @param wallet.publicKey - The address the wallet's signer signs as.
+ * @returns Resolves once the wallet, its connection and the re-homed key are seeded.
+ */
+export async function seedProductionPrivyWallet(wallet: {
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  await seedProjectPrivyWallet({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    createdBy: TEST_USER.id,
+    custodyWalletId: wallet.custodyWalletId,
+    publicKey: wallet.publicKey,
+  });
+  await getDb(env)
+    .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+    .bind(TEST_PRODUCTION_PROJECT_ID, TEST_API_KEY.id)
+    .run();
+  await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+}
+
+/**
+ * Enable the mainnet global sponsorship policy as an operator would; the seed ships it disabled
+ * pending approval, so a Production project's sponsored movement needs this first.
+ *
+ * @returns Resolves once the policy is enabled at a new version.
+ */
+export async function enableMainnetSponsorship(): Promise<void> {
+  await new SponsorshipBudgetRepository(getDb(env)).setPolicyEnabled({
+    network: "mainnet",
+    scopeType: "global",
+    scopeId: null,
+    enabled: true,
+    operator: "operator:payments-test",
+    reason: "Approve mainnet sponsorship for the Production project",
+  });
+}
+
 export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
@@ -297,71 +400,6 @@ export async function seedCounterparty(params?: {
     .run();
 
   return id;
-}
-
-export function mockTokenSupplyDecimalsOnce(decimals = 6): void {
-  createRpcMock.mockReturnValueOnce({
-    getTokenSupply: () => ({
-      send: async () => ({ value: { decimals } }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-}
-
-export function mockRecurringActivationRpc(options: {
-  tokenAccounts?: Array<{
-    pubkey: string;
-    mint: string;
-    amount: string;
-    decimals: number;
-    uiAmountString: string;
-  }>;
-}) {
-  const tokenAccounts = options.tokenAccounts ?? [
-    {
-      pubkey: TEST_SOLANA_ADDRESSES.wallet3,
-      mint: DEVNET_USDC_MINT,
-      amount: "1000000000",
-      decimals: 6,
-      uiAmountString: "1000",
-    },
-  ];
-
-  createRpcMock.mockReturnValue({
-    getTokenAccountsByOwner: () => ({
-      send: async () => ({
-        value: tokenAccounts.map((account) => ({
-          pubkey: account.pubkey,
-          account: {
-            data: {
-              parsed: {
-                info: {
-                  mint: account.mint,
-                  tokenAmount: {
-                    amount: account.amount,
-                    decimals: account.decimals,
-                    uiAmountString: account.uiAmountString,
-                  },
-                },
-              },
-            },
-          },
-        })),
-      }),
-    }),
-    getTokenSupply: () => ({
-      send: async () => ({
-        value: {
-          decimals: 6,
-        },
-      }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
 export async function recurringCollectionTransactionForSignature(options: {

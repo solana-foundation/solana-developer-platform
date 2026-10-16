@@ -33,6 +33,7 @@ import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
+import { IDEMPOTENCY_KEY_PRUNE_CRON, runIdempotencyKeyPrune } from "./idempotency-keys";
 import {
   PENDING_DEPOSITS_CRON,
   PENDING_DEPOSITS_MONITOR,
@@ -318,6 +319,16 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // skips providers the release channel leaves out.
   tasks.push(
     scheduleSystemTask(RAMP_TRANSFERS_CRON, "cron:ramp-transfers", runRampTransfersReconciliation)
+  );
+
+  // Idempotency-Key retention (HOO-1918). Cross-tenant, so it takes the system
+  // identity; behind no flag, because every module's keys expire.
+  tasks.push(
+    scheduleSystemTask(
+      IDEMPOTENCY_KEY_PRUNE_CRON,
+      "cron:idempotency-key-prune",
+      runIdempotencyKeyPrune
+    )
   );
 
   return {

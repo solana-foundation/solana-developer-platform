@@ -19,3 +19,5 @@ When you import the collection into Postman, set:
 
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
+
+Requests to routes that require an `Idempotency-Key` send a saved per-operation key, the `idempotencyKey.<operationId>` collection variable. The collection mints it when unset and clears it only after a `2xx` that shows the payment final, a replayed refusal, or a `422` rejection other than `IDEMPOTENCY_KEY_REUSED`. While a response shows the payment `pending` or `processing`, the key is kept: poll it with `GET` instead of sending a new one, and clear the variable once it is final. Resending after a timeout, a `5xx`, a `409`, a `429`, a `400`, `401` or `403` refusal, or a `422 IDEMPOTENCY_KEY_REUSED` keeps the same key. See [Idempotency](/docs/developing-with-sdp/idempotency#the-dashboard-and-the-postman-collection).

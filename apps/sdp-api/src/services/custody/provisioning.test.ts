@@ -92,6 +92,25 @@ describe("coinbase account provisioning", () => {
     }
   });
 
+  it("sends the caller's idempotency key as X-Idempotency-Key, and a fresh one without it", async () => {
+    const headers: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        headers.push(new Headers(init?.headers).get("X-Idempotency-Key"));
+        return jsonResponse({ address: CREATED_ADDRESS }, 200);
+      }
+    );
+
+    const base = { orgId: "org_abc", projectId: "proj_1", walletSeed: "seed-1" };
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+
+    expect(headers[0]).toBe("req-1");
+    expect(headers[1]).toBe("req-1");
+    expect(headers[2]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it("does not derive the identity from truncatable tenant identifiers", async () => {
     const names: string[] = [];
     mockCreateCapturingNames(names);
@@ -323,7 +342,7 @@ describe("privy wallet provisioning", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
   });
 
-  it("reuses a wallet found by external ID before creating one", async () => {
+  it("creates in one Privy call, with no lookup first; a retry is deduped by Privy", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(privyWalletResponse());
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).resolves.toEqual({
@@ -333,16 +352,15 @@ describe("privy wallet provisioning", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(toUrlString(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
-      "https://privy.test/v1/wallets/ext_wal_sdp_connection_123"
+      "https://privy.test/v1/wallets"
     );
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("creates a wallet with stable external and idempotency IDs", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(
         privyWalletResponse({ id: "wallet-created", address: CREATED_ADDRESS })
       );
@@ -352,7 +370,7 @@ describe("privy wallet provisioning", () => {
       address: CREATED_ADDRESS,
     });
 
-    const createRequest = fetchMock.mock.calls[1]?.[1];
+    const createRequest = fetchMock.mock.calls[0]?.[1];
     expect(JSON.parse(String(createRequest?.body))).toEqual({
       chain_type: "solana",
       external_id: "sdp_connection_123",
@@ -363,7 +381,6 @@ describe("privy wallet provisioning", () => {
   it("reconciles by external ID after an ambiguous create outcome", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockRejectedValueOnce(new TypeError("connection reset"))
       .mockResolvedValueOnce(privyWalletResponse({ id: "wallet-reconciled" }));
 
@@ -371,13 +388,12 @@ describe("privy wallet provisioning", () => {
       walletId: "wallet-reconciled",
       address: EXISTING_ADDRESS,
     });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it("reconciles the unique external ID when create reports it already exists", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ error: "external_id already exists" }, 409))
       .mockResolvedValueOnce(privyWalletResponse({ id: "wallet-reconciled" }));
 
@@ -385,25 +401,23 @@ describe("privy wallet provisioning", () => {
       walletId: "wallet-reconciled",
       address: EXISTING_ADDRESS,
     });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it("fails closed when a duplicate external ID remains unavailable to lookup", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ error: "external_id already exists" }, 409))
       .mockResolvedValueOnce(privyWalletNotFound());
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
     });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it("surfaces a deterministic conflict found during reconciliation", async () => {
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ error: "rejected" }, 500))
       .mockResolvedValueOnce(privyWalletResponse({ archived_at: Date.now() }));
 
@@ -432,12 +446,11 @@ describe("privy wallet provisioning", () => {
     ["an archived wallet", { ...PRIVY_WALLET, archived_at: 1_725_000_000_000 }, "CONFLICT"],
     ["another external ID", { ...PRIVY_WALLET, external_id: "sdp_connection_other" }, "CONFLICT"],
     ["a non-Solana chain", { ...PRIVY_WALLET, chain_type: "ethereum" }, "CONFLICT"],
-  ] as const)("fails closed when external-ID lookup returns %s", async (_case, body, code) => {
+  ] as const)("fails closed when create and its lookup return %s", async (_case, body, code) => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(body, 200));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({ code });
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it.each([
@@ -445,31 +458,28 @@ describe("privy wallet provisioning", () => {
     ["another external ID", { ...PRIVY_WALLET, external_id: "sdp_connection_other" }],
     ["a non-Solana chain", { ...PRIVY_WALLET, chain_type: "ethereum" }],
   ] as const)("rejects a create response containing %s", async (_case, body) => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
-      .mockResolvedValueOnce(jsonResponse(body, 200));
+    // A conflict is settled by the lookup, which finds the same wallet and refuses it.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(body, 200));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
       code: "CONFLICT",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it("treats an incomplete create response as ambiguous and reconciles once", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ id: "wallet-created", address: CREATED_ADDRESS }, 200))
       .mockResolvedValueOnce(privyWalletNotFound());
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
       code: "NETWORK_ERROR",
     });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
-  it("classifies a Provider 401 during external-ID lookup as an invalid credential", async () => {
+  it("classifies a Provider 401 on create as an invalid credential, with no lookup", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ error: "invalid credentials" }, 401));
@@ -483,14 +493,13 @@ describe("privy wallet provisioning", () => {
   it("preserves an ambiguous create outcome when reconciliation returns 401", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(privyWalletNotFound())
       .mockResolvedValueOnce(jsonResponse({ error: "unknown" }, 500))
       .mockResolvedValueOnce(jsonResponse({ error: "invalid credentials" }, 401));
 
     await expect(provisionTestPrivyWallet(PRIVY_CREATE_OPTIONS)).rejects.toMatchObject({
       code: "NETWORK_ERROR",
     });
-    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "POST", "GET"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "GET"]);
   });
 
   it.each([

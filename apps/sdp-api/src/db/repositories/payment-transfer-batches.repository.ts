@@ -4,6 +4,7 @@ import {
   type PaymentTransferBatchRecipientStatus,
   type PaymentTransferBatchStatus,
   type PaymentTransferStatus,
+  type SdpEnvironment,
   type TransferChainVerdictStatus,
 } from "@sdp/types";
 
@@ -312,4 +313,29 @@ export interface PaymentTransferBatchesRepository {
   recomputeTransferBatchStatus(
     input: RecomputeTransferBatchStatusInput
   ): Promise<PaymentTransferBatchRow>;
+  /**
+   * Fails the batch's recipients that never got a chunk transfer (pending, no
+   * transfer_id) and recomputes the batch status, in one transaction under the
+   * batch row lock. A chunk's transfer row and recipient links commit before
+   * it is broadcast, so an unlinked recipient was never sent: failing it is
+   * truthful, and only valid once the request that created the batch is dead.
+   *
+   * @param input.batchId - Batch whose unsent recipients are failed.
+   * @param input.error - Failure detail recorded on each failed recipient.
+   * @returns The batch row after the recompute.
+   */
+  failUnsentTransferRecipients(
+    input: RecomputeTransferBatchStatusInput & { error: string }
+  ): Promise<PaymentTransferBatchRow>;
+  /**
+   * Processing batches created before `createdBefore` that still have pending
+   * recipients with no chunk transfer: their request died before sending them.
+   * System-only (the reconciliation job), oldest first.
+   */
+  listStrandedTransferBatches(input: {
+    /** Only batches whose project is in this environment, so one job run settles one cluster's batches. */
+    environment: SdpEnvironment;
+    createdBefore: string;
+    limit: number;
+  }): Promise<RecomputeTransferBatchStatusInput[]>;
 }

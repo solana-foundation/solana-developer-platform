@@ -30,6 +30,11 @@ export const healthReadyResponseSchema = z
       description: "Cloud Run revision serving the request, or `local` outside Cloud Run.",
       example: "sdp-prod-api-public-00042-abc",
     }),
+    commit: z.string().openapi({
+      description:
+        "Git commit the serving image was built from, or `local` when the image carries none.",
+      example: "0123456789abcdef0123456789abcdef01234567",
+    }),
     checks: z
       .object({
         database: z.enum(["ok", "error"]).openapi({

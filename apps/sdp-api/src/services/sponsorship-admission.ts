@@ -10,21 +10,18 @@ import type { Env } from "@/types/env";
 /** What sponsorship admission needs to know about a scope. */
 export interface SponsorshipAdmissionScope {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   actor: { type: string; id: string };
   movement: MovementId;
 }
 
-/**
- * The organization's live state for a sponsor signature (HOO-1955). A scope
- * with no project has nothing to read, and so cannot start money.
- */
+/** The organization's live state for a sponsor signature (HOO-1955). */
 export async function readSponsorshipAdmissionFacts(
   env: Env,
   scope: SponsorshipAdmissionScope
 ): Promise<MoneyAdmissionFacts | null> {
   // An exit always passes, so it reads nothing.
-  if (MOVEMENTS[scope.movement].kind === "exit" || scope.projectId === null) {
+  if (MOVEMENTS[scope.movement].kind === "exit") {
     return null;
   }
   return readMoneyAdmissionFacts(env, {

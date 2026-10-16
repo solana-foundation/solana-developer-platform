@@ -27,16 +27,17 @@ describe("Google Maps request failures", () => {
     expect(failure).toBeInstanceOf(AppError);
     expect(failure).toMatchObject({
       code: "PROVIDER_UNAVAILABLE",
-      message: "Google Maps request failed with status 400",
+      message: "google answered 400",
       details: { provider: "google", providerStatus: 400 },
     });
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: "sdp_api_places_provider_error",
+        event: "sdp_api_provider_error",
+        provider: "google",
         provider_status: 400,
         error_diagnostics: { providerMessage: "API key for [REDACTED_EMAIL] is not valid" },
       }),
-      "sdp_api_places_provider_error"
+      "sdp_api_provider_error"
     );
   });
 });

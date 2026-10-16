@@ -14,6 +14,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "core GET /docs",
   "core GET /health",
   "core GET /health/ready",
+  "core GET /internal/dashboard/network",
   "core GET /llms.txt",
   "core GET /openapi.json",
   "core GET /v1/api-keys",

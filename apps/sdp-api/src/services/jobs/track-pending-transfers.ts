@@ -14,10 +14,15 @@
  *
  * 3. Upgrade "confirmed" transfers to "finalized" once the cluster reports
  *    finality — confirmed is transitional, not terminal.
+ *
+ * Runs inside one cluster scope per environment (`runInEachClusterScope`): each run selects only
+ * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 
 import { withTransientRpcRetry } from "@sdp/rpc";
-import type { SignatureStatusInfo } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { TransferChainVerdictStatus } from "@sdp/types";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
@@ -38,7 +43,7 @@ import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
-const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
+export const STUCK_PROCESSING_AFTER_MS = 5 * 60 * 1000;
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
 // A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
@@ -203,7 +208,35 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
 
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
-  await finalizeConfirmedTransfers(env, repo, now, nowIso);
+  await finalizeConfirmedTransfers(repo, now, nowIso);
+  await failStrandedTransferBatches(env, now);
+}
+
+/** Past any request's lifetime (renewal cap plus lease), with room to spare. */
+const STRANDED_BATCH_AGE_MS = 60 * 60 * 1000;
+const STRANDED_BATCH_PAGE_SIZE = 50;
+
+/**
+ * Settles batches whose request died after the batch and its recipients
+ * committed but before a chunk transfer was written (HOO-1918). Those
+ * recipients were never sent (a chunk's transfer row and links commit before
+ * its broadcast), and no transfer row exists for the sweep above to settle, so
+ * without a same-key retry the batch would stay processing forever. They are
+ * failed and the batch status recomputed, as the record finder does on a retry.
+ */
+async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
+  const batches = createSystemPaymentTransferBatchesRepository(env);
+  const stranded = await batches.listStrandedTransferBatches({
+    environment: currentClusterScope().environment,
+    createdBefore: new Date(now.getTime() - STRANDED_BATCH_AGE_MS).toISOString(),
+    limit: STRANDED_BATCH_PAGE_SIZE,
+  });
+  for (const batch of stranded) {
+    await batches.failUnsentTransferRecipients({
+      ...batch,
+      error: "The batch request ended before this recipient's transfer was sent",
+    });
+  }
 }
 
 /**
@@ -236,14 +269,12 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
  * that window the transaction will never finalize, so the row rests at
  * confirmed and stops costing RPC.
  *
- * @param env - Runtime environment for RPC and repository construction.
  * @param repo - System payments repository.
  * @param now - Tick time anchoring the finalization window.
  * @param nowIso - Timestamp applied to every polled row.
  * @returns Resolves when the page's poll has been recorded.
  */
 async function finalizeConfirmedTransfers(
-  env: Env,
   repo: PaymentsRepository,
   now: Date,
   nowIso: string
@@ -251,6 +282,7 @@ async function finalizeConfirmedTransfers(
   const windowFloor = new Date(now.getTime() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
   const { valid: confirmedTransfers, invalid } = partitionByValidStoredSignature(
     await repo.listConfirmedTransfersToPoll({
+      environment: currentClusterScope().environment,
       confirmedAfter: windowFloor,
       limit: MAX_SIGNATURES_PER_BATCH,
     })
@@ -278,7 +310,7 @@ async function finalizeConfirmedTransfers(
 
   let statuses: Array<SignatureStatusInfo | null>;
   try {
-    const rpc = solanaRpc.createRpc(env);
+    const rpc = createClusterRpc();
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures, {
       searchTransactionHistory: true,
     });
@@ -286,6 +318,7 @@ async function finalizeConfirmedTransfers(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getSignatureStatuses RPC call failed for confirmed transfers"
     );
@@ -362,6 +395,7 @@ async function recoverStuckProcessingTransfers(
   const cutoff = new Date(now.getTime() - STUCK_PROCESSING_AFTER_MS).toISOString();
 
   const stuckProcessing = await repo.listTransfersByStatus({
+    environment: currentClusterScope().environment,
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
@@ -400,6 +434,7 @@ async function syncProcessingTransfersOnChain(
 ): Promise<void> {
   const { valid: processingWithSig, invalid } = partitionByValidStoredSignature(
     await repo.listTransfersByStatus({
+      environment: currentClusterScope().environment,
       statuses: ["processing"],
       types: WALLET_TRANSFER_TYPES,
       hasSignature: true,
@@ -433,14 +468,15 @@ async function syncProcessingTransfersOnChain(
 
   let statuses: Array<SignatureStatusInfo | null>;
 
-  let rpc: ReturnType<typeof solanaRpc.createRpc>;
+  let rpc: SolanaRpc;
   try {
-    rpc = solanaRpc.createRpc(env);
+    rpc = createClusterRpc();
     statuses = await solanaRpc.getSignatureStatuses(rpc, signatures);
   } catch (err) {
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getSignatureStatuses RPC call failed"
     );
@@ -485,7 +521,7 @@ async function syncProcessingTransfersOnChain(
 async function reconcileExpiredLegacyCacheMisses(
   env: Env,
   repo: PaymentsRepository,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   transfers: PaymentTransferWithSignature[],
   nowIso: string
 ): Promise<void> {
@@ -512,7 +548,7 @@ async function reconcileExpiredLegacyCacheMisses(
 async function reconcileSignedSubmissionCacheMisses(
   env: Env,
   repo: PaymentsRepository,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   signedSubmissions: PaymentTransferWithSignedSubmission[],
   nowIso: string
 ): Promise<void> {
@@ -527,6 +563,7 @@ async function reconcileSignedSubmissionCacheMisses(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: getBlockHeight RPC call failed"
     );
@@ -638,7 +675,7 @@ async function keepStartedSubmissionForReconciliation(
 }
 
 async function getArchivedStatuses(
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   transfers: PaymentTransferWithSignature[]
 ): Promise<Array<SignatureStatusInfo | null> | null> {
   if (transfers.length === 0) {
@@ -661,6 +698,7 @@ async function getArchivedStatuses(
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
+        environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
     );

@@ -7,13 +7,12 @@ import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { assertPaymentWalletExactAccess, resolveScope, resolveWallet } from "../wallets";
+import { resolveScope, resolveWallet } from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
@@ -77,10 +76,10 @@ export async function createPaymentRequest(
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
+  // Access to the wallet and counterparty was checked by authorizePaymentRequest, before the
+  // key. Whether the wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
     c.env,

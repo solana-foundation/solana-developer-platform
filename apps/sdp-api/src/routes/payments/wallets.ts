@@ -15,9 +15,29 @@ import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
-async function findRetainedPaymentWallet(
+/**
+ * A custody wallet of the caller's project by its id, whatever its status: for an
+ * access check, where whether the wallet is active is state for the handler.
+ */
+export function findRetainedPaymentWallet(
   c: AppContext,
   custodyWalletId: string
+): Promise<CustodyWallet | null> {
+  return findProjectPaymentWallet(c, "id", custodyWalletId);
+}
+
+/** {@link findRetainedPaymentWallet}, by the provider wallet ID a request names. */
+export function findRetainedPaymentWalletByWalletId(
+  c: AppContext,
+  walletId: string
+): Promise<CustodyWallet | null> {
+  return findProjectPaymentWallet(c, "wallet_id", walletId);
+}
+
+async function findProjectPaymentWallet(
+  c: AppContext,
+  column: "id" | "wallet_id",
+  value: string
 ): Promise<CustodyWallet | null> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -28,12 +48,12 @@ async function findRetainedPaymentWallet(
        FROM custody_wallets w
        LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
        LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
-       WHERE w.id = ?
+       WHERE w.${column} = ?
          AND ((cfg.organization_id = ? AND cfg.project_id = ?)
            OR (conn.organization_id = ? AND conn.project_id = ?))
        LIMIT 1`
     )
-    .bind(custodyWalletId, auth.organizationId, projectId, auth.organizationId, projectId)
+    .bind(value, auth.organizationId, projectId, auth.organizationId, projectId)
     .first<{
       id: string;
       custody_config_id: string | null;
@@ -149,6 +169,33 @@ export function resolveWalletByCustodyWalletId(
     throw walletNotFound();
   }
   return wallet;
+}
+
+/**
+ * The access check for a route that names a wallet by its provider wallet ID
+ * (HOO-1918, ADR 0009): the key's bindings as authentication read them on this
+ * request (HOO-2048), deactivated wallets kept, so the replay of a request
+ * that ran is never refused. Resolving the wallet (ownership, whether it is
+ * active) stays in the handler.
+ */
+export function authorizeProviderWallet(
+  c: AppContext,
+  walletId: string,
+  requiredWalletPermissions: Permission[]
+): void {
+  assertApiKeyWalletAccess(getAuth(c), walletId, requiredWalletPermissions);
+}
+
+/**
+ * {@link authorizeProviderWallet} for a route that names a custody wallet by
+ * its id. A no-op for callers that are not wallet-scoped API keys.
+ */
+export function authorizeCustodyPaymentWallet(
+  c: AppContext,
+  custodyWalletId: string,
+  requiredWalletPermissions: Permission[]
+): void {
+  assertApiKeyCustodyWalletAccess(getAuth(c), custodyWalletId, requiredWalletPermissions);
 }
 
 export function assertPaymentWalletExactAccess(

@@ -8,6 +8,7 @@
  */
 
 import type { BackgroundRunner } from "@/runtime/background";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import type { Observability } from "@/runtime/observability";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -24,7 +25,10 @@ export interface PendingTransfersReconciliationDeps {
 
 export function runPendingTransfersReconciliation(deps: PendingTransfersReconciliationDeps): void {
   const work = async () => {
-    await Promise.all([trackPendingTransfers(deps.env), reconcileSponsorshipBudgets(deps.env)]);
+    await Promise.all([
+      runInEachClusterScope(() => trackPendingTransfers(deps.env)),
+      reconcileSponsorshipBudgets(deps.env),
+    ]);
   };
 
   // Both branches must hand bg.run() a promise — never invoke `work` eagerly,

@@ -103,7 +103,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail),
         amount: null,
         memo: null,
         type: "onramp",

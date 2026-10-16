@@ -664,6 +664,13 @@ export const COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * The collection attempts that answer a keyed collect (HOO-1918): a live one,
+ * as migration 0135's unique index covers. A failed or skipped attempt answers
+ * nothing, so the same key runs again.
+ */
+export const COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY =
+  COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE;
 export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
   "processing",
   "confirmed",
@@ -680,6 +687,20 @@ export type PaymentSubscriptionCollectionAttemptInitialStatus =
 export const IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+/**
+ * The activation, lifecycle and update attempts that answer a keyed request
+ * (HOO-1918): every one but a failed attempt, as migration 0135's unique
+ * indexes cover. A failed attempt answers nothing, so the same key runs again.
+ */
+export const RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY = [
+  "processing",
+  "confirmed",
+] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+export function isInFlightRecurringPaymentAttemptStatus(
+  status: PaymentRecurringPaymentAttemptStatus
+): boolean {
+  return IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES.some((candidate) => candidate === status);
+}
 export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
   "canceling",
   "resuming",

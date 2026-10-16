@@ -27,6 +27,7 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
 
     adapter = new KoraAdapter({
       rpcUrl,
+      userId: "sdp:v1:system:integration-kora",
       apiKey,
       timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30000,
     });
@@ -133,6 +134,7 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
     it("handles invalid RPC URL gracefully", async () => {
       const badAdapter = new KoraAdapter({
         rpcUrl: "http://localhost:1",
+        userId: "sdp:v1:system:integration-kora",
         timeoutMs: 5000,
       });
 

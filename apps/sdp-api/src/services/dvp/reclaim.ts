@@ -34,7 +34,10 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -133,12 +136,15 @@ export async function reclaimDvpTradeLeg(
   const [destination] = await findAssociatedTokenPda({ owner: party, mint, tokenProgram });
 
   // Sponsorship only after every refusal above, as in fund and settle.
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    movement: "dvp.reclaim",
-    organizationId: params.organizationId,
-    projectId: params.projectId,
-    actor: { type: "wallet", id: params.custodyWalletId },
-  });
+  const feePayment = createSponsorshipFeePayment(
+    env,
+    await resolveProjectSponsorshipScope(env, {
+      organizationId: params.organizationId,
+      projectId: params.projectId,
+      actor: { type: "wallet", id: params.custodyWalletId },
+    }),
+    "dvp.reclaim"
+  );
   const sponsor = await feePayment.getFeePayer();
 
   // The sponsor pays rent for the destination when it has to be created, like

@@ -1,3 +1,4 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
@@ -28,7 +29,7 @@ describe("runPendingTransfersReconciliation", () => {
     runPendingTransfersReconciliation({ env, bg });
     await vi.mocked(bg.run).mock.calls[0]?.[0];
 
-    expect(trackPendingTransfers).toHaveBeenCalledExactlyOnceWith(env);
+    expect(vi.mocked(trackPendingTransfers).mock.calls).toEqual(SDP_ENVIRONMENTS.map(() => [env]));
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledExactlyOnceWith(env);
     expect(replayRampWebhookEvents).not.toHaveBeenCalled();
   });
