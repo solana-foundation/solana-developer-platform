@@ -3,10 +3,17 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
-  type Base64EncodedWireTransaction,
+  address,
+  blockhash,
+  compileTransaction,
+  createTransactionMessage,
+  getBase64EncodedWireTransaction,
   isSolanaError,
+  pipe,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { createClusterRpc } from "./factory";
 import { runInClusterScope } from "./scope";
@@ -24,6 +31,21 @@ type RpcCall = { url: string; method: string };
 type JsonRpcBody = { result: unknown } | { error: { code: number; message: string } };
 
 const SLOT = 7;
+
+const WIRE_TRANSACTION = getBase64EncodedWireTransaction(
+  compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) =>
+        setTransactionMessageFeePayer(address("11111111111111111111111111111111"), message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash: blockhash("11111111111111111111111111111111"), lastValidBlockHeight: 0n },
+          message
+        )
+    )
+  )
+);
 
 const SERVES_DEVNET: Endpoint = {
   genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
@@ -483,6 +505,137 @@ describe("createClusterRpc", () => {
     ]);
   });
 
+  it("fails a read behind the caller's slot over without cooling the endpoint down", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-behind-preferred.example.test";
+    const fallback = "https://devnet-behind-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const behindCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(
+        SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+      ),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(behindCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const caughtUpCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    await rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send();
+    assert.deepEqual(caughtUpCalls, [
+      slotRead(preferred),
+      { url: preferred, method: "sendTransaction" },
+    ]);
+  });
+
+  it("cools an endpoint down when it answers a read as unhealthy", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-unhealthy-read-preferred.example.test";
+    const fallback = "https://devnet-unhealthy-read-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(unhealthyCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [slotRead(fallback)]);
+  });
+
+  it("returns an unhealthy sendTransaction answer without failing over and cools the endpoint down", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-unhealthy-send-preferred.example.test";
+    const fallback = "https://devnet-unhealthy-send-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    await assert.rejects(
+      rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send(),
+      (error) => isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)
+    );
+    assert.deepEqual(unhealthyCalls, [
+      genesisProbe(preferred),
+      { url: preferred, method: "sendTransaction" },
+    ]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [genesisProbe(fallback), slotRead(fallback)]);
+  });
+
+  it("keeps the last endpoint cooling down when it answers a read as unhealthy", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    const preferred = "https://devnet-last-unhealthy-preferred.example.test";
+    const fallback = "https://devnet-last-unhealthy-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: preferred,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: fallback,
+    });
+    const outageCalls = stubEndpoints({
+      [preferred]: DEVNET_FETCH_FAILS,
+      [fallback]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(outageCalls, [
+      genesisProbe(preferred),
+      slotRead(preferred),
+      genesisProbe(fallback),
+      slotRead(fallback),
+    ]);
+
+    const unhealthyCalls = stubEndpoints({
+      [preferred]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
+      [fallback]: devnetJsonRpcError(
+        SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+      ),
+    });
+    mock.timers.tick(29_999);
+    await assert.rejects(rpc.getSlot().send(), (error) =>
+      isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)
+    );
+    assert.deepEqual(unhealthyCalls, [slotRead(fallback), slotRead(preferred)]);
+
+    const recoveredCalls = stubEndpoints({ [preferred]: SERVES_DEVNET, [fallback]: SERVES_DEVNET });
+    mock.timers.tick(1);
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(recoveredCalls, [genesisProbe(fallback), slotRead(fallback)]);
+  });
+
   it("stops failing over once the caller aborts", async () => {
     const stalled = "https://devnet-abandoned.example.test";
     const healthy = "https://devnet-never-asked.example.test";
@@ -519,7 +672,7 @@ describe("createClusterRpc", () => {
 
     await assert.rejects(
       runInClusterScope(SANDBOX, createClusterRpc)
-        .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
+        .sendTransaction(WIRE_TRANSACTION, { encoding: "base64" })
         .send(),
       { name: "TypeError", message: "fetch failed" }
     );
@@ -536,7 +689,7 @@ describe("createClusterRpc", () => {
     const calls = stubEndpoints({ [unproven]: GENESIS_PROBE_FETCH_FAILS, [proven]: SERVES_DEVNET });
 
     await runInClusterScope(SANDBOX, createClusterRpc)
-      .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
+      .sendTransaction(WIRE_TRANSACTION, { encoding: "base64" })
       .send();
 
     assert.deepEqual(calls, [
