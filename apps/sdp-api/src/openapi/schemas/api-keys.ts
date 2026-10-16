@@ -12,7 +12,6 @@ import {
   withOpenApi,
   z,
 } from "./base";
-import { custodyWalletOwnerRequestSchema } from "./custody";
 
 export const apiKeyGrantSchema = z.enum(API_KEY_GRANTABLE_ACTIONS).openapi({
   description:
@@ -224,7 +223,13 @@ const retiredApiKeyFieldMask = {
 } as const;
 
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
-  .omit({ connectionId: true, ...retiredApiKeyFieldMask })
+  .omit({
+    connectionId: true,
+    provisionWallet: true,
+    walletLabel: true,
+    walletPurpose: true,
+    ...retiredApiKeyFieldMask,
+  })
   .extend({
     name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
@@ -257,19 +262,6 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
     }),
-    provisionWallet: withOpenApi(custodyWalletOwnerRequestSchema.optional(), {
-      description:
-        "Provision a new wallet for this key under exactly one provider account: { provider } for the project's Managed config for that provider, or { connectionId } for a Custody Connection.",
-      example: { connectionId: "cconn_123" },
-    }),
-    walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
-      description: "Optional label for a provisioned wallet.",
-      example: "Mint authority wallet",
-    }),
-    walletPurpose: withOpenApi(apiKeyCreateSchemaBase.shape.walletPurpose, {
-      description: "Optional purpose for a provisioned wallet.",
-      example: "mint_authority",
-    }),
   })
   .openapi({
     description: "Create API key request body.",
@@ -277,9 +269,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       name: "Primary Key",
       grants: ["transfers.execute", "counterparties.read", "wallets.read"],
       walletScope: "selected",
-      provisionWallet: { connectionId: "cconn_123" },
-      walletLabel: "Treasury wallet",
-      walletPurpose: "transfer",
+      walletIds: ["cwlt_0f2c8c1e"],
     },
   });
 

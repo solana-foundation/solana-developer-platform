@@ -82,14 +82,13 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
 
   await assertProjectAccess(c, actor, projectId);
 
-  // Refused before any wallet is provisioned; the service refuses them again.
+  // Refused before anything is written; the service refuses them again.
   assertGrantableApiKeyGrants(actor.role, body.grants);
   assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), body.grants);
 
-  const { walletScope, provisionedWalletId } = await resolveCreateWalletScope(
+  const walletScope = await resolveCreateWalletScope(
     c,
-    actor,
-    projectId,
+    { organizationId: actor.organizationId, projectId },
     body
   );
 
@@ -126,7 +125,6 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
           grants: key.grants,
           environment: key.environment,
           ...walletScopeAuditMetadata(walletScope),
-          provisionedWalletId,
         },
       },
     };

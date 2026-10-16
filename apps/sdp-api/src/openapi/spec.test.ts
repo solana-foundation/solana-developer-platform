@@ -642,32 +642,20 @@ describe("OpenAPI spec", () => {
     });
   });
 
-  it("documents optional exact-owner provisioning for both API-key create routes", () => {
+  it("documents no wallet provisioning on either API-key create route", () => {
     const doc = createOpenApiDocument();
 
     for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
       const operation = doc.paths?.[path]?.post;
       const requestSchema = getJsonSchema(operation?.requestBody);
 
-      expect(requestSchema.properties?.connectionId).toBeUndefined();
-      expect(
-        requestSchema.properties?.provisionWallet?.anyOf?.map((variant) => ({
-          required: variant.required,
-          not: variant.not,
-        }))
-      ).toEqual([
-        { required: ["provider"], not: { required: ["connectionId"] } },
-        { required: ["connectionId"], not: { required: ["provider"] } },
-      ]);
-      expect(requestSchema.example).toMatchObject({
-        provisionWallet: { connectionId: "cconn_123" },
-      });
+      // Creating a key never creates a wallet (HOO-2099).
+      for (const field of ["connectionId", "provisionWallet", "walletLabel", "walletPurpose"]) {
+        expect(requestSchema.properties?.[field], `${path} ${field}`).toBeUndefined();
+      }
+      expect(requestSchema.example).toMatchObject({ walletIds: ["cwlt_0f2c8c1e"] });
       expect(operation?.responses?.["201"]).toBeDefined();
       expect(operation?.responses?.["400"]).toBeDefined();
-      expect(operation?.responses?.["403"]).toBeDefined();
-      expect(operation?.responses?.["404"]).toBeDefined();
-      expect(operation?.responses?.["409"]).toBeDefined();
-      expect(operation?.responses?.["503"]).toBeDefined();
     }
   });
 

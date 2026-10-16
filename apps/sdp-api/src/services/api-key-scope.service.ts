@@ -93,7 +93,6 @@ export function assertApiKeyGrantsInReleaseChannel(
 export function parseRequestedWalletScope(input: {
   walletScope: ApiKeyWalletScope | undefined;
   walletIds: readonly string[] | undefined;
-  provisionWallet: boolean;
 }): { scope: ApiKeyWalletScope; walletIds: readonly string[] } | undefined {
   if (input.walletScope === undefined) {
     if (input.walletIds !== undefined) {
@@ -104,9 +103,6 @@ export function parseRequestedWalletScope(input: {
   if (input.walletScope === "all") {
     if (input.walletIds !== undefined) {
       throw badRequest("walletScope 'all' cannot be combined with walletIds");
-    }
-    if (input.provisionWallet) {
-      throw badRequest("walletScope 'all' cannot be combined with provisionWallet");
     }
     return { scope: "all", walletIds: [] };
   }

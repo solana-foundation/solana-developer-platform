@@ -3,7 +3,6 @@
  */
 
 import type { Action } from "./actions";
-import type { CustodyWalletOwnerTarget } from "./custody";
 
 export const SDP_ENVIRONMENTS = ["sandbox", "production"] as const;
 
@@ -57,9 +56,6 @@ export interface CreateApiKeyRequest {
   walletIds?: string[]; // Custody wallet ids, for walletScope "selected"
   allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
   expiresAt?: string; // ISO date string
-  provisionWallet?: CustodyWalletOwnerTarget;
-  walletLabel?: string;
-  walletPurpose?: string;
 }
 
 export interface UpdateApiKeyRequest {

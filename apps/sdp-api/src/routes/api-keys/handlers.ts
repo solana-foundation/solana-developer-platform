@@ -107,15 +107,14 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
 
   const body = c.req.valid("json");
 
-  // Refused before any wallet is provisioned; the service refuses them again.
+  // Refused before anything is written; the service refuses them again.
   assertGrantableApiKeyGrants(actor.role, body.grants);
   assertApiKeyGrantsInReleaseChannel(requestApiKeyGrantChannel(c), body.grants);
 
   const projectId = requireProjectId(c);
-  const { walletScope, provisionedWalletId } = await resolveCreateWalletScope(
+  const walletScope = await resolveCreateWalletScope(
     c,
-    actor,
-    projectId,
+    { organizationId: actor.organizationId, projectId },
     body
   );
 
@@ -147,7 +146,6 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
           grants: key.grants,
           environment: key.environment,
           ...walletScopeAuditMetadata(walletScope),
-          provisionedWalletId,
         },
       },
     };
@@ -223,7 +221,6 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   const requestedWalletScope = parseRequestedWalletScope({
     walletScope: body.walletScope,
     walletIds: body.walletIds,
-    provisionWallet: false,
   });
   const walletScope =
     requestedWalletScope === undefined

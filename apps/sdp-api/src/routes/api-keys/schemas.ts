@@ -1,7 +1,6 @@
 import { ACTIONS, API_KEY_WALLET_SCOPES, isApiKeyGrantableAction } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
-import { custodyWalletOwnerSchema } from "../custody/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
@@ -40,6 +39,8 @@ function retiredApiKeyField(field: string, replacement: string) {
 const GRANTS_REPLACEMENT = "grants, the explicit module.verb actions the key holds";
 const WALLETS_REPLACEMENT =
   "walletScope and walletIds, the custody wallet ids the key may sign with";
+const PROVISION_REPLACEMENT =
+  "create the wallet with POST /v1/wallets, then list its id in walletIds";
 
 const retiredApiKeyFields = {
   role: retiredApiKeyField("role", GRANTS_REPLACEMENT),
@@ -72,12 +73,12 @@ export const apiKeyCreateSchema = z.strictObject({
   walletIds: apiKeyWalletIdsSchema.optional(),
   allowedIps: z.array(apiKeyAllowedIpSchema).optional(),
   expiresAt: z.string().datetime().optional(),
-  provisionWallet: custodyWalletOwnerSchema.optional(),
   connectionId: z.never().optional(),
-  walletLabel: z.string().max(100).optional(),
-  walletPurpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
-    .optional(),
+  // Creating a key never creates a wallet (HOO-2099): two writes in one
+  // request could leave a provider wallet with no key.
+  provisionWallet: retiredApiKeyField("provisionWallet", PROVISION_REPLACEMENT),
+  walletLabel: retiredApiKeyField("walletLabel", PROVISION_REPLACEMENT),
+  walletPurpose: retiredApiKeyField("walletPurpose", PROVISION_REPLACEMENT),
   ...retiredApiKeyFields,
 });
 

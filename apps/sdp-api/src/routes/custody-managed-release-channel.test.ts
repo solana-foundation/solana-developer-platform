@@ -5,7 +5,6 @@ import app from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
@@ -127,39 +126,6 @@ describe("Managed custody out of the release channel", () => {
     expect(await response.json()).toEqual(channelRefusalBody("privy"));
     expect(fetch).not.toHaveBeenCalled();
   });
-
-  it("refuses API-key Config wallet provisioning before any Provider call or row", async () => {
-    // Keys are created by a signed-in organization admin (HOO-2099).
-    const { headers } = await authenticateTestClerkUser(env, getDb(env), {
-      userId: USER_ID,
-      email: "managed-release-channel@example.com",
-      clerkUserId: `clerk_${USER_ID}`,
-      organizationId: ORGANIZATION_ID,
-      clerkOrgId: `clerk_${ORGANIZATION_ID}`,
-      orgSlug: "managed-release-channel",
-      role: "admin",
-    });
-    const response = await sendAs(headers(PROJECT_ID), `/v1/projects/${PROJECT_ID}/api-keys`, {
-      name: "Managed out of channel key",
-      grants: ["transfers.read"],
-      walletScope: "selected",
-      provisionWallet: { provider: "privy" },
-    });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual(channelRefusalBody("privy"));
-    expect(await getDb(env).queryMany("SELECT id FROM custody_wallets ORDER BY id")).toEqual([
-      { id: "cwlt_managed_channel_anchorage" },
-      { id: "cwlt_managed_channel_privy_a" },
-      { id: "cwlt_managed_channel_privy_b" },
-    ]);
-    expect(
-      await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = ?", [
-        "Managed out of channel key",
-      ])
-    ).toEqual([]);
-    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !isJwksRequest(input))).toEqual([]);
-  });
 });
 
 function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
@@ -170,7 +136,7 @@ function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
   );
 }
 
-async function sendAs(
+async function _sendAs(
   headers: Record<string, string>,
   path: string,
   body: Record<string, unknown>

@@ -8,7 +8,6 @@ describe("parseRequestedWalletScope", () => {
       parseRequestedWalletScope({
         walletScope: "all",
         walletIds: undefined,
-        provisionWallet: false,
       })
     ).toEqual({ scope: "all", walletIds: [] });
   });
@@ -18,7 +17,6 @@ describe("parseRequestedWalletScope", () => {
       parseRequestedWalletScope({
         walletScope: "selected",
         walletIds: ["cwlt_a", "cwlt_b"],
-        provisionWallet: false,
       })
     ).toEqual({ scope: "selected", walletIds: ["cwlt_a", "cwlt_b"] });
   });
@@ -28,21 +26,16 @@ describe("parseRequestedWalletScope", () => {
       parseRequestedWalletScope({
         walletScope: "selected",
         walletIds: undefined,
-        provisionWallet: false,
       })
     ).toEqual({ scope: "selected", walletIds: [] });
   });
 
-  it("refuses wallets or provisioning on an all-wallets key", () => {
+  it("refuses wallets on an all-wallets key", () => {
     expect(() =>
       parseRequestedWalletScope({
         walletScope: "all",
         walletIds: ["cwlt_a"],
-        provisionWallet: false,
       })
-    ).toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
-    expect(() =>
-      parseRequestedWalletScope({ walletScope: "all", walletIds: undefined, provisionWallet: true })
     ).toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
   });
 
@@ -51,14 +44,12 @@ describe("parseRequestedWalletScope", () => {
       parseRequestedWalletScope({
         walletScope: undefined,
         walletIds: undefined,
-        provisionWallet: false,
       })
     ).toBeUndefined();
     expect(() =>
       parseRequestedWalletScope({
         walletScope: undefined,
         walletIds: ["cwlt_a"],
-        provisionWallet: false,
       })
     ).toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
   });
