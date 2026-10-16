@@ -6,8 +6,11 @@ import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types
 import { type CryptoRailId, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import { addDecimalAmounts, subtractDecimalAmounts } from "../../../decimal";
 import { SdpPaymentsError } from "../../../errors";
+import { RAMP_PROVIDER_CLIENTS } from "../../index";
+import { replayExchanges } from "../../test-kit";
 import type { RampOfframpQuoteInput, RampOnrampQuoteInput, RampRuntimeContext } from "../../types";
 import { distillMoonpayRailSupport, MoonpayRampClient } from "./client";
+import { MOONPAY_TEST_KIT } from "./test-kit";
 
 const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
 const SECRET_KEY = "sk_test_moonpay";
@@ -257,6 +260,66 @@ describe("MoonpayRampClient on-ramp limits", () => {
     await assert.rejects(
       quoteAud(`1${"0".repeat(40)}`),
       isBadRequest(/^fiatAmount is out of range$/)
+    );
+  });
+});
+
+describe("MoonpayRampClient credentials", () => {
+  /** Estimates the kit's onramp with `env` in `mode`, counting every request. */
+  async function estimateWith(env: Record<string, string>, mode: "sandbox" | "production") {
+    assert.ok(MOONPAY_TEST_KIT.onramp, "the MoonPay kit records an onramp");
+    const replay = replayExchanges(MOONPAY_TEST_KIT.onramp.estimate.exchanges);
+    const settled = await RAMP_PROVIDER_CLIENTS.moonpay
+      .estimateOnramp({ env, mode }, MOONPAY_TEST_KIT.onramp.estimate.input)
+      .then(
+        () => ({ ok: true as const }),
+        (cause: unknown) => ({ ok: false as const, cause })
+      );
+    return { settled, requests: replay.requests.length + replay.unrecorded.length };
+  }
+
+  function refusedBeforeAnyRequest(
+    result: Awaited<ReturnType<typeof estimateWith>>,
+    message: string
+  ): void {
+    assert.equal(result.requests, 0, "no request reaches MoonPay");
+    assert.ok(!result.settled.ok, "the estimate is refused");
+    assert.ok(result.settled.cause instanceof SdpPaymentsError);
+    assert.equal(result.settled.cause.code, "PROVIDER_NOT_CONFIGURED");
+    assert.equal(result.settled.cause.message, message);
+  }
+
+  it("refuses production projects, which bring their own keys", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(MOONPAY_TEST_KIT.env, "production"),
+      "MoonPay is not configured for production projects."
+    );
+  });
+
+  it("refuses a live secret key mounted under the sandbox names", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(
+        { ...MOONPAY_TEST_KIT.env, MOONPAY_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" },
+        "sandbox"
+      ),
+      "MoonPay sandbox keys must be test-mode keys."
+    );
+  });
+
+  it("refuses a live publishable key mounted under the sandbox names", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith(
+        { ...MOONPAY_TEST_KIT.env, MOONPAY_SANDBOX_API_KEY: "pk_live_mounted_by_mistake" },
+        "sandbox"
+      ),
+      "MoonPay sandbox keys must be test-mode keys."
+    );
+  });
+
+  it("refuses when the sandbox keys are missing", async () => {
+    refusedBeforeAnyRequest(
+      await estimateWith({ MOONPAY_SANDBOX_API_KEY: "pk_test_contract" }, "sandbox"),
+      "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY."
     );
   });
 });

@@ -20,15 +20,15 @@ function providerField(
 describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
   it("offers only the ramp providers the flags leave on, in the quote endpoints' provider picker", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
-      { transfers: [], wallets: [], rampProviders: ["bvnk", "coinbase"] },
+      { transfers: [], wallets: [], rampProviders: ["bvnk", "moonpay"] },
       t
     );
 
     for (const endpointId of ["create-onramp-quote", "create-offramp-quote"]) {
       const field = providerField(configs, endpointId);
       expect(field?.kind).toBe("select");
-      expect(field?.options?.map((option) => option.value)).toEqual(["bvnk", "coinbase"]);
-      expect(field?.options?.map((option) => option.label)).toEqual(["BVNK", "Coinbase"]);
+      expect(field?.options?.map((option) => option.value)).toEqual(["bvnk", "moonpay"]);
+      expect(field?.options?.map((option) => option.label)).toEqual(["BVNK", "MoonPay"]);
       expect(field?.defaultValue).toBe("bvnk");
     }
   });

@@ -44,11 +44,21 @@ import type { CustodyWalletPurpose } from "@sdp/types";
 
 export type WalletPurpose = CustodyWalletPurpose;
 
+/**
+ * A keyed wallet create's recovery point (HOO-1918, migration 0136): the
+ * request id derived from its Idempotency-Key and the request's fingerprint.
+ */
+export interface CustodyWalletIdempotency {
+  requestId: string;
+  fingerprint: string;
+}
+
 export interface CreateWalletParams {
   walletId: string;
   publicKey: string;
   label?: string;
   purpose?: WalletPurpose;
+  idempotency?: CustodyWalletIdempotency | null;
 }
 
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
@@ -294,9 +304,11 @@ export class CustodyConfigStore implements SigningConfigStore {
              label,
              purpose,
              status,
+             idempotency_request_id,
+             idempotency_fingerprint,
              updated_at
            )
-           VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
         )
         .bind(
           id,
@@ -304,7 +316,9 @@ export class CustodyConfigStore implements SigningConfigStore {
           params.walletId,
           params.publicKey,
           params.label ?? null,
-          params.purpose ?? null
+          params.purpose ?? null,
+          params.idempotency?.requestId ?? null,
+          params.idempotency?.fingerprint ?? null
         ),
     ];
 

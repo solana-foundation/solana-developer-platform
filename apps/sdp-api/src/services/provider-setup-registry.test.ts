@@ -117,8 +117,8 @@ describe("provider setup registry", () => {
   it("reports ramps as platform-managed and respects sandbox configuration", () => {
     const moonpay = getProviderSetupDefinition("ramps", "moonpay");
     const env = {
-      MOONPAY_SANDBOX_API_KEY: "sandbox-key",
-      MOONPAY_SANDBOX_SECRET_KEY: "sandbox-secret",
+      MOONPAY_SANDBOX_API_KEY: "pk_test_sandbox",
+      MOONPAY_SANDBOX_SECRET_KEY: "sk_test_sandbox",
     } as Env;
 
     expect(moonpay.setupMode).toBe("platform_managed");

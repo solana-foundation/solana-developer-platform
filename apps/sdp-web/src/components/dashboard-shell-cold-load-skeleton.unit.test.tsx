@@ -65,7 +65,17 @@ function renderColdLoad(pathname: string): string {
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
 
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, identityTranslate, false, false, []);
+  // The same previous design the shell above is rendered in.
+  const config = getDashboardPageConfig(
+    pathname,
+    identityTranslate,
+    false,
+    false,
+    [],
+    true,
+    true,
+    false
+  );
   return config.contentWidthClass ?? "max-w-5xl";
 }
 

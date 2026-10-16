@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { requirePermissions } from "@/middleware/auth";
-import { validateBody } from "@/middleware/validate";
+import { authorize } from "@/middleware/authorize";
+import { idempotent } from "@/middleware/idempotency";
+import { validateBody, validateParams } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { authorizeSubscriptionPlanCreate, authorizeSubscriptionPlanUpdate } from "../access";
 import {
   createSubscriptionPlan,
   getSubscriptionPlan,
@@ -12,6 +15,7 @@ import {
 import {
   createSubscriptionPlanSchema,
   prepareSubscriptionPlanCreateSchema,
+  subscriptionPlanIdParamsSchema,
   updateSubscriptionPlanSchema,
 } from "./schemas";
 
@@ -21,6 +25,8 @@ subscriptionPlans.post(
   "/",
   requirePermissions("payments:write", "wallets:read"),
   validateBody(createSubscriptionPlanSchema),
+  authorize(authorizeSubscriptionPlanCreate),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   createSubscriptionPlan
 );
 subscriptionPlans.get("/", requirePermissions("payments:read"), listSubscriptionPlans);
@@ -34,7 +40,10 @@ subscriptionPlans.get("/:planId", requirePermissions("payments:read"), getSubscr
 subscriptionPlans.patch(
   "/:planId",
   requirePermissions("payments:write", "wallets:read"),
+  validateParams(subscriptionPlanIdParamsSchema),
   validateBody(updateSubscriptionPlanSchema),
+  authorize(authorizeSubscriptionPlanUpdate),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   updateSubscriptionPlan
 );
 

@@ -31,7 +31,7 @@ describe("createTransfer", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const transfer = await createTransfer(SUBMISSION, t, "key_1");
+    const transfer = await createTransfer(SUBMISSION, t, { value: "key_1", persisted: true });
 
     expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
     const init = fetchMock.mock.calls[0][1];
@@ -40,7 +40,7 @@ describe("createTransfer", () => {
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("idempotencyKey");
   });
 
-  it("carries no key header for a caller whose request is already single-shot", async () => {
+  it("gives a caller without its own key a per-action key", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
     );
@@ -50,7 +50,9 @@ describe("createTransfer", () => {
 
     const init = fetchMock.mock.calls[0][1];
     expect(init).toBeDefined();
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toBeNull();
+    // Transfers require a key (HOO-1918), so a single-shot caller gets one for
+    // its action from dashboardRequest.
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
   });
 
@@ -60,9 +62,9 @@ describe("createTransfer", () => {
       vi.fn(async () => Response.json({ data: {} }))
     );
 
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toThrow(
-      "DashboardPayments.workspace.transferMissing"
-    );
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
   });
 
   // The status decides the key's fate, so the error has to carry it.
@@ -72,13 +74,15 @@ describe("createTransfer", () => {
       vi.fn(async () => Response.json({ error: { message: "over the limit" } }, { status: 422 }))
     );
 
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toMatchObject({
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toMatchObject({
       name: "TransferRequestError",
       message: "over the limit",
       status: 422,
     });
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toBeInstanceOf(
-      TransferRequestError
-    );
+    await expect(
+      createTransfer(SUBMISSION, t, { value: "key_1", persisted: true })
+    ).rejects.toBeInstanceOf(TransferRequestError);
   });
 });

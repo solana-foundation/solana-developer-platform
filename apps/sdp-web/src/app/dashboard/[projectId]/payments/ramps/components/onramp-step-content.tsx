@@ -6,8 +6,6 @@ import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
-import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
-import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
@@ -170,19 +168,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
 
   if (currentStepId === "PROVIDER" && quote?.deliveryMode === "hosted") {
     return (
-      <div className="space-y-6">
-        {quote.provider === "coinbase" ? (
-          <>
-            <CoinbaseQuoteSummary quote={quote} />
-            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
-          </>
-        ) : (
-          <MoonpayRampFrame
-            title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
-            src={quote.hostedUrl}
-          />
-        )}
-      </div>
+      <MoonpayRampFrame
+        title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
+        src={quote.hostedUrl}
+      />
     );
   }
 

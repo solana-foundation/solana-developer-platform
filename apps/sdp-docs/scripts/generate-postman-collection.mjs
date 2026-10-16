@@ -2,6 +2,12 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  isSuccessfulPaymentTransferStatus,
+  NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+  RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+  RECURRING_PAYMENT_UPDATE_TRANSITION,
+} from "@sdp/types";
+import {
   getPrimaryTagName,
   isPublicOperation,
   POSTMAN_COLLECTION_FILENAME,
@@ -169,7 +175,7 @@ function getNamedExampleValue(examples, preferredName) {
   return undefined;
 }
 
-function getRequestHeaders(operation) {
+function getRequestHeaders(operation, routePath, method) {
   const headers = [];
 
   if (operation.requestBody?.content?.["application/json"]) {
@@ -180,7 +186,126 @@ function getRequestHeaders(operation) {
     });
   }
 
+  // A route that requires Idempotency-Key returns 400 without one (ADR 0009).
+  // The key is a saved collection variable per operation, not {{$guid}}: a
+  // retry after a timeout must resend the same key or it moves money twice,
+  // and one operation's response must never retire another's key.
+  // idempotencyKeyEvents mints and retires it.
+  const requiresIdempotencyKey = (operation.parameters ?? []).some(
+    (parameter) =>
+      parameter?.in === "header" &&
+      parameter.required === true &&
+      typeof parameter.name === "string" &&
+      parameter.name.toLowerCase() === "idempotency-key"
+  );
+  if (requiresIdempotencyKey) {
+    headers.push({
+      key: "Idempotency-Key",
+      value: `{{${idempotencyKeyVariable(operation, routePath, method)}}}`,
+      type: "text",
+    });
+  }
+
   return headers;
+}
+
+/** The collection variable holding one operation's saved Idempotency-Key. */
+function idempotencyKeyVariable(operation, routePath, method) {
+  const name = operation.operationId ?? `${method}_${routePath}`.replace(/[^A-Za-z0-9]+/g, "_");
+  return `idempotencyKey.${name}`;
+}
+
+const SAVED_KEY_VARIABLE = [
+  'const header = pm.request.headers.find((h) => h.key.toLowerCase() === "idempotency-key");',
+  "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+  "const variable = saved && saved[1];",
+];
+
+/**
+ * Statuses that mean the movement a money route answered with is still under
+ * way, derived from `@sdp/types` so they never drift from the API's own: a
+ * transfer not yet in a terminal or successful status (pending, processing,
+ * awaiting payment, settling; a batch and a collection attempt use the same
+ * in-flight names), and a recurring schedule mid-transition (the statuses the
+ * cron recovers, plus the update's processing status). While a response shows
+ * one, the saved key is kept. Embedded into the script text at generation.
+ */
+const NON_FINAL_STATUSES = [
+  ...new Set([
+    ...NON_TERMINAL_RAMP_TRANSFER_STATUSES.filter(
+      (status) => !isSuccessfulPaymentTransferStatus(status)
+    ),
+    ...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
+    RECURRING_PAYMENT_UPDATE_TRANSITION.processingStatus,
+  ]),
+];
+
+/**
+ * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
+ * its own `idempotencyKey.<operationId>` variable, minted only when none is
+ * saved. Every saved key is a money route's, so it follows the dashboard's
+ * money-route rule (`moneyAnswerRetiresKey`, apps/sdp-web/src/lib/idempotency.ts):
+ * the key is retired by a 2xx whose movement is final, a replayed refusal, or
+ * a 422 other than `IDEMPOTENCY_KEY_REUSED` (the request itself was rejected).
+ * A 2xx that still shows the transfer, batch, schedule or collection under way
+ * (`NON_FINAL_STATUSES`), or whose body is unreadable or names no data (as the
+ * dashboard treats an unreadable answer), keeps it: pressing Send again with a
+ * new key would pay again, so the user polls with GET until it is final, then
+ * clears the variable.
+ * Everything else keeps it too: a 400, 401, 403 or 429 refusal is not stored
+ * and the original may still have run, a 409 (in flight, or outcome unknown) is
+ * answered under the same key, a 5xx is retried under it, and a 422
+ * `IDEMPOTENCY_KEY_REUSED` says only that this send differed from the key's
+ * original, so the user restores the original request or clears the variable
+ * deliberately. A timeout runs no test script and keeps the key, so pressing
+ * Send again retries the same operation instead of starting another.
+ * Each send remembers the key it used (a request-local variable) and retires
+ * only that key, so a late answer to an earlier send never clears the key a
+ * newer send saved.
+ */
+function idempotencyKeyEvents() {
+  return [
+    {
+      listen: "prerequest",
+      script: {
+        type: "text/javascript",
+        exec: [
+          ...SAVED_KEY_VARIABLE,
+          "if (variable && !pm.collectionVariables.get(variable)) {",
+          '  pm.collectionVariables.set(variable, pm.variables.replaceIn("{{$guid}}"));',
+          "}",
+          'if (variable) pm.variables.set("idempotencyKeySent", pm.collectionVariables.get(variable));',
+        ],
+      },
+    },
+    {
+      listen: "test",
+      script: {
+        type: "text/javascript",
+        exec: [
+          ...SAVED_KEY_VARIABLE,
+          'const sent = pm.variables.get("idempotencyKeySent");',
+          "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
+          "  const status = pm.response.code;",
+          '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
+          "  let body;",
+          "  try { body = pm.response.json(); } catch (e) {}",
+          "  const code = body && body.error ? body.error.code : undefined;",
+          '  const rejected = status === 422 && code !== "IDEMPOTENCY_KEY_REUSED";',
+          "  const data = body && typeof body.data === 'object' ? body.data : null;",
+          `  const moving = new Set(${JSON.stringify(NON_FINAL_STATUSES)});`,
+          "  const inFlight = data !== null && [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
+          "    .some((record) => record && moving.has(record.status));",
+          "  // A 2xx whose body is unreadable or names no data says nothing final: keep the key.",
+          "  const settled = status >= 200 && status < 300 ? data !== null && !inFlight : replayed;",
+          "  if (settled || rejected) {",
+          "    pm.collectionVariables.unset(variable);",
+          "  }",
+          "}",
+        ],
+      },
+    },
+  ];
 }
 
 function getRequestBody(spec, operation, preferredExampleName) {
@@ -226,7 +351,7 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
   const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
-    header: getRequestHeaders(operation),
+    header: getRequestHeaders(operation, routePath, method),
     url: buildRequestUrl(baseUrl, routePath),
     description: operation.description || operation.summary || "",
   };
@@ -305,6 +430,7 @@ function toPostmanCollection(spec) {
         },
       ],
     },
+    event: idempotencyKeyEvents(),
     variable: [
       {
         key: "baseUrl",

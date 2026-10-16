@@ -114,7 +114,7 @@ function buildTransferListWhere(params: ListTransfersInput): {
          JOIN payment_transfers named_pt
            ON named_pt.counterparty_id = search_c.id
           AND named_pt.organization_id = search_c.organization_id
-          AND named_pt.project_id IS NOT DISTINCT FROM search_c.project_id
+          AND named_pt.project_id = search_c.project_id
          WHERE ${counterpartyScope.join(" AND ")}
            AND search_c.display_name ILIKE ? ESCAPE '\\'
        )`
@@ -164,7 +164,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
-    project_id: (row.project_id as string | null | undefined) ?? null,
+    project_id: row.project_id as string,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     counterparty_id: row.counterparty_id as string | null,
@@ -218,7 +218,7 @@ function buildTransferScopeWhere(params: {
   const values: unknown[] = [params.organizationId];
 
   if (!params.includeAllOrganizationProjects) {
-    clauses.push(`${prefix}project_id IS NOT DISTINCT FROM ?`);
+    clauses.push(`${prefix}project_id = ?`);
     values.push(params.projectId);
   }
 
@@ -250,7 +250,7 @@ export function createPostgresPaymentsRepository(
     input: TransferStatusChangeFields & {
       transferId: string;
       organizationId: string;
-      projectId: string | null;
+      projectId: string;
       updatedAt: string;
     },
     guard: {
@@ -438,7 +438,7 @@ export function createPostgresPaymentsRepository(
         values.push(input.organizationId);
       }
       if (input.projectId !== undefined) {
-        clauses.push("project_id IS NOT DISTINCT FROM ?");
+        clauses.push("project_id = ?");
         values.push(input.projectId);
       }
       if (input.expectedStatus !== undefined) {
@@ -589,6 +589,8 @@ export function createPostgresPaymentsRepository(
            UPDATE payment_transfers
            SET destination_address = ?,
                initiated_by_key_id = ?,
+               idempotency_key = COALESCE(?, idempotency_key),
+               idempotency_fingerprint = COALESCE(?, idempotency_fingerprint),
                status = 'processing',
                error = NULL,
                updated_at = ?
@@ -597,7 +599,14 @@ export function createPostgresPaymentsRepository(
            )
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
-        .bind(input.destinationAddress, input.initiatedByKeyId, input.updatedAt, ...scope.values)
+        .bind(
+          input.destinationAddress,
+          input.initiatedByKeyId,
+          input.idempotency?.key ?? null,
+          input.idempotency?.fingerprint ?? null,
+          input.updatedAt,
+          ...scope.values
+        )
         .first<PaymentTransferProjectionRow>();
 
       return row ? mapTransferRow(row) : null;
@@ -856,7 +865,7 @@ export function createPostgresPaymentsRepository(
            LEFT JOIN counterparties c
              ON c.id = pt.counterparty_id
             AND c.organization_id = pt.organization_id
-            AND c.project_id IS NOT DISTINCT FROM pt.project_id
+            AND c.project_id = pt.project_id
            WHERE ${scope.where}`
         )
         .bind(...scope.values)
@@ -885,7 +894,7 @@ export function createPostgresPaymentsRepository(
              LEFT JOIN counterparties c
                ON c.id = pt.counterparty_id
               AND c.organization_id = pt.organization_id
-              AND c.project_id IS NOT DISTINCT FROM pt.project_id
+              AND c.project_id = pt.project_id
              WHERE ${whereClause}
              ORDER BY ${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC
              LIMIT ?
@@ -910,6 +919,7 @@ export function createPostgresPaymentsRepository(
     },
 
     async listTransfersByStatus({
+      environment,
       statuses,
       types,
       hasSignature,
@@ -927,8 +937,8 @@ export function createPostgresPaymentsRepository(
         return [];
       }
 
-      const clauses = [`pt.status IN (${buildInClause(statuses.length)})`];
-      const values: unknown[] = [...statuses];
+      const clauses = ["p.environment = ?", `pt.status IN (${buildInClause(statuses.length)})`];
+      const values: unknown[] = [environment, ...statuses];
 
       if (types?.length) {
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
@@ -952,6 +962,7 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
            WHERE ${clauses.join(" AND ")}
            ORDER BY pt.updated_at ASC, pt.id ASC
            LIMIT ?
@@ -963,7 +974,7 @@ export function createPostgresPaymentsRepository(
       return rows.results.map(mapTransferRow);
     },
 
-    async listConfirmedTransfersToPoll({ confirmedAfter, limit }) {
+    async listConfirmedTransfersToPoll({ environment, confirmedAfter, limit }) {
       if (tenantScope) {
         throw new TenantScopeViolationError(
           "PaymentsRepository.listConfirmedTransfersToPoll is system-only"
@@ -974,14 +985,16 @@ export function createPostgresPaymentsRepository(
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
-           WHERE pt.status = ?
+           JOIN projects p ON p.id = pt.project_id
+           WHERE p.environment = ?
+             AND pt.status = ?
              AND pt.type IN (${buildInClause(WALLET_TRANSFER_TYPES.length)})
              AND pt.signature IS NOT NULL
              AND pt.confirmed_at > ?
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
-        .bind(pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
+        .bind(environment, pollableStatus, ...WALLET_TRANSFER_TYPES, confirmedAfter, limit)
         .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);

@@ -249,6 +249,11 @@ export function defineDashboardFlags({
     ],
   });
 
+  const newDesignOverview = newDesignModuleFlag(
+    "overview",
+    "the dashboard's Overview (the page, its name in the sidebar, the new quick start)"
+  );
+
   const newDesignWallets = newDesignModuleFlag(
     "wallets",
     "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"
@@ -267,7 +272,6 @@ export function defineDashboardFlags({
 
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
-  const rampProviderCoinbase = rampProviderFlag("coinbase", "Coinbase");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
 
   return {
@@ -281,13 +285,13 @@ export function defineDashboardFlags({
     earn,
     newDesign,
     paymentsDemoMode,
+    newDesignOverview,
     newDesignWallets,
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
     rampProviderMoonpay,
     rampProviderBvnk,
-    rampProviderCoinbase,
     rampProviderStripe,
   };
 }

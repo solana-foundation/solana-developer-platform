@@ -53,12 +53,12 @@ export const {
   earn,
   newDesign,
   paymentsDemoMode,
+  newDesignOverview,
   newDesignWallets,
   newDesignContacts,
   newDesignPayDeposit,
   newDesignActivity,
   rampProviderMoonpay,
   rampProviderBvnk,
-  rampProviderCoinbase,
   rampProviderStripe,
 } = flags;

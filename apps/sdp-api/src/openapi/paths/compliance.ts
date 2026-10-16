@@ -1,8 +1,15 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 
 import { addressScreeningRequestSchema, errorResponseSchema } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import { errorResponses, jsonContent, projectScopeWithDeclaredIdempotencyHeaders } from "./helpers";
 import { addressScreeningResponse } from "./responses";
+
+// Matches each route's `idempotent({ key: "accepted", serverErrors: "store" })`
+// step (ADR 0009); spec.test.ts checks.
+const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "store",
+});
 
 export function registerCompliancePaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -15,7 +22,7 @@ export function registerCompliancePaths(registry: OpenAPIRegistry) {
       "Runs address screening against configured compliance providers and returns provider-level risk scores.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: keyAcceptedHeaders,
       body: {
         required: true,
         content: jsonContent(addressScreeningRequestSchema),
@@ -26,7 +33,7 @@ export function registerCompliancePaths(registry: OpenAPIRegistry) {
         description: "Address screening results",
         content: jsonContent(addressScreeningResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 422, 500]),
     },
   });
 }

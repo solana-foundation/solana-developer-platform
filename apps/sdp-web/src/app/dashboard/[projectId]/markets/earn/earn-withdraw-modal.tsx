@@ -41,7 +41,7 @@ export function withdrawalRequestSignature(
   // "1.50", "1.5" and "01.50" are ONE intended withdrawal at three spellings.
   // Keying on the raw text would let a cosmetic edit after an ambiguous failure
   // — a 5xx that may already be recorded, the exact case
-  // `answerRetiresIdempotencyKey` refuses to release a key on — mint a fresh
+  // `answerRetiresKey` refuses to release a key on — mint a fresh
   // key and resubmit the same intent as a SECOND withdrawal. Canonicalizing
   // keeps every spelling of a value on one key while a real correction
   // ("12.50" → "13.00") still mints a new one. The fallback only ever sees

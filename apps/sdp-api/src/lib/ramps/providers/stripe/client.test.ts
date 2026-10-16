@@ -4,9 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const STRIPE_CONTEXT = {
   env: {
-    STRIPE_SECRET_KEY: "sk_test_secret",
-    STRIPE_PUBLISHABLE_KEY: "pk_test_pub",
-    STRIPE_WEBHOOK_SECRET: "whsec_test",
+    STRIPE_SANDBOX_SECRET_KEY: "sk_test_secret",
+    STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_pub",
   },
   mode: "sandbox",
 } as const;
@@ -185,7 +184,7 @@ describe("StripeRampClient", () => {
   it("throws when the secret key is not configured", async () => {
     await expect(
       new StripeRampClient().createOnrampQuote({ env: {}, mode: "sandbox" }, onrampInput())
-    ).rejects.toThrow(/Stripe is not configured/);
+    ).rejects.toThrow(/Stripe sandbox is not configured/);
   });
 
   it("returns an onramp estimate from Stripe quotes", async () => {

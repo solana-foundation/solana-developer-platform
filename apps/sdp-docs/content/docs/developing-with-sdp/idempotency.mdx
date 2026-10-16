@@ -1,42 +1,98 @@
 ---
 title: Idempotency
-description: Replay-safe mutations through the Idempotency-Key header, claimed by the record itself.
+description: Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, and accepted on the mutations listed below.
 ---
 
-Retries are a fact of distributed systems: clients time out, connections drop, workers die mid-run. SDP lets you replay a mutation safely by sending an `Idempotency-Key` header — a unique value (a UUID works well) that you mint once per logical operation and reuse on every retry of that operation.
+Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
-  -H "Idempotency-Key: 8a2f6c1e-9d4b-4f3a-b7e5-2c8d9f0a1b3c" \
+  -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
-## How replay resolution works
+## Where keys apply
 
-SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
+**Required.** These routes move money. A request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`, and nothing runs.
 
-1. The first request creates the record — a transfer or a batch — carrying your key and a fingerprint of the normalized request payload.
-2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
-3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+- `POST /v1/payments/transfers`
+- `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/recurring-payments`
+- `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
+- `POST /v1/payments/recurring-payments/{id}/activate`
+- `POST /v1/payments/recurring-payments/{id}/cancel`
+- `POST /v1/payments/recurring-payments/{id}/collect`
+- `POST /v1/payments/recurring-payments/{id}/resume`
 
-Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+**Accepted.** The key is optional, and honored when sent.
 
-The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Subscription plans and subscriptions: `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
+- Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
+- Compliance: `POST /v1/compliance/address-screenings`
 
-## Where it applies
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
-Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+Modules with their own key handling say so on their pages.
 
-| Domain | Operations | Key namespace |
-| --- | --- | --- |
-| Payments — transfers | `POST /v1/payments/transfers` | Per project |
-| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
-| Custody | Provider credential submission (dashboard flow) | Required on every submission |
+## Choosing a key
 
-Namespaces are independent across domains — the same key value used on a transfer and on a batch are two separate claims that never collide. Modules with their own idempotency scope say so on their pages.
+- A key is 1–255 printable ASCII characters. Anything else returns `400`.
+- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation before you send it, and send the same key on every retry of that operation.
+- A new operation needs a new key, even when its request is identical to an earlier one.
+- Keys are scoped to your organization, project, HTTP method and route, and bound to the credential that sent them. The same key value on two different routes is two separate keys.
 
-## This model is open to change
+## What a retry returns
 
-The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
+Access is checked before the key on every request, so a retry passes exactly the checks a new request passes, and a request refused for access never claims the key.
+
+| Situation | Response |
+| --- | --- |
+| Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
+| Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
+| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again in a new batch with a new key. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
+| Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
+| Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
+| Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
+| A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
+| A recurring-payment action failed | An action refused before it sent anything leaves the schedule as it was. If a cancel or resume sent its transaction and confirming it then failed, SDP keeps the attempt and the schedule stays `canceling` or `resuming` until the attempt is recovered; poll `GET /v1/payments/recurring-payments/{id}`. A `400`, `401`, `403`, `409` or `429` (such as `TRANSACTION_FAILED`) is not stored, and a `5xx` is not replayed, so a same-key retry runs the action again. Any other `4xx`, such as `422 SIGNING_REJECTED` or `404`, is stored and replayed with `Idempotent-Replayed: true` for 24 hours; send a new key to try again sooner. |
+| A recurring-payment action meets another key's unfinished attempt on the schedule | Cancel, resume and collect return `409` (already processing), not stored; read the schedule with `GET`. An interrupted collect finishes on its own from the transaction SDP saved before sending it. An interrupted activate, cancel or resume is resumed in the background from the last step SDP recorded; if it was interrupted after a step was sent but before SDP recorded it, that recovery can fail instead of finishing. An interrupted `PATCH` resumes only when that `PATCH` is retried with its key (see below). A `PATCH` may finish that attempt and then applies its own change. |
+| A keyed recurring-payment cancel, resume or `PATCH` changes nothing (such as canceling a canceled schedule) | It still records its attempt, so a same-key retry, even after 24 hours, is answered from it and never runs over a later change. |
+| Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer also carries `Idempotent-Replayed: true`. |
+
+"Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
+
+Keys are scoped to the credential that sent them. A rotated API key is a new credential: for 24 hours after the original request, a retry under the new API key with the old `Idempotency-Key` gets `422`; after that, the old key's record is gone and the same retry runs as a new request and can move money again, as can any retry under a new `Idempotency-Key`. So after any API key rotation, read the resource with `GET` (for example `GET /v1/payments/transfers` or `GET /v1/payments/recurring-payments/{id}`) to learn whether the original request ran, and never resend a money request under the new credential without checking first.
+
+An organization that has been deleted or has lost production access is refused before the key is read: `401` or `403`, even for a retry of a request that completed.
+
+## Replays are snapshots
+
+A replay returns the response as it was first sent: a transfer stored as `processing` replays as `processing`. To see current state, read the resource with `GET`. Never re-send a request to learn its outcome.
+
+When the answer comes from the original record instead (a same-key retry after a `5xx`, or after the 24-hour window), it reflects that record as it stands now. A recurring-payment lifecycle action answered this way returns the schedule as it is, which may still be mid-transition; poll `GET /v1/payments/recurring-payments/{id}` until it settles. An update left `updating` is not finished in the background: retry the `PATCH` with the same key. Until the interrupted attempt is 15 minutes old, that retry gets `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`; after that, it resumes from the last step SDP recorded. If the interruption came after a step was sent but before SDP recorded it, which is rare, the retry can fail or send that step again; read the schedule with `GET` before editing it again.
+
+## Retention
+
+Keys are kept for 24 hours after the original request. After that, a same-key retry on most accepted routes starts a new request. On the routes that move money, the record the first attempt wrote still holds its key, so a late retry is answered from that record, or refused if the request differs; a failed transfer answers with the status and code it failed with.
+
+## Creating wallets
+
+With a key, SDP never records a second wallet for one `POST /v1/wallets` key: a retry returns the wallet an earlier attempt recorded, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, and a new key is a new provider request. A `503` can mean the provider created the wallet before the error. Only Privy and Coinbase CDP dedupe on the request id, so with any other provider, an ambiguous failure that left no SDP wallet row makes even the same `Idempotency-Key` a new provider request once its 24-hour record has expired. Before any retry after an ambiguous failure, whatever key you use, check `GET /v1/wallets` and, if the wallet is not there, the provider account itself. The provider request id and the lookup of the recorded wallet both include the credential, so after an API key rotation, once the key's 24-hour record has expired, the same `Idempotency-Key` under the new API key no longer finds the earlier attempt: it is a new provider request and can create a second wallet. After rotating the API key, list wallets with `GET /v1/wallets` and check the provider account before retrying a create.
+
+## The dashboard and the Postman collection
+
+The dashboard sends a key on every request to the routes that require one, and keeps it until it gets a definitive answer, so a retried click never moves money twice.
+
+The [Postman collection](/docs/reference/postman-collection) saves one key per operation for the required routes (the `idempotencyKey.<operationId>` collection variable) and follows the dashboard's rule for money routes. It mints the key only when the variable is unset and clears it only on a `2xx` that shows the payment final, a replayed refusal, or a `422` other than `IDEMPOTENCY_KEY_REUSED`. A `2xx` that shows the transfer, batch or schedule still `pending` or `processing` keeps the key: poll it with `GET` instead of sending a new one, and clear the variable once it is final. Every other answer keeps it too, so resending reuses the key: a timeout, a `5xx`, a `409` (in flight or outcome unknown), a `429`, and a `400`, `401` or `403` refusal, after which the original may still have run. A `422 IDEMPOTENCY_KEY_REUSED` means only that the request differed from the key's original: restore the original request to retry it. Clear the variable yourself to start a new operation, after checking with `GET` that the original settled.
+
+## Recommendations
+
+- Send a key on every mutation that accepts one, not only where it is required.
+- Retry timeouts, connection errors and `409 IDEMPOTENCY_KEY_IN_FLIGHT` with backoff, reusing the key.
+- Treat `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` as final for that key: check with `GET`, then use a new key.
+- After a `5xx`, retry with the same key on the routes that move money; elsewhere, use a new key.
+- Outside a key rotation, treat `422 IDEMPOTENCY_KEY_REUSED` as a bug in your client: the key was attached to two different operations.
+- Persist the returned resource ID before moving to the next operation, so a restarted worker can resume without guessing.

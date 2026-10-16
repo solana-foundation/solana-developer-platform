@@ -16,7 +16,6 @@
     "ramps-providers",
     "ramps-moonpay",
     "ramps-bvnk",
-    "ramps-coinbase",
     "ramps-stripe"
   ]
 }

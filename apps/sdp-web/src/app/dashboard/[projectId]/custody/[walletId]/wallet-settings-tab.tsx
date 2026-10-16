@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { formatDate, formatDateTime } from "../../payments/payments-presentation";
 import { updateWalletLabelAction } from "../actions";
 import { useWalletActions } from "../use-wallet-actions";
@@ -24,6 +26,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
   const [pending, startTransition] = useTransition();
+  const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
   const changed = draft.trim() !== saved.trim();
 
   function save(event: FormEvent) {
@@ -32,12 +35,15 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
     const toastId = toast.loading(t("DashboardCustody.updatingWalletLabel"), {
       position: "bottom-right",
     });
+    const input = JSON.stringify([wallet.walletId, draft.trim()]);
     startTransition(async () => {
-      const result = await updateWalletLabelAction(wallet.walletId, draft).catch((error) => ({
+      const key = actionKey.keyFor(input);
+      const result = await updateWalletLabelAction(wallet.walletId, draft, key).catch((error) => ({
         status: "error" as const,
         message:
           error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),
       }));
+      actionKey.settled(input, key, result);
       if (result.status === "success") {
         toast.success(t("DashboardCustody.walletLabelUpdated"), {
           id: toastId,

@@ -587,6 +587,7 @@
     "walletSetupConnectionManaged": "Managed by SDP",
     "walletSetupConnectionRequired": "Choose the account the wallet is created in.",
     "walletSetupProviderAlreadySetUp": "This provider is already set up. Add a wallet instead.",
+    "walletSetupOutcomeUnknown": "We couldn't confirm whether the wallet was created. Check your wallet list first; if it isn't there, press Create wallet again, which repeats the same request.",
     "walletSetupConnectionUnavailablePending": "Setup unfinished",
     "walletSetupConnectionUnavailableFailed": "Needs attention",
     "undo": "Undo",

@@ -5,7 +5,12 @@
 
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
-import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/fee-payment";
+import {
+  createFeePaymentAdapter,
+  KoraAdapter,
+  KoraClient,
+  resolveKoraEndpoint,
+} from "@sdp/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import {
@@ -17,6 +22,7 @@ import { closeDatabasePools, getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
@@ -69,6 +75,7 @@ export const apiTestSupport = {
   KoraAdapter,
   KoraClient,
   resolveEarnExecutionClient,
+  resolveKoraEndpoint,
   seedTestDatabase,
   submitExternalWalletDeposit,
   submitExternalWalletWithdrawal,
@@ -80,6 +87,6 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
-  trackPendingTransfers,
+  trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
   withdrawFromVault,
 };

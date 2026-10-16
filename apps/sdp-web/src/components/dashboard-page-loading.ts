@@ -1,7 +1,8 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/dashboard/[projectId]/(home)/loading";
+import { PreviousDashboardLoading as LegacyDashboardLoading } from "@/app/dashboard/[projectId]/(home)/loading";
+import { CurrentDashboardLoading } from "@/app/dashboard/[projectId]/(home)/loading.redesign";
 import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
 import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
 import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
@@ -95,6 +96,7 @@ const LEGACY_DESIGN_PAGE_LOADING: Partial<
   "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
   "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
   "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
+  home: LegacyDashboardLoading,
   "wallets-overview": LegacyWalletsOverviewSkeleton,
   "wallet-setup": LegacyWalletSetupSkeleton,
   "wallet-detail": LegacyWalletDetailSkeleton,
@@ -113,7 +115,7 @@ function resolveCurrentPageLoadingComponent(
 ): ComponentType<PageLoadingProps> {
   switch (route) {
     case "home":
-      return DashboardLoading;
+      return CurrentDashboardLoading;
     case "integrations":
       return IntegrationsFlagsSkeleton;
     case "integration-detail":

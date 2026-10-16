@@ -84,6 +84,9 @@ services:
       # Solana
       SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      # createClusterRpc() reads only the per-cluster pool; mainnet stays unset until named.
+      SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: ${SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL:-https://api.devnet.solana.com}
+      SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: ${SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL:-}
 
       # Signing
       SIGNING_PROVIDER: ${SIGNING_PROVIDER:-local}

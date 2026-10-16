@@ -29,6 +29,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
 import { conflict } from "@/lib/errors";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 
@@ -43,17 +44,14 @@ const releaseClaim = vi.hoisted(() => vi.fn());
 const listForTrade = vi.hoisted(() => vi.fn());
 const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 const confirmTransaction = vi.hoisted(() => vi.fn());
-const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+const resolveProjectSponsorshipScope = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const fetchMaybeMint = vi.hoisted(() => vi.fn());
 
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  createProjectSponsorshipFeePayment,
-}));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
@@ -163,7 +161,19 @@ describe("reclaimDvpTradeLeg", () => {
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope").mockImplementation(
+      resolveProjectSponsorshipScope
+    );
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+      createSponsorshipFeePayment
+    );
+    resolveProjectSponsorshipScope.mockResolvedValue({
+      environment: "sandbox",
+      organizationId: "org_dvp_sponsor",
+      projectId: "prj_dvp_sponsor",
+      actor: { type: "wallet", id: "cwlt_dvp_sponsor" },
+    });
+    createSponsorshipFeePayment.mockReturnValue({
       getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });
@@ -393,7 +403,7 @@ describe("reclaimDvpTradeLeg", () => {
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.nothingToReclaim },
     });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -421,7 +431,7 @@ describe("reclaimDvpTradeLeg", () => {
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.transferHookUnsupported },
     });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
   });
 
   // The program only accepts the party. A wallet whose key no longer resolves
@@ -433,7 +443,7 @@ describe("reclaimDvpTradeLeg", () => {
       message: expect.stringMatching(/no longer signs as side a's party/),
       details: { reason: DVP_LEG_REFUSAL.signerNotParty },
     });
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
   });
 
   // PRO-1973. The leg is locked first, then the trade read: a settle or cancel

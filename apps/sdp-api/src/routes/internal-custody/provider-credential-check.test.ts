@@ -73,7 +73,6 @@ function successfulPrivyFetch(connectionId: unknown) {
   const providerFetch = vi
     .fn()
     .mockResolvedValueOnce(privyJson({ data: [], next_cursor: null }, 200))
-    .mockResolvedValueOnce(privyJson({ error: "wallet not found" }, 404))
     .mockResolvedValueOnce(privyWalletResponse(externalId));
   vi.stubGlobal("fetch", providerFetch);
   return providerFetch;
@@ -459,10 +458,10 @@ describe("exact Custody Connection installation routes", () => {
         timestamp: expect.any(String),
       },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(3);
+    // The account check, then the create: no external-ID lookup before the POST.
+    expect(providerFetch).toHaveBeenCalledTimes(2);
     expect(providerFetch.mock.calls[0]?.[0]).toBe("https://privy.example.test/v1/wallets");
-    expect(providerFetch.mock.calls[1]?.[0]).toBe(PRIVY_EXTERNAL_WALLET_URL);
-    expect(providerFetch.mock.calls[2]).toEqual([
+    expect(providerFetch.mock.calls[1]).toEqual([
       "https://privy.example.test/v1/wallets",
       expect.objectContaining({
         method: "POST",
@@ -569,7 +568,7 @@ describe("exact Custody Connection installation routes", () => {
     expect(await replay.json()).toMatchObject({
       data: { connectionId: CONNECTION_ID, completion: { status: "success" } },
     });
-    expect(providerFetch).toHaveBeenCalledTimes(3);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
     expect(completeCritical).toHaveBeenCalledOnce();
     expect(await getState(CONNECTION_ID)).toMatchObject({
       credential_status: "active",
@@ -1129,7 +1128,7 @@ describe("exact Custody Connection installation routes", () => {
     releaseValidation?.();
     const first = await firstPromise;
     expect(first.status).toBe(200);
-    expect(providerFetch).toHaveBeenCalledTimes(3);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
     expect(providerFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
@@ -1241,15 +1240,17 @@ describe("exact Custody Connection installation routes", () => {
     const firstGate = new Promise<void>((resolve) => {
       releaseFirstLookup = resolve;
     });
-    let lookupCalls = 0;
+    let createCalls = 0;
     const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "GET" && url.endsWith("/wallets")) {
         return privyJson({ data: [] }, 200);
       }
-      if (url === PRIVY_EXTERNAL_WALLET_URL) {
-        lookupCalls += 1;
-        if (lookupCalls === 1) {
+      if (url === PRIVY_EXTERNAL_WALLET_URL) return privyJson({ error: "not found" }, 404);
+      if (init?.method === "POST") {
+        createCalls += 1;
+        if (createCalls === 1) {
+          // The stale completion's create answers late, with a wallet it must refuse.
           firstLookupEntered?.();
           await firstGate;
           return privyJson(
@@ -1263,9 +1264,8 @@ describe("exact Custody Connection installation routes", () => {
             200
           );
         }
-        return privyJson({ error: "not found" }, 404);
+        return privyWalletResponse(PRIVY_EXTERNAL_ID);
       }
-      if (init?.method === "POST") return privyWalletResponse(PRIVY_EXTERNAL_ID);
       throw new Error(`Unexpected Privy request: ${url}`);
     });
     vi.stubGlobal("fetch", providerFetch);

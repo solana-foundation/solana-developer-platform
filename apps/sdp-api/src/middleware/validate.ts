@@ -3,8 +3,24 @@ import { validator } from "hono/validator";
 import { z } from "zod";
 import { type AppError, badRequest } from "@/lib/errors";
 import type { Env } from "@/types/env";
+import type { RouteHandler } from "./authorize";
 
-type ValidatedTarget = "json" | "query" | "param";
+const VALIDATED_TARGETS = ["json", "query", "param"] as const;
+type ValidatedTarget = (typeof VALIDATED_TARGETS)[number];
+
+/** Marks a route-level validator with its target, for route inventory tests. */
+const VALIDATION_MARKER = Symbol.for("sdp.validate");
+
+function markValidation<H extends object>(handler: H, target: ValidatedTarget): H {
+  return Object.assign(handler, { [VALIDATION_MARKER]: target });
+}
+
+/** The target a route step validates, when it is one of these validators. */
+export function declaredValidation(handler: RouteHandler): ValidatedTarget | undefined {
+  if (!(VALIDATION_MARKER in handler)) return undefined;
+  const target = handler[VALIDATION_MARKER];
+  return VALIDATED_TARGETS.find((candidate) => candidate === target);
+}
 
 type ValidatedSchemas = Partial<Record<ValidatedTarget, z.ZodType>>;
 
@@ -69,7 +85,7 @@ export function validateBody<S extends z.ZodType<object>>(
   const parse = zodValidation(schema, (prettified) =>
     badRequest(`Invalid request body:\n${prettified}`)
   );
-  return async (c, next) => {
+  return markValidation(async (c, next) => {
     const raw = await c.req.text();
     let value: unknown = {};
     if (raw.trim().length > 0) {
@@ -81,7 +97,7 @@ export function validateBody<S extends z.ZodType<object>>(
     }
     c.req.addValidatedData("json", await parse(value));
     await next();
-  };
+  }, "json");
 }
 
 /**
@@ -92,9 +108,12 @@ export function validateBody<S extends z.ZodType<object>>(
  * @returns Route-level middleware that rejects invalid queries with a 400.
  */
 export function validateQuery<S extends z.ZodType>(schema: S) {
-  return validator(
-    "query",
-    zodValidation(schema, (prettified) => badRequest(`Invalid query parameters:\n${prettified}`))
+  return markValidation(
+    validator(
+      "query",
+      zodValidation(schema, (prettified) => badRequest(`Invalid query parameters:\n${prettified}`))
+    ),
+    "query"
   );
 }
 
@@ -106,8 +125,11 @@ export function validateQuery<S extends z.ZodType>(schema: S) {
  * @returns Route-level middleware that rejects invalid params with a 400.
  */
 export function validateParams<S extends z.ZodType>(schema: S) {
-  return validator(
-    "param",
-    zodValidation(schema, (prettified) => badRequest(`Invalid path parameters:\n${prettified}`))
+  return markValidation(
+    validator(
+      "param",
+      zodValidation(schema, (prettified) => badRequest(`Invalid path parameters:\n${prettified}`))
+    ),
+    "param"
   );
 }

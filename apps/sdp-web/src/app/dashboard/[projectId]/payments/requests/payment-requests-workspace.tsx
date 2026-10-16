@@ -67,6 +67,8 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -74,6 +76,7 @@ import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
+import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
@@ -212,6 +215,7 @@ function CreateRequestModal({
   onCreated: (request: PaymentRequest | null) => void;
 }) {
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice(null);
   const form = useZodForm(createRequestSchema, {
     amount: "",
     token: "",
@@ -258,8 +262,23 @@ function CreateRequestModal({
     }
     const counterpartyId =
       result.data.counterparty === ANYONE_OPTION ? null : result.data.counterparty;
-    const expiresAt = resolveExpiryDate(result.data.expiry);
+    const input = JSON.stringify([
+      result.data.wallet,
+      result.data.token,
+      result.data.amount,
+      counterpartyId,
+      result.data.expiry,
+    ]);
 
+    // Read from the clock once per action, so a retry resends the same body
+    // under the first attempt's key.
+    const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(result.data.expiry));
+    if (expiresAt === undefined) {
+      // The retry's frozen expiry has passed: not sent. Close and refresh the list.
+      toast.error(t("DashboardPayments.requests.staleRetryCheckList"));
+      onCreated(null);
+      return;
+    }
     setSubmitting(true);
     const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
       method: "POST",
@@ -268,11 +287,17 @@ function CreateRequestModal({
         token: result.data.token,
         amount: result.data.amount,
         counterpartyId,
-        expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        expiresAt,
       },
     });
+    settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
     if (!res.ok) {
+      // The earlier attempt may have created it: close and refresh the list.
+      if (notice(fetchResultAnswer(res))) {
+        onCreated(null);
+        return;
+      }
       toast.error(res.error);
       return;
     }

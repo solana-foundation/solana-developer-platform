@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { z } from "zod";
-import { SdpPaymentsError } from "../errors";
+import { SdpPaymentsError, type SdpPaymentsErrorCode } from "../errors";
 import {
+  classifyProviderFailure,
   isDefinitiveProviderRejection,
   PROVIDER_MAX_RESPONSE_BYTES,
   PROVIDER_REQUEST_TIMEOUT_MS,
@@ -17,36 +18,42 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+describe("classifyProviderFailure", () => {
+  for (const [status, code, outcome] of [
+    [400, "BAD_REQUEST", "rejected"],
+    [401, "PROVIDER_NOT_CONFIGURED", "rejected"],
+    [403, "PROVIDER_NOT_CONFIGURED", "rejected"],
+    [404, "BAD_REQUEST", "rejected"],
+    [408, "PROVIDER_UNAVAILABLE", "unknown"],
+    [409, "CONFLICT", "unknown"],
+    [422, "BAD_REQUEST", "rejected"],
+    [429, "RATE_LIMITED", "rejected"],
+    [499, "BAD_REQUEST", "rejected"],
+    [500, "PROVIDER_UNAVAILABLE", "unknown"],
+    [503, "PROVIDER_UNAVAILABLE", "unknown"],
+    [304, "PROVIDER_UNAVAILABLE", "unknown"],
+  ] as const) {
+    it(`classifies ${status} as ${code}, ${outcome}`, () => {
+      assert.deepEqual(classifyProviderFailure(status), { code, outcome });
+    });
+  }
+});
+
 describe("isDefinitiveProviderRejection", () => {
   for (const [name, error, expected] of [
     [
-      "400",
+      "a rejected outcome",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", outcome: "rejected" }),
+      true,
+    ],
+    [
+      "an unknown outcome",
+      new SdpPaymentsError("PROVIDER_UNAVAILABLE", "x", { provider: "stripe", outcome: "unknown" }),
+      false,
+    ],
+    [
+      "a 4xx status with no outcome",
       new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 400 }),
-      true,
-    ],
-    [
-      "409",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 409 }),
-      false,
-    ],
-    [
-      "408",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 408 }),
-      false,
-    ],
-    [
-      "499",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 499 }),
-      true,
-    ],
-    [
-      "500",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe", providerStatus: 500 }),
-      false,
-    ],
-    [
-      "details without providerStatus",
-      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "stripe" }),
       false,
     ],
     ["no details", new SdpPaymentsError("BAD_REQUEST", "x"), false],
@@ -158,7 +165,11 @@ describe("providerFetchJson failures", () => {
 
     assert.equal(error.code, "BAD_REQUEST");
     assert.equal(error.message, "moonpay request failed with status 400");
-    assert.deepEqual(error.details, { provider: "moonpay", providerStatus: 400 });
+    assert.deepEqual(error.details, {
+      provider: "moonpay",
+      providerStatus: 400,
+      outcome: "rejected",
+    });
     assert.deepEqual(error.diagnostics, {
       providerMessage: "email [REDACTED_EMAIL] is already registered",
     });
@@ -172,6 +183,89 @@ describe("providerFetchJson failures", () => {
     assert.equal(error.code, "PROVIDER_UNAVAILABLE");
     assert.equal(error.message, "moonpay request failed with status 503");
     assert.equal(error.diagnostics, undefined);
+  });
+
+  it("answers a credential refusal as our misconfiguration, not the caller's request", async () => {
+    respondWith(401, JSON.stringify({ message: "Invalid API key" }));
+
+    const error = await failure();
+
+    assert.equal(error.code, "PROVIDER_NOT_CONFIGURED");
+    assert.equal(error.details?.outcome, "rejected");
+  });
+
+  it("calls a success it cannot parse invalid, with an unknown outcome", async () => {
+    respondWith(200, "<html>ok</html>");
+
+    const error = await failure();
+
+    assert.equal(error.code, "PROVIDER_RESPONSE_INVALID");
+    assert.equal(error.statusCode, 502);
+    assert.equal(error.message, "moonpay returned an unparseable response");
+    assert.deepEqual(error.details, { provider: "moonpay", outcome: "unknown" });
+  });
+
+  it("keeps the transport failure's structure, never its message", async () => {
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed https://api.example.test/quote?apiKey=pk_test_secret", {
+        cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+      });
+    };
+
+    const error = await failure();
+
+    assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+    assert.equal(error.message, "Failed to reach the moonpay API");
+    assert.deepEqual(error.details, { provider: "moonpay", outcome: "unknown" });
+    assert.deepEqual(error.diagnostics, {
+      transportError: "TypeError",
+      transportCode: "ECONNRESET",
+    });
+    assert.ok(!JSON.stringify(error.diagnostics).includes("apiKey"));
+  });
+});
+
+describe("providerFetch request headers", () => {
+  async function sentHeaders(
+    body: Record<string, string> | URLSearchParams | undefined,
+    headers?: HeadersInit
+  ): Promise<Headers> {
+    let sent: Headers | undefined;
+    globalThis.fetch = async (input, init) => {
+      sent = new Request(input, init).headers;
+      return new Response("{}", { status: 200 });
+    };
+    await providerFetch("stripe", "https://api.example.test/x", {
+      method: body === undefined ? "GET" : "POST",
+      body,
+      headers,
+    });
+    assert.ok(sent !== undefined, "the request was sent");
+    return sent;
+  }
+
+  it("sends no Content-Type without a body", async () => {
+    const headers = await sentHeaders(undefined);
+    assert.equal(headers.get("content-type"), null);
+    assert.equal(headers.get("accept"), "application/json");
+  });
+
+  it("types a JSON body as JSON", async () => {
+    const headers = await sentHeaders({ amount: "10" });
+    assert.equal(headers.get("content-type"), "application/json");
+  });
+
+  it("lets a form body carry the form type", async () => {
+    const headers = await sentHeaders(new URLSearchParams({ amount: "10" }));
+    assert.equal(headers.get("content-type"), "application/x-www-form-urlencoded;charset=UTF-8");
+  });
+
+  it("lets the caller's headers win", async () => {
+    const headers = await sentHeaders(
+      { amount: "10" },
+      { "Content-Type": "application/vnd.x+json" }
+    );
+    assert.equal(headers.get("content-type"), "application/vnd.x+json");
   });
 });
 
@@ -207,9 +301,9 @@ describe("providerFetchJson response schema", () => {
       ),
       (cause: unknown) => {
         assert.ok(cause instanceof SdpPaymentsError);
-        assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+        assert.equal(cause.code, "PROVIDER_RESPONSE_INVALID");
         assert.equal(cause.message, "moonpay returned an unexpected response");
-        assert.deepEqual(cause.details, { provider: "moonpay" });
+        assert.deepEqual(cause.details, { provider: "moonpay", outcome: "unknown" });
         assert.deepEqual(cause.diagnostics, {
           issues: [{ path: "quoteCurrencyAmount", code: "invalid_type" }],
         });
@@ -228,10 +322,10 @@ describe("providerFetch fences", () => {
     });
   }
 
-  function failsWith(message: string) {
+  function failsWith(message: string, code: SdpPaymentsErrorCode) {
     return (cause: unknown) => {
       assert.ok(cause instanceof SdpPaymentsError);
-      assert.equal(cause.code, "PROVIDER_UNAVAILABLE");
+      assert.equal(cause.code, code);
       assert.equal(cause.message, message);
       return true;
     };
@@ -251,7 +345,10 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("stripe", "https://api.example.test/hang", { method: "GET" }),
-      failsWith(`The stripe API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+      failsWith(
+        `The stripe API did not answer within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`,
+        "PROVIDER_UNAVAILABLE"
+      )
     );
     assert.deepEqual(requested, [PROVIDER_REQUEST_TIMEOUT_MS]);
   });
@@ -266,7 +363,10 @@ describe("providerFetch fences", () => {
     });
     caller.abort();
 
-    await assert.rejects(pending, failsWith("Failed to reach the moonpay API"));
+    await assert.rejects(
+      pending,
+      failsWith("Failed to reach the moonpay API", "PROVIDER_UNAVAILABLE")
+    );
   });
 
   it("gives up on a body that stops arriving once the timeout passes", {
@@ -287,7 +387,10 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("stripe", "https://api.example.test/slow", { method: "GET" }),
-      failsWith(`The stripe API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`)
+      failsWith(
+        `The stripe API response did not finish within ${PROVIDER_REQUEST_TIMEOUT_MS} ms`,
+        "PROVIDER_RESPONSE_INVALID"
+      )
     );
   });
 
@@ -307,8 +410,34 @@ describe("providerFetch fences", () => {
 
     await assert.rejects(
       providerFetch("moonpay", "https://api.example.test/huge", { method: "GET" }),
-      failsWith(`moonpay returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`)
+      failsWith(
+        `moonpay returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`,
+        "PROVIDER_RESPONSE_INVALID"
+      )
     );
     assert.ok(pulled <= PROVIDER_MAX_RESPONSE_BYTES / chunk.byteLength + 2);
+  });
+
+  it("keeps a refusal's meaning when its body is unreadable", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(chunk);
+          },
+        }),
+        { status: 400 }
+      );
+
+    await assert.rejects(
+      providerFetch("moonpay", "https://api.example.test/huge", { method: "GET" }),
+      (cause: unknown) => {
+        assert.ok(cause instanceof SdpPaymentsError);
+        assert.equal(cause.code, "BAD_REQUEST");
+        assert.equal(cause.details?.outcome, "rejected");
+        return true;
+      }
+    );
   });
 });

@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
@@ -858,19 +859,20 @@ export function EarnVaultWithdrawModal({
       shares,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
     });
-    const resolvedKey = vaultWithdrawalIdempotencyKeyStore.claimReportingReuse(fingerprint);
+    const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);
 
-    // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
-    // live — must replay the floor it was MINTED with, verbatim — the deposit
-    // modal documents why. The changed-request refusal is a 409, which retires
-    // the key and lets the next submit mint a fresh one while the first attempt
-    // may already have exited. The floor memo answers for it. A fresh key takes
+    // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
+    // a refusal that settled nothing) — must replay the floor it was MINTED
+    // with, verbatim — the deposit modal documents why. A changed floor under
+    // the key is a 422, which retires the key and lets the next submit mint a
+    // fresh one while the first attempt may already have exited. The floor
+    // memo answers for it. A fresh key takes
     // the freshly derived floor, and records it for exactly that future replay.
     // A reuse whose memo LOST the floor cannot re-floor safely at all — it
     // stops here, submitting nothing, rather than pair the live key with a
     // changed request.
     const replay = floorToReplay(
-      resolvedKey,
+      { reused },
       recallVaultWithdrawalFloor,
       fingerprint,
       minAmountOut ?? null
@@ -883,8 +885,8 @@ export function EarnVaultWithdrawModal({
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
-    const submission = vaultWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-    if (!submission) {
+    const { key, persisted } = vaultWithdrawalIdempotencyKeyStore.claim(fingerprint);
+    if (!persisted) {
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
     }
@@ -894,19 +896,25 @@ export function EarnVaultWithdrawModal({
         shares,
         ...(replay.floor === null ? {} : { minAmountOut: replay.floor }),
       },
-      resolvedKey.key
+      key
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording the answer.
-    const disposition = applyIdempotencyKeyOutcome(
+    // A money movement: an unknown outcome or a reused key keeps the key
+    // (`moneyAnswerRetiresKey`).
+    const retired = settleMoneyIdempotencyKey(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
-      result,
-      submission.wasUncertain
+      key,
+      fetchResultAnswer(result)
     );
+    // A slippage refusal comes from simulation, run only after no movement was
+    // found under this key: the retry is a new request (see the deposit modal).
+    const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
+    if (slippageRefused) vaultWithdrawalIdempotencyKeyStore.release(fingerprint, key);
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
-    if (disposition === "retired") forgetVaultWithdrawalFloor(fingerprint);
+    if (retired || slippageRefused) forgetVaultWithdrawalFloor(fingerprint);
     if (controller.signal.aborted) return;
     const resolution = resolveWithdrawalSubmission(
       result,

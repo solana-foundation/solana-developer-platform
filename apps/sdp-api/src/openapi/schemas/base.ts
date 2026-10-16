@@ -203,8 +203,13 @@ export const errorCodeSchema = z
     "SIGNING_REJECTED",
     "PROVIDER_NOT_CONFIGURED",
     "PROVIDER_UNAVAILABLE",
+    "PROVIDER_RESPONSE_INVALID",
     "UNSUPPORTED_CORRIDOR",
     "VAULT_EXPOSURE_CAP",
+    "IDEMPOTENCY_KEY_REQUIRED",
+    "IDEMPOTENCY_KEY_REUSED",
+    "IDEMPOTENCY_KEY_IN_FLIGHT",
+    "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
   ])
   .openapi({ description: "Machine-readable error code." });
 

@@ -99,11 +99,6 @@
       "import": "./src/ramps/providers/bvnk/test-fixtures.ts",
       "default": "./src/ramps/providers/bvnk/test-fixtures.ts"
     },
-    "./ramps/providers/coinbase/client": {
-      "types": "./src/ramps/providers/coinbase/client.ts",
-      "import": "./src/ramps/providers/coinbase/client.ts",
-      "default": "./src/ramps/providers/coinbase/client.ts"
-    },
     "./ramps/providers/moonpay/client": {
       "types": "./src/ramps/providers/moonpay/client.ts",
       "import": "./src/ramps/providers/moonpay/client.ts",
@@ -126,7 +121,6 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@coinbase/cdp-sdk": "1.56.0",
     "@sdp/redaction": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",

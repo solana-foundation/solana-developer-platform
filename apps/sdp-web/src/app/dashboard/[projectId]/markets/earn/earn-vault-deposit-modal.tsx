@@ -20,7 +20,8 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer } from "@/lib/idempotency";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
@@ -1280,19 +1281,20 @@ export function EarnVaultDepositModal({
       toleranceBps: slippagePolicy === null ? null : slippageBps,
       ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
     });
-    const resolvedKey = vaultDepositIdempotencyKeyStore.claimReportingReuse(fingerprint);
+    const reused = vaultDepositIdempotencyKeyStore.has(fingerprint);
 
-    // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
-    // live — must replay the floor it was MINTED with, verbatim: the API's
-    // idempotency fingerprint includes `minSharesOut`, and the changed-request
-    // refusal is a 409, which retires the key and lets the next submit mint a
-    // fresh one while the first attempt may already have executed. The floor
-    // memo answers for it; a fresh key takes the freshly derived floor, and
-    // records it for exactly that future replay. A reuse whose memo LOST the
-    // floor cannot re-floor safely at all — it stops here, submitting nothing,
-    // rather than pair the live key with a changed request.
+    // A KEPT key — one an earlier attempt left unretired (a lost answer, a 5xx,
+    // a refusal that settled nothing) — must replay the floor it was MINTED
+    // with, verbatim: the API's idempotency fingerprint includes
+    // `minSharesOut`, so a changed floor under the key is a 422, which retires
+    // the key and lets the next submit mint a fresh one while the first attempt
+    // may already have executed. The floor memo answers for it; a fresh key
+    // takes the freshly derived floor, and records it for exactly that future
+    // replay. A reuse whose memo LOST the floor cannot re-floor safely at all —
+    // it stops here, submitting nothing, rather than pair the live key with a
+    // changed request.
     const replay = floorToReplay(
-      resolvedKey,
+      { reused },
       recallVaultDepositFloor,
       fingerprint,
       minSharesOut ?? null
@@ -1311,8 +1313,8 @@ export function EarnVaultDepositModal({
     // bookkeeping needs. The controller still exists, but it gates the UI
     // below, never the request or the key bookkeeping.
     const submittedAt = Date.now();
-    const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
-    if (!submission) {
+    const { key, persisted } = vaultDepositIdempotencyKeyStore.claim(fingerprint);
+    if (!persisted) {
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
     }
@@ -1329,20 +1331,28 @@ export function EarnVaultDepositModal({
             }
           : {}),
       },
-      resolvedKey.key
+      key
     );
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording what the
     // server just answered.
-    const disposition = applyIdempotencyKeyOutcome(
+    // A money movement: an unknown outcome or a reused key keeps the key
+    // (`moneyAnswerRetiresKey`).
+    const retired = settleMoneyIdempotencyKey(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
-      result,
-      submission.wasUncertain
+      key,
+      fetchResultAnswer(result)
     );
+    // A slippage refusal comes from simulation, which Earn runs only after it
+    // found no movement under this key, so no attempt under it recorded
+    // anything: the retry is a new request with a fresh quote's floor and a
+    // fresh key, not a replay of the floor that was refused.
+    const slippageRefused = !result.ok && isSlippageExceededRefusal(result.body);
+    if (slippageRefused) vaultDepositIdempotencyKeyStore.release(fingerprint, key);
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
-    if (disposition === "retired") forgetVaultDepositFloor(fingerprint);
+    if (retired || slippageRefused) forgetVaultDepositFloor(fingerprint);
     if (controller.signal.aborted) return;
     const resolution = resolveDepositSubmission(
       result,
