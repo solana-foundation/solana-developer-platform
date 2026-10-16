@@ -223,7 +223,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       },
       body: JSON.stringify({
         name: "Signer check integration key",
-        permissions: ["wallets:write"],
+        grants: ["wallets.execute"],
         walletScope: "selected",
         signingWalletId: walletId,
       }),

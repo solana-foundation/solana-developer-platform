@@ -283,16 +283,19 @@ function CreateRequestModal({
       return;
     }
     setSubmitting(true);
-    const res = await dashboardFetch<{ data: CreatedPaymentRequest }>("/api/dashboard/payments/requests", {
-      method: "POST",
-      body: {
-        walletId: result.data.wallet,
-        token: result.data.token,
-        amount: result.data.amount,
-        counterpartyId,
-        expiresAt,
-      },
-    });
+    const res = await dashboardFetch<{ data: CreatedPaymentRequest }>(
+      "/api/dashboard/payments/requests",
+      {
+        method: "POST",
+        body: {
+          walletId: result.data.wallet,
+          token: result.data.token,
+          amount: result.data.amount,
+          counterpartyId,
+          expiresAt,
+        },
+      }
+    );
     settleExpiresAt(input, expiresAt, res);
     setSubmitting(false);
     if (!res.ok) {
