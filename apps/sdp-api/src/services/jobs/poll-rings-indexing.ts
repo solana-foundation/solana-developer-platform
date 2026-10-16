@@ -100,7 +100,7 @@ export interface PollRingsIndexingDependencies {
   readSignatureStatus?: SignatureStatusReader;
 }
 
-export function isRingsIndexingPollEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
+export function isRingsIndexingPollEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
   return isHeliusRingsEnabled(env);
 }
 

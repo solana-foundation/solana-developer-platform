@@ -4,8 +4,8 @@ import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-c
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { privateChannels } from "@/flags";
 import { getEnabledRampProviders } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import {
   fetchProviderAvailability,
   filterEnabledRampProviderAccess,
@@ -24,7 +24,7 @@ const UNLINKED_ONBOARDING_STATUS = {
 async function loadPrivateSendStatus(
   apiClient: Awaited<ReturnType<typeof createSdpApiClient>>
 ): Promise<{ enabled: boolean; connected: boolean } | null> {
-  if (!(await privateChannels())) return null;
+  if (!isModuleInDeploymentReleaseChannel("private_channels")) return null;
   const instance = await loadInstance(apiClient);
   return { enabled: true, connected: instance.ok && instance.data?.isActive === true };
 }

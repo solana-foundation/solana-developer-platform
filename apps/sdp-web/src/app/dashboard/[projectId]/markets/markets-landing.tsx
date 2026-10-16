@@ -12,7 +12,7 @@ import {
   providerSelectionCardTitleClassName,
   providerSelectionCardTitleUnderlineClassName,
 } from "@/components/ui/provider-selection-card";
-import { dvp, earn } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { requestProjectHref } from "@/lib/sdp-api";
@@ -75,7 +75,11 @@ function MarketsPathCard({
  * is on: the same check its segment layout 404s on.
  */
 export async function MarketsLanding() {
-  const [t, earnEnabled, dvpEnabled] = await Promise.all([getTranslations(), earn(), dvp()]);
+  const [t, earnEnabled, dvpEnabled] = await Promise.all([
+    getTranslations(),
+    isModuleInDeploymentReleaseChannel("earn"),
+    isModuleInDeploymentReleaseChannel("dvp"),
+  ]);
 
   return (
     <DashboardWorkspaceOverviewPanel>

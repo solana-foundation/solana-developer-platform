@@ -248,17 +248,11 @@ export interface Env extends ManagedRpcEnv {
   // Self-hosted Asset Profiles production opt-in; managed rollout uses Vercel.
   SDP_FLAG_ASSET_PROFILES?: string;
 
-  // Private Channels (SPC) feature gate — API routes + deposit/withdrawal cron.
-  PRIVATE_CHANNELS_ENABLED?: string;
-
   // Comma-separated origins (`scheme://host[:port]`) a Private Channels gateway
   // or auth URL may point at. Projects supply those URLs, so this is the list
   // that decides where a probe is allowed to go; the public sandbox is approved
   // without configuring anything. See services/private-channels/egress.ts.
   PRIVATE_CHANNEL_EGRESS_ALLOWLIST?: string;
-
-  // Helius Rings feature gate — devnet-only shielded wallet API routes.
-  HELIUS_RINGS_ENABLED?: string;
 
   // Compliance providers
   RANGE_API_KEY?: string;
@@ -301,9 +295,6 @@ export interface Env extends ManagedRpcEnv {
   STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
   STRIPE_SANDBOX_WEBHOOK_SECRET?: string;
 
-  // Markets module gate. Clearing it dark-launches every Markets API surface.
-  MARKETS_ENABLED?: string;
-  EARN_ENABLED?: string;
   // Optional Hastra PRIME -> wYLDS -> Jupiter -> USDC exit. Off by default;
   // Hastra's operator-settled par redemption remains available independently.
   EARN_HASTRA_DEX_EXIT_ENABLED?: string;

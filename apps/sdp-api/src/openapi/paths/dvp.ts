@@ -2,7 +2,7 @@
  * DvP trade routes.
  *
  * Registered on the INTERNAL document only, deliberately. The routes are real
- * and mounted, but the whole family is behind `MARKETS_ENABLED` and the swap
+ * and mounted, but the whole family is `experimental` (release channel) and the swap
  * program is deployed on devnet only (PRO-1798). Publishing them would expose
  * an unsupported public surface. Promoting the family is one line in
  * `registerPublicPaths` plus a `"dvp"` slug in

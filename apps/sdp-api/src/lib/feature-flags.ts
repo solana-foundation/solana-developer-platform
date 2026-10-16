@@ -22,8 +22,7 @@ function isTruthyFlag(value: string | undefined): boolean {
 
 /**
  * Whether the deployment's release channel (`SDP_RELEASE_CHANNEL`, see `@sdp/types` release channels)
- * includes `module`. A release channel only caps: every flag below still has to be on,
- * and none of them can bring back a module the release channel leaves out.
+ * includes `module`. Modules have no flags of their own: the release channel alone decides.
  */
 export function isModuleAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
@@ -102,49 +101,26 @@ export function isAssetProfilesEnabled(
   return env.ENVIRONMENT === "development" || isTruthyFlag(env.SDP_FLAG_ASSET_PROFILES);
 }
 
-export function isPrivateChannelsEnabled(
-  env: Pick<Env, "PRIVATE_CHANNELS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isModuleAvailable(env, "private_channels", SDP_RAMP_PROVIDER_STAGES) &&
-    isTruthyFlag(env.PRIVATE_CHANNELS_ENABLED)
-  );
+export function isPrivateChannelsEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "private_channels", SDP_RAMP_PROVIDER_STAGES);
 }
 
-export function isHeliusRingsEnabled(
-  env: Pick<Env, "HELIUS_RINGS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isModuleAvailable(env, "helius_rings", SDP_RAMP_PROVIDER_STAGES) &&
-    isTruthyFlag(env.HELIUS_RINGS_ENABLED)
-  );
+export function isHeliusRingsEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "helius_rings", SDP_RAMP_PROVIDER_STAGES);
 }
 
-export function isMarketsEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_STAGES) && isTruthyFlag(env.MARKETS_ENABLED)
-  );
+export function isMarketsEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_STAGES);
 }
 
-// Earn is a sub-module of Markets, so the parent flag gates it: clearing
-// MARKETS_ENABLED disables every Markets API surface in one move. Callers must
-// not add a second markets check — this hierarchy is the single source of truth.
-export function isEarnEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
-  return (
-    isMarketsEnabled(env) &&
-    isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_STAGES) &&
-    isTruthyFlag(env.EARN_ENABLED)
-  );
+// Markets is in a release channel whenever Earn or DvP is (`@sdp/types` release channels),
+// so a sub-module check needs no separate Markets check.
+export function isEarnEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_STAGES);
 }
 
-// DvP is the other Markets sub-module. It has no flag of its own on the API, so
-// Markets plus the release channel decide it.
-export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">): boolean {
-  return isMarketsEnabled(env) && isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_STAGES);
+export function isDvpEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
+  return isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_STAGES);
 }
 
 /**

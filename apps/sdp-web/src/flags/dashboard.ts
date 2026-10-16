@@ -1,15 +1,5 @@
 import type { SdpReleaseChannel } from "@sdp/types";
-import {
-  assetProfiles,
-  dvp,
-  earn,
-  heliusRings,
-  issuance,
-  markets,
-  newDesign,
-  paymentsDemoMode,
-  privateChannels,
-} from "@/flags";
+import { assetProfiles, newDesign, paymentsDemoMode } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
 import {
   deploymentReleaseChannel,
@@ -54,45 +44,33 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
-    dvpEnabled,
-    earnEnabled,
-    heliusRingsEnabled,
-    issuanceEnabled,
-    marketsEnabled,
     newDesignEnabled,
     newDesignModules,
     paymentsDemoModeEnabled,
-    privateChannelsEnabled,
     rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
-    dvp(),
-    earn(),
-    heliusRings(),
-    issuance(),
-    markets(),
     newDesign(),
     getDesignModuleFlags(),
     paymentsDemoMode(),
-    privateChannels(),
     isRampsEnabled(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
     compliance: isModuleInDeploymentReleaseChannel("compliance"),
-    // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
+    // Modules have no flags of their own: the release channel alone decides (HOO-1956).
     custody: isModuleInDeploymentReleaseChannel("custody"),
-    dvp: dvpEnabled,
-    earn: earnEnabled,
-    heliusRings: heliusRingsEnabled,
-    issuance: issuanceEnabled,
-    markets: marketsEnabled,
+    dvp: isModuleInDeploymentReleaseChannel("dvp"),
+    earn: isModuleInDeploymentReleaseChannel("earn"),
+    heliusRings: isModuleInDeploymentReleaseChannel("helius_rings"),
+    issuance: isModuleInDeploymentReleaseChannel("issuance"),
+    markets: isModuleInDeploymentReleaseChannel("markets"),
     newDesign: newDesignEnabled,
     newDesignModules,
     payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
-    privateChannels: privateChannelsEnabled,
+    privateChannels: isModuleInDeploymentReleaseChannel("private_channels"),
     ramps: rampsEnabled,
     releaseChannel: deploymentReleaseChannel(),
   };

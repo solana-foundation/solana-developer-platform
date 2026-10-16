@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { issuance } from "@/flags";
 import { withLegacyDesign } from "@/flags/new-design";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
@@ -21,7 +20,7 @@ async function DashboardPage() {
     getTranslations(),
     auth(),
     isModuleInDeploymentReleaseChannel("custody"),
-    issuance(),
+    isModuleInDeploymentReleaseChannel("issuance"),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());

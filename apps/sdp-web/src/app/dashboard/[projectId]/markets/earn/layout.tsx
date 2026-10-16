@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { earn } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 /**
  * The Earn sub-module flag on this segment's legacy alias routes
@@ -13,7 +13,7 @@ import { earn } from "@/flags";
  * other alias segments (`dashboard/wallets` for Custody).
  */
 export default async function EarnLayout({ children }: { children: ReactNode }) {
-  if (!(await earn())) {
+  if (!isModuleInDeploymentReleaseChannel("earn")) {
     notFound();
   }
 

@@ -129,19 +129,6 @@ export function defineDashboardFlags({
     ],
   });
 
-  const issuance = flag<boolean, DashboardFlagEntities>({
-    key: "issuance",
-    adapter: moduleAdapter("issuance"),
-    identify,
-    defaultValue: flagDefault("ISSUANCE_ENABLED", false),
-    description:
-      "Show the Issuance module. Off hides every Issuance surface at once, whatever the Asset Profiles flag says.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
   const assetProfiles = flag<boolean, DashboardFlagEntities>({
     key: "asset-profiles",
     adapter: moduleAdapter("issuance"),
@@ -152,71 +139,6 @@ export function defineDashboardFlags({
     options: [
       { value: false, label: "Legacy issuance" },
       { value: true, label: "Asset Profiles" },
-    ],
-  });
-
-  const privateChannels = flag<boolean, DashboardFlagEntities>({
-    key: "private-channels",
-    adapter: moduleAdapter("private_channels"),
-    identify,
-    defaultValue: flagDefault("PRIVATE_CHANNELS_ENABLED", false),
-    description:
-      "Show the Private Channels payments workspace (instance, channels, members, deposits, transfers, withdrawals).",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
-  const heliusRings = flag<boolean, DashboardFlagEntities>({
-    key: "helius-rings",
-    adapter: moduleAdapter("helius_rings"),
-    identify,
-    defaultValue: flagDefault("HELIUS_RINGS_ENABLED", false),
-    description:
-      "Show the Helius Rings devnet workspace (shielded wallets, private transfers, zones, timelocks).",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
-  const markets = flag<boolean, DashboardFlagEntities>({
-    key: "markets",
-    adapter: moduleAdapter("markets"),
-    identify,
-    defaultValue: flagDefault("MARKETS_ENABLED", false),
-    description:
-      "Show the Markets module — Earn today, further market workspaces later. Off hides every Markets surface at once, whatever the sub-module flags say.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
-  const dvp = flag<boolean, DashboardFlagEntities>({
-    key: "dvp",
-    adapter: moduleAdapter("dvp"),
-    identify,
-    defaultValue: flagDefault("DVP_ENABLED", false),
-    description:
-      "Show the DvP workspace (atomic delivery-versus-payment trades). A sub-module of Markets, so it also requires the markets flag. The swap program is deployed on devnet only, so the API answers 403 everywhere else regardless of this flag.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
-    ],
-  });
-
-  const earn = flag<boolean, DashboardFlagEntities>({
-    key: "earn",
-    adapter: moduleAdapter("earn"),
-    identify,
-    defaultValue: flagDefault("EARN_ENABLED", false),
-    description:
-      "Show the Earn workspace (strategy catalogue, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
-    options: [
-      { value: false, label: "Hidden" },
-      { value: true, label: "Enabled" },
     ],
   });
 
@@ -276,13 +198,7 @@ export function defineDashboardFlags({
 
   return {
     homepageOpenSignup,
-    issuance,
     assetProfiles,
-    privateChannels,
-    heliusRings,
-    markets,
-    dvp,
-    earn,
     newDesign,
     paymentsDemoMode,
     newDesignOverview,

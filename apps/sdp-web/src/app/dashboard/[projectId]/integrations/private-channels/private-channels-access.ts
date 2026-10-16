@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
-import { privateChannels } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 
 /**
@@ -12,7 +12,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
  * "the caller is allowed to render".
  */
 export async function requirePrivateChannelsAccess(): Promise<void> {
-  if (!(await privateChannels())) {
+  if (!isModuleInDeploymentReleaseChannel("private_channels")) {
     notFound();
   }
 

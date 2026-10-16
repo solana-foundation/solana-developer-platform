@@ -25,7 +25,7 @@ import {
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
-import { issuance } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -158,7 +158,7 @@ export default async function WalletDetailPage({
     getTranslations(),
     auth(),
     params,
-    issuance(),
+    isModuleInDeploymentReleaseChannel("issuance"),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { earn } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 /**
  * The Earn half of what used to be the shared Markets gate.
@@ -9,7 +9,7 @@ import { earn } from "@/flags";
  * so a non-Earn sibling like DvP is not hidden by it.
  */
 export default async function EmbeddedYieldLayout({ children }: { children: ReactNode }) {
-  if (!(await earn())) {
+  if (!isModuleInDeploymentReleaseChannel("earn")) {
     notFound();
   }
 

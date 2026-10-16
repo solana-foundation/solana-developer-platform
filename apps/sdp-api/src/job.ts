@@ -91,7 +91,7 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *    deployment-provided Managed Reconciliation Cadence is its effective
  *    cadence, so no Redis slot is needed.
  * 4. **Private-channel deposit and withdrawal reconcilers** (gated on
- *    `PRIVATE_CHANNELS_ENABLED`) — siblings, not stages: concurrent under
+ *    the release channel) — siblings, not stages: concurrent under
  *    their own monitors so a failing leg never skips the other. The Managed
  *    Reconciliation Cadence is their effective cadence, the same degradation
  *    from the per-minute crontab that pending-transfers accepts. Fatal.

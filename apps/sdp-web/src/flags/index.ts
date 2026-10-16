@@ -44,13 +44,7 @@ const flags = defineDashboardFlags({
 
 export const {
   homepageOpenSignup,
-  issuance,
   assetProfiles,
-  privateChannels,
-  heliusRings,
-  markets,
-  dvp,
-  earn,
   newDesign,
   paymentsDemoMode,
   newDesignOverview,

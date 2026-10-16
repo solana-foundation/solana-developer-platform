@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
-import { heliusRings } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import { HeliusRingsWorkspace } from "./helius-rings-workspace";
@@ -20,7 +20,7 @@ interface CustodyWalletOption {
  * upstreams render honestly: red health, pending wallets, failed operations.
  */
 export default async function HeliusRingsPage() {
-  if (!(await heliusRings())) {
+  if (!isModuleInDeploymentReleaseChannel("helius_rings")) {
     notFound();
   }
   const { userId, orgId } = await auth();

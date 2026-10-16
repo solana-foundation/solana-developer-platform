@@ -8,14 +8,17 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { issuance } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
-  const [t, issuanceEnabled] = await Promise.all([getTranslations(), issuance()]);
+  const [t, issuanceEnabled] = await Promise.all([
+    getTranslations(),
+    isModuleInDeploymentReleaseChannel("issuance"),
+  ]);
 
   try {
     const apiClient = await createSdpApiClient(
