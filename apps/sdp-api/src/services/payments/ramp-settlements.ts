@@ -6,6 +6,7 @@ import {
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferTransitionId,
   type RampWebhookBusinessOutcome,
+  type SdpEnvironment,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
@@ -116,14 +117,20 @@ function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId 
  * the CAS instead of overwriting state.
  *
  * @param env - Process environment used for repository access.
+ * @param environment - Environment of the verified provider webhook.
  * @param event - The provider settlement event to apply.
  * @returns Whether the event produced a real transition; callers release
  * provider reservations only on a real one.
  */
 export async function applyRampSettlementEvent(
   env: Env,
+  environment: SdpEnvironment,
   event: RampSettlementEvent
-): Promise<{ applied: boolean; outcome: RampWebhookBusinessOutcome }> {
+): Promise<{
+  applied: boolean;
+  outcome: RampWebhookBusinessOutcome;
+  reason?: "environment_mismatch" | "settled_after_cancel";
+}> {
   if (event.kind === "ignore") {
     return { applied: false, outcome: "ignored" };
   }
@@ -136,8 +143,24 @@ export async function applyRampSettlementEvent(
   const transfer = await repo.getTransferByProviderReference({
     provider: event.provider,
     providerReference: event.reference,
+    environment,
   });
   if (!transfer) {
+    const otherEnvironment = await repo.getTransferByProviderReference({
+      provider: event.provider,
+      providerReference: event.reference,
+    });
+    if (otherEnvironment) {
+      logEvent("error", {
+        event: "sdp_api_ramp_settlement_environment_mismatch",
+        flow: "ramp-settlement",
+        provider: event.provider,
+        provider_reference: event.reference,
+        project_id: otherEnvironment.project_id,
+        environment,
+      });
+      return { applied: false, outcome: "refused", reason: "environment_mismatch" };
+    }
     logEvent("info", {
       event: "sdp_api_ramp_settlement_unmatched",
       flow: "ramp-settlement",
@@ -151,6 +174,9 @@ export async function applyRampSettlementEvent(
   }
   if (!isRampTransferType(transfer.type)) {
     return { applied: false, outcome: "refused" };
+  }
+  if (event.kind === "settled" && transfer.status === "canceled") {
+    return { applied: false, outcome: "refused", reason: "settled_after_cancel" };
   }
   // A lock the provider did not enforce must not write another asset's amount
   // onto the row, so a delivery the provider reports must be the transfer's asset.
@@ -206,6 +232,17 @@ export async function applyRampSettlementEvent(
     }
     return { applied: updated !== null, linkedReference: null };
   });
+
+  if (!applied && event.kind === "settled") {
+    const current = await repo.getTransferById({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+    });
+    if (current?.status === "canceled") {
+      return { applied: false, outcome: "refused", reason: "settled_after_cancel" };
+    }
+  }
 
   // First-write-wins: the event reported a different provider customer than the
   // counterparty's canonical link. The displaced reference is preserved in the

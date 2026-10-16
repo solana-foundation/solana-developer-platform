@@ -188,7 +188,7 @@ describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
       reference: "moonpay_stale",
     });
 
-    const result = await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "awaiting_payment",
       reference: "moonpay_stale",

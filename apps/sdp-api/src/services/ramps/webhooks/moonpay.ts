@@ -16,7 +16,7 @@ import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
-import type { WebhookProcessor } from "./processor";
+import type { RampWebhookProcessResult, WebhookProcessor } from "./processor";
 
 /**
  * The key that signs `environment`'s MoonPay events. SDP holds the sandbox key
@@ -196,23 +196,36 @@ export const moonpayWebhook = {
     );
   },
 
-  async process(env: Env, _environment: SdpEnvironment, event: MoonpaySettlementEvent) {
+  async process(
+    env: Env,
+    environment: SdpEnvironment,
+    event: MoonpaySettlementEvent
+  ): Promise<RampWebhookProcessResult> {
     if (event.kind === "ignore") {
       getLogger().info(`[moonpay webhook] ignored event: ${event.reason}`);
-      return "ignored" as const;
+      return { outcome: "ignored" };
     }
-    const transfer = await createSystemPaymentsRepository(env).setProviderReferenceIfEmpty({
+    const repo = createSystemPaymentsRepository(env);
+    const transfer = await repo.setProviderReferenceIfEmpty({
       provider: event.provider,
       transferId: event.transferId,
       providerReference: event.reference,
+      environment,
       updatedAt: new Date().toISOString(),
     });
     if (!transfer) {
+      const transferEnvironment = await repo.getTransferProjectEnvironment({
+        transferId: event.transferId,
+        provider: event.provider,
+      });
+      if (transferEnvironment !== null && transferEnvironment !== environment) {
+        return { outcome: "refused", reason: "environment_mismatch" };
+      }
       getLogger().warn(
         `[moonpay webhook] refused provider reference for transfer ${event.transferId}`
       );
-      return "unmatched" as const;
+      return { outcome: "unmatched" };
     }
-    return (await applyRampSettlementEvent(env, event)).outcome;
+    return applyRampSettlementEvent(env, environment, event);
   },
 } satisfies WebhookProcessor<MoonpaySettlementEvent>;

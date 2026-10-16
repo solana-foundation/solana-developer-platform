@@ -8,8 +8,13 @@ export type AppContext = Context<{ Bindings: Env }>;
 
 export class TerminalRampWebhookError extends Error {}
 
+export interface RampWebhookProcessResult {
+  outcome: RampWebhookBusinessOutcome;
+  reason?: "environment_mismatch" | "settled_after_cancel";
+}
+
 export interface WebhookProcessor<Event = unknown> extends RampProviderWebhook<Event> {
   readonly provider: RampProviderId;
   verify(context: RampWebhookValidationContext): Promise<string>;
-  process(env: Env, environment: SdpEnvironment, event: Event): Promise<RampWebhookBusinessOutcome>;
+  process(env: Env, environment: SdpEnvironment, event: Event): Promise<RampWebhookProcessResult>;
 }

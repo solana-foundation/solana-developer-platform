@@ -7,7 +7,7 @@ import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
-import type { WebhookProcessor } from "./processor";
+import type { RampWebhookProcessResult, WebhookProcessor } from "./processor";
 
 const STRIPE_SESSION_STATUS = {
   requires_payment: "awaiting_payment",
@@ -264,11 +264,15 @@ export const stripeWebhook = {
     return { provider: this.provider, kind, reference };
   },
 
-  async process(env: Env, _environment: SdpEnvironment, event: RampSettlementEvent) {
+  async process(
+    env: Env,
+    environment: SdpEnvironment,
+    event: RampSettlementEvent
+  ): Promise<RampWebhookProcessResult> {
     if (event.kind === "ignore") {
       getLogger().info(`[stripe webhook] ignored event: ${event.reason}`);
-      return "ignored" as const;
+      return { outcome: "ignored" };
     }
-    return (await applyRampSettlementEvent(env, event)).outcome;
+    return applyRampSettlementEvent(env, environment, event);
   },
 } satisfies WebhookProcessor<RampSettlementEvent>;

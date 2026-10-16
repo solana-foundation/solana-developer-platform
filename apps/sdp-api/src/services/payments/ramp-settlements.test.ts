@@ -30,6 +30,7 @@ async function seedTransfer(input: {
   type?: "onramp" | "offramp" | "transfer";
   counterpartyId?: string;
   provider?: "moonpay" | "stripe";
+  projectId?: string;
   signature?: string;
 }) {
   const type = input.type ?? "onramp";
@@ -45,7 +46,7 @@ async function seedTransfer(input: {
     .bind(
       input.id,
       ORG_ID,
-      PROJECT_ID,
+      input.projectId ?? PROJECT_ID,
       "wallet_ramp_settlement_test",
       input.counterpartyId === undefined ? null : input.counterpartyId,
       type === "offramp" ? "source" : null,
@@ -119,7 +120,7 @@ describe("applyRampSettlementEvent", () => {
       provider: "moonpay",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_onchain_settlement",
@@ -150,7 +151,7 @@ describe("applyRampSettlementEvent", () => {
       signature: "sdp-submitted-signature",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_onchain_payment",
@@ -176,23 +177,61 @@ describe("applyRampSettlementEvent", () => {
   it("never reopens a canceled transfer", async () => {
     await seedTransfer({ id: "xfr_canceled", reference: "order_canceled", status: "canceled" });
 
-    await applyRampSettlementEvent(env, {
+    const result = await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_canceled",
       receivedAmount: "12",
     });
 
+    expect(result).toEqual({
+      applied: false,
+      outcome: "refused",
+      reason: "settled_after_cancel",
+    });
     expect(await readTransfer("xfr_canceled")).toMatchObject({
       status: "canceled",
       amount: "10",
     });
   });
 
+  it.each([
+    { transferEnvironment: "production", eventEnvironment: "sandbox" },
+    { transferEnvironment: "sandbox", eventEnvironment: "production" },
+  ] as const)(
+    "refuses a $eventEnvironment event for a $transferEnvironment transfer",
+    async ({ transferEnvironment, eventEnvironment }) => {
+      await seedTransfer({
+        id: "xfr_environment_mismatch",
+        reference: "order_environment_mismatch",
+        status: "settling",
+        provider: "stripe",
+        projectId: transferEnvironment === "production" ? `${PROJECT_ID}_production` : PROJECT_ID,
+      });
+
+      const result = await applyRampSettlementEvent(env, eventEnvironment, {
+        provider: "stripe",
+        kind: "settled",
+        reference: "order_environment_mismatch",
+        receivedAmount: "12",
+      });
+
+      expect(result).toEqual({
+        applied: false,
+        outcome: "refused",
+        reason: "environment_mismatch",
+      });
+      expect(await readTransfer("xfr_environment_mismatch")).toMatchObject({
+        status: "settling",
+        amount: "10",
+      });
+    }
+  );
+
   it("revives an expired transfer when the provider proves the checkout completed", async () => {
     await seedTransfer({ id: "xfr_expired", reference: "order_expired", status: "expired" });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_expired",
@@ -213,7 +252,7 @@ describe("applyRampSettlementEvent", () => {
       type: "offramp",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_processing_deposit",
@@ -230,7 +269,7 @@ describe("applyRampSettlementEvent", () => {
   it("does not regress a settling transfer on an out-of-order event", async () => {
     await seedTransfer({ id: "xfr_settling", reference: "order_settling", status: "settling" });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "awaiting_payment",
       reference: "order_settling",
@@ -246,7 +285,9 @@ describe("applyRampSettlementEvent", () => {
       { provider: "moonpay", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
-    const results = await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
+    const results = await Promise.all(
+      events.map((event) => applyRampSettlementEvent(env, "sandbox", event))
+    );
     expect(results.map((result) => result.outcome).sort()).toEqual(["applied", "ignored"]);
 
     const transfer = await readTransfer("xfr_race");
@@ -268,13 +309,13 @@ describe("applyRampSettlementEvent", () => {
       status: "pending",
       counterpartyId: COUNTERPARTY_ID,
     });
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "awaiting_payment",
       reference: "order_first_wins",
       providerCustomerId: "cust_first",
     });
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_first_wins",
@@ -301,7 +342,7 @@ describe("applyRampSettlementEvent", () => {
       status: "settling",
       counterpartyId: COUNTERPARTY_ID,
     });
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "failed",
       reference: "order_refused_link",
@@ -309,7 +350,7 @@ describe("applyRampSettlementEvent", () => {
       providerCustomerId: "cust_winner",
     });
 
-    await applyRampSettlementEvent(env, {
+    await applyRampSettlementEvent(env, "sandbox", {
       provider: "moonpay",
       kind: "settled",
       reference: "order_refused_link",
@@ -337,11 +378,13 @@ describe("applyRampSettlementEvent", () => {
       receivedAmount: "9",
     };
 
-    expect(await applyRampSettlementEvent(env, event)).toEqual({
+    expect(await applyRampSettlementEvent(env, "sandbox", event)).toEqual({
       applied: true,
       outcome: "applied",
     });
-    expect(await applyRampSettlementEvent(env, { ...event, receivedAmount: "999" })).toEqual({
+    expect(
+      await applyRampSettlementEvent(env, "sandbox", { ...event, receivedAmount: "999" })
+    ).toEqual({
       applied: false,
       outcome: "ignored",
     });

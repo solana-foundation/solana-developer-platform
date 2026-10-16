@@ -99,6 +99,22 @@ describe("moonpayWebhook.process", () => {
       provider_reference: MOONPAY_TRANSACTION_ID,
     });
   });
+
+  it("does not bind a sandbox transfer from a production event", async () => {
+    const result = await processor.process(env, "production", {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+    });
+
+    expect(result).toEqual({ outcome: "refused", reason: "environment_mismatch" });
+    const row = await getDb(env)
+      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .first<{ status: string; provider_reference: string | null }>();
+    expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
 });
 
 describe("moonpayWebhook.verify", () => {

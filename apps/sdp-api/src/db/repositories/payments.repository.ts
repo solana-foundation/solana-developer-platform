@@ -194,6 +194,7 @@ export interface ListTransfersResult {
 export type GetTransferByProviderReferenceInput = {
   provider: RampProviderId;
   providerReference: string;
+  environment?: SdpEnvironment;
 } & (
   | {
       organizationId: string;
@@ -377,6 +378,10 @@ export interface PaymentsRepository {
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
   ): Promise<PaymentTransferRow | null>;
+  getTransferProjectEnvironment(input: {
+    transferId: string;
+    provider: RampProviderId;
+  }): Promise<SdpEnvironment | null>;
   /**
    * Atomically binds a provider-owned reference to a provider transfer selected
    * by SDP's internal correlation ID. Replays with the same reference succeed;
@@ -386,6 +391,7 @@ export interface PaymentsRepository {
     transferId: string;
     provider: RampProviderId;
     providerReference: string;
+    environment: SdpEnvironment;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   listTransfersBySignatures(params: {

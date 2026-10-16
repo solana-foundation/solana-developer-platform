@@ -1,4 +1,8 @@
-import type { RampWebhookFailureOutcome, SdpRampProviderStages } from "@sdp/types";
+import type {
+  RampWebhookBusinessOutcome,
+  RampWebhookFailureOutcome,
+  SdpRampProviderStages,
+} from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
 import { getDb } from "@/db";
 import {
@@ -72,6 +76,10 @@ function failureOutcome(kind: RampWebhookFailureKind): RampWebhookFailureOutcome
   }
 }
 
+function businessFailureReason(outcome: RampWebhookBusinessOutcome, reason?: string): string {
+  return reason ?? `provider event ${outcome}`;
+}
+
 /**
  * The identity a parked row is stamped with; a later deploy changes it.
  * Deliberately the image build SHA, NOT K_REVISION and not API_VERSION: the
@@ -139,10 +147,10 @@ export async function applyStoredRampWebhookEvent(
       throw error;
     }
 
-    const outcome = await processor.process(env, row.environment, parsed);
+    const { outcome, reason } = await processor.process(env, row.environment, parsed);
     if (outcome === "unmatched" || outcome === "refused") {
       if (row.environment === "sandbox") {
-        await events.dischargeEvent(row.id, "discarded", `provider event ${outcome}`);
+        await events.dischargeEvent(row.id, "discarded", businessFailureReason(outcome, reason));
         logEvent("warn", {
           event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
           flow: "ramp-settlement",
@@ -150,6 +158,7 @@ export async function applyStoredRampWebhookEvent(
           provider: row.provider,
           environment: row.environment,
           outcome,
+          reason,
         });
         return false;
       }
@@ -157,7 +166,7 @@ export async function applyStoredRampWebhookEvent(
       const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
       await events.recordFailure({
         id: row.id,
-        error: `provider event ${outcome}`,
+        error: businessFailureReason(outcome, reason),
         attempts: spentAttempts,
         maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
         appRevision: currentAppRevision(env),
@@ -172,6 +181,7 @@ export async function applyStoredRampWebhookEvent(
           provider: row.provider,
           environment: row.environment,
           outcome,
+          reason,
           attempts: spentAttempts,
         });
       }

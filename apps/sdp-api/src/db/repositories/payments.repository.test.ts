@@ -581,8 +581,15 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       transferId: transfer.id,
       provider: "moonpay" as const,
       providerReference: "moonpay-transaction-1",
+      environment: "sandbox" as const,
       updatedAt: "2026-08-31T11:00:00.000Z",
     };
+    await expect(
+      repo.setProviderReferenceIfEmpty({ ...input, environment: "production" })
+    ).resolves.toBeNull();
+    await expect(
+      repo.getTransferProjectEnvironment({ transferId: transfer.id, provider: "moonpay" })
+    ).resolves.toBe("sandbox");
     await expect(repo.setProviderReferenceIfEmpty(input)).resolves.toMatchObject({
       provider_reference: "moonpay-transaction-1",
     });
