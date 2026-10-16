@@ -26,6 +26,7 @@ import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { reconcilePaymentRequest } from "./payment-requests";
@@ -316,6 +317,23 @@ describe("reconcilePaymentRequest", () => {
 
     expect(result).toBe(request);
     expect(errorSpy).toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("best-effort rethrows RPC_NOT_CONFIGURED instead of degrading to the stored row", async () => {
+    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
+    for (const [envKey, blankValue] of Object.entries(BLANK_MANAGED_POOL_ENV)) {
+      vi.stubEnv(envKey, blankValue);
+    }
+    const request = await createRequest();
+
+    await expect(reconcileOnSandbox(request, { bestEffort: true })).rejects.toMatchObject({
+      name: "SdpRpcError",
+      code: "RPC_NOT_CONFIGURED",
+      details: { cluster: "devnet" },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(findReferenceSpy).not.toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
