@@ -1,4 +1,4 @@
-import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
+import type { SdpEnvironment } from "@sdp/types";
 import { SOL_MINT } from "@sdp/types";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,11 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { clusterOfRpcClient, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import {
+  clusterOfRpcClient,
+  ENVIRONMENT_CLUSTER_CASES,
+  installClusterRpcStub,
+} from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
@@ -74,11 +78,6 @@ const sponsoredGrantMetadataSchema = z.object({
   signature: z.string().min(1),
 });
 
-const CLUSTER_CASES = [
-  { environment: "sandbox", cluster: "devnet" },
-  { environment: "production", cluster: "mainnet-beta" },
-] as const satisfies readonly { environment: SdpEnvironment; cluster: SolanaCluster }[];
-
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
@@ -132,7 +131,7 @@ describe("Public payment request routes", () => {
     }));
   }
 
-  it.for(CLUSTER_CASES)(
+  it.for(ENVIRONMENT_CLUSTER_CASES)(
     "reports and reads a $environment request on $cluster only",
     async ({ environment, cluster }) => {
       const request = await createAwaitingPaymentRequest(
@@ -185,7 +184,7 @@ describe("Public payment request routes", () => {
   });
 
   describe("sponsored transaction window", () => {
-    it.for(CLUSTER_CASES)(
+    it.for(ENVIRONMENT_CLUSTER_CASES)(
       "builds a $environment request's sponsored transaction on $cluster only",
       async ({ environment, cluster }) => {
         const sponsorship = stubSponsorship();

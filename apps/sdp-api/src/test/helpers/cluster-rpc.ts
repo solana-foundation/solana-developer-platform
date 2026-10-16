@@ -6,6 +6,7 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   GENESIS_HASH_BY_CLUSTER,
   SDP_ENVIRONMENTS,
+  type SdpEnvironment,
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
@@ -79,13 +80,21 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
   return cluster;
 }
 
+/** Each environment with the cluster its projects' chain reads and sends must land on. */
+export const ENVIRONMENT_CLUSTER_CASES = [
+  { environment: "sandbox", cluster: "devnet" },
+  { environment: "production", cluster: "mainnet-beta" },
+] as const satisfies readonly { environment: SdpEnvironment; cluster: SolanaCluster }[];
+
 /**
- * The cluster and parsed body of a JSON-RPC fetch the stub intercepts.
+ * The cluster and parsed body of a JSON-RPC fetch the stub intercepts. Like `fetch`, a request
+ * whose signal is already aborted is refused before it reaches the endpoint or is recorded.
  *
  * @param input - The fetch target kit passed.
  * @param init - The fetch options kit passed.
  * @returns The cluster whose endpoint was hit and the request's parsed JSON body.
  * @throws Error when kit did not fetch a string URL with a string body.
+ * @throws The signal's abort reason when the request was aborted before it was sent.
  */
 function readJsonRpcFetch(
   input: Parameters<typeof fetch>[0],
@@ -97,6 +106,7 @@ function readJsonRpcFetch(
   if (init === undefined || typeof init.body !== "string") {
     throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
   }
+  init.signal?.throwIfAborted();
   return { cluster: clusterForUrl(input), body: JSON.parse(init.body) };
 }
 
