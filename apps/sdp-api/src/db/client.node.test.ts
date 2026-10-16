@@ -5,31 +5,49 @@ interface MockQueryResult {
   rowCount: number;
 }
 
+interface SentQuery {
+  text: string;
+  name?: string;
+  values?: unknown[];
+}
+
+/** What the client hands the driver: a bare command or a statement with its values. */
+type SentInput = string | SentQuery;
+
 interface MockPoolClient {
-  queries: unknown[][];
+  queries: [SentInput][];
   release: ReturnType<typeof vi.fn>;
 }
 
 interface MockPool {
   config: Record<string, unknown>;
-  queries: unknown[];
+  queries: SentQuery[];
   connectedClients: MockPoolClient[];
   end: ReturnType<typeof vi.fn>;
 }
 
-const pgMock = vi.hoisted(() => ({
-  pools: [] as MockPool[],
-  connectError: undefined as Error | undefined,
-  lastClientQuery: undefined as unknown,
-  poolQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
-  poolClientQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
-  poolEnd: async (): Promise<void> => {},
-}));
+const pgMock = vi.hoisted(() => {
+  // One class for every evaluation of the "pg" mock factory below, so
+  // `instanceof` agrees between the client under test and the errors built here.
+  class DatabaseError extends Error {
+    code: string | undefined = undefined;
+  }
+
+  return {
+    DatabaseError,
+    pools: [] as MockPool[],
+    connectError: undefined as Error | undefined,
+    lastClientQuery: undefined as SentInput | undefined,
+    poolQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
+    poolClientQuery: async (): Promise<MockQueryResult> => ({ rows: [], rowCount: 0 }),
+    poolEnd: async (): Promise<void> => {},
+  };
+});
 
 vi.mock("pg", () => {
   class Pool {
     readonly config: Record<string, unknown>;
-    readonly queries: unknown[] = [];
+    readonly queries: SentQuery[] = [];
     readonly connectedClients: MockPoolClient[] = [];
     readonly end = vi.fn(() => pgMock.poolEnd());
     readonly totalCount = 10;
@@ -45,22 +63,22 @@ vi.mock("pg", () => {
       return this;
     }
 
-    async query(args: unknown): Promise<MockQueryResult> {
+    async query(args: SentQuery): Promise<MockQueryResult> {
       this.queries.push(args);
       return pgMock.poolQuery();
     }
 
     async connect(): Promise<
-      MockPoolClient & { query: (...args: unknown[]) => Promise<MockQueryResult> }
+      MockPoolClient & { query: (input: SentInput) => Promise<MockQueryResult> }
     > {
       if (pgMock.connectError) {
         throw pgMock.connectError;
       }
       const client = {
-        queries: [] as unknown[][],
-        query: async (...args: unknown[]): Promise<MockQueryResult> => {
-          client.queries.push(args);
-          pgMock.lastClientQuery = args[0];
+        queries: [] as [SentInput][],
+        query: async (input: SentInput): Promise<MockQueryResult> => {
+          client.queries.push([input]);
+          pgMock.lastClientQuery = input;
           return pgMock.poolClientQuery();
         },
         release: vi.fn(),
@@ -72,24 +90,40 @@ vi.mock("pg", () => {
 
   return {
     Pool,
+    DatabaseError: pgMock.DatabaseError,
     types: { setTypeParser: vi.fn() },
   };
 });
 
-interface SentQuery {
-  text: string;
-  name?: string;
-  values?: unknown[];
-}
-
 const STATUS_QUERY = "SELECT status FROM organizations WHERE id = ?";
 
-function staleStatement(): Error {
-  return Object.assign(new Error("cached plan must not change result type"), { code: "0A000" });
+/** A failure the server reported, with its SQLSTATE. */
+function serverError(code: string, message: string): Error {
+  return Object.assign(new pgMock.DatabaseError(message), { code });
 }
 
-function isNamedQuery(query: unknown): boolean {
-  return typeof query === "object" && query !== null && "name" in query;
+function staleStatement(): Error {
+  return serverError("0A000", "cached plan must not change result type");
+}
+
+function isNamedQuery(query: SentInput | undefined): boolean {
+  return typeof query === "object" && query.name !== undefined;
+}
+
+function firstPool(): MockPool {
+  const [pool] = pgMock.pools;
+  if (pool === undefined) {
+    throw new Error("expected the client to create a pool");
+  }
+  return pool;
+}
+
+function connectedClient(index: number): MockPoolClient {
+  const client = firstPool().connectedClients.at(index);
+  if (client === undefined) {
+    throw new Error(`expected a connected client at ${index}`);
+  }
+  return client;
 }
 
 let closeDatabasePools: typeof import("./client").closeDatabasePools;
@@ -404,11 +438,15 @@ describe("database client connection management", () => {
     await db.queryOne(STATUS_QUERY, ["org_1"]);
     await db.queryOne(STATUS_QUERY, ["org_2"]);
 
-    const [first, second, third] = (pgMock.pools[0]?.queries ?? []) as SentQuery[];
-    expect(first?.name).toBeUndefined();
-    expect(second?.name).toMatch(/^sdp_[0-9a-f]{32}$/);
-    expect(third).toMatchObject({ name: second?.name, values: ["org_2"] });
-    expect(third?.text).toBe("SELECT status FROM organizations WHERE id = $1");
+    const { queries } = firstPool();
+    const names = queries.map((query) => query.name);
+    expect(names[0]).toBeUndefined();
+    expect(names[1]).toMatch(/^sdp_[0-9a-f]{32}$/);
+    expect(names[2]).toBe(names[1]);
+    expect(queries[2]).toMatchObject({
+      text: "SELECT status FROM organizations WHERE id = $1",
+      values: ["org_2"],
+    });
   });
 
   it("names a transaction's repeated statements and leaves its control statements unnamed", async () => {
@@ -420,12 +458,11 @@ describe("database client connection management", () => {
       });
     }
 
-    const sent = (pgMock.pools[0]?.connectedClients ?? []).flatMap((client) =>
+    const sent = firstPool().connectedClients.flatMap((client) =>
       client.queries.map(([query]) => query)
     );
     const statements = sent.filter(
-      (query): query is SentQuery =>
-        typeof query === "object" && query !== null && "text" in query && query.text !== "BEGIN"
+      (query): query is SentQuery => typeof query === "object" && query.text !== "BEGIN"
     );
     expect(statements.map((query) => query.name === undefined)).toEqual([true, false]);
     expect(sent.filter(isNamedQuery)).toHaveLength(1);
@@ -439,7 +476,7 @@ describe("database client connection management", () => {
       await db.execute("SELECT 1; SELECT 2");
     }
 
-    const queries = (pgMock.pools[0]?.queries ?? []) as SentQuery[];
+    const { queries } = firstPool();
     expect(queries).toHaveLength(6);
     expect(queries.some(isNamedQuery)).toBe(false);
   });
@@ -453,7 +490,9 @@ describe("database client connection management", () => {
         await db.queryOne(STATUS_QUERY, ["org_1"]);
       }
 
-      expect((pgMock.pools[0]?.queries ?? []).some(isNamedQuery)).toBe(false);
+      const { queries } = firstPool();
+      expect(queries).toHaveLength(4);
+      expect(queries.some(isNamedQuery)).toBe(false);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -474,7 +513,7 @@ describe("database client connection management", () => {
 
     await expect(db.queryOne(STATUS_QUERY, ["org_1"])).resolves.toEqual({ status: "active" });
 
-    expect(pgMock.pools[0]?.queries).toHaveLength(4);
+    expect(firstPool().queries).toHaveLength(4);
   });
 
   it("closes the connection that held a stale statement and runs it on another", async () => {
@@ -497,14 +536,15 @@ describe("database client connection management", () => {
 
     await expect(run()).resolves.toEqual({ status: "active" });
 
-    const [, , failed, retried] = pgMock.pools[0]?.connectedClients ?? [];
-    expect(failed?.queries.map(([query]) => query)).toEqual([
+    const failed = connectedClient(2);
+    const retried = connectedClient(3);
+    expect(failed.queries.map(([query]) => query)).toEqual([
       expect.objectContaining({ text: expect.stringContaining("BEGIN") }),
       expect.objectContaining({ name: expect.stringMatching(/^sdp_/) }),
       "ROLLBACK",
     ]);
-    expect(failed?.release).toHaveBeenCalledWith(stale);
-    expect(retried?.release).toHaveBeenCalledWith(undefined);
+    expect(failed.release).toHaveBeenCalledWith(stale);
+    expect(retried.release).toHaveBeenCalledWith(undefined);
   });
 
   it("does not run a stale error again for a statement that has no name", async () => {
@@ -516,7 +556,7 @@ describe("database client connection management", () => {
 
     await expect(db.queryOne(STATUS_QUERY, ["org_1"])).rejects.toBe(stale);
 
-    expect(pgMock.pools[0]?.queries).toHaveLength(1);
+    expect(firstPool().queries).toHaveLength(1);
   });
 
   it("gives up once a statement is stale on every connection the pool can hold", async () => {
@@ -531,7 +571,7 @@ describe("database client connection management", () => {
     await expect(db.queryOne(STATUS_QUERY, ["org_1"])).rejects.toBe(stale);
 
     // The first attempt plus one retry per pooled connection.
-    expect(pgMock.pools[0]?.queries).toHaveLength(2 + 1 + 10);
+    expect(firstPool().queries).toHaveLength(2 + 1 + 10);
   });
 
   it("closes a transaction's connection when a statement in it went stale", async () => {
@@ -548,13 +588,13 @@ describe("database client connection management", () => {
 
     await expect(db.transaction((tx) => tx.queryOne(STATUS_QUERY, ["org_1"]))).rejects.toBe(stale);
 
-    const client = pgMock.pools[0]?.connectedClients.at(-1);
-    expect(client?.queries.map(([query]) => query)).toEqual([
+    const client = connectedClient(-1);
+    expect(client.queries.map(([query]) => query)).toEqual([
       expect.objectContaining({ text: "BEGIN" }),
       expect.objectContaining({ name: expect.stringMatching(/^sdp_/) }),
       "ROLLBACK",
     ]);
-    expect(client?.release).toHaveBeenCalledWith(stale);
+    expect(client.release).toHaveBeenCalledWith(stale);
   });
 
   it.each([
@@ -568,12 +608,9 @@ describe("database client connection management", () => {
     ],
     [
       "the server has no connection slots left",
-      Object.assign(new Error("sorry, too many clients already"), { code: "53300" }),
+      serverError("53300", "sorry, too many clients already"),
     ],
-    [
-      "the server is starting up",
-      Object.assign(new Error("the database system is starting up"), { code: "57P03" }),
-    ],
+    ["the server is starting up", serverError("57P03", "the database system is starting up")],
   ])("reports a database that cannot take work when %s", async (_reason, failure) => {
     pgMock.connectError = failure;
     const db = createDatabaseClient("postgresql://node-unavailable/sdp");
@@ -581,7 +618,11 @@ describe("database client connection management", () => {
     const error = await db.transaction(async () => {}).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(DatabaseUnavailableError);
-    expect(error).toMatchObject({ cause: failure, pool: { total: 10, idle: 0, waiting: 3 } });
+    expect(error).toMatchObject({
+      cause: failure,
+      pool: { total: 10, idle: 0, waiting: 3 },
+      message: expect.stringContaining("(pool: 10 open, 0 idle, 3 waiting)"),
+    });
   });
 
   it("reports an unavailable database from every way the client takes a connection", async () => {
@@ -614,7 +655,7 @@ describe("database client connection management", () => {
     const db = createDatabaseClient("postgresql://node-other-errors/sdp");
     await expect(db.transaction(async () => {})).rejects.toBe(refused);
 
-    const duplicate = Object.assign(new Error("duplicate key value"), { code: "23505" });
+    const duplicate = serverError("23505", "duplicate key value");
     pgMock.connectError = undefined;
     pgMock.poolQuery = async () => {
       throw duplicate;

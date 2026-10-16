@@ -1,4 +1,5 @@
-import { Pool, type PoolClient, type QueryResult, types } from "pg";
+import { DatabaseError, Pool, type PoolClient, type QueryResult, types } from "pg";
+import { parseDatabaseEnv } from "@/db/database-env";
 import {
   currentDatabaseIdentity,
   type DatabaseIdentity,
@@ -6,8 +7,8 @@ import {
 } from "@/db/identity";
 import {
   isStalePreparedStatementError,
+  MAX_NAMED_STATEMENTS,
   PreparedStatementNames,
-  preparedStatementsEnabled,
 } from "@/db/prepared-statements";
 import { getLogger } from "@/runtime/logger";
 
@@ -79,24 +80,22 @@ export class SessionLockUnavailableError extends Error {
 export class DatabaseUnavailableError extends Error {
   /** Pool counters when the failure happened; `waiting` is the queue behind a saturated pool. */
   readonly pool: { total: number; idle: number; waiting: number };
-  readonly code?: string;
+  /** The server's SQLSTATE when it refused the connection; undefined for a pool timeout. */
+  readonly code: string | undefined;
 
-  constructor(cause: unknown, pool: Pick<Pool, "totalCount" | "idleCount" | "waitingCount">) {
+  constructor(cause: Error, pool: Pick<Pool, "totalCount" | "idleCount" | "waitingCount">) {
     const counters = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
     // The counters ride in the message because the API logs an unexpected
     // error's message and nothing else of it, and they are what tells a
     // saturated pool from a database that is down.
     super(
-      `Database unavailable: ${cause instanceof Error ? cause.message : String(cause)} ` +
+      `Database unavailable: ${cause.message} ` +
         `(pool: ${counters.total} open, ${counters.idle} idle, ${counters.waiting} waiting)`,
       { cause }
     );
     this.name = "DatabaseUnavailableError";
     this.pool = counters;
-    const code = (cause as { code?: unknown } | null)?.code;
-    if (typeof code === "string") {
-      this.code = code;
-    }
+    this.code = cause instanceof DatabaseError ? cause.code : undefined;
   }
 }
 
@@ -109,26 +108,60 @@ const POOL_ACQUIRE_TIMEOUT_MESSAGES: readonly string[] = [
 const CONNECT_REFUSED_CODES: readonly string[] = ["53300", "57P03"];
 
 /** Whether `error` is a failure to get any connection, as opposed to a statement that failed. */
-export function isDatabaseUnavailableCause(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
+export function isDatabaseUnavailableCause(error: Error): boolean {
+  if (POOL_ACQUIRE_TIMEOUT_MESSAGES.includes(error.message)) {
+    return true;
   }
-  const { code, message } = error as { code?: unknown; message?: unknown };
   return (
-    (typeof code === "string" && CONNECT_REFUSED_CODES.includes(code)) ||
-    (typeof message === "string" && POOL_ACQUIRE_TIMEOUT_MESSAGES.includes(message))
+    error instanceof DatabaseError &&
+    error.code !== undefined &&
+    CONNECT_REFUSED_CODES.includes(error.code)
   );
 }
 
-function asDatabaseUnavailable(error: unknown, pool: Pool): unknown {
-  return isDatabaseUnavailableCause(error) ? new DatabaseUnavailableError(error, pool) : error;
+/** Runs `run`, reporting a failure to get any connection as a DatabaseUnavailableError. */
+async function reportingUnavailable<T>(pool: Pool, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof Error && isDatabaseUnavailableCause(error)) {
+      throw new DatabaseUnavailableError(error, pool);
+    }
+    throw error;
+  }
 }
 
-async function acquireClient(pool: Pool): Promise<PoolClient> {
+function acquireClient(pool: Pool): Promise<PoolClient> {
+  return reportingUnavailable(pool, () => pool.connect());
+}
+
+/**
+ * Whether a prepared statement went stale on the connection `error` came from.
+ * Such a connection fails that statement until it is closed, so it must never
+ * go back into the pool.
+ */
+function isStaleStatement(error: Error): error is DatabaseError {
+  return error instanceof DatabaseError && isStalePreparedStatementError(error);
+}
+
+/** Connections a prepared statement went stale on, with the error that showed it. */
+const staleConnections = new WeakMap<PoolClient, DatabaseError>();
+
+/** Returns a connection to the pool, or closes it when a statement went stale on it. */
+function releaseConnection(client: PoolClient, failure: Error | undefined): void {
+  const stale = staleConnections.get(client);
+  client.release(failure === undefined ? stale : failure);
+}
+
+/** Runs a statement on a connection, remembering when it went stale there. */
+async function runStatement(client: PoolClient, args: QueryArgs): Promise<QueryResult> {
   try {
-    return await pool.connect();
+    return await client.query(args);
   } catch (error) {
-    throw asDatabaseUnavailable(error, pool);
+    if (error instanceof Error && isStaleStatement(error)) {
+      staleConnections.set(client, error);
+    }
+    throw error;
   }
 }
 
@@ -150,19 +183,7 @@ function withStatementName(args: QueryArgs, names: PreparedStatementNames): Quer
 
 /** A connection inside a transaction, running its statements under cached plans. */
 function namedQueryable(client: PoolClient, names: PreparedStatementNames): Queryable {
-  return { query: (args) => client.query(withStatementName(args, names)) };
-}
-
-/**
- * The error to release a connection with so the pool closes it: a prepared
- * statement a migration made stale fails on this connection until it is
- * closed, so no later borrower may get it back.
- */
-function staleStatementReleaseError(error: unknown): Error | undefined {
-  if (!isStalePreparedStatementError(error)) {
-    return undefined;
-  }
-  return error instanceof Error ? error : new Error(String(error));
+  return { query: (args) => runStatement(client, withStatementName(args, names)) };
 }
 
 const pooledClients = new Map<string, PooledPostgresClient>();
@@ -433,7 +454,8 @@ class IdentityStampingPoolQueryable implements Queryable {
         if (
           named.name === undefined ||
           attempt >= MAX_STALE_STATEMENT_RETRIES ||
-          !isStalePreparedStatementError(error)
+          !(error instanceof Error) ||
+          !isStaleStatement(error)
         ) {
           throw error;
         }
@@ -444,18 +466,14 @@ class IdentityStampingPoolQueryable implements Queryable {
   private async queryOnce(args: QueryArgs): Promise<QueryResult> {
     const identity = currentDatabaseIdentity();
     if (!identity || identity.kind === "none") {
-      try {
-        return await this.pool.query(args);
-      } catch (error) {
-        throw asDatabaseUnavailable(error, this.pool);
-      }
+      return reportingUnavailable(this.pool, () => this.pool.query(args));
     }
 
     const client = await acquireClient(this.pool);
     let releaseError: Error | undefined;
     try {
       await beginWithDatabaseIdentity(client, identity);
-      const result = await client.query(args);
+      const result = await runStatement(client, args);
       await client.query("COMMIT");
       return result;
     } catch (error) {
@@ -465,10 +483,9 @@ class IdentityStampingPoolQueryable implements Queryable {
         releaseError =
           rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
       }
-      releaseError ??= staleStatementReleaseError(error);
       throw error;
     } finally {
-      client.release(releaseError);
+      releaseConnection(client, releaseError);
     }
   }
 }
@@ -483,7 +500,8 @@ class PooledPostgresClient extends BasePostgresClient {
       ...NODE_POOL_OPTIONS,
     });
     const statementNames = new PreparedStatementNames({
-      enabled: preparedStatementsEnabled(process.env.DATABASE_PREPARED_STATEMENTS),
+      enabled: parseDatabaseEnv(process.env).DATABASE_PREPARED_STATEMENTS !== "off",
+      maxNames: MAX_NAMED_STATEMENTS,
     });
     super(new IdentityStampingPoolQueryable(pool, statementNames));
     this.pool = pool;
@@ -513,10 +531,9 @@ class PooledPostgresClient extends BasePostgresClient {
         releaseError =
           rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
       }
-      releaseError ??= staleStatementReleaseError(error);
       throw error;
     } finally {
-      client.release(releaseError);
+      releaseConnection(client, releaseError);
     }
   }
 
@@ -580,7 +597,6 @@ class PooledPostgresClient extends BasePostgresClient {
             rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
         }
       }
-      releaseError ??= staleStatementReleaseError(error);
       if (rollbackConfirmed && callbackCompleted && afterRollback) {
         try {
           await afterRollback(callbackResult as T);
@@ -605,7 +621,7 @@ class PooledPostgresClient extends BasePostgresClient {
             unlockError instanceof Error ? unlockError : new Error(String(unlockError));
         }
       }
-      client.release(releaseError);
+      releaseConnection(client, releaseError);
     }
   }
 

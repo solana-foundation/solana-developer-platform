@@ -28,6 +28,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { DatabaseError } from "pg";
 
 /**
  * The most statement texts that may hold a server-side name. Every pooled
@@ -36,13 +37,7 @@ import { createHash } from "node:crypto";
  */
 export const MAX_NAMED_STATEMENTS = 512;
 
-/**
- * A text earns a name on its second sighting, so SQL built with a literal or a
- * variable-length list that is seen once never takes a slot.
- */
-const SIGHTINGS_BEFORE_NAMING = 2;
-
-/** Texts remembered while they wait to earn a name; the oldest is forgotten first. */
+/** Texts remembered after their first sighting; the oldest is forgotten first. */
 const MAX_TRACKED_TEXTS = 4_096;
 
 /** Only statements PostgreSQL can plan are worth naming. */
@@ -61,22 +56,18 @@ function isNameable(text: string): boolean {
   return firstSemicolon === -1 || text.slice(firstSemicolon + 1).trim() === "";
 }
 
-/** Whether the `DATABASE_PREPARED_STATEMENTS` setting leaves named statements on. */
-export function preparedStatementsEnabled(setting: string | undefined): boolean {
-  const normalized = setting?.trim().toLowerCase();
-  return normalized !== "off" && normalized !== "false" && normalized !== "0";
-}
-
 export class PreparedStatementNames {
   private readonly names = new Map<string, string>();
-  /** Sightings per text; -1 marks a text that can never be named. */
-  private readonly sightings = new Map<string, number>();
+  /** Each text seen once, and whether it can ever be named. */
+  private readonly seenOnce = new Map<string, boolean>();
 
-  constructor(
-    private readonly options: { enabled: boolean; maxNames?: number } = { enabled: true }
-  ) {}
+  constructor(private readonly options: { enabled: boolean; maxNames: number }) {}
 
-  /** The server-side name `text` runs under, or undefined to run it unnamed. */
+  /**
+   * The server-side name `text` runs under, or undefined to run it unnamed. A
+   * text earns a name on its second sighting, so SQL built with a literal or a
+   * variable-length list that is seen once never takes one of the limited names.
+   */
   nameFor(text: string): string | undefined {
     if (!this.options.enabled) {
       return undefined;
@@ -86,36 +77,29 @@ export class PreparedStatementNames {
       return known;
     }
 
-    const seen = this.sightings.get(text) ?? 0;
-    if (seen < 0) {
+    const nameable = this.seenOnce.get(text);
+    if (nameable === undefined) {
+      this.rememberFirstSighting(text, isNameable(text));
       return undefined;
     }
-    if (seen === 0 && !isNameable(text)) {
-      this.track(text, -1);
-      return undefined;
-    }
-    if (seen + 1 < SIGHTINGS_BEFORE_NAMING) {
-      this.track(text, seen + 1);
-      return undefined;
-    }
-    if (this.names.size >= (this.options.maxNames ?? MAX_NAMED_STATEMENTS)) {
+    if (!nameable || this.names.size >= this.options.maxNames) {
       return undefined;
     }
 
     const name = `sdp_${createHash("sha256").update(text).digest("hex").slice(0, 32)}`;
     this.names.set(text, name);
-    this.sightings.delete(text);
+    this.seenOnce.delete(text);
     return name;
   }
 
-  private track(text: string, count: number): void {
-    if (!this.sightings.has(text) && this.sightings.size >= MAX_TRACKED_TEXTS) {
-      const oldest = this.sightings.keys().next();
+  private rememberFirstSighting(text: string, nameable: boolean): void {
+    if (this.seenOnce.size >= MAX_TRACKED_TEXTS) {
+      const oldest = this.seenOnce.keys().next();
       if (!oldest.done) {
-        this.sightings.delete(oldest.value);
+        this.seenOnce.delete(oldest.value);
       }
     }
-    this.sightings.set(text, count);
+    this.seenOnce.set(text, nameable);
   }
 }
 
@@ -130,15 +114,9 @@ export class PreparedStatementNames {
  * - `26000` "prepared statement does not exist": something deallocated the
  *   name behind the driver's back, for example a pooler.
  */
-export function isStalePreparedStatementError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-  const { code, message } = error as { code?: unknown; message?: unknown };
+export function isStalePreparedStatementError(error: DatabaseError): boolean {
   return (
-    code === "26000" ||
-    (code === "0A000" &&
-      typeof message === "string" &&
-      message.includes("cached plan must not change result type"))
+    error.code === "26000" ||
+    (error.code === "0A000" && error.message.includes("cached plan must not change result type"))
   );
 }

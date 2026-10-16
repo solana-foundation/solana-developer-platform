@@ -110,14 +110,18 @@ describe("named prepared statements", () => {
       for (let run = 0; run < 3; run += 1) {
         await tx.queryOne("SELECT ?::int AS probe /* prepared_statement_probe */", [run]);
       }
-      return tx.queryMany<PreparedStatementRow>(
+      return tx.queryMany<Pick<PreparedStatementRow, "name" | "statement">>(
         `SELECT name, statement FROM pg_prepared_statements
           WHERE statement LIKE '%prepared_statement_probe%' AND statement NOT LIKE '%pg_prepared_statements%'`
       );
     });
 
-    expect(prepared).toHaveLength(1);
-    expect(prepared[0]?.name).toMatch(/^sdp_[0-9a-f]{32}$/);
+    expect(prepared).toEqual([
+      {
+        name: expect.stringMatching(/^sdp_[0-9a-f]{32}$/),
+        statement: expect.stringContaining("prepared_statement_probe"),
+      },
+    ]);
   });
 
   it("keeps tenant isolation once PostgreSQL reuses one generic plan for the statement", async () => {
@@ -145,10 +149,10 @@ describe("named prepared statements", () => {
       expect(await as.tenantB()).toEqual({ n: 1 });
     }
 
-    const reused = (await preparedStatements()).find((row) =>
+    const reused = (await preparedStatements()).filter((row) =>
       row.statement.includes("FROM counterparties WHERE organization_id IN")
     );
-    expect(reused?.generic_plans).toBeGreaterThan(0);
+    expect(reused.map((row) => row.generic_plans > 0)).toEqual([true]);
   });
 
   it("recovers a statement a migration made stale", async () => {
@@ -159,6 +163,7 @@ describe("named prepared statements", () => {
     await read();
     await read();
     const before = await db.queryOne<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    expect(before).toEqual({ pid: expect.any(Number) });
 
     await admin.query(`ALTER TABLE ${SCRATCH_TABLE} ADD COLUMN b TEXT DEFAULT 'new'`);
 
@@ -166,7 +171,8 @@ describe("named prepared statements", () => {
     // change result type"; the client closes it and runs the statement again.
     await expect(read()).resolves.toEqual({ id: 1, a: "x", b: "new" });
     const after = await db.queryOne<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-    expect(after?.pid).not.toBe(before?.pid);
+    expect(after).toEqual({ pid: expect.any(Number) });
+    expect(after).not.toEqual(before);
   });
 
   it("closes the connection of a transaction whose statement went stale", async () => {
