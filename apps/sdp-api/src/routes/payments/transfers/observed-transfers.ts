@@ -19,16 +19,6 @@ import * as tokenAccounts from "../token-accounts";
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
 
 /**
- * The client observed transfers read wallet history through: the scope's cluster pool with
- * Helius first, for its deeper signature history.
- *
- * @returns The history RPC client for the scope's cluster.
- */
-export function observedHistoryRpc(): SolanaRpc {
-  return createClusterHistoryRpc();
-}
-
-/**
  * Cap on token-account addresses added to the signature search alongside the
  * owner address. A wallet's token-account count is unbounded external data;
  * without the cap it directly scales the getSignaturesForAddress fan-out.
