@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { z } from "zod";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import type { DraftState } from "./draft-model";
@@ -9,26 +10,66 @@ import type { DraftState } from "./draft-model";
 export type DraftAccess = "blocklist" | "allowlist" | "off";
 
 /**
+ * What the browser holds of a draft: each field read on its own, so a value of the wrong type
+ * (from an older build, say) drops out and the fresh draft's value stands. A half-finished draft
+ * is normal here, so the draft's own validation (a name, a symbol) does not apply.
+ */
+const optionalText = z.string().optional().catch(undefined);
+const optionalFlag = z.boolean().optional().catch(undefined);
+const storedDraftSchema = z.object({
+  assetClass: z.enum(["stablecoin", "digital-asset"]).optional().catch(undefined),
+  name: optionalText,
+  symbol: optionalText,
+  description: optionalText,
+  website: optionalText,
+  maxSupply: optionalText,
+  decimals: optionalText,
+  allowlist: optionalFlag,
+  pauseTransfers: optionalFlag,
+  interestBearing: optionalFlag,
+  interestRate: optionalText,
+  transferFee: optionalFlag,
+  transferFeeBasisPoints: optionalText,
+  transferFeeMax: optionalText,
+  issuerName: optionalText,
+  pegCurrency: z.enum(["USD", "EUR", "GBP"]).optional().catch(undefined),
+  freezeAccounts: optionalFlag,
+  permanentDelegate: optionalFlag,
+  authorities: z
+    .object({
+      "mint-authority": optionalText,
+      "metadata-authority": optionalText,
+      "freeze-authority": optionalText,
+      "permanent-delegate": optionalText,
+    })
+    .catch({}),
+});
+export type StoredDraft = z.infer<typeof storedDraftSchema>;
+
+/** Reads a stored draft's fields one by one; anything that is not an object reads as empty. */
+export function parseStoredDraft(value: unknown): StoredDraft {
+  return storedDraftSchema.catch({ authorities: {} }).parse(value);
+}
+
+const storedLocalDraftSchema = z.object({
+  id: z.string(),
+  savedAt: z.string(),
+  /** The step it was left on, 0-based. */
+  step: z.number(),
+  access: z.enum(["blocklist", "allowlist", "off"]),
+  draft: storedDraftSchema,
+});
+
+/**
  * A draft the flow could not store in SDP yet, because the API takes only a complete draft:
  * kept in this browser until it is finished or discarded.
  */
-export interface LocalDraft {
-  id: string;
-  savedAt: string;
-  /** The step it was left on, 0-based. */
-  step: number;
-  access: DraftAccess;
-  draft: DraftState;
-}
+export type LocalDraft = z.infer<typeof storedLocalDraftSchema>;
 
 const EMPTY: readonly LocalDraft[] = [];
 const CHANGE_EVENT = "sdp:issuance-local-drafts-updated";
 const memory = new Map<string, readonly LocalDraft[]>();
 const parsed = new Map<string, { raw: string | null; drafts: readonly LocalDraft[] }>();
-
-const ACCESS = new Set<DraftAccess>(["blocklist", "allowlist", "off"]);
-const ASSET_CLASSES = new Set<string>(["stablecoin", "digital-asset"]);
-const PEG_CURRENCIES = new Set<string>(["USD", "EUR", "GBP"]);
 
 /**
  * Local drafts are per person, organization and project, as wallet pins are: a draft names the
@@ -39,29 +80,21 @@ export function localDraftsKey(scope: DashboardCacheScope, projectId: string | n
   return `sdp:issuance-local-drafts:v1:${getDashboardCacheScopeKey(scope, { projectId })}`;
 }
 
-function isLocalDraft(value: unknown): value is LocalDraft {
-  if (!value || typeof value !== "object") return false;
-  const entry = value as Partial<LocalDraft>;
-  return (
-    typeof entry.id === "string" &&
-    typeof entry.savedAt === "string" &&
-    typeof entry.step === "number" &&
-    ACCESS.has(entry.access as DraftAccess) &&
-    Boolean(entry.draft) &&
-    typeof entry.draft === "object"
-  );
-}
-
 function parseDrafts(raw: string | null): readonly LocalDraft[] {
   if (!raw) return EMPTY;
+  let json: unknown;
   try {
-    const value = JSON.parse(raw) as unknown;
-    if (!Array.isArray(value)) return EMPTY;
-    const drafts = value.filter(isLocalDraft);
-    return drafts.length > 0 ? drafts : EMPTY;
+    json = JSON.parse(raw);
   } catch {
     return EMPTY;
   }
+  const list = z.array(z.unknown()).safeParse(json);
+  if (!list.success) return EMPTY;
+  const drafts = list.data.flatMap((entry) => {
+    const parsedEntry = storedLocalDraftSchema.safeParse(entry);
+    return parsedEntry.success ? [parsedEntry.data] : [];
+  });
+  return drafts.length > 0 ? drafts : EMPTY;
 }
 
 /** The stored drafts, newest first; the same array until storage changes. */
@@ -148,26 +181,18 @@ export function useLocalDrafts() {
  */
 export function restoreDraft(
   fresh: DraftState,
-  stored: unknown,
+  stored: StoredDraft,
   walletIds: ReadonlySet<string>
 ): DraftState {
-  const source = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
-  const next = { ...fresh } as Record<string, unknown>;
-  for (const [field, value] of Object.entries(fresh)) {
-    if (field === "authorities") continue;
-    const candidate = source[field];
-    if (candidate !== undefined && typeof candidate === typeof value) next[field] = candidate;
-  }
-  if (!ASSET_CLASSES.has(next.assetClass as string)) next.assetClass = fresh.assetClass;
-  if (PEG_CURRENCIES.has(source.pegCurrency as string)) next.pegCurrency = source.pegCurrency;
-  const storedAuthorities = (
-    source.authorities && typeof source.authorities === "object" ? source.authorities : {}
-  ) as Record<string, unknown>;
+  const { authorities: storedAuthorities, ...fields } = stored;
   const authorities = { ...fresh.authorities };
   for (const role of Object.keys(authorities) as (keyof DraftState["authorities"])[]) {
     const walletId = storedAuthorities[role];
-    if (typeof walletId === "string" && walletIds.has(walletId)) authorities[role] = walletId;
+    if (walletId !== undefined && walletIds.has(walletId)) authorities[role] = walletId;
   }
-  next.authorities = authorities;
-  return next as DraftState;
+  return { ...fresh, ...withoutUndefined(fields), authorities };
+}
+
+function withoutUndefined(fields: Omit<StoredDraft, "authorities">): Partial<DraftState> {
+  return Object.fromEntries(Object.entries(fields).filter(([, field]) => field !== undefined));
 }

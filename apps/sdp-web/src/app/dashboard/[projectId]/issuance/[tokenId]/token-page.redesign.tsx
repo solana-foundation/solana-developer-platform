@@ -1,7 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import type { AssetProfile, Token, TokenTransaction } from "@sdp/types";
+import { type AssetProfile, TOKEN_TRANSACTION_STATUSES, type Token } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
+import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
+import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
@@ -12,19 +14,48 @@ interface TokenPageProps {
   params: Promise<{ tokenId: string }>;
 }
 
-async function readData<T>(
+// The API's contract for a token and its asset profile is `Token` and `AssetProfile` in
+// @sdp/types, the same types the typed client and the previous design's page use. The envelope
+// and the record's identity are checked here; no second, hand-written copy of every field is
+// kept beside the interface.
+const tokenResponseSchema = z.object({
+  data: z.object({
+    token: z.custom<Token>((value) => z.object({ id: z.string() }).safeParse(value).success),
+  }),
+});
+const assetProfileResponseSchema = z.object({
+  data: z.object({
+    assetProfile: z.custom<AssetProfile>(
+      (value) => z.object({ tokenId: z.string() }).safeParse(value).success
+    ),
+  }),
+});
+const latestDeployResponseSchema = z.object({
+  data: z.array(
+    z.object({
+      status: z.enum(TOKEN_TRANSACTION_STATUSES),
+      error: z.string().nullable(),
+      createdAt: z.string(),
+    })
+  ),
+});
+
+/**
+ * Reads one API resource. A response that is not OK comes back with its status for the caller
+ * to name; a read that throws, or a body that is not what the page expects, fails the page
+ * rather than reading as an empty one.
+ */
+async function readResource<Schema extends z.ZodType>(
   request: SdpApiClient["request"],
   path: string,
-  pick: (data: Record<string, unknown>) => T | undefined
-): Promise<{ status: number | null; value: T | null }> {
-  try {
-    const response = await request(path);
-    if (!response.ok) return { status: response.status, value: null };
-    const body = (await response.json()) as { data?: Record<string, unknown> };
-    return { status: response.status, value: body.data ? (pick(body.data) ?? null) : null };
-  } catch {
-    return { status: null, value: null };
+  schema: Schema
+): Promise<{ ok: true; data: z.infer<Schema> } | { ok: false; status: number; message: string }> {
+  const response = await request(path);
+  if (!response.ok) {
+    const message = readApiErrorMessage(await response.json().catch(() => null));
+    return { ok: false, status: response.status, message: message ?? response.statusText };
   }
+  return { ok: true, data: schema.parse(await response.json()) };
 }
 
 /**
@@ -36,23 +67,22 @@ async function readLatestDeploy(
   token: Token
 ): Promise<LatestDeployAttempt | null> {
   if (token.mintAddress) return null;
-  try {
-    const response = await request(
-      `/v1/issuance/tokens/${encodeURIComponent(token.id)}/transactions?type=deploy&page=1&pageSize=5`
-    );
-    if (!response.ok) return null;
-    const body = (await response.json()) as { data?: TokenTransaction[] };
-    const latest = (body.data ?? []).reduce<TokenTransaction | null>(
-      (newest, transaction) =>
-        newest === null || transaction.createdAt > newest.createdAt ? transaction : newest,
-      null
-    );
-    return latest
-      ? { status: latest.status, error: latest.error, createdAt: latest.createdAt }
-      : null;
-  } catch {
-    return null;
+  const result = await readResource(
+    request,
+    `/v1/issuance/tokens/${encodeURIComponent(token.id)}/transactions?type=deploy&page=1&pageSize=5`,
+    latestDeployResponseSchema
+  );
+  if (!result.ok) {
+    throw new Error(`Deploy history request failed (${result.status}): ${result.message}`);
   }
+  const latest = result.data.data.reduce<LatestDeployAttempt | null>(
+    (newest, attempt) =>
+      newest === null || attempt.createdAt > newest.createdAt
+        ? { status: attempt.status, error: attempt.error, createdAt: attempt.createdAt }
+        : newest,
+    null
+  );
+  return latest;
 }
 
 /** One token's page on the new design. */
@@ -76,41 +106,45 @@ export default async function TokenPage({ params }: TokenPageProps) {
   const encodedId = encodeURIComponent(tokenId);
   const [tokenResult, profileResult] = await Promise.all([
     trace.step("fetch_token", () =>
-      readData<Token>(apiClient.request, `/v1/issuance/tokens/${encodedId}`, (data) =>
-        data.token ? (data.token as Token) : undefined
-      )
+      readResource(apiClient.request, `/v1/issuance/tokens/${encodedId}`, tokenResponseSchema)
     ),
     trace.step("fetch_asset_profile", () =>
-      readData<AssetProfile>(
+      readResource(
         apiClient.request,
         `/v1/issuance/asset-profiles/by-token/${encodedId}`,
-        (data) => (data.assetProfile ? (data.assetProfile as AssetProfile) : undefined)
+        assetProfileResponseSchema
       )
     ),
   ]);
 
-  const token = tokenResult.value;
-  if (tokenResult.status === 404 || !token) {
-    trace.log({ ok: false, tokenId, notFound: true });
-    notFound();
+  if (!tokenResult.ok) {
+    trace.log({ ok: false, tokenId, tokenStatus: tokenResult.status });
+    if (tokenResult.status === 404) notFound();
+    throw new Error(
+      t("DashboardIssuance.errors.apiRequestFailed", {
+        resource: t("DashboardIssuance.errors.tokenResource"),
+        status: tokenResult.status,
+        error: tokenResult.message,
+      })
+    );
   }
-  if (!profileResult.value) {
+  if (!profileResult.ok) {
     trace.log({ ok: false, tokenId, profileStatus: profileResult.status });
     throw new Error(
       profileResult.status === 404
         ? t("DashboardIssuance.errors.assetProfileNotFound")
         : t("DashboardIssuance.errors.assetProfileLoadFailed", {
-            status: profileResult.status ?? t("DashboardIssuance.errors.unavailable"),
-            error: t("DashboardIssuance.errors.unknown"),
+            status: profileResult.status,
+            error: profileResult.message,
           })
     );
   }
+  const token = tokenResult.data.data.token;
+  const assetProfile = profileResult.data.data.assetProfile;
   const latestDeploy = await trace.step("fetch_latest_deploy", () =>
     readLatestDeploy(apiClient.request, token)
   );
   trace.log({ ok: true, tokenId, latestDeploy: latestDeploy?.status ?? null });
 
-  return (
-    <TokenPageView token={token} assetProfile={profileResult.value} latestDeploy={latestDeploy} />
-  );
+  return <TokenPageView token={token} assetProfile={assetProfile} latestDeploy={latestDeploy} />;
 }

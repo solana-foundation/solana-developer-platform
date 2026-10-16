@@ -1,37 +1,30 @@
 "use client";
 
-import type { AssetAuditEvent } from "@sdp/types";
+import type { AssetAuditActorType, AssetAuditEvent, AssetAuditStatus } from "@sdp/types";
+import { useState } from "react";
 import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
 import type { StatusTone } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
+import { usePagedList } from "@/lib/use-paged-list";
+import { issuanceQueryKeys } from "../../issuance-query-key";
 import { type AssetAuditHistory, fetchAssetAuditHistory } from "../asset-profile/asset-audit.data";
 
 type Translate = ReturnType<typeof useTranslations>;
-
-export const TOKEN_ACTIVITY_KEY = "token-activity-redesign";
 
 export interface TokenActivityQuery {
   page: number;
   pageSize: number;
   action?: string;
-  status?: string;
-  actorType?: string;
+  status?: AssetAuditStatus;
+  actorType?: AssetAuditActorType;
 }
 
 /** One page of the token's audit history: what was done to it, by whom, and how it went. */
 export function useTokenActivity(tokenId: string, query: TokenActivityQuery) {
   return useSWR<AssetAuditHistory, Error>(
-    [
-      TOKEN_ACTIVITY_KEY,
-      tokenId,
-      query.page,
-      query.pageSize,
-      query.action,
-      query.status,
-      query.actorType,
-    ],
+    issuanceQueryKeys.tokenActivity({ tokenId, ...query }),
     () =>
       fetchAssetAuditHistory(tokenId, {
         page: query.page,
@@ -65,23 +58,23 @@ export function useTokenActivityWindows(
     (index, previous) =>
       previous && !previous.hasMore
         ? null
-        : [
-            TOKEN_ACTIVITY_KEY,
+        : issuanceQueryKeys.tokenActivity({
             tokenId,
-            index + 1,
-            TOKEN_ACTIVITY_WINDOW,
-            filters.action,
-            filters.status,
-            filters.actorType,
-          ],
-    ([, , page]) =>
-      fetchAssetAuditHistory(tokenId, {
-        page: page as number,
+            page: index + 1,
+            pageSize: TOKEN_ACTIVITY_WINDOW,
+            ...filters,
+          }),
+    (key) => {
+      const page = issuanceQueryKeys.tokenActivityPage(key);
+      if (page === null) throw new Error("The activity read was given a key that is not a window");
+      return fetchAssetAuditHistory(tokenId, {
+        page,
         pageSize: TOKEN_ACTIVITY_WINDOW,
         action: filters.action ?? null,
         status: filters.status ?? null,
         actorType: filters.actorType ?? null,
-      }),
+      });
+    },
     { revalidateOnFocus: true, revalidateFirstPage: true }
   );
   const events = data?.flatMap((window) => window.events) ?? [];
@@ -102,7 +95,7 @@ export function useTokenActivityWindows(
   };
 }
 
-const ACTION_LABEL: Record<string, MessageKey> = {
+const ACTION_LABEL = {
   deploy: "DashboardIssuance.newDesign.activity.events.deploy",
   mint: "DashboardIssuance.newDesign.activity.events.mint",
   burn: "DashboardIssuance.newDesign.activity.events.burn",
@@ -116,50 +109,124 @@ const ACTION_LABEL: Record<string, MessageKey> = {
   create: "DashboardIssuance.newDesign.activity.events.create",
   update: "DashboardIssuance.newDesign.activity.events.update",
   revoke: "DashboardIssuance.newDesign.activity.events.revoke",
-};
+} as const satisfies Record<string, MessageKey>;
 
-export const ACTIVITY_ACTIONS = Object.keys(ACTION_LABEL);
+export const ACTIVITY_ACTIONS: readonly string[] = Object.keys(ACTION_LABEL);
 
 /**
  * A control list change, which the API logs as `create` or `revoke` on the list entry rather
  * than on the token: read on its own, `create` would say the token was created.
  */
-const LIST_ACTION_LABEL: Record<string, MessageKey> = {
+const LIST_ACTION_LABEL = {
   create: "DashboardIssuance.newDesign.activity.events.listAdd",
   revoke: "DashboardIssuance.newDesign.activity.events.listRemove",
-};
+} as const satisfies Record<string, MessageKey>;
+
+function isListAction(action: string): action is keyof typeof LIST_ACTION_LABEL {
+  return Object.hasOwn(LIST_ACTION_LABEL, action);
+}
+
+function isKnownAction(action: string): action is keyof typeof ACTION_LABEL {
+  return Object.hasOwn(ACTION_LABEL, action);
+}
 
 export function activityEventLabel(action: string, t: Translate, resourceType?: string): string {
-  const key =
-    (resourceType === "token_allowlist" ? LIST_ACTION_LABEL[action] : undefined) ??
-    ACTION_LABEL[action];
-  if (key) return t(key);
+  if (resourceType === "token_allowlist" && isListAction(action))
+    return t(LIST_ACTION_LABEL[action]);
+  if (isKnownAction(action)) return t(ACTION_LABEL[action]);
   // An event the catalog has no words for reads in sentence case, as the named ones do.
   const words = action.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-export function activityActorType(event: Pick<AssetAuditEvent, "actorType">, t: Translate) {
-  return t(
-    event.actorType === "api_key"
-      ? "DashboardIssuance.newDesign.activity.actorApiKey"
-      : event.actorType === "system"
-        ? "DashboardIssuance.newDesign.activity.actorSystem"
-        : "DashboardIssuance.newDesign.activity.actorMember"
-  );
+export function activityActorType(actorType: AssetAuditActorType, t: Translate) {
+  switch (actorType) {
+    case "api_key":
+      return t("DashboardIssuance.newDesign.activity.actorApiKey");
+    case "system":
+      return t("DashboardIssuance.newDesign.activity.actorSystem");
+    case "user":
+      return t("DashboardIssuance.newDesign.activity.actorMember");
+    default: {
+      const unhandled: never = actorType;
+      return unhandled;
+    }
+  }
 }
 
 export function activityStatus(
-  event: Pick<AssetAuditEvent, "status">,
+  status: AssetAuditStatus,
   t: Translate
 ): { label: string; tone: StatusTone } {
-  return event.status === "failure"
-    ? { label: t("DashboardIssuance.newDesign.activity.failed"), tone: "critical" }
-    : { label: t("DashboardIssuance.newDesign.activity.success"), tone: "positive" };
+  switch (status) {
+    case "failure":
+      return { label: t("DashboardIssuance.newDesign.activity.failed"), tone: "critical" };
+    case "success":
+      return { label: t("DashboardIssuance.newDesign.activity.success"), tone: "positive" };
+    default: {
+      const unhandled: never = status;
+      return unhandled;
+    }
+  }
 }
 
 /** The event's on-chain signature, where the audit record carries one. */
 export function activitySignature(event: Pick<AssetAuditEvent, "metadata">): string | null {
   const signature = event.metadata?.signature;
   return typeof signature === "string" && signature ? signature : null;
+}
+
+/** How many events the activity tab shows at a time. */
+export const ACTIVITY_PAGE_SIZE = 25;
+
+export interface ActivityFilters {
+  action?: string;
+  actorType?: AssetAuditActorType;
+  status?: AssetAuditStatus;
+}
+
+/**
+ * The activity tab's behavior: the audit filters (read by the API), a text search over what is
+ * loaded (the API has none), and the page of matching events. A change to a filter or the
+ * search goes back to the first page.
+ */
+export function useTokenActivityFeed(tokenId: string, t: Translate) {
+  const [filters, setFilters] = useState<ActivityFilters>({});
+  const [search, setSearch] = useState("");
+  const history = useTokenActivityWindows(tokenId, filters);
+  const needle = search.trim().toLowerCase();
+  const events = history.events.filter(
+    (event) =>
+      !needle ||
+      [
+        activityEventLabel(event.action, t, event.resourceType),
+        event.actorLabel,
+        activityStatus(event.status, t).label,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+  );
+  const paging = usePagedList(events, ACTIVITY_PAGE_SIZE);
+  return {
+    history,
+    filters,
+    search,
+    needle,
+    events,
+    ...paging,
+    updateFilters: (changes: ActivityFilters) => {
+      setFilters((current) => ({ ...current, ...changes }));
+      paging.reset();
+    },
+    changeSearch: (value: string) => {
+      setSearch(value);
+      paging.reset();
+    },
+    clearAll: () => {
+      setFilters({});
+      setSearch("");
+      paging.reset();
+    },
+  };
 }

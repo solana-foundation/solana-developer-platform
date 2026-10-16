@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { issuanceQueryKeys } from "../../issuance-query-key";
 import { formatTokenDay } from "../../issuance-token-state.redesign";
 import { fetchTokenAllowlistPage, type TokenAllowlistPage } from "../asset-profile/allowlist.data";
-import { TOKEN_ALLOWLIST_KEY } from "../asset-profile/allowlist-cache";
 import type { TokenTabProps } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
@@ -26,7 +26,9 @@ type AllowlistEntry = TokenAllowlistPage["entries"][number];
 function useComplianceEntries(tokenId: string, mode: AccessControlMode) {
   const [page, setPage] = useState(1);
   const { data, error } = useSWR<TokenAllowlistPage, Error>(
-    mode === "disabled" ? null : [TOKEN_ALLOWLIST_KEY, tokenId, page, PAGE_SIZE, "", ""],
+    mode === "disabled"
+      ? null
+      : issuanceQueryKeys.tokenAllowlist({ tokenId, page, pageSize: PAGE_SIZE }),
     () => fetchTokenAllowlistPage(tokenId, { page, pageSize: PAGE_SIZE }),
     { keepPreviousData: true }
   );

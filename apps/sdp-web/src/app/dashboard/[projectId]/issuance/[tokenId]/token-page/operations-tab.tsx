@@ -16,6 +16,7 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
+import { issuanceQueryKeys } from "../../issuance-query-key";
 import { isOnChain, type TokenLifecycle } from "../../issuance-token-state.redesign";
 import {
   getOperationGroups,
@@ -28,7 +29,6 @@ import {
   fetchTokenTransactionsPage,
   type TokenTransactionsPage,
 } from "../asset-profile/transactions.data";
-import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { getRemainingMintableSupply } from "../token-management-workspace.utils";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
@@ -570,7 +570,7 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
   const locale = useLocale();
   const [page, setPage] = useState(1);
   const { data, error } = useSWR<TokenTransactionsPage, Error>(
-    [TOKEN_TRANSACTIONS_KEY, tokenId, page, TRANSACTIONS_PAGE_SIZE, "redesign"],
+    issuanceQueryKeys.tokenTransactions({ tokenId, page, pageSize: TRANSACTIONS_PAGE_SIZE }),
     () => fetchTokenTransactionsPage(tokenId, { page, pageSize: TRANSACTIONS_PAGE_SIZE }),
     { keepPreviousData: true }
   );

@@ -1,8 +1,17 @@
 "use client";
 
-import type { AssetAuditEvent, Token } from "@sdp/types";
+import {
+  ASSET_AUDIT_ACTOR_TYPES,
+  ASSET_AUDIT_STATUSES,
+  type AssetAuditActorType,
+  type AssetAuditEvent,
+  type AssetAuditStatus,
+  isAssetAuditActorType,
+  isAssetAuditStatus,
+  type Token,
+} from "@sdp/types";
 import { ArrowUpRightIcon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -20,31 +29,21 @@ import {
   activityEventLabel,
   activitySignature,
   activityStatus,
-  useTokenActivityWindows,
+  useTokenActivityFeed,
+  type useTokenActivityWindows,
 } from "./token-activity";
 import { transactionExplorerHref } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
 // The history is read 100 events at a time and searched and paged here: the audit API filters
 // by event, actor type and status but has no text search. Older windows load on request.
-const PAGE_SIZE = 25;
-const ACTOR_TYPES = ["user", "api_key", "system"] as const;
-const STATUSES = ["success", "failure"] as const;
-
-interface ActivityFilters {
-  action?: string;
-  actorType?: string;
-  status?: string;
-}
 
 /** Everything done to the token, by whom, how it went and when, newest first. */
 export function TokenActivityTab({ token }: { token: Token }) {
   const t = useTranslations();
   const locale = useLocale();
-  const [filters, setFilters] = useState<ActivityFilters>({});
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const history = useTokenActivityWindows(token.id, filters);
+  const feed = useTokenActivityFeed(token.id, t);
+  const { history, filters, search, needle, events, visible, page, pageCount } = feed;
   const formatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -57,29 +56,9 @@ export function TokenActivityTab({ token }: { token: Token }) {
     [locale]
   );
 
-  const needle = search.trim().toLowerCase();
-  const events = history.events.filter((event) =>
-    needle
-      ? [
-          activityEventLabel(event.action, t, event.resourceType),
-          event.actorLabel,
-          activityStatus(event, t).label,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle)
-      : true
-  );
-  const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
-  const visible = events.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const update = (changes: ActivityFilters) => {
-    setFilters((current) => ({ ...current, ...changes }));
-    setPage(1);
-  };
-
   const anyLabel = t("Shared.SharedComponents.any");
-  const actorLabel = (value: string) => activityActorType({ actorType: value as "user" }, t);
-  const statusLabel = (value: string) => activityStatus({ status: value as "success" }, t).label;
+  const actorLabel = (value: AssetAuditActorType) => activityActorType(value, t);
+  const statusLabel = (value: AssetAuditStatus) => activityStatus(value, t).label;
   const sections: FilterMenuSection[] = [
     {
       id: "action",
@@ -93,7 +72,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
             value: action,
             label: activityEventLabel(action, t),
           }))}
-          onChange={(action) => update({ action })}
+          onChange={(action) => feed.updateFilters({ action })}
         />
       ),
     },
@@ -105,8 +84,12 @@ export function TokenActivityTab({ token }: { token: Token }) {
         <FilterMenuOptions
           value={filters.actorType}
           anyLabel={anyLabel}
-          options={ACTOR_TYPES.map((value) => ({ value, label: actorLabel(value) }))}
-          onChange={(actorType) => update({ actorType })}
+          options={ASSET_AUDIT_ACTOR_TYPES.map((value) => ({ value, label: actorLabel(value) }))}
+          onChange={(actorType) =>
+            feed.updateFilters({
+              actorType: actorType && isAssetAuditActorType(actorType) ? actorType : undefined,
+            })
+          }
         />
       ),
     },
@@ -118,8 +101,12 @@ export function TokenActivityTab({ token }: { token: Token }) {
         <FilterMenuOptions
           value={filters.status}
           anyLabel={anyLabel}
-          options={STATUSES.map((value) => ({ value, label: statusLabel(value) }))}
-          onChange={(status) => update({ status })}
+          options={ASSET_AUDIT_STATUSES.map((value) => ({ value, label: statusLabel(value) }))}
+          onChange={(status) =>
+            feed.updateFilters({
+              status: status && isAssetAuditStatus(status) ? status : undefined,
+            })
+          }
         />
       ),
     },
@@ -140,13 +127,10 @@ export function TokenActivityTab({ token }: { token: Token }) {
       >
         <SearchInput
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(1);
-          }}
+          onChange={(event) => feed.changeSearch(event.target.value)}
           clear={{
             label: t("DashboardIssuance.newDesign.list.clearSearch"),
-            onClear: () => setSearch(""),
+            onClear: () => feed.changeSearch(""),
           }}
           placeholder={t("DashboardIssuance.newDesign.activity.searchPlaceholder")}
           aria-label={t("DashboardIssuance.newDesign.activity.searchPlaceholder")}
@@ -164,7 +148,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
               <button
                 type="button"
                 aria-label={t("Shared.SharedComponents.clearFilter", { filter: chip.label })}
-                onClick={() => update({ [chip.id]: undefined })}
+                onClick={() => feed.updateFilters({ [chip.id]: undefined })}
                 className="rounded-control-inner p-0.5 text-tertiary hover:bg-fill hover:text-primary"
               >
                 <XIcon className="size-3.5" aria-hidden="true" />
@@ -182,13 +166,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
             message={t("DashboardIssuance.newDesign.activity.noMatchTitle")}
             description={t("DashboardIssuance.newDesign.activity.noMatchBody")}
             action={
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setFilters({});
-                  setSearch("");
-                }}
-              >
+              <Button variant="secondary" onClick={feed.clearAll}>
                 {t("DashboardIssuance.newDesign.list.clearAll")}
               </Button>
             }
@@ -200,7 +178,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
         <ActivityTable events={visible} formatter={formatter} />
       )}
       {pageCount > 1 ? (
-        <ArrowPagination page={page} pageCount={pageCount} onPageChange={setPage} />
+        <ArrowPagination page={page} pageCount={pageCount} onPageChange={feed.setPage} />
       ) : null}
       <ActivityMore history={history} />
     </div>
@@ -234,7 +212,7 @@ function ActivityTable({
       ]}
     >
       {events.map((event) => {
-        const status = activityStatus(event, t);
+        const status = activityStatus(event.status, t);
         const signature = activitySignature(event);
         return (
           <TableRow key={event.id}>

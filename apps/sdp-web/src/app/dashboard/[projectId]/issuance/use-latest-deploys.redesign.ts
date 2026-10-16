@@ -8,6 +8,7 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { issuanceQueryKeys } from "./issuance-query-key";
 import type { DeployAttemptStatus } from "./issuance-token-state.redesign";
 
 /** How often the list re-reads deploys while one is still on its way. */
@@ -67,7 +68,7 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
     [tokens]
   );
   const { data } = useSWR(
-    ids.length > 0 ? (["issuance-latest-deploys", ids] as const) : null,
+    ids.length > 0 ? issuanceQueryKeys.latestDeploys({ tokenIds: ids }) : null,
     async ([, tokenIds]) => {
       const statuses = await Promise.all(tokenIds.map(fetchLatestDeploy));
       return Object.fromEntries(tokenIds.map((id, index) => [id, statuses[index] ?? null]));
@@ -87,7 +88,7 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
     const fresh = ids.filter((id) => landed(data[id]) && !refreshedFor.current.has(id));
     if (fresh.length === 0) return;
     for (const id of fresh) refreshedFor.current.add(id);
-    void mutate((key) => Array.isArray(key) && key[0] === "issuance-tokens");
+    void mutate(issuanceQueryKeys.isTokensKey);
   }, [data, ids, mutate]);
 
   return data ?? {};

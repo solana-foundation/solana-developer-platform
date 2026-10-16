@@ -90,16 +90,17 @@ describe("local drafts", () => {
 describe("restoreDraft", () => {
   it("takes stored fields of the right type and keeps keys only on wallets that still exist", async () => {
     const { restoreDraft } = await import("./local-drafts.redesign");
+    const { parseStoredDraft } = await import("./local-drafts.redesign");
     const restored = restoreDraft(
       fresh,
-      {
+      parseStoredDraft({
         assetClass: "digital-asset",
         name: "Treasury Fund",
         decimals: 9,
         pegCurrency: "EUR",
         permanentDelegate: true,
         authorities: { "mint-authority": "wallet-b", "freeze-authority": "gone" },
-      },
+      }),
       new Set(["wallet-a", "wallet-b"])
     );
     expect(restored.assetClass).toBe("digital-asset");
@@ -113,9 +114,10 @@ describe("restoreDraft", () => {
 
   it("refuses values outside the draft's choices", async () => {
     const { restoreDraft } = await import("./local-drafts.redesign");
+    const { parseStoredDraft } = await import("./local-drafts.redesign");
     const restored = restoreDraft(
       fresh,
-      { assetClass: "security", pegCurrency: "JPY" },
+      parseStoredDraft({ assetClass: "security", pegCurrency: "JPY" }),
       new Set(["wallet-a"])
     );
     expect(restored.assetClass).toBe("stablecoin");

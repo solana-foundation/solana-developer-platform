@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { TokenTransactionStatus } from "@sdp/types";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -11,14 +12,22 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
 );
 
-const deploys: Record<string, Array<{ status: string; createdAt: string }>> = {
+const deploys = {
   deploying: [
     { status: "failed", createdAt: "2026-09-30T10:00:00.000Z" },
     { status: "processing", createdAt: "2026-10-01T10:00:00.000Z" },
   ],
   failed: [{ status: "failed", createdAt: "2026-10-01T10:00:00.000Z" }],
   untouched: [],
-};
+} as const satisfies Record<
+  string,
+  ReadonlyArray<{ status: TokenTransactionStatus; createdAt: string }>
+>;
+
+/** A token's deploy transactions; none for a token the fixture does not name. */
+function deploysOf(tokenId: string) {
+  return Object.entries(deploys).find(([name]) => name === tokenId)?.[1] ?? [];
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,7 +35,7 @@ describe("useLatestDeploys", () => {
   it("reads the latest deploy of each row with no mint, and only those", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const id = decodeURIComponent(url.split("/tokens/")[1]?.split("/")[0] ?? "");
-      return new Response(JSON.stringify({ data: deploys[id] ?? [] }), { status: 200 });
+      return new Response(JSON.stringify({ data: deploysOf(id) }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 

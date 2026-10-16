@@ -559,7 +559,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
       ) : (
         <ul className="flex flex-col">
           {events.map((event) => {
-            const status = activityStatus(event, t);
+            const status = activityStatus(event.status, t);
             const moment = formatTokenMoment(event.createdAt, locale);
             return (
               <li
@@ -574,7 +574,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
                     </StatusText>
                   </span>
                   <span className="truncate text-meta text-secondary">
-                    {event.actorLabel} · {activityActorType(event, t)}
+                    {event.actorLabel} · {activityActorType(event.actorType, t)}
                   </span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-0.5 text-right tabular-nums">

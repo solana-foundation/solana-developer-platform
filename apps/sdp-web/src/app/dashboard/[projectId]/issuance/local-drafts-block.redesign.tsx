@@ -66,8 +66,9 @@ function LocalDraftRow({ entry, onDiscard }: { entry: LocalDraft; onDiscard: () 
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
-  const name = entry.draft.name.trim() || t("DashboardIssuance.newDesign.localDrafts.untitled");
-  const symbol = entry.draft.symbol.trim();
+  const name =
+    (entry.draft.name ?? "").trim() || t("DashboardIssuance.newDesign.localDrafts.untitled");
+  const symbol = (entry.draft.symbol ?? "").trim();
 
   return (
     <div className="-mx-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 rounded-control border-b border-border-subtle hover:bg-fill-subtle">

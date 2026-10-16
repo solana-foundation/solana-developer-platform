@@ -13,9 +13,6 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: "sandbox" }),
 }));
-vi.mock("qrcode", () => ({
-  default: { toDataURL: vi.fn(async () => "data:image/png;base64,iVBORw0KGgo=") },
-}));
 
 const paymentRequest = {
   id: "preq_1",
