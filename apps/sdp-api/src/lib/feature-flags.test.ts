@@ -270,16 +270,16 @@ describe("release channels", () => {
 
   it("pins each custody (provider, mode) pair's stage", () => {
     expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
-      local: "stable",
-      fireblocks: "stable",
+      local: "beta",
+      fireblocks: "beta",
       privy: "stable",
-      coinbase_cdp: "stable",
-      para: "stable",
-      turnkey: "stable",
-      dfns: "stable",
-      ibm_haven: "stable",
-      anchorage: "stable",
-      utila: "stable",
+      coinbase_cdp: "beta",
+      para: "beta",
+      turnkey: "beta",
+      dfns: "beta",
+      ibm_haven: "beta",
+      anchorage: "beta",
+      utila: "beta",
     });
     expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable" });
   });
