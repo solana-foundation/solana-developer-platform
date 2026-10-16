@@ -30,7 +30,7 @@
  * trusted, so a change inside one is reviewed like the waists themselves.
  *
  * It also pins who may set the money principal (HOO-2099): the ambient
- * identity the waists check a start against. Only the entry points that
+ * identity the waists check a signature against. Only the entry points that
  * authenticated it set it, so no handler can name a more privileged one.
  *
  * Adding a file to any list below is a security-reviewed change.

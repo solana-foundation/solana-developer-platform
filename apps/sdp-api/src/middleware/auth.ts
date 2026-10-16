@@ -67,7 +67,7 @@ interface ApiKeyContext {
 /**
  * The rest of an authenticated API-key request: narrowed to the key's
  * organization, and moving money as the key (HOO-2099). The signing waists
- * re-read the key's row whenever it signs a start.
+ * re-read the key's row whenever it signs for it.
  */
 function runAsAuthenticatedKey(
   key: Pick<ApiKeyContext, "id" | "organizationId">,

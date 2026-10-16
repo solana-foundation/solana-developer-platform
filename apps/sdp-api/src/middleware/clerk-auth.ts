@@ -565,7 +565,7 @@ function assertClerkTenantClaims(payload: ClerkJwtPayload): void {
 /**
  * The rest of a signed-in request: narrowed to the member's organization, and
  * moving money as the member (HOO-2099). The signing waists re-read the
- * membership whenever it signs a start.
+ * membership whenever it signs for them.
  */
 function runAsSignedInMember(
   clerk: { userId: string; organizationId: string },

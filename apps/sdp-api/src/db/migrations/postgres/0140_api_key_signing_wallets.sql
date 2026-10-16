@@ -23,7 +23,7 @@ ALTER TABLE api_keys
   ADD COLUMN IF NOT EXISTS wallet_scope TEXT NOT NULL DEFAULT 'all'
   CHECK (wallet_scope IN ('all', 'selected'));
 
-CREATE TABLE IF NOT EXISTS api_key_signing_wallets (
+CREATE TABLE api_key_signing_wallets (
   api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
   custody_wallet_id TEXT NOT NULL REFERENCES custody_wallets(id),
   created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
@@ -31,8 +31,39 @@ CREATE TABLE IF NOT EXISTS api_key_signing_wallets (
 );
 
 -- The foreign-key check on a custody wallet's deletion looks rows up by wallet.
-CREATE INDEX IF NOT EXISTS idx_api_key_signing_wallets_custody_wallet
+CREATE INDEX idx_api_key_signing_wallets_custody_wallet
   ON api_key_signing_wallets(custody_wallet_id);
+
+-- backfill:start
+-- A key that was wallet-bound stays bound: without this every bound key would
+-- read as 'all' and sign with any wallet in its project. Fails closed. A
+-- binding carries over only if it could sign before ('*', a :write or :admin
+-- permission, or the NULL historical unrestricted marker) and its provider
+-- wallet id names exactly one custody wallet in the key's project; a key left
+-- with none listed signs nothing until a person picks its wallets again.
+UPDATE api_keys ak
+   SET wallet_scope = 'selected'
+ WHERE ak.wallet_scope = 'all'
+   AND (ak.signing_wallet_id IS NOT NULL
+        OR EXISTS (SELECT 1 FROM api_key_wallet_permissions b WHERE b.api_key_id = ak.id));
+
+INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
+SELECT b.api_key_id, min(w.id)
+  FROM api_key_wallet_permissions b
+  JOIN api_keys ak ON ak.id = b.api_key_id
+  JOIN custody_wallets w ON w.wallet_id = b.wallet_id
+  LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+  LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+ WHERE ((cfg.organization_id = ak.organization_id AND cfg.project_id = ak.project_id)
+     OR (conn.organization_id = ak.organization_id AND conn.project_id = ak.project_id))
+   AND (b.permissions IS NULL
+        OR b.permissions LIKE '%"*"%'
+        OR b.permissions LIKE '%:write"%'
+        OR b.permissions LIKE '%:admin"%')
+ GROUP BY b.api_key_id, b.wallet_id
+HAVING count(DISTINCT w.id) = 1
+ON CONFLICT DO NOTHING;
+-- backfill:end
 
 -- As visible as the key it belongs to (0081's child-table policy).
 ALTER TABLE api_key_signing_wallets ENABLE ROW LEVEL SECURITY;
@@ -56,7 +87,4 @@ CREATE POLICY sdp_tenant_isolation ON api_key_signing_wallets
 ALTER TABLE payment_recurring_payments
   ADD COLUMN IF NOT EXISTS activated_by_api_key_id TEXT,
   ADD COLUMN IF NOT EXISTS activated_by_user_id TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_payment_recurring_payments_activated_by_api_key
-  ON payment_recurring_payments(activated_by_api_key_id)
-  WHERE activated_by_api_key_id IS NOT NULL;
+-- Their index builds concurrently in 0141.
