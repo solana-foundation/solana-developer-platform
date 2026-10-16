@@ -1,13 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
+import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -151,7 +152,7 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 }
 
 describe("Custody wallet by ID route", () => {
-  installClusterRpcStub();
+  const clusterRpc = installClusterRpcResponder();
 
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
@@ -556,41 +557,56 @@ describe("Custody wallet by ID route", () => {
     expect(res.status).toBe(403);
   });
 
-  it("falls back to a zero SOL balance when the RPC lookup fails", async () => {
-    getAccountInfoMock.mockRejectedValueOnce(new Error("RPC unavailable"));
+  it("answers 503 instead of a zero balance when the balance read fails", async () => {
+    getAccountInfoMock.mockReset();
+    clusterRpc.respond("getAccountInfo", () => ({
+      error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
+    }));
 
     const res = await app.request(
       "/v1/wallets/para_wallet_a",
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "PROVIDER_UNAVAILABLE",
+        message: "Wallet balance is temporarily unavailable. Try again.",
       },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(clusterRpc.requests.filter(({ method }) => method === "getAccountInfo")).toEqual([
+      {
+        cluster: "devnet",
+        method: "getAccountInfo",
+        params: [TEST_SOLANA_ADDRESSES.wallet2, { encoding: "base64", commitment: "confirmed" }],
+      },
+    ]);
+    expect(attachUsdValuesMock).not.toHaveBeenCalled();
+  });
+
+  it("reads a zero SOL balance for a wallet with no account on chain", async () => {
+    getAccountInfoMock.mockReset();
+    clusterRpc.answer("getAccountInfo", { context: { slot: 1 }, value: null });
+
+    const res = await app.request(
+      "/v1/wallets/para_wallet_a",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
       env
     );
 
     expect(res.status).toBe(200);
-
-    const body = (await res.json()) as {
+    expect(await res.json()).toMatchObject({
       data: {
         wallet: {
-          balance: {
-            token: string;
-            amount: string;
-            uiAmount: string;
-            decimals: number;
-          };
-        };
-      };
-    };
-
-    expect(body.data.wallet.balance).toMatchObject({
-      token: "SOL",
-      amount: "0",
-      uiAmount: "0",
-      decimals: 9,
+          id: "cwlt_wallet_by_id_para_a",
+          balance: { token: "SOL", amount: "0", uiAmount: "0", decimals: 9 },
+        },
+      },
     });
+    expect(clusterRpc.calls).toContainEqual({ cluster: "devnet", method: "getAccountInfo" });
   });
 });
 
