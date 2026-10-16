@@ -10,7 +10,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { Redis } from "ioredis";
+import type { Redis, RedisOptions } from "ioredis";
 import type { Env } from "@/types/env";
 import type {
   KVListResult,
@@ -75,12 +75,16 @@ const COMPARE_AND_DELETE_SHA = createHash("sha1").update(COMPARE_AND_DELETE_LUA)
 // parallel sockets.
 const clientPromisesByUrl = new Map<string, Promise<Redis>>();
 
-function ensureClient(url: string): Promise<Redis> {
-  const existing = clientPromisesByUrl.get(url);
+function ensureClient(
+  url: string,
+  dedicated?: { name: string; options: RedisOptions }
+): Promise<Redis> {
+  const cacheKey = dedicated === undefined ? url : `${dedicated.name}:${url}`;
+  const existing = clientPromisesByUrl.get(cacheKey);
   if (existing) return existing;
   const promise = (async (): Promise<Redis> => {
     const { default: IORedis } = await import("ioredis");
-    return new IORedis(url, {
+    const client = new IORedis(url, {
       // Eager TCP handshake — but ioredis does it asynchronously, so
       // unreachable hosts surface on the first command (or via the "error"
       // event), not from `new IORedis(...)`. Only a structurally malformed
@@ -90,15 +94,19 @@ function ensureClient(url: string): Promise<Redis> {
       // the third retry fails fast — better signal for upstream error
       // handling.
       maxRetriesPerRequest: 3,
+      ...dedicated?.options,
     });
+    // A lazy client connects here once, shared by every caller of this entry.
+    if (dedicated?.options.lazyConnect === true) await client.connect();
+    return client;
   })();
-  clientPromisesByUrl.set(url, promise);
+  clientPromisesByUrl.set(cacheKey, promise);
   // Evict on rejection so a transient malformed-URL or module-load failure
   // doesn't permanently poison the cache. `===` guard avoids racing with a
   // successful re-creation that already replaced this entry.
   promise.catch(() => {
-    if (clientPromisesByUrl.get(url) === promise) {
-      clientPromisesByUrl.delete(url);
+    if (clientPromisesByUrl.get(cacheKey) === promise) {
+      clientPromisesByUrl.delete(cacheKey);
     }
   });
   return promise;
@@ -279,6 +287,37 @@ export function createKVStoreSet(env: Env): KVStoreSet {
     rateLimits: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.rateLimits}`),
     cache: new RedisKVStore(clientPromise, `${namespace}${STORE_PREFIXES.cache}`),
   };
+}
+
+/**
+ * The audit ledger's checkpoint store: the `cache` keyspace, on a client of
+ * its own (HOO-2089). Every command on it settles within `commandTimeoutMs`,
+ * and a command whose promise has settled is never sent afterwards: no
+ * offline queue and no resend after a reconnect. So once a checkpoint call
+ * settles (EVALSHA, and any NOSCRIPT fallback EVAL) everything it sent is
+ * already ahead of the next command on the connection. Its own client because
+ * the shared one serves rate limits, the API-key cache and sponsorship
+ * budgets, whose callers rely on the default queueing and no timeout.
+ */
+export function createAuditLedgerCheckpointStore(env: Env, commandTimeoutMs: number): KVStore {
+  const url = env.REDIS_URL?.trim();
+  if (!url) {
+    throw new Error(
+      "REDIS_URL is required. Set it in the environment (e.g. redis://localhost:6379)."
+    );
+  }
+  const client = ensureClient(url, {
+    name: "audit-ledger",
+    options: {
+      commandTimeout: commandTimeoutMs,
+      enableOfflineQueue: false,
+      autoResendUnfulfilledCommands: false,
+      // With no offline queue a command sent while connecting would fail, so
+      // the store waits for the connection before its first command.
+      lazyConnect: true,
+    },
+  });
+  return new RedisKVStore(client, `${testWorkerStorePrefix()}${STORE_PREFIXES.cache}`);
 }
 
 /** Verify that the configured Redis backend is reachable. */

@@ -15,7 +15,7 @@ import {
   getTransferBatch,
   listTransferBatches,
 } from "./handlers";
-import { canonicalizeTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 
 const transferBatches = new Hono<{ Bindings: Env }>();
@@ -40,6 +40,7 @@ transferBatches.post(
     recovery: "record",
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
+    previousCanonicalize: previousCanonicalTransferBatchBody,
   }),
   replayFromRecord(findTransferBatchRecordReplay),
   admit(admitTransferBatchExecution),

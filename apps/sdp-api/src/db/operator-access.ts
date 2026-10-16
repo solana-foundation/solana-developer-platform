@@ -14,8 +14,9 @@
 
 import { getDb } from "@/db";
 import { runWithDatabaseIdentity } from "@/db/identity";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { AuditService } from "@/services/audit.service";
+import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
 import type { Env } from "@/types/env";
 
 export interface OperatorAccessGrant {
@@ -36,7 +37,10 @@ export async function runWithOperatorDatabaseAccess<T>(
     throw new Error("Operator database access requires a non-empty actor and reason");
   }
 
-  const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
+  const audit = new AuditService(
+    getDb(env),
+    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
+  );
   return runWithDatabaseIdentity({ kind: "operator", actor, reason }, async () => {
     // Fail closed: if the bypass cannot be recorded, it does not happen.
     await audit.logSystem({

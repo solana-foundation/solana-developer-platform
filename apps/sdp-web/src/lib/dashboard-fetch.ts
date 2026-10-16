@@ -177,20 +177,31 @@ function retiresKey(response: Response, body: ArrayBuffer, movesMoney: boolean):
 }
 
 /**
- * The GET path of the recurring schedule a kept money answer shows still under
- * way, or `null`: the only money route keyed here is recurring (transfers and
- * batches keep their own keys), so its kept key settles from that read.
+ * The GET path that shows when a kept money answer's movement is final, or
+ * `null` for none. The only money routes keyed here are recurring (transfers
+ * and batches keep their own keys). A collect is final when its collection's
+ * own transfer is, so it reads that transfer (`transfer.id`, else the
+ * attempt's `transferId`); with neither, nothing the dashboard can read shows
+ * the attempt's status, so the key simply stays kept. Any other recurring
+ * answer reads its schedule.
  */
-function inFlightRecurringReadPath(body: ArrayBuffer): string | null {
+function inFlightMovementReadPath(body: ArrayBuffer): string | null {
   let json: unknown;
   try {
     json = JSON.parse(new TextDecoder().decode(body));
   } catch {
     return null;
   }
-  const parsed = recurringPaymentIdSchema.safeParse(json);
+  const parsed = keptMovementBodySchema.safeParse(json);
   if (!parsed.success || !isMovementInFlight(movementStatusOf(json))) return null;
-  return MOVEMENT_READ_PATHS.recurringPayment(parsed.data.data.recurringPayment.id);
+  const { transfer, collectionAttempt, recurringPayment } = parsed.data.data;
+  if (collectionAttempt !== undefined) {
+    const transferId = transfer?.id ?? collectionAttempt.transferId;
+    return transferId ? MOVEMENT_READ_PATHS.transfer(transferId) : null;
+  }
+  return recurringPayment === undefined
+    ? null
+    : MOVEMENT_READ_PATHS.recurringPayment(recurringPayment.id);
 }
 
 function sendWithProject(
@@ -286,7 +297,7 @@ async function sendUnderActionKey(
       if (retiresKey(response, body, movesMoney)) {
         keys.release(fingerprint, key);
       } else if (movesMoney && response.ok) {
-        const readPath = inFlightRecurringReadPath(body);
+        const readPath = inFlightMovementReadPath(body);
         if (readPath !== null) {
           settleWhenMovementFinal(readPath, () => keys.release(fingerprint, key));
         }
@@ -468,9 +479,13 @@ export function settleWhenMovementFinal(readPath: string, settle: () => void): v
   setTimeout(read, MOVEMENT_POLL_INTERVAL_MS);
 }
 
-/** The id of the recurring schedule a success body shows, or `null`. */
-const recurringPaymentIdSchema = z.object({
-  data: z.object({ recurringPayment: z.object({ id: z.string() }) }),
+/** The records a kept recurring answer names, as far as their ids go. */
+const keptMovementBodySchema = z.object({
+  data: z.object({
+    transfer: z.object({ id: z.string() }).optional(),
+    collectionAttempt: z.object({ transferId: z.string().nullish() }).optional(),
+    recurringPayment: z.object({ id: z.string() }).optional(),
+  }),
 });
 
 export async function dashboardFetch<T = unknown>(

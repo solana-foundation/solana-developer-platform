@@ -10,7 +10,7 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { getClientIp } from "@/lib/client-ip";
 import type { KVStore } from "@/runtime/kv";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "./audit-ledger-timeout";
@@ -163,7 +163,9 @@ type AuditCheckpointStore = Pick<KVStore, "compareAndSet" | "compareAndDelete"> 
  * on Redis later, and not as one command: `RedisKVStore.compareAndSet` sends
  * EVALSHA, then EVAL on NOSCRIPT. So nothing may assume a later call runs
  * after it; the witness write waits for its own call to settle before the
- * restore ({@link recoverFailedWitness}).
+ * restore ({@link recoverFailedWitness}). The Redis client bounds each command
+ * on its own (`createAuditLedgerCheckpointStore`); this bound also covers an
+ * injected store.
  */
 function boundedAuditCheckpointStore(store: AuditCheckpointStore): AuditCheckpointStore {
   return {
@@ -186,13 +188,24 @@ function withAuditRedisTimeout<T>(call: Promise<T>): Promise<T> {
 }
 
 /**
+ * The longest the writer waits for a timed-out witness call to settle. The
+ * ledger's Redis client bounds every command by
+ * {@link AUDIT_LEDGER_REDIS_TIMEOUT_MS} (`createAuditLedgerCheckpointStore`),
+ * so a compare-and-set settles within two of them (EVALSHA, then the NOSCRIPT
+ * fallback EVAL); this backstop only fires for a store without that bound.
+ */
+const WITNESS_SETTLE_BACKSTOP_FACTOR = 3;
+
+/**
  * Restores the predecessor checkpoint after this writer's pending-witness
  * write failed (HOO-2089). The transaction never reaches COMMIT, so a witness
- * that lands late would lock every later write. The restore therefore waits,
- * for one more bounded interval, until the witness call itself has settled
- * (its EVALSHA and any NOSCRIPT fallback EVAL included), then runs; if the
- * witness never landed it is a no-op. Neither outcome it cannot repair is
- * silent: a witness still unsettled, or a restore that did not put the
+ * that lands late would lock every later write. The restore is sent only once
+ * the witness call itself has settled: its EVALSHA and any NOSCRIPT fallback
+ * EVAL are then already sent, and the ledger's client never sends a settled
+ * command later, so Redis runs the restore after them. If the witness never
+ * landed the restore is a no-op. What it cannot repair is never silent: a
+ * witness still unsettled after the backstop (no restore is sent then, since
+ * it could run ahead of the witness), or a restore that did not put the
  * predecessor back, is logged as the event that locks audit writes until an
  * operator restores the checkpoint.
  */
@@ -202,17 +215,26 @@ async function recoverFailedWitness(
   expectedCheckpoint: string | null,
   pendingCheckpoint: string
 ): Promise<void> {
-  const witnessSettled = await withAuditRedisTimeout(
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const backstop = new Promise<false>((resolve) => {
+    timer = setTimeout(
+      () => resolve(false),
+      AUDIT_LEDGER_REDIS_TIMEOUT_MS * WITNESS_SETTLE_BACKSTOP_FACTOR
+    );
+  });
+  const witnessSettled = await Promise.race([
     witnessCall.then(
       () => true,
       () => true
-    )
-  ).catch(() => false);
+    ),
+    backstop,
+  ]).finally(() => clearTimeout(timer));
   if (!witnessSettled) {
     getLogger().error(
       { event: "audit_ledger_witness_unsettled", pendingCheckpoint },
-      "Audit-ledger pending witness did not settle; if it lands, audit writes stay locked until an operator restores the checkpoint"
+      "Audit-ledger pending witness did not settle, so it was not restored; if it lands, audit writes stay locked until an operator restores the checkpoint"
     );
+    return;
   }
   const restored = await restorePendingWitness(
     checkpointStore,
@@ -505,7 +527,7 @@ export class AuditService {
         userAgent,
         requestId,
       },
-      this.checkpointStore ?? createKVStoreSet(c.env).cache
+      this.checkpointStore ?? createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
     );
   }
 

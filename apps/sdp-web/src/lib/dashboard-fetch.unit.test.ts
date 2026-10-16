@@ -203,6 +203,60 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     }
   });
 
+  // A collect is final when its collection's own transfer is: the schedule is
+  // already `active` while that transfer is still processing.
+  it("keeps a collect key until the collection's transfer is final, not the schedule", async () => {
+    vi.useFakeTimers();
+    try {
+      openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+      const transferStatuses = ["processing", "finalized"];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "GET" && String(input).includes("/transfers/")) {
+          return Response.json({
+            data: { transfer: { id: "xfr_c", status: transferStatuses.shift() ?? "finalized" } },
+          });
+        }
+        if (init?.method === "GET") {
+          return Response.json({ data: { recurringPayment: { id: "rp_1", status: "active" } } });
+        }
+        return Response.json({
+          data: {
+            recurringPayment: { id: "rp_1", status: "active" },
+            collectionAttempt: { id: "att_1", status: "processing", transferId: "xfr_c" },
+            transfer: { id: "xfr_c", status: "processing" },
+          },
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const collect = () =>
+        dashboardRequest(`${PATH}/rp_1/collect`, { method: "POST", body: "{}" });
+      const postKeys = () =>
+        fetchMock.mock.calls
+          .filter(([, init]) => init?.method === "POST")
+          .map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+
+      await collect();
+      // The transfer still reads `processing`, so the key is kept.
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+      await collect();
+      // Now it reads `finalized`, which retires the key.
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+      await collect();
+
+      const [first, kept, next] = postKeys();
+      expect(kept).toBe(first);
+      expect(next).not.toBe(first);
+      const reads = fetchMock.mock.calls.filter(([, init]) => init?.method === "GET");
+      expect(reads.map(([input]) => String(input))).toEqual([
+        MOVEMENT_READ_PATHS.transfer("xfr_c"),
+        MOVEMENT_READ_PATHS.transfer("xfr_c"),
+      ]);
+    } finally {
+      vi.useRealTimers();
+      resetMovementWatchesForTests();
+    }
+  });
+
   it("retires the key once a 5xx comes back as a replay, so the next submit is new", async () => {
     openTab(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const responses = [

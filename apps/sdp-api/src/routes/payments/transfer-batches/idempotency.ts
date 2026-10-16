@@ -28,6 +28,22 @@ function isDefaultedOption(name: string): name is DefaultedOption {
  * sent; validation refuses it.
  */
 export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
+  return canonicalBatchBody(body, withoutDefaultOptions);
+}
+
+/**
+ * {@link canonicalizeTransferBatchBody} as it was before APE-665, with options
+ * as sent, so a key or batch row saved under it still matches its retry
+ * (`previousCanonicalize`).
+ */
+export function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
+  return canonicalBatchBody(body, (options) => options);
+}
+
+function canonicalBatchBody(
+  body: JsonValue,
+  canonicalOptions: (options: JsonValue | undefined) => JsonValue | undefined
+): JsonValue {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return body;
   }
@@ -36,7 +52,7 @@ export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
     return body;
   }
   const { options: sentOptions, ...rest } = body;
-  const options = withoutDefaultOptions(sentOptions);
+  const options = canonicalOptions(sentOptions);
   const emptyOptions =
     options !== null &&
     typeof options === "object" &&

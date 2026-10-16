@@ -83,6 +83,12 @@ export interface IdempotencyOptions {
    * does not matter). Must be pure.
    */
   canonicalize?: (body: JsonValue) => JsonValue;
+  /**
+   * The canonical form the route fingerprinted with before its current
+   * `canonicalize`. A key record or domain row saved under it still matches,
+   * so a retry across the change replays instead of answering 422. Must be pure.
+   */
+  previousCanonicalize?: (body: JsonValue) => JsonValue;
 }
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -132,10 +138,7 @@ export function idempotencyOperation(c: Context): string {
  * normalised), so two spellings the schema treats as one request fingerprint
  * the same. A route without a body validator falls back to the parsed JSON.
  */
-async function readFingerprintBody(
-  c: Context<{ Bindings: Env }>,
-  canonicalize: IdempotencyOptions["canonicalize"]
-): Promise<JsonValue> {
+async function readFingerprintBody(c: Context<{ Bindings: Env }>): Promise<JsonValue> {
   const body = validatedInput(c).body;
   let parsed: JsonValue;
   if (body !== undefined) {
@@ -150,7 +153,7 @@ async function readFingerprintBody(
       return ["unparsed", raw];
     }
   }
-  return canonicalize ? canonicalize(parsed) : parsed;
+  return parsed;
 }
 
 /**
@@ -353,18 +356,24 @@ export async function runIdempotency(
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
   const maxRenewalSeconds = options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS;
   const validatedParams = validatedInput(c).params;
-  const fingerprint = requestFingerprint({
-    operation,
-    // As the route's param validator left them, like the body.
-    params: toJsonValue(validatedParams),
-    // Names are ordered by the canonical form; repeated values keep their order.
-    query: c.req.queries(),
-    body: await readFingerprintBody(c, options.canonicalize),
-  });
+  const body = await readFingerprintBody(c);
+  const fingerprintOf = (canonicalize: IdempotencyOptions["canonicalize"]) =>
+    requestFingerprint({
+      operation,
+      // As the route's param validator left them, like the body.
+      params: toJsonValue(validatedParams),
+      // Names are ordered by the canonical form; repeated values keep their order.
+      query: c.req.queries(),
+      body: canonicalize ? canonicalize(body) : body,
+    });
+  let fingerprint = fingerprintOf(options.canonicalize);
+  const previousFingerprint = options.previousCanonicalize
+    ? fingerprintOf(options.previousCanonicalize)
+    : fingerprint;
   const id = `idk_${crypto.randomUUID()}`;
   const claimToken = crypto.randomUUID();
   const repository = createPostgresIdempotencyKeyRepository(getDb(c.env));
-  const claim = await repository.claim({
+  const claimInput = {
     id,
     claimToken,
     organizationId: auth.organizationId,
@@ -379,7 +388,18 @@ export async function runIdempotency(
     presumedLiveSeconds: maxRenewalSeconds + leaseSeconds,
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
-  });
+  };
+  let claim = await repository.claim(claimInput);
+  if (claim.kind === "mismatch" && previousFingerprint !== fingerprint) {
+    // A key saved before the route's canonical form changed (a mismatch
+    // writes nothing, so claiming again under the old form is safe).
+    const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
+    if (previous.kind !== "mismatch") {
+      claim = previous;
+      fingerprint = previousFingerprint;
+    }
+  }
+  c.set("idempotencyPreviousFingerprint", previousFingerprint);
 
   switch (claim.kind) {
     case "completed":
@@ -614,4 +634,18 @@ export function markIdempotencyRecordMismatch(c: Context<{ Bindings: Env }>): vo
  */
 export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string | undefined {
   return c.get("idempotencyFingerprint");
+}
+
+/**
+ * Whether a fingerprint stored on a domain row is this request's: its current
+ * fingerprint, or the one under the route's `previousCanonicalize`, so a row
+ * saved before the canonical form changed still answers its retry.
+ */
+export function idempotencyFingerprintMatches(
+  c: Context<{ Bindings: Env }>,
+  stored: string
+): boolean {
+  return (
+    stored === c.get("idempotencyFingerprint") || stored === c.get("idempotencyPreviousFingerprint")
+  );
 }
