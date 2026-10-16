@@ -218,9 +218,9 @@ describe("runCronJob", () => {
     vi.mocked(collectDueRecurringPayments)
       .mockReset()
       .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 });
-    vi.mocked(pollRingsIndexing).mockReset().mockResolvedValue(undefined);
-    vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
-    vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);
+    vi.mocked(pollRingsIndexing).mockClear();
+    vi.mocked(trackPendingDeposits).mockClear();
+    vi.mocked(trackPendingWithdrawals).mockClear();
     vi.mocked(reconcileEarnVaultMovements).mockReset().mockResolvedValue(undefined);
     vi.mocked(reconcileRampTransfers).mockReset().mockResolvedValue(undefined);
     vi.mocked(detectOrphanedEarnSplitSwaps).mockReset().mockResolvedValue(undefined);
@@ -412,9 +412,6 @@ describe("runCronJob", () => {
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
     expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env, expect.any(Date));
-    // The rings poll gates itself on the flag plus the http adapter, so the job
-    // hands it every tick — this is its only tick on a managed deployment.
-    expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
     // exit reconciler never waits on advisory work (ADR 0002, PRO-1864).
@@ -425,8 +422,6 @@ describe("runCronJob", () => {
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(env, undefined, {
       workEnabled: false,
     });
-    expect(trackPendingDeposits).not.toHaveBeenCalled();
-    expect(trackPendingWithdrawals).not.toHaveBeenCalled();
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
   });
@@ -462,7 +457,7 @@ describe("runCronJob", () => {
 
   it("runs every reconciler while credential cleanup is pending and reports its failure last", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
-      makeEnv({ PRIVATE_CHANNELS_ENABLED: "true", MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
+      makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
     );
     const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
@@ -471,9 +466,6 @@ describe("runCronJob", () => {
     try {
       await vi.waitFor(() => {
         expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
-        expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
-        expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
-        expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
         expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
         expect(reconcileDvpTrades).toHaveBeenCalledTimes(1);
         expect(detectOrphanedEarnSplitSwaps).toHaveBeenCalledTimes(1);
@@ -536,62 +528,46 @@ describe("runCronJob", () => {
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
-  it("fails the job on a rings-poll error but still runs the ticks after it", async () => {
-    vi.mocked(pollRingsIndexing).mockRejectedValue(new Error("photon down"));
-
-    await expect(runCronJob()).rejects.toThrow("photon down");
-
-    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
-    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
-  });
-
-  it("runs both private-channel reconcilers behind the flag", async () => {
-    const env = makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" });
-    vi.mocked(getProcessEnv).mockReturnValue(env);
+  it("checks the paused deposit, withdrawal and rings monitors in without running their jobs", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(
+      makeEnv({ PRIVATE_CHANNELS_ENABLED: "true", HELIUS_RINGS_ENABLED: "true" })
+    );
 
     await runCronJob();
 
-    expect(trackPendingDeposits).toHaveBeenCalledExactlyOnceWith(env);
-    expect(trackPendingWithdrawals).toHaveBeenCalledExactlyOnceWith(env);
-  });
-
-  // The reconcilers are siblings: a failing deposits leg must never skip the
-  // withdrawals leg (or vice versa), only fail the job after both settle.
-  it("still reconciles withdrawals when deposit tracking fails", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
-    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
-
-    await expect(runCronJob()).rejects.toThrow("deposits down");
-
-    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
-    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
+    for (const monitor of [
+      "sdp-api-managed-track-pending-deposits",
+      "sdp-api-managed-track-pending-withdrawals",
+      "sdp-api-managed-poll-rings-indexing",
+    ]) {
+      expect(logEvent).toHaveBeenCalledWith(
+        "info",
+        expect.objectContaining({ event: "sdp_cron_run", monitor, status: "ok" })
+      );
+    }
+    expect(trackPendingDeposits).not.toHaveBeenCalled();
+    expect(trackPendingWithdrawals).not.toHaveBeenCalled();
+    expect(pollRingsIndexing).not.toHaveBeenCalled();
   });
 
   it("completes feature-disabled monitors as successful no-ops", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({
         SDP_DEPLOYMENT_MODE: "self_hosted",
-        PRIVATE_CHANNELS_ENABLED: "false",
         MARKETS_ENABLED: "false",
         EARN_ENABLED: "false",
       })
     );
     await runCronJob();
 
-    const runs = vi
-      .mocked(logEvent)
-      .mock.calls.filter(([, payload]) => payload.event === "sdp_cron_run");
-    for (const monitorSlug of [
-      "sdp-api-managed-track-pending-deposits",
-      "sdp-api-managed-track-pending-withdrawals",
-      "sdp-api-managed-refresh-earn-metrics",
-    ]) {
-      expect(
-        runs.some(([, payload]) => payload.monitor === monitorSlug && payload.status === "ok")
-      ).toBe(true);
-    }
-    expect(trackPendingDeposits).not.toHaveBeenCalled();
-    expect(trackPendingWithdrawals).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_cron_run",
+        monitor: "sdp-api-managed-refresh-earn-metrics",
+        status: "ok",
+      })
+    );
     expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledWith(expect.any(Object), undefined, {
       workEnabled: false,
@@ -599,8 +575,6 @@ describe("runCronJob", () => {
   });
 
   it("emits one sdp_cron_run event per managed tick", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
-
     await runCronJob();
 
     const runs = vi
@@ -805,21 +779,19 @@ describe("runCronJob", () => {
   });
 
   it("aggregates failures from more than one tick without dropping either", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
     vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
-    vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
+    vi.mocked(reconcileRampTransfers).mockRejectedValue(new Error("ramp inbox down"));
     vi.mocked(detectOrphanedEarnSplitSwaps).mockRejectedValue(new Error("split swaps down"));
 
     await expect(runCronJob()).rejects.toMatchObject({
       message: "reconciliation job had multiple tick failures",
       errors: [
         expect.objectContaining({ message: "sponsorship down" }),
-        expect.objectContaining({ message: "deposits down" }),
+        expect.objectContaining({ message: "ramp inbox down" }),
         expect.objectContaining({ message: "split swaps down" }),
       ],
     });
 
-    expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
   });
 
