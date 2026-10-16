@@ -24,7 +24,8 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
-import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
+import { DatabaseUnavailableError } from "@/db";
+import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
@@ -282,6 +283,34 @@ function captureUnexpectedError(
     // it deliberately, and neither should depend on the other being present.
     observability.captureException(scrubError(err));
   });
+}
+
+/** How long a client is told to wait after the database could not take its request. */
+const DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
+
+/**
+ * The response for an error nothing else recognized, after it was logged and
+ * captured. A database with no connection to give is the one retryable case:
+ * a 503 with `Retry-After` tells the client to back off where a 500 told it
+ * the API was broken. It is still logged and captured as an internal error, so
+ * the alert on those keeps seeing a saturated pool.
+ */
+function unexpectedErrorResponse(c: Context<{ Bindings: Env }>, err: Error): Response {
+  if (err instanceof DatabaseUnavailableError) {
+    c.header("Retry-After", String(DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS));
+    return appErrorResponse(c, serviceUnavailable());
+  }
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An internal error occurred",
+      },
+      meta: { requestId: c.get("requestId") },
+    },
+    500
+  );
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
@@ -583,17 +612,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     );
     captureUnexpectedError(deps.observability, err, c);
 
-    c.header("X-SDP-Trace-ID", traceId);
-    return c.json(
-      {
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "An internal error occurred",
-        },
-        meta: { requestId },
-      },
-      500
-    );
+    return unexpectedErrorResponse(c, err);
   });
 
   // 404 handler

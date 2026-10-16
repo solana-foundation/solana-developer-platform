@@ -6,6 +6,7 @@ export {
   type DatabaseBindings,
   type DatabaseClient,
   type DatabaseExecutor,
+  DatabaseUnavailableError,
   getConnectionString,
   getDb,
   type PreparedStatement,
