@@ -96,7 +96,7 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *    Reconciliation Cadence is their effective cadence, the same degradation
  *    from the per-minute crontab that pending-transfers accepts. Fatal.
  * 5. **Rings indexing poll** — behind no gate here, because the job itself
- *    early-returns unless the rings flag is on. This job is the poll's only tick
+ *    early-returns unless the release channel includes Helius Rings. This job is the poll's only tick
  *    on managed deployments; without it an operation that reached `indexing`
  *    would neither complete nor ever time out. Fatal.
  * 6. **Earn vault-movement reconciliation** — deliberately outside the Earn

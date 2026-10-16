@@ -13,7 +13,7 @@
  *  4. In-flight rows, advanced by `executeOperation`, with `indexing` past the
  *     budget failed so nothing sits in limbo.
  *
- * Ships dormant: early-returns unless the feature flag is on.
+ * Ships dormant: early-returns unless the release channel includes Helius Rings.
  */
 
 import { getDb } from "@/db";

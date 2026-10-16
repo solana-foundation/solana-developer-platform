@@ -184,7 +184,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
     });
 
   // Feature-gated ticks keep emitting their sdp_cron_run proof-of-life while
-  // the flag is off, mirroring the managed job (job.ts): the staleness alert
+  // the release channel excludes their module, mirroring the managed job (job.ts): the staleness alert
   // counts distinct monitors per window, so a disabled feature must read as a
   // healthy no-op, not as the silence that means the scheduler died. It takes
   // no database identity on purpose — the tick does nothing but log, and a
@@ -247,8 +247,8 @@ export function startCron(deps: CronDeps): CronHandle | null {
     scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
   }
 
-  // Cheap to schedule unconditionally: the job early-returns unless the rings
-  // flag is on and the live gateway adapter is selected.
+  // Cheap to schedule unconditionally: the job early-returns unless the release
+  // channel includes Helius Rings and the live gateway adapter is selected.
   tasks.push(scheduleSystemTask(RINGS_INDEXING_CRON, "cron:rings-indexing", runRingsIndexingPoll));
 
   if (isEarnEnabled(deps.env)) {
