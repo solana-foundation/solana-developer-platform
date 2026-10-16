@@ -219,7 +219,7 @@ async function getBalancesByWalletId(
     ])
   );
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
+  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
@@ -667,8 +667,7 @@ export const getWalletById = async (c: AppContext) => {
     return success(c, response);
   }
 
-  let lamports = 0n;
-
+  let lamports: bigint;
   try {
     const rpc = createClusterRpc();
     const accountInfo = await solanaRpc.getAccountInfo(rpc, wallet.publicKey as Address);
@@ -684,6 +683,7 @@ export const getWalletById = async (c: AppContext) => {
       // biome-ignore lint/security/noSecrets: Operational log message, not a secret.
       "getWalletById: failed to fetch wallet balance"
     );
+    throw providerUnavailable("Wallet balance is temporarily unavailable. Try again.");
   }
 
   const solBalance = {

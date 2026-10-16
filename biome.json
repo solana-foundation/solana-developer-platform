@@ -227,7 +227,8 @@
                   "@sdp/rpc/scope": {
                     "allowImportNames": ["currentClusterScope", "ClusterScope"],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
-                  }
+                  },
+                  "@sdp/rpc/helius-das": "Only services/helius-das.service.ts may send Helius DAS requests: DAS is Helius-only, so it bypasses the managed pool, and no caller should reach for a provider directly. Use createClusterRpc() for standard RPC. See docs/decisions/0007-cluster-scope-ambient.md."
                 }
               }
             }
@@ -259,6 +260,26 @@
                       "ClusterScope",
                       "runInClusterScope"
                     ],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/apps/sdp-api/src/services/helius-das.service.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
                     "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   }
                 }

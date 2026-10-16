@@ -259,7 +259,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet by ID",
     operationId: "getWalletById",
     description:
-      "Returns active wallet metadata, exact Config or Connection ownership, runtime execution admission, Provider, public key, and by default the current SOL balance. Set includeBalance=false for a metadata-only read.",
+      "Returns active wallet metadata, exact Config or Connection ownership, runtime execution admission, Provider, public key, and by default the current SOL balance. If the balance read fails, returns 503 instead of a zero balance. Set includeBalance=false for a metadata-only read.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -279,7 +279,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet details",
         content: jsonContent(custodyWalletByIdResponse),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500, 503]),
     },
   });
 

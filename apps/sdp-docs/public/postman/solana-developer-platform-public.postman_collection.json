@@ -356,7 +356,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/{{walletId}}",
-            "description": "Returns active wallet metadata, exact Config or Connection ownership, runtime execution admission, Provider, public key, and by default the current SOL balance. Set includeBalance=false for a metadata-only read."
+            "description": "Returns active wallet metadata, exact Config or Connection ownership, runtime execution admission, Provider, public key, and by default the current SOL balance. If the balance read fails, returns 503 instead of a zero balance. Set includeBalance=false for a metadata-only read."
           }
         },
         {

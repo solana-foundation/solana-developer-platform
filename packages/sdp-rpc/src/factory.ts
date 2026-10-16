@@ -1,8 +1,4 @@
-import {
-  GENESIS_HASH_BY_CLUSTER,
-  type OrganizationRpcProvider,
-  type SolanaCluster,
-} from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
@@ -18,36 +14,11 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { SdpRpcError, solanaRpcError } from "./errors";
+import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
 import { isTransientRpcError } from "./transient";
-import type { ManagedRpcEnv } from "./types";
-
-/**
- * Each cluster's managed pool env key per provider. Key order is the failover order;
- * `default` (often a public endpoint) last.
- */
-const MANAGED_RPC_ENV_KEYS = {
-  devnet: {
-    triton: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL",
-    helius: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL",
-    alchemy: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL",
-    quicknode: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
-    validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
-    nodit: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL",
-    default: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
-  },
-  "mainnet-beta": {
-    triton: "SOLANA_RPC_TRITON_MAINNET_API_KEY_URL",
-    helius: "SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL",
-    alchemy: "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
-    quicknode: "SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL",
-    validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL",
-    nodit: "SOLANA_RPC_NODIT_MAINNET_API_KEY_URL",
-    default: "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL",
-  },
-} as const satisfies Record<SolanaCluster, Record<OrganizationRpcProvider, keyof ManagedRpcEnv>>;
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
 const GENESIS_PROOF_TTL_MS = 30_000;
