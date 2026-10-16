@@ -1,6 +1,7 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createSystemPaymentsRepository } from "@/db/repositories";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -93,6 +94,10 @@ async function readTransfer(id: string) {
 }
 
 describe("applyRampSettlementEvent", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).batch([
@@ -193,6 +198,71 @@ describe("applyRampSettlementEvent", () => {
       status: "canceled",
       amount: "10",
     });
+  });
+
+  it("refuses settlement when cancellation wins after the first read", async () => {
+    await seedCounterparty();
+    await seedTransfer({
+      id: "xfr_cancel_race",
+      reference: "order_cancel_race",
+      status: "awaiting_payment",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+
+    const db = getDb(env);
+    const runTransaction = db.transaction.bind(db);
+    const settlementTransaction = vi
+      .spyOn(db, "transaction")
+      .mockImplementationOnce(async (callback) => {
+        const canceled = await createSystemPaymentsRepository(env).updateTransferStatusGuarded({
+          transferId: "xfr_cancel_race",
+          organizationId: ORG_ID,
+          projectId: PROJECT_ID,
+          fromStatuses: ["awaiting_payment"],
+          toStatus: "canceled",
+          updatedAt: new Date().toISOString(),
+        });
+        expect(canceled?.status).toBe("canceled");
+        return runTransaction(callback);
+      });
+
+    const result = await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "order_cancel_race",
+      receivedAmount: "12",
+      providerCustomerId: "cust_cancel_race",
+      onchain: {
+        signature: "provider-reported-signature",
+        sourceAddress: "provider-reported-source",
+        destinationAddress: "provider-reported-destination",
+        amount: "12",
+      },
+    });
+
+    expect(settlementTransaction).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      applied: false,
+      outcome: "refused",
+      reason: "settled_after_cancel",
+    });
+    expect(await readTransfer("xfr_cancel_race")).toMatchObject({
+      status: "canceled",
+      amount: "10",
+      fiat_amount: "10",
+      source_address: null,
+      destination_address: "destination",
+      signature: null,
+      provider_data: {},
+    });
+    const links = await db
+      .prepare(
+        `SELECT provider_customer_reference FROM counterparty_provider_accounts
+         WHERE counterparty_id = ?`
+      )
+      .bind(COUNTERPARTY_ID)
+      .all<{ provider_customer_reference: string }>();
+    expect(links.results).toHaveLength(0);
   });
 
   it.each([
