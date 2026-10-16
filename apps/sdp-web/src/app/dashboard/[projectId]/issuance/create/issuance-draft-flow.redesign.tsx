@@ -10,6 +10,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useZodForm } from "@/lib/use-zod-form";
 import { saveIssuanceDraft } from "./actions";
 import {
   ClassifyStep,
@@ -158,7 +159,7 @@ function DraftFlow({
     classified,
     setClassified,
     draft,
-    setDraft,
+    update,
     access,
     setAccess,
     storageKey,
@@ -171,9 +172,6 @@ function DraftFlow({
     storageKey,
     localId,
   });
-  const update = (changes: Partial<DraftState>) =>
-    setDraft((current) => ({ ...current, ...changes }));
-
   const savable = classified && draftSchema.safeParse(draft).success;
 
   // The draft flow sits at the top of the page, with no title over it: the design draws its
@@ -405,7 +403,8 @@ function useDraftFlowState(
     resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
   );
   const [classified, setClassified] = useState(resumeFrom !== null);
-  const [draft, setDraft] = useState<DraftState>(() =>
+  const form = useZodForm(
+    draftSchema,
     resumeFrom
       ? restoreDraft(
           initialDraft(wallets),
@@ -423,8 +422,8 @@ function useDraftFlowState(
     setStep,
     classified,
     setClassified,
-    draft,
-    setDraft,
+    draft: form.values,
+    update: form.setFields,
     access,
     setAccess,
     storageKey,
