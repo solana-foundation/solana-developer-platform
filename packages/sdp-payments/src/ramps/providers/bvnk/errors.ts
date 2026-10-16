@@ -7,6 +7,7 @@ import {
   rateLimited,
   type SdpPaymentsError,
 } from "../../../errors";
+import { classifyProviderFailure } from "../../fetch";
 import { bvnkErrorEnvelopeSchema } from "./schemas";
 
 /**
@@ -29,7 +30,11 @@ function mapBvnkErrorStatus(
   status: number,
   options: { edgeBlocked: boolean; diagnostics: Record<string, unknown> | undefined }
 ): SdpPaymentsError {
-  const details = { provider: "bvnk", providerStatus: status };
+  const details = {
+    provider: "bvnk",
+    providerStatus: status,
+    outcome: classifyProviderFailure(status).outcome,
+  };
   const { diagnostics } = options;
   if (options.edgeBlocked) {
     return providerUnavailable(

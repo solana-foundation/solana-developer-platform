@@ -23,6 +23,7 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
+import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
 import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
@@ -38,6 +39,8 @@ export interface DashboardPlaygroundApiKeyOption {
 }
 
 type DashboardWorkspaceContextValue = {
+  initialQuickStartStatus: import("@/lib/dashboard-quick-start.redesign").QuickStartStatus | null;
+  /** The previous design's quick start (NEW DESIGN off). */
   initialQuickStartStep: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
@@ -64,6 +67,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 );
 
 type DashboardWorkspaceProviderProps = {
+  initialQuickStartStatus?: import("@/lib/dashboard-quick-start.redesign").QuickStartStatus | null;
   initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
   children: ReactNode;
   scopeRefreshFallback: ReactNode;
@@ -75,6 +79,7 @@ type DashboardWorkspaceProviderProps = {
 };
 
 export function DashboardWorkspaceProvider({
+  initialQuickStartStatus = null,
   initialQuickStartStep = null,
   children,
   scopeRefreshFallback,
@@ -116,6 +121,9 @@ export function DashboardWorkspaceProvider({
     () => getDashboardCacheScopeKey(liveDashboardCacheScope),
     [liveDashboardCacheScope]
   );
+  // Set while rendering, before any child reads a key, so a key store never
+  // hands one user's or org's Idempotency-Keys to another in the same tab.
+  setIdempotencyKeyScope(liveDashboardCacheScopeKey);
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
     [serverDashboardCacheScope]
@@ -227,6 +235,7 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
+      initialQuickStartStatus: dashboardScopeIsFresh ? initialQuickStartStatus : null,
       initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
       dashboardAccess,
       flags,
@@ -248,6 +257,7 @@ export function DashboardWorkspaceProvider({
       toggleSidebar,
     }),
     [
+      initialQuickStartStatus,
       initialQuickStartStep,
       dashboardScopeIsFresh,
       dashboardAccess,

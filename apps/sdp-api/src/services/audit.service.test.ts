@@ -72,16 +72,17 @@ function createAuditWriter(
       params,
     };
   });
+  const execute = vi.fn(async () => 0);
   const db = {
     lockedTransactionWithPostCommit: vi.fn(
       async (
         _lockKey: string,
-        callback: (tx: { queryOne: typeof queryOne }) => Promise<unknown>,
+        callback: (tx: { queryOne: typeof queryOne; execute: typeof execute }) => Promise<unknown>,
         afterCommit: (result: unknown) => Promise<void>,
         afterRollback?: (result: unknown) => Promise<void>
       ) => {
         pendingSequence = null;
-        const result = await callback({ queryOne });
+        const result = await callback({ queryOne, execute });
         if (pendingSequence !== null && commitFailAt === pendingSequence) {
           commitFailAt = undefined;
           pendingSequence = null;
@@ -96,7 +97,7 @@ function createAuditWriter(
       }
     ),
   };
-  return { db, queryOne, checkpoint: createMemoryCheckpointStore() };
+  return { db, queryOne, execute, checkpoint: createMemoryCheckpointStore() };
 }
 
 function insertedCalls(queryOne: ReturnType<typeof vi.fn>) {
@@ -104,6 +105,31 @@ function insertedCalls(queryOne: ReturnType<typeof vi.fn>) {
 }
 
 describe("AuditService", () => {
+  it("lifts the idle-in-transaction timeout in the ledger transaction before it awaits Redis", async () => {
+    const { db, execute, checkpoint } = createAuditWriter();
+    const context = {
+      get: (key: string) =>
+        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
+      req: { header: () => null },
+    };
+
+    await new AuditService(db as never, checkpoint).log(context as never, {
+      action: "validate_failed",
+      resourceType: "provider_credential",
+      resourceId: "pcred_123",
+      status: "failure",
+    });
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      "SET LOCAL idle_in_transaction_session_timeout = 0"
+    );
+    const firstRedisCall = Math.min(
+      ...vi.mocked(checkpoint.get).mock.invocationCallOrder,
+      ...vi.mocked(checkpoint.compareAndSet).mock.invocationCallOrder
+    );
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(firstRedisCall);
+  });
+
   it("redacts credential-shaped metadata before persisting", async () => {
     const { db, queryOne, checkpoint } = createAuditWriter();
     const context = {

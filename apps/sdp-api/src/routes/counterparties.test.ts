@@ -23,6 +23,7 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
 } from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import {
@@ -34,6 +35,7 @@ import {
   counterpartyProviderAccountUuid,
 } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
+import { counterpartySchema } from "@/openapi/schemas/counterparties";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
@@ -62,6 +64,9 @@ const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
 const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
 const BVNK_SESSION_REFERENCE = "00000000-0000-4000-8000-00000000a001";
 const BVNK_CUSTOMER_REFERENCE = "00000000-0000-4000-8000-00000000c058";
+const counterpartyIdentityResponseSchema = z.object({
+  data: z.object({ counterparty: counterpartySchema.pick({ id: true }) }),
+});
 const { agreements: BVNK_SESSION_AGREEMENTS } = bvnkAgreementSession();
 const BVNK_SESSION_AGREEMENT = {
   ...BVNK_SESSION_AGREEMENTS[0],
@@ -529,7 +534,9 @@ describe("Counterparties Routes", () => {
       async (provider) => {
         const created = await createCounterparty({ externalId: `retired_selector_${provider}` });
         expect(created.status).toBe(201);
-        const counterparty = (await created.json()).data.counterparty;
+        const { counterparty } = counterpartyIdentityResponseSchema.parse(
+          await created.json()
+        ).data;
         for (const selector of [
           "wallet",
           "walletId",
@@ -571,7 +578,7 @@ describe("Counterparties Routes", () => {
     it("keeps unrelated client hints optional on exact BVNK onramp requirements", async () => {
       const created = await createCounterparty({ externalId: "requirements_client_hint" });
       expect(created.status).toBe(201);
-      const counterparty = (await created.json()).data.counterparty;
+      const { counterparty } = counterpartyIdentityResponseSchema.parse(await created.json()).data;
       const response = await app.request(
         `/v1/counterparties/${counterparty.id}/requirements`,
         {

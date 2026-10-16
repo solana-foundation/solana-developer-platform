@@ -7,9 +7,9 @@
 
 ## Context
 
-Ramps launch with Stripe and MoonPay. Mural, MoneyGram and Lightspark are
-removed; Coinbase (HOO-2035) and BVNK (HOO-2037) are next. Adding a provider
-touches about 45 files today, 68 for one with KYC. The target is about 14.
+Ramps launch with Stripe and MoonPay. Mural, MoneyGram, Lightspark and Coinbase
+(HOO-2035) are removed; BVNK (HOO-2037) is next. Adding a provider touches
+about 45 files today, 68 for one with KYC. The target is about 14.
 
 `RampProvider` covers estimates, quotes and a synchronous counterparty check.
 Everything else is a per-provider switch outside it, and the covered half is
@@ -56,8 +56,15 @@ stateful providers fit the model at all.
   `resolveRampProviderClient` answers 503 for any id that is not live, retired
   ids included.
 - **Provider responses are validated.** `providerFetchJson` takes a zod schema,
-  and a response that does not match is `PROVIDER_UNAVAILABLE`. A schema
-  requires exactly what the adapter reads, no more.
+  and a success that does not match, is not JSON, or cannot be read is
+  `PROVIDER_RESPONSE_INVALID` (502). A schema requires exactly what the adapter
+  reads, no more.
+- **Every provider failure records its outcome.** `details.outcome` is
+  `rejected` when the provider answered and refused, and `unknown` when the
+  action may have happened: a transport failure, a timeout, 408, 409, 5xx, or a
+  success SDP could not read. Only the provider HTTP layer sets it
+  (`classifyProviderFailure`), an error without one counts as unknown, and a
+  once-only claim is released only on `rejected`.
 - **Error data is public or internal, never both.** `message` and `details` on
   `SdpPaymentsError` are public: error bodies and transfer rows carry them, so
   they hold only SDP's own wording. The provider's message, codes and field
@@ -117,7 +124,7 @@ stateful providers fit the model at all.
 - Provider failures lose the provider's wording in API error bodies. Callers get
   the code, the provider status in `details` and an SDP message; operators read
   the provider's wording from `error_diagnostics` in the logs.
-- Until step 3, BVNK and Coinbase stay on the current interface, named as legacy
-  entries in the test-kit map.
+- Until step 3, BVNK stays on the current interface, named as a legacy entry in
+  the test-kit map.
 - A schema stricter than the provider's real responses turns quotes into 503s,
   so schemas require only what adapters already read.

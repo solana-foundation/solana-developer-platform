@@ -115,7 +115,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail),
         amount: null,
         memo: null,
         type: "onramp",
@@ -193,7 +193,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail),
         amount: null,
         memo: null,
         type: "onramp",
@@ -225,17 +225,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
       });
       quote = bvnkResult.quote;
-      break;
-    }
-    case "coinbase": {
-      quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        destinationWalletAddress,
-        externalCustomerId: counterparty.id,
-        domain: input.domain,
-      });
       break;
     }
     case "stripe": {

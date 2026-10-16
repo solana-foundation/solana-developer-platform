@@ -14,11 +14,12 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
-import { type AppContext, type getFeePayment, getPaymentsRepository } from "../context";
+import { type AppContext, getPaymentsRepository } from "../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
 
@@ -115,7 +116,7 @@ export async function executeChunk(params: {
   resolved: ResolvedBatchRequest;
   chunk: TransactionChunk;
   recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
-  feePayment: ReturnType<typeof getFeePayment>;
+  feePayment: SponsorshipFeePayment;
   lastValidBlockHeight: bigint;
   preflight: boolean;
 }): Promise<void> {

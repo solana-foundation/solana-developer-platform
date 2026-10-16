@@ -186,8 +186,21 @@ describe("OndoEarnClient.listStrategies", () => {
     assert.equal(snapshot.riskMetadata?.tvlUsd, 179668490.6);
     assert.equal(snapshot.riskMetadata?.curator, "ondo");
     // The eligibility constraints ride the row (PRO-1832): an integrator reads
-    // them from the catalogue, not from a doc they have to know exists.
-    assert.match(String(snapshot.riskMetadata?.eligibility), /Reg S/);
+    // them from the catalogue, not from a doc they have to know exists. Pin
+    // every restriction the string states, so dropping one fails here (the
+    // API route test seeds its own copy and cannot catch it).
+    const eligibility = String(snapshot.riskMetadata?.eligibility);
+    for (const clause of [
+      "individuals and entities in the US, Canada and the other jurisdictions it lists",
+      "Reg S US persons or anyone acting for them",
+      "from subscribing for, acquiring or redeeming USDY",
+      "buy orders placed from the US are barred too",
+      "Qualified/professional investors only in Brazil, the EEA, Hong Kong, Malaysia, Singapore, Switzerland and the UK",
+      "Not enforced on-chain or by SDP",
+      "https://docs.ondo.finance/general-access-products/usdy/eligibility",
+    ]) {
+      assert.ok(eligibility.includes(clause), `eligibility is missing: ${clause}`);
+    }
     assert.match(String(snapshot.riskMetadata?.issuerControls), /freeze authority/);
     // The row must sit inside the envelope the sync validates against.
     assert.equal(isStrategyWithinDeclaredSupport(client.declaredSupport, snapshot), true);

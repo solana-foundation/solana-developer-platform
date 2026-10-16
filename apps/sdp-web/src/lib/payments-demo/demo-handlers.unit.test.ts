@@ -257,7 +257,7 @@ describe("ramp requirements", () => {
   });
 
   it("is ready at once with providers that run no onboarding", () => {
-    for (const provider of ["moonpay", "coinbase", "stripe"]) {
+    for (const provider of ["moonpay", "stripe"]) {
       expect(
         read(`/v1/counterparties/demo_cpty_jane/requirements?provider=${provider}`).body.data.status
       ).toBe("ready");
@@ -415,7 +415,7 @@ describe("ramp estimates and quotes", () => {
   it("refuses an on-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
       write("POST", "/v1/payments/ramps/onramp/quote", {
-        provider: "coinbase",
+        provider: "moonpay",
         counterpartyId: "demo_cpty_jane",
         destinationCustodyWalletId: TREASURY,
         assetRail: "usdc.solana",
@@ -456,7 +456,6 @@ describe("ramp estimates and quotes", () => {
     expect(modes).toEqual({
       moonpay: "hosted",
       bvnk: "manual_instructions",
-      coinbase: "hosted",
       stripe: "session_widget",
     });
   });
@@ -760,7 +759,7 @@ describe("transfers and batches", () => {
 
   it("credits a settled on-ramp to its exact wallet despite another provider reference", () => {
     const { collision, original, source } = collisionWorld();
-    const ramp = transferById(collision, "demo_xfr_onramp_coinbase");
+    const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
     if (!ramp) throw new Error("Missing demo ramp fixture");
     ramp.custodyWalletId = source.id;
     ramp.status = "awaiting_payment";
@@ -780,7 +779,7 @@ describe("transfers and batches", () => {
     "does not fund or simulate a ramp without an exact wallet: %s",
     (pin) => {
       const { collision } = collisionWorld();
-      const ramp = transferById(collision, "demo_xfr_onramp_coinbase");
+      const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
       if (!ramp) throw new Error("Missing demo ramp fixture");
       ramp.custodyWalletId = pin;
       ramp.status = "awaiting_payment";

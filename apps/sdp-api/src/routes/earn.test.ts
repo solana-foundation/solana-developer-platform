@@ -929,6 +929,17 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     await seedAuth();
     const usdyMint = required(ONDO_DEPLOYMENTS["mainnet-beta"]).usdyMint;
     assert(usdyMint);
+    const disclosure = {
+      curator: "ondo",
+      eligibility:
+        "Ondo bars individuals and entities in the US, Canada and the other jurisdictions " +
+        "it lists, and Reg S US persons or anyone acting for them, from subscribing for, " +
+        "acquiring or redeeming USDY; buy orders placed from the US are barred too. " +
+        "Qualified/professional investors only in Brazil, the EEA, Hong Kong, Malaysia, " +
+        "Singapore, Switzerland and the UK. Not enforced on-chain or by SDP. Full rules: " +
+        "https://docs.ondo.finance/general-access-products/usdy/eligibility",
+      issuerControls: "Ondo holds the USDY mint and freeze authority",
+    };
     const ondo = await seedStrategy({
       provider: "ondo",
       providerReference: usdyMint,
@@ -939,11 +950,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       shareMint: usdyMint,
       currentApy: null,
 
-      riskMetadata: {
-        curator: "ondo",
-        eligibility: "Reg S: non-US persons only; not enforced on-chain",
-        issuerControls: "Ondo holds the USDY mint and freeze authority",
-      },
+      riskMetadata: disclosure,
       hostCluster: "mainnet-beta",
     });
 
@@ -968,11 +975,6 @@ describe("Earn strategy reads — shipped V1 curation", () => {
           withdrawalSlippage: { quoteRequired: boolean; defaultToleranceBps: number } | null;
         }>;
       };
-    };
-    const disclosure = {
-      curator: "ondo",
-      eligibility: "Reg S: non-US persons only; not enforced on-chain",
-      issuerControls: "Ondo holds the USDY mint and freeze authority",
     };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([ondo.id]);
     expect(body.data.strategies[0]).toMatchObject({

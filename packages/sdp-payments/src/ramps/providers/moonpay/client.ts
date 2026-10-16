@@ -34,8 +34,6 @@ import type {
 } from "../../types";
 
 const MOONPAY_API_BASE_URL = "https://api.moonpay.com";
-const MOONPAY_ONRAMP_URL = "https://buy.moonpay.com";
-const MOONPAY_OFFRAMP_URL = "https://sell.moonpay.com";
 const MOONPAY_SANDBOX_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 const MOONPAY_SANDBOX_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
 
@@ -70,29 +68,61 @@ const moonpaySellQuoteSchema = z.object({
   extraFeeAmount: z.number(),
 });
 
-function readMoonpayConfig(
-  env: Record<string, string | undefined>,
-  mode: SdpEnvironment
-): MoonpayConfig {
-  const apiKey = (mode === "sandbox" ? env.MOONPAY_SANDBOX_API_KEY : env.MOONPAY_API_KEY)?.trim();
-  const secretKey = (
-    mode === "sandbox" ? env.MOONPAY_SANDBOX_SECRET_KEY : env.MOONPAY_SECRET_KEY
-  )?.trim();
+/** The env keys SDP's managed MoonPay credentials and widget overrides live under. */
+interface MoonpayManagedEnv {
+  readonly MOONPAY_SANDBOX_API_KEY?: string;
+  readonly MOONPAY_SANDBOX_SECRET_KEY?: string;
+  readonly MOONPAY_ONRAMP_URL?: string;
+  readonly MOONPAY_OFFRAMP_URL?: string;
+}
 
+const MOONPAY_TEST_API_KEY = /^pk_test_/;
+const MOONPAY_TEST_SECRET_KEY = /^sk_test_/;
+
+/**
+ * The managed MoonPay keys for `mode`, or why SDP can't use them. SDP holds
+ * sandbox keys only; a production project brings its own (HOO-1942), so
+ * production fails closed until it can. Both keys must be test-mode keys, so
+ * a live key mounted under the sandbox names can never reach MoonPay.
+ */
+function readMoonpayManagedKeys(
+  env: MoonpayManagedEnv,
+  mode: SdpEnvironment
+): { ok: true; apiKey: string; secretKey: string } | { ok: false; reason: string } {
+  if (mode === "production") {
+    return { ok: false, reason: "MoonPay is not configured for production projects." };
+  }
+  const apiKey = env.MOONPAY_SANDBOX_API_KEY?.trim();
+  const secretKey = env.MOONPAY_SANDBOX_SECRET_KEY?.trim();
   if (!apiKey || !secretKey) {
-    throw providerNotConfigured(
-      mode === "sandbox"
-        ? "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY."
-        : "MoonPay is not configured. Set MOONPAY_API_KEY and MOONPAY_SECRET_KEY."
-    );
+    return {
+      ok: false,
+      reason:
+        "MoonPay sandbox is not configured. Set MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_SECRET_KEY.",
+    };
+  }
+  if (!MOONPAY_TEST_API_KEY.test(apiKey) || !MOONPAY_TEST_SECRET_KEY.test(secretKey)) {
+    return { ok: false, reason: "MoonPay sandbox keys must be test-mode keys." };
+  }
+  return { ok: true, apiKey, secretKey };
+}
+
+/**
+ * Whether SDP's managed MoonPay keys can serve `mode`: the same check every
+ * MoonPay call makes before its first request, so availability never disagrees.
+ */
+export function hasMoonpayManagedKeys(env: MoonpayManagedEnv, mode: SdpEnvironment): boolean {
+  return readMoonpayManagedKeys(env, mode).ok;
+}
+
+function readMoonpayConfig(env: MoonpayManagedEnv, mode: SdpEnvironment): MoonpayConfig {
+  const keys = readMoonpayManagedKeys(env, mode);
+  if (!keys.ok) {
+    throw providerNotConfigured(keys.reason);
   }
 
-  const onrampUrl =
-    env.MOONPAY_ONRAMP_URL ??
-    (mode === "sandbox" ? MOONPAY_SANDBOX_ONRAMP_URL : MOONPAY_ONRAMP_URL);
-  const offrampUrl =
-    env.MOONPAY_OFFRAMP_URL ??
-    (mode === "sandbox" ? MOONPAY_SANDBOX_OFFRAMP_URL : MOONPAY_OFFRAMP_URL);
+  const onrampUrl = env.MOONPAY_ONRAMP_URL ?? MOONPAY_SANDBOX_ONRAMP_URL;
+  const offrampUrl = env.MOONPAY_OFFRAMP_URL ?? MOONPAY_SANDBOX_OFFRAMP_URL;
 
   try {
     new URL(onrampUrl);
@@ -101,7 +131,7 @@ function readMoonpayConfig(
     throw new SdpPaymentsError("INTERNAL_ERROR", "MoonPay URL configuration is invalid.");
   }
 
-  return { apiKey, secretKey, onrampUrl, offrampUrl };
+  return { apiKey: keys.apiKey, secretKey: keys.secretKey, onrampUrl, offrampUrl };
 }
 
 function requireMoonpayTransferId(paymentTransferId: string | undefined): string {

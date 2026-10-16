@@ -196,7 +196,11 @@ test.describe
             for (const body of bodies) {
               const response = await fetch(write.path, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "x-project-id": projectId },
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-project-id": projectId,
+                  "Idempotency-Key": crypto.randomUUID(),
+                },
                 body: JSON.stringify(body),
               });
               statuses.push(response.status);
@@ -259,7 +263,7 @@ test.describe
             token: "SOL",
             amount: "0.01",
           })
-        ).rejects.toThrow("(404)");
+        ).rejects.toThrow("(409)");
         const after = transferListSchema.parse(
           await api.get<unknown>(`/v1/payments/transfers?custodyWalletId=${alias.id}`)
         );
@@ -346,7 +350,11 @@ test.describe
         async ({ projectId, body }) => {
           const response = await fetch("/api/dashboard/payments/ramps/offramp/quote", {
             method: "POST",
-            headers: { "Content-Type": "application/json", "x-project-id": projectId },
+            headers: {
+              "Content-Type": "application/json",
+              "x-project-id": projectId,
+              "Idempotency-Key": crypto.randomUUID(),
+            },
             body: JSON.stringify(body),
           });
           return { status: response.status, body: await response.json() };
@@ -422,7 +430,11 @@ test.describe
           async ({ projectId, transferId }) => {
             const response = await fetch("/api/dashboard/payments/ramps/transfers/cancel", {
               method: "POST",
-              headers: { "Content-Type": "application/json", "x-project-id": projectId },
+              headers: {
+                "Content-Type": "application/json",
+                "x-project-id": projectId,
+                "Idempotency-Key": crypto.randomUUID(),
+              },
               body: JSON.stringify({ transferId }),
             });
             return response.status;

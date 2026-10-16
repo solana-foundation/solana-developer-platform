@@ -1,6 +1,10 @@
 import type { PaymentRecurringPaymentStatus } from "@sdp/types";
-import { describe, expect, it } from "vitest";
-import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
+import { describe, expect, it, vi } from "vitest";
+import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
+import {
+  getRecurringPaymentDetailState,
+  refreshIfOutcomeUnknown,
+} from "./recurring-payment-detail-state";
 
 describe("getRecurringPaymentDetailState", () => {
   it("allows pending edits and cancellation while signing is unavailable", () => {
@@ -98,4 +102,16 @@ describe("getRecurringPaymentDetailState", () => {
       ).toMatchObject({ sourceWalletUnresolved, isEditable, controlsDisabled });
     }
   );
+});
+
+describe("refreshIfOutcomeUnknown", () => {
+  it("refreshes the page after an unknown outcome, and not after a refusal", () => {
+    const refresh = vi.fn();
+
+    refreshIfOutcomeUnknown(new Error("refused"), refresh);
+    expect(refresh).not.toHaveBeenCalled();
+
+    refreshIfOutcomeUnknown(new IdempotencyOutcomeUnknownError("check the list"), refresh);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
 });

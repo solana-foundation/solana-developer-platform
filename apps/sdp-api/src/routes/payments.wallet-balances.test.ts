@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { walletBalancesSchema } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -16,6 +18,10 @@ import {
   seedConnectionOwnedDuplicateProviderWallet,
   seedCustodyWalletFixture,
 } from "@/test/helpers/payments-transfers";
+
+const balanceIdentityResponseSchema = z.object({
+  data: z.object({ walletBalances: walletBalancesSchema.pick({ custodyWalletId: true }).loose() }),
+});
 
 const readBalances = (walletId: string) =>
   app.request(
@@ -35,7 +41,7 @@ describe("Payments wallet balance identity", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = balanceIdentityResponseSchema.parse(await response.json());
     expect(body).toMatchObject({
       data: {
         walletBalances: {

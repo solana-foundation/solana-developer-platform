@@ -21,17 +21,12 @@ import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-ov
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   type CreateTransferBatchResult,
-  createTransferBatch,
   estimateTransferBatch,
   fetchBatchRecipients,
-  TransferBatchRequestError,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
-  claimTransferBatchIdempotencyKey,
-  isTransferBatchKeyConflict,
-  releaseTransferBatchIdempotencyKey,
-  transferBatchRequestFingerprint,
+  sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -334,16 +329,11 @@ export function useBatchSendWizard({
     const toastId = toast.loading(t("DashboardPayments.batchSend.submitting"), {
       position: "bottom-right",
     });
-    // Claimed BEFORE the await and durable per tab: a retry of this exact
-    // batch — double press, timeout, reload — carries the SAME key, so the
-    // API replays the recorded batch instead of moving the money again.
-    const fingerprint = transferBatchRequestFingerprint(request);
-    const idempotencyKey = claimTransferBatchIdempotencyKey(fingerprint);
     try {
-      const result = await createTransferBatch(request, t, idempotencyKey);
-      // The batch row exists — the key is spent, and the next identical batch
-      // is a new intent rather than a retry of this one.
-      releaseTransferBatchIdempotencyKey(fingerprint);
+      // Durable per tab: a retry of this exact batch (double press, timeout,
+      // reload) carries the SAME key, so the API replays the recorded batch
+      // instead of moving the money again.
+      const result = await sendTransferBatchUnderKey(request, t);
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {
@@ -370,21 +360,6 @@ export function useBatchSendWizard({
         });
       }
     } catch (error) {
-      // A 4xx is a definitive refusal — nothing was recorded, so the key is
-      // retired and the next attempt is a fresh intent. A 5xx or a network
-      // failure keeps the key: the API may have recorded the batch before the
-      // answer was lost, and only a retry with the SAME key can find out
-      // without paying every recipient twice. A 409 is the exception among
-      // 4xx: it says this key already carries a batch whose payload the API
-      // read differently, so the key is the only handle on it.
-      if (
-        error instanceof TransferBatchRequestError &&
-        error.status >= 400 &&
-        error.status < 500 &&
-        !isTransferBatchKeyConflict(error.status)
-      ) {
-        releaseTransferBatchIdempotencyKey(fingerprint);
-      }
       toast.error(t("DashboardPayments.batchSend.resultFailed"), {
         id: toastId,
         description:

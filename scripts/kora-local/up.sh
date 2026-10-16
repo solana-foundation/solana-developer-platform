@@ -71,13 +71,23 @@ surfpool_rpc_url="$(awk -F= '$1 == "SURFPOOL_RPC_URL" { v = substr($0, index($0,
 [ -n "${surfpool_rpc_url}" ] || { echo "Surfpool did not report an RPC URL." >&2; exit 1; }
 
 # --- hand-off to the API ----------------------------------------------------
-# Suffixed KORA_*_<CLUSTER> wins over Doppler's bare KORA_RPC_URL, and the
-# mainnet RPC points at the fork so the API and its paymaster see one chain.
+# The per-cluster Kora URLs override Doppler's deployed Koras (empty audiences:
+# the local Koras are plain HTTP, and a Doppler audience would reject them), and the
+# mainnet RPCs point at the fork so the API, its fee preflight and its paymaster see one chain.
 {
   echo "FEE_PAYMENT_PROVIDER=kora"
-  echo "KORA_RPC_URL_DEVNET=http://127.0.0.1:${KORA_LOCAL_DEVNET_PORT}"
-  echo "KORA_RPC_URL_MAINNET=http://127.0.0.1:${KORA_LOCAL_MAINNET_PORT}"
+  echo "KORA_DEVNET_URL=http://127.0.0.1:${KORA_LOCAL_DEVNET_PORT}"
+  echo "KORA_MAINNET_URL=http://127.0.0.1:${KORA_LOCAL_MAINNET_PORT}"
+  echo "KORA_DEVNET_CLOUD_RUN_AUDIENCE="
+  echo "KORA_MAINNET_CLOUD_RUN_AUDIENCE="
   echo "SOLANA_MAINNET_RPC_URL=${surfpool_rpc_url}"
+  echo "KORA_MAINNET_RPC_URL=${surfpool_rpc_url}"
+  # The door builds Production transactions from the managed mainnet pool: only the fork, so
+  # nothing reaches real mainnet through a provider URL inherited from Doppler.
+  for provider in TRITON HELIUS ALCHEMY QUICKNODE VALIDATIONCLOUD NODIT; do
+    echo "SOLANA_RPC_${provider}_MAINNET_API_KEY_URL="
+  done
+  echo "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL=${surfpool_rpc_url}"
 } >"${API_ENV_FILE}"
 
 echo "Local paymasters ready; API env written to ${API_ENV_FILE#"${ROOT_DIR}"/}."

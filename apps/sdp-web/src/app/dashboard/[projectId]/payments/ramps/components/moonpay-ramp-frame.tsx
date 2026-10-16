@@ -28,7 +28,7 @@ export function MoonpayRampFrame({ title, src }: { title: string; src: string })
 
   return (
     <div className="overflow-hidden rounded-2xl">
-      {/* referrerPolicy matches the Coinbase frame: the widget host must not
+      {/* The widget host must not
           learn the dashboard URL via the Referer header. */}
       <iframe
         title={title}

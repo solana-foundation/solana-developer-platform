@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";
 import {
+  createActionMemo,
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
+  setIdempotencyKeyScope,
 } from "./idempotency-key-store";
 
-describe("claimReportingReuse", () => {
+describe("claim", () => {
   const store = createIdempotencyKeyStore("test:key-reuse:v1");
   const fingerprint = "request-fingerprint";
 
@@ -21,39 +24,36 @@ describe("claimReportingReuse", () => {
     vi.restoreAllMocks();
   });
 
-  it("reports a freshly minted key as not reused", () => {
-    expect(store.claimReportingReuse(fingerprint)).toEqual({
-      key: expect.any(String),
-      wasReused: false,
+  it("mints and keeps a key, and hands the kept one to every retry until it is released", () => {
+    expect(store.has(fingerprint)).toBe(false);
+    const first = store.claim(fingerprint);
+    expect(first).toEqual({ key: expect.any(String), persisted: true });
+    expect(store.has(fingerprint)).toBe(true);
+    expect(store.claim(fingerprint).key).toBe(first.key);
+
+    store.release(fingerprint, first.key);
+    expect(store.has(fingerprint)).toBe(false);
+    expect(store.claim(fingerprint).key).not.toBe(first.key);
+  });
+
+  it("retires only the key an answer was sent under, never a newer one for the same request", () => {
+    const first = store.claim(fingerprint).key;
+    // A second attempt under the same key is answered first and retires it.
+    store.release(fingerprint, first);
+    const second = store.claim(fingerprint).key;
+
+    // The first attempt's late answer settles nothing the user has not sent yet.
+    store.release(fingerprint, first);
+    expect(store.claim(fingerprint).key).toBe(second);
+  });
+
+  it("reports a key the browser would not store, and still keeps it for this page", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
     });
-  });
-
-  it("reports a kept key — one a prior ambiguous attempt left live — as reused", () => {
-    const first = store.claimReportingReuse(fingerprint);
-    // The first answer is discarded, the way a 5xx or a lost transport answer
-    // discards it: the key stays live in the store either way.
-    const retry = store.claimReportingReuse(fingerprint);
-
-    expect(retry.key).toBe(first.key);
-    expect(retry.wasReused).toBe(true);
-  });
-
-  it("answers a fresh key — not a reused one — once a prior attempt's key has lapsed", () => {
-    vi.useFakeTimers();
-    try {
-      const first = store.claimReportingReuse(fingerprint);
-      // Past the TTL the prior key is dead. The reuse answer comes from the
-      // SAME read that produced the key, so a lapsed entry can never stick a
-      // reuse flag on a brand-new mint — which would send the previous
-      // request's remembered state (the vault flows' floor) under it.
-      vi.setSystemTime(Date.now() + 15 * 60_000 + 1_000);
-      const retry = store.claimReportingReuse(fingerprint);
-
-      expect(retry.wasReused).toBe(false);
-      expect(retry.key).not.toBe(first.key);
-    } finally {
-      vi.useRealTimers();
-    }
+    const first = store.claim(fingerprint);
+    expect(first.persisted).toBe(false);
+    expect(store.claim(fingerprint).key).toBe(first.key);
   });
 });
 
@@ -97,9 +97,9 @@ describe("FloorMemo partial-write divergence", () => {
     // State a previous page load left behind: readable, and about to be stale.
     seedReadableStorage(FLOOR_KEY, JSON.stringify({}), originalSetItem);
 
-    const first = keyStore.claimReportingReuse(FINGERPRINT);
-    // A plain claim's reuse flag decides whether a remembered floor replays.
-    const firstResolution = { wasReused: first.wasReused };
+    // Whether a key is kept decides whether a remembered floor replays.
+    const firstResolution = { reused: keyStore.has(FINGERPRINT) };
+    const first = keyStore.claim(FINGERPRINT);
     const fresh = floorToReplay(
       firstResolution,
       (fp) => floorMemo.recall(fp),
@@ -113,14 +113,13 @@ describe("FloorMemo partial-write divergence", () => {
     // The first value-moving POST may have been accepted before its response
     // was lost; its key is intentionally kept for an ambiguous retry. The
     // floor-only storage failure must not disturb the key store.
-    const retryClaim = keyStore.claimReportingReuse(FINGERPRINT);
-    expect(retryClaim.key).toBe(first.key);
-    expect(retryClaim.wasReused).toBe(true);
+    const retryResolution = { reused: keyStore.has(FINGERPRINT) };
+    expect(retryResolution.reused).toBe(true);
+    expect(keyStore.claim(FINGERPRINT).key).toBe(first.key);
 
     // The retry must resubmit the floor the key was MINTED with, verbatim —
     // the API's idempotency fingerprint includes it, and a freshly derived
     // floor paired with the reused key retires it and opens a second deposit.
-    const retryResolution = { wasHeld: false, wasReused: retryClaim.wasReused };
     const retry = floorToReplay(retryResolution, (fp) => floorMemo.recall(fp), FINGERPRINT, "0.5");
     expect(retry).toEqual({ kind: "replay", floor: "0.99899" });
   });
@@ -173,5 +172,127 @@ describe("FloorMemo partial-write divergence", () => {
     floorMemo.remember("fp", "0.999");
     expect(floorMemo.recall("fp")).toBe("0.999");
     expect(JSON.parse(sessionStorage.getItem(FLOOR_KEY) ?? "{}")).toEqual({ fp: "0.999" });
+  });
+});
+
+describe("createActionMemo", () => {
+  const memo = createActionMemo("test:action-memo:v1", z.string().nullable());
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("freezes each input's first value, including null, across a reload", () => {
+    const build = vi.fn(() => new Date().toISOString());
+    const first = memo.valueFor("expiry=1h", build);
+    memo.valueFor("expiry=never", () => null);
+
+    resetIdempotencyKeyStoresForTests();
+
+    expect(memo.valueFor("expiry=1h", () => "later")).toBe(first);
+    expect(memo.valueFor("expiry=never", () => "later")).toBeNull();
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores a digest of the input, never the input itself", () => {
+    memo.valueFor("counterparty=Alice Example", () => "value");
+
+    expect(sessionStorage.getItem("test:action-memo:v1")).not.toContain("Alice");
+  });
+
+  it("never evicts an unanswered value, however many inputs follow", () => {
+    const first = memo.valueFor("input=0", () => "first");
+    memo.settle("input=0", first, { status: 503, replayed: false, code: null });
+    for (let index = 1; index <= 40; index++) memo.valueFor(`input=${index}`, () => `v${index}`);
+
+    expect(memo.valueFor("input=0", () => "fresh")).toBe(first);
+  });
+
+  it("forgets a value on a success, a replay or a 422, and keeps it on a plain refusal", () => {
+    memo.valueFor("a", () => "a1");
+    memo.settle("a", "a1", { status: 201, replayed: false, code: null });
+    memo.valueFor("b", () => "b1");
+    memo.settle("b", "b1", { status: 400, replayed: true, code: null });
+    memo.valueFor("c", () => "c1");
+    memo.settle("c", "c1", { status: 422, replayed: false, code: null });
+    memo.valueFor("d", () => "d1");
+    memo.settle("d", "d1", { status: 400, replayed: false, code: null });
+
+    expect(memo.valueFor("a", () => "a2")).toBe("a2");
+    expect(memo.valueFor("b", () => "b2")).toBe("b2");
+    expect(memo.valueFor("c", () => "c2")).toBe("c2");
+    expect(memo.valueFor("d", () => "d2")).toBe("d1");
+  });
+
+  it("keeps the value in memory when storage refuses reads", () => {
+    const first = memo.valueFor("a", () => "a1");
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+
+    expect(memo.valueFor("a", () => "a2")).toBe(first);
+  });
+
+  it("rebuilds a stored value its schema rejects", () => {
+    const strict = createActionMemo("test:action-memo-strict:v1", z.string().min(1));
+    strict.valueFor("a", () => "kept");
+    const raw = sessionStorage.getItem("test:action-memo-strict:v1") ?? "";
+    sessionStorage.setItem("test:action-memo-strict:v1", raw.replace('"\\"kept\\""', '"42"'));
+    resetIdempotencyKeyStoresForTests();
+
+    expect(strict.valueFor("a", () => "rebuilt")).toBe("rebuilt");
+  });
+});
+
+describe("user and org scope", () => {
+  const store = createIdempotencyKeyStore("test:key-scope:v1");
+  const memo = createActionMemo("test:action-memo-scope:v1", z.string());
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  afterEach(() => {
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  it("never hands user A's unanswered key to user B, or to A in another org", () => {
+    setIdempotencyKeyScope("user_a:org_1");
+    const { key: keyA, persisted } = store.claim("same-payment");
+    expect(persisted).toBe(true);
+    const actionKeyA = memo.valueFor("same-label", () => "key-a");
+
+    setIdempotencyKeyScope("user_b:org_1");
+    expect(store.has("same-payment")).toBe(false);
+    expect(store.claim("same-payment").key).not.toBe(keyA);
+    expect(memo.valueFor("same-label", () => "key-b")).toBe("key-b");
+
+    setIdempotencyKeyScope("user_a:org_2");
+    expect(store.claim("same-payment").key).not.toBe(keyA);
+    expect(memo.valueFor("same-label", () => "key-a-org-2")).toBe("key-a-org-2");
+
+    setIdempotencyKeyScope("user_a:org_1");
+    expect(store.claim("same-payment").key).toBe(keyA);
+    expect(memo.valueFor("same-label", () => "rebuilt")).toBe(actionKeyA);
+  });
+
+  it("settles an answer in the scope that claimed its key, after the user switched org", () => {
+    setIdempotencyKeyScope("user_a:org_1");
+    const { key: keyA } = store.claim("same-payment");
+    setIdempotencyKeyScope("user_a:org_2");
+    const { key: keyB } = store.claim("same-payment");
+
+    // Org 1's request answers while org 2 is selected.
+    store.release("same-payment", keyA);
+
+    expect(store.claim("same-payment").key).toBe(keyB);
+    setIdempotencyKeyScope("user_a:org_1");
+    expect(store.has("same-payment")).toBe(false);
   });
 });

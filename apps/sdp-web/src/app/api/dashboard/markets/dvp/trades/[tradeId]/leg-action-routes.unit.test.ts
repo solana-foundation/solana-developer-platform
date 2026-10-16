@@ -19,7 +19,7 @@ describe("DvP leg action proxies", () => {
     ["fund", fund],
     ["reclaim", reclaim],
   ] as const)(
-    "forwards the Idempotency-Key on %s and nothing else from the caller",
+    "leaves the Idempotency-Key to proxyToSdpApi and adds no upstream headers on %s",
     async (action, post) => {
       const request = new Request(`https://dashboard.example/api/x/${action}`, {
         method: "POST",
@@ -32,18 +32,7 @@ describe("DvP leg action proxies", () => {
         request,
         traceSource: `route.dashboard.dvp.trades.${action}`,
         path: `/v1/dvp/trades/dvp%2F1/${action}`,
-        upstreamHeaders: { "Idempotency-Key": "dvp-key-1" },
       });
     }
   );
-
-  it("forwards no key when the caller sent none", async () => {
-    const request = new Request("https://dashboard.example/api/x/fund", { method: "POST" });
-
-    await fund(request, { params });
-
-    expect(proxyToSdpApi).toHaveBeenCalledWith(
-      expect.objectContaining({ upstreamHeaders: undefined })
-    );
-  });
 });

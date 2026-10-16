@@ -1,4 +1,3 @@
-import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -12,6 +11,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ tra
     request,
     traceSource: "route.dashboard.dvp.trades.reclaim",
     path: `/v1/dvp/trades/${encodeURIComponent(tradeId)}/reclaim`,
-    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }

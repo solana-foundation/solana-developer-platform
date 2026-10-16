@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
+import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
@@ -98,8 +99,8 @@ function createSdpApiRequest(
     if (projectId && !headers.has(PROJECT_HEADER_NAME)) {
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
-    const startedAt = performance.now();
     const method = options.method ?? "GET";
+    const startedAt = performance.now();
     // The query string is caller-supplied and may carry a pasted credential
     // (e.g. a playground request); the log keeps the route only while the
     // upstream request still receives the full path.
@@ -143,7 +144,9 @@ function createSdpApiRequest(
 export class SdpApiResponseError extends Error {
   constructor(
     readonly status: number,
-    readonly responseBody: string
+    readonly responseBody: string,
+    /** Whether sdp-api answered from a stored result (`Idempotent-Replayed`). */
+    readonly replayed = false
   ) {
     super(`SDP API request failed (${status}): ${responseBody}`);
     this.name = "SdpApiResponseError";
@@ -153,7 +156,11 @@ export class SdpApiResponseError extends Error {
 async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new SdpApiResponseError(res.status, body);
+    throw new SdpApiResponseError(
+      res.status,
+      body,
+      res.headers.get("Idempotent-Replayed") === "true"
+    );
   }
 
   if (res.status === 204) {
@@ -211,6 +218,34 @@ export function extractSdpApiError(error: unknown): { status: number | null; mes
   return {
     status: match ? Number.parseInt(match[1] ?? "", 10) : null,
     message: extractSdpApiErrorMessage(error),
+  };
+}
+
+/**
+ * What sdp-api answered a failed call, for a server action to hand back to the
+ * browser that owns the Idempotency-Key: the browser never sees the status or
+ * `Idempotent-Replayed` through a server action, and needs both to apply
+ * `answerRetiresKey`.
+ *
+ * @param cause - What the sdp-api call threw, as a `catch` hands it over.
+ */
+export function sdpApiAnswer(cause: unknown): ApiAnswer {
+  if (cause instanceof SdpApiResponseError) {
+    return {
+      status: cause.status,
+      replayed: cause.replayed,
+      code: apiErrorCode(cause.responseBody),
+    };
+  }
+  // Crossed a server-action boundary: the body survives only in the message.
+  const body =
+    cause instanceof Error
+      ? /^SDP API request failed \(\d+\): ([\s\S]*)$/.exec(cause.message)
+      : null;
+  return {
+    status: extractSdpApiError(cause).status,
+    replayed: false,
+    code: body?.[1] === undefined ? null : apiErrorCode(body[1]),
   };
 }
 
@@ -362,6 +397,43 @@ export function proxyFailure(
 }
 
 /**
+ * The upstream headers plus the caller's Idempotency-Key on a mutation
+ * (HOO-1918). The key is the one piece of client-owned transport metadata every
+ * mutation forwards: without it, a retried request is a new one upstream.
+ */
+function withForwardedIdempotencyKey(
+  request: Request,
+  upstreamHeaders: HeadersInit | undefined
+): HeadersInit | undefined {
+  const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
+  if (idempotencyKey === null || request.method === "GET" || request.method === "HEAD") {
+    return upstreamHeaders;
+  }
+  const headers = new Headers(upstreamHeaders);
+  if (!headers.has(IDEMPOTENCY_KEY_HEADER)) {
+    headers.set(IDEMPOTENCY_KEY_HEADER, idempotencyKey);
+  }
+  return headers;
+}
+
+/** The headers sdp-api answers a keyed request with, passed back to the browser. */
+const IDEMPOTENCY_RESPONSE_HEADERS = ["Idempotent-Replayed", "Retry-After"] as const;
+
+type IdempotencyResponseHeader = (typeof IDEMPOTENCY_RESPONSE_HEADERS)[number];
+
+/** What sdp-api says about a keyed request, passed back to the browser. */
+function idempotencyResponseHeaders(
+  response: Response
+): Partial<Record<IdempotencyResponseHeader, string>> {
+  const headers: Partial<Record<IdempotencyResponseHeader, string>> = {};
+  for (const name of IDEMPOTENCY_RESPONSE_HEADERS) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+  return headers;
+}
+
+/**
  * Proxies a dashboard API route to sdp-api: forwards the incoming method and
  * body to `path` and streams the upstream response back with trace headers.
  * The project is the one the calling tab sent as `x-project-id`, never the
@@ -406,7 +478,7 @@ export async function proxyToSdpApi({
     const response = await apiClient.request(path, {
       method,
       body: rawBody === "" ? undefined : rawBody,
-      headers: upstreamHeaders,
+      headers: withForwardedIdempotencyKey(request, upstreamHeaders),
     });
 
     logRouteResult(trace, response.status);
@@ -419,6 +491,7 @@ export async function proxyToSdpApi({
         "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
+        ...idempotencyResponseHeaders(response),
       },
     });
   } catch (error) {

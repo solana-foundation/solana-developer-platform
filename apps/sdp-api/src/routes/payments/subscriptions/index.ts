@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { requirePermissions } from "@/middleware/auth";
+import { authorize } from "@/middleware/authorize";
+import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { authorizeSubscriptionCreate } from "../access";
 import {
   createSubscription,
   getSubscription,
@@ -25,6 +28,8 @@ subscriptions.post(
   "/",
   requirePermissions("payments:write", "counterparties:read"),
   validateBody(createSubscriptionSchema),
+  authorize(authorizeSubscriptionCreate),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   createSubscription
 );
 subscriptions.get("/", requirePermissions("payments:read"), listSubscriptions);

@@ -1,4 +1,3 @@
-import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 import { proxyQueryErrorResponse, vaultWithdrawalRequestsProxyQuery } from "../provider-query";
 
@@ -7,7 +6,6 @@ export async function POST(request: Request) {
     request,
     traceSource: "route.dashboard.earn.vault_withdrawal_requests.create",
     path: "/v1/earn/vault-withdrawal-requests",
-    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }
 

@@ -31,7 +31,7 @@ const localApiServerEnv = {
 if (["127.0.0.1", "localhost"].includes(new URL(localApiUrl).hostname)) {
   Object.assign(localApiServerEnv, {
     MOONPAY_SANDBOX_API_KEY: "pk_test_playwright",
-    MOONPAY_SANDBOX_SECRET_KEY: "playwright-moonpay-fixture-secret",
+    MOONPAY_SANDBOX_SECRET_KEY: "sk_test_playwright_fixture_secret",
   });
 }
 
@@ -109,7 +109,7 @@ export default defineConfig({
       testMatch: /.*\.e2e\.spec\.ts/,
       testIgnore: [
         /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
-        /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
+        /(^|\/)(payments-idempotency|payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       ],
       dependencies: ["auth-setup"],
       use: {
@@ -119,7 +119,8 @@ export default defineConfig({
     },
     {
       name: "dashboard-transactions",
-      testMatch: /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
+      testMatch:
+        /(^|\/)(payments-idempotency|payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       dependencies: ["auth-setup"],
       use: {
         ...devices["Desktop Chrome"],

@@ -27,6 +27,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
 import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 import { deriveDvpSettleAtas } from "./settle-atas";
@@ -85,21 +86,6 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({ hasLiveClaim }),
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("@/services/sponsorship.service", async () => {
-  const actual = await vi.importActual<typeof import("@/services/sponsorship.service")>(
-    "@/services/sponsorship.service"
-  );
-  return {
-    ...actual,
-    createRequestSponsorshipFeePayment: () => ({
-      getFeePayer,
-      prepareOwnedSubmission,
-      providerId: "test",
-      signAsFeePayer: vi.fn(),
-      signAndSend: vi.fn(),
-    }),
-  };
-});
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
@@ -168,6 +154,19 @@ describe("closeDvpTrade", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.spyOn(sponsorshipService, "resolveRequestSponsorshipScope").mockReturnValue({
+      environment: "sandbox",
+      organizationId: "org_dvp_settle",
+      projectId: "prj_dvp_settle",
+      actor: { type: "api_key", id: "key_dvp_settle" },
+    });
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockReturnValue({
+      getFeePayer,
+      prepareOwnedSubmission,
+      providerId: "test",
+      signAsFeePayer: vi.fn(),
+      signAndSend: vi.fn(),
+    });
     closeLocks.clear();
     getBlockHeight.mockResolvedValue(50n);
     hasLiveClaim.mockResolvedValue(false);

@@ -12,7 +12,12 @@ import {
   signerCheckRequestSchema,
   updateCustodyWalletRequestSchema,
 } from "../schemas/custody";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithDeclaredIdempotencyHeaders,
+} from "./helpers";
 import {
   custodyConfigsResponse,
   custodyDeleteWalletResponse,
@@ -22,6 +27,19 @@ import {
   custodyWalletResponse,
   custodyWalletsResponse,
 } from "./responses";
+
+// Matches each route's `idempotent({ key: "accepted", serverErrors: "store" })`
+// step (ADR 0009); spec.test.ts checks.
+const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "store",
+});
+// Wallet create also mounts `replayFromRecord`: `recovery: "record"`.
+const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "store",
+  recovery: "record",
+});
 
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -34,6 +52,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: keyAcceptedHeaders,
       body: {
         required: true,
         content: jsonContent(initializeSigningRequestSchema),
@@ -44,7 +63,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500]),
       403: {
         description:
           "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
@@ -65,9 +84,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Create wallet",
     operationId: "createWallet",
     description:
-      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
+      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400. With an Idempotency-Key, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, including after the 24-hour key window. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe at the provider. A provider failure is stored as a 503, and a new key is a new provider request. A 503 can mean the provider created the wallet before the error, and with a provider other than Privy or Coinbase CDP, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours: before any retry after an ambiguous failure, whatever the key, check GET /v1/wallets and, if the wallet is not there, the provider account. The provider request id and the recorded-wallet lookup both include the credential, so after an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: after a rotation, list wallets with GET /v1/wallets and check the provider account before retrying a create.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: walletCreateKeyHeaders,
       body: {
         required: true,
         content: jsonContent(createCustodyWalletRequestSchema),
@@ -78,7 +98,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet created",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500, 503]),
       403: {
         description:
           "Forbidden: the API key lacks permission or is wallet-scoped, or the provider account was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when provider names a Managed config in a Production project (Production is BYOK only: create the wallet in a Custody Connection with connectionId), custody_provider_not_in_release_channel, or provider_not_entitled.",
@@ -97,6 +117,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: keyAcceptedHeaders,
       body: {
         required: true,
         content: jsonContent(deleteWalletRequestSchema),
@@ -107,7 +128,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet deleted",
         content: jsonContent(custodyDeleteWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -216,7 +237,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Signs a server-authored memo message with the wallet selected by an authenticated API key or Clerk JWT, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: keyAcceptedHeaders,
       body: {
         required: true,
         content: jsonContent(signerCheckRequestSchema),
@@ -227,7 +248,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Signer check verified in simulation",
         content: jsonContent(custodySignerCheckResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 502]),
     },
   });
 
@@ -275,7 +296,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       params: z.object({
         walletId: walletIdParamSchema,
       }),
-      headers: projectScopeHeaders,
+      headers: keyAcceptedHeaders,
       body: {
         required: true,
         content: jsonContent(updateCustodyWalletRequestSchema),
@@ -286,7 +307,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet updated",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 }
