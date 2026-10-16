@@ -7,6 +7,7 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -36,6 +37,7 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — on-chain transfers", () => {
@@ -311,6 +313,83 @@ describe("Payments routes — on-chain transfers", () => {
     expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
     expect(await countTransferRows()).toBe(1);
+  });
+
+  it("funds a Production off-ramp with the mainnet USDC mint its quote recorded", async () => {
+    const productionSigner = await generateKeyPairSigner();
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(productionSigner);
+    await seedProductionPrivyWallet({
+      custodyWalletId: "cwlt_payments_production",
+      publicKey: productionSigner.address,
+    });
+    await enableMainnetSponsorship();
+    answerSourceUsdcTokenAccount(MAINNET_USDC_MINT);
+    const productionWallet = required(
+      await getDb(env)
+        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
+        .bind("cwlt_payments_production")
+        .first<{ wallet_id: string }>()
+    );
+    const transferId = generatePaymentTransferId();
+    await createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT_ID })
+    ).createTransfer({
+      id: transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      custodyWalletId: "cwlt_payments_production",
+      walletId: productionWallet.wallet_id,
+      counterpartyId: null,
+      sourceAddress: productionSigner.address,
+      destinationAddress: null,
+      token: rampTransferTokenMint("usdc.solana", "mainnet-beta"),
+      amount: "1",
+      memo: null,
+      type: "offramp",
+      direction: "outbound",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerReference: "moonpay-production-deposit",
+      deliveryMode: "hosted",
+      fiatCurrency: "USD",
+      fiatAmount: "100",
+      providerData: {
+        cryptoDeposit: {
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          amount: "1.0",
+        },
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey: null,
+      idempotencyFingerprint: null,
+    });
+    const quoted = await getDb(env)
+      .prepare("SELECT token FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ token: string }>();
+    expect(quoted).toEqual({ token: MAINNET_USDC_MINT });
+
+    const res = await postTransfer(
+      {
+        transferId,
+        sourceCustodyWalletId: "cwlt_payments_production",
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "USDC",
+        amount: "1",
+      },
+      {}
+    );
+
+    const responseText = await res.text();
+    expect(res.status, responseText).toBe(200);
+    expect((await readTransferResponse(new Response(responseText))).data.transfer).toMatchObject({
+      id: transferId,
+      status: "settling",
+    });
   });
 
   // Jina (#2334): past the key's record, the deposit row answered the same key

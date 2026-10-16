@@ -1,6 +1,6 @@
 import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { normalizePaymentToken } from "@/services/payment-operation.service";
+import { normalizePaymentToken, rampTransferTokenMint } from "@/services/payment-operation.service";
 
 describe("normalizePaymentToken", () => {
   it.each([
@@ -14,5 +14,14 @@ describe("normalizePaymentToken", () => {
     expect(() => normalizePaymentToken("USDT", "devnet")).toThrow(
       "USDT is not available on devnet"
     );
+  });
+});
+
+describe("rampTransferTokenMint", () => {
+  it.each([
+    ["mainnet-beta", WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address],
+    ["devnet", WELL_KNOWN_TOKENS.USDC.mints.devnet.address],
+  ] as const)("records the USDC rail as its %s mint", (cluster, mint) => {
+    expect(rampTransferTokenMint("usdc.solana", cluster)).toBe(mint);
   });
 });
