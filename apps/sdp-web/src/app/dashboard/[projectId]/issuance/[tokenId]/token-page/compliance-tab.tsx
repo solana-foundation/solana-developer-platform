@@ -182,7 +182,7 @@ function ComplianceEntriesView({
   return (
     <TokenTable
       className="mt-2"
-      tableClassName="min-w-[560px]"
+      tableClassName="min-w-[35rem]"
       columns={[
         { className: "w-[38%]", label: t("DashboardIssuance.newDesign.compliance.address") },
         { className: "w-[30%]", label: t("DashboardIssuance.newDesign.compliance.label") },

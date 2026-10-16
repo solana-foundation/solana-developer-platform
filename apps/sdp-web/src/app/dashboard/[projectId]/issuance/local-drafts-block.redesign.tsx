@@ -74,7 +74,7 @@ function LocalDraftRow({ entry, onDiscard }: { entry: LocalDraft; onDiscard: () 
       <Link
         href={projectHref(`${CREATE_PATH}?draft=${encodeURIComponent(entry.id)}`)}
         data-issuance-local-draft={entry.id}
-        className="grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 rounded-control px-2 py-4 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+        className="grid grid-cols-[2.25rem_minmax(0,1fr)_max-content] items-center gap-x-3 rounded-control px-2 py-4 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
       >
         <IssuedTokenMark symbol={symbol || name} name={name} logoUrl={null} />
         <span className="flex min-w-0 flex-col gap-0.5">

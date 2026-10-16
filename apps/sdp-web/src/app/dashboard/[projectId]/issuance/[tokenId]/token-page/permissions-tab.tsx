@@ -12,6 +12,7 @@ import type { PermissionRowId } from "../token-management-workspace.types";
 import { AuthorityForm, DraftHolderForm } from "./authority-form";
 import {
   accessControlLabel,
+  accessControlWhy,
   holderName,
   shortAddress,
   type TokenTabProps,
@@ -78,13 +79,7 @@ export function TokenPermissionsTab({
     enabledRow(t, "freezable", token.isFreezable),
     {
       name: accessControlLabel(ops.accessControlMode, t),
-      why: t(
-        ops.accessControlMode === "allowlist"
-          ? "DashboardIssuance.newDesign.permissions.allowlistWhy"
-          : ops.accessControlMode === "blocklist"
-            ? "DashboardIssuance.newDesign.permissions.blocklistWhy"
-            : "DashboardIssuance.newDesign.permissions.noListWhy"
-      ),
+      why: accessControlWhy(ops.accessControlMode, t),
       state: t(
         ops.accessControlMode === "disabled"
           ? "DashboardIssuance.newDesign.permissions.off"
@@ -180,13 +175,15 @@ export function TokenPermissionsTab({
                       value={choice}
                       onValueChange={setChoice}
                       onKeep={() => {
-                        form.updateDraft({
-                          ...(row.id === "mint-authority" ? { signingWalletId: choice } : {}),
-                          authorityWalletIds: {
-                            ...form.draft.authorityWalletIds,
-                            [row.id]: choice,
-                          },
-                        });
+                        const authorityWalletIds = {
+                          ...form.draft.authorityWalletIds,
+                          [row.id]: choice,
+                        };
+                        form.updateDraft(
+                          row.id === "mint-authority"
+                            ? { signingWalletId: choice, authorityWalletIds }
+                            : { authorityWalletIds }
+                        );
                         setEditing(null);
                       }}
                       onCancel={() => setEditing(null)}

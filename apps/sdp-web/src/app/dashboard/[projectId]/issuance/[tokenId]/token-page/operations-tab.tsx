@@ -1,6 +1,6 @@
 "use client";
 
-import type { TokenTransactionStatus } from "@sdp/types";
+import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types";
 import { ArrowUpRightIcon, ChevronDownIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -30,6 +30,7 @@ import {
 } from "../asset-profile/transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
+import { getRemainingMintableSupply } from "../token-management-workspace.utils";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {
@@ -205,18 +206,9 @@ function SupplyBlock({
 }: Pick<TokenTabProps, "token" | "ops"> & { rows: OperationRow[] | null }) {
   const t = useTranslations();
   const locale = useLocale();
-  const decimals = Math.min(Math.max(token.decimals, 2), 9);
-  const leftFormat = useMemo(
-    () =>
-      new Intl.NumberFormat(locale, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: decimals,
-      }),
-    [locale, decimals]
-  );
-  const issued = Number(token.totalSupply || 0);
-  const cap = token.maxSupply ? Number(token.maxSupply) : null;
-  const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
+  // Exact: the cap and the supply are decimal strings, so what is left is taken in base units.
+  const cap = token.maxSupply;
+  const left = getRemainingMintableSupply(token);
   // Mint or burn opens in place under the issued supply, its own button giving way to the form.
   const openAction = rows ? ops.fundManagementModalAction : null;
   // Lock supply opens the same way under the cap.
@@ -256,8 +248,8 @@ function SupplyBlock({
           {cap === null
             ? t("DashboardIssuance.newDesign.overview.noCap")
             : t("DashboardIssuance.newDesign.operations.capLeft", {
-                cap: formatDecimalAmount(token.maxSupply ?? "0", locale),
-                left: leftFormat.format(left ?? 0),
+                cap: formatDecimalAmount(cap ?? "0", locale),
+                left: formatDecimalAmount(left ?? "0", locale),
               })}
         </OperationLine>
         <OperationLine
@@ -603,7 +595,7 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
         </div>
       ) : (
         <TokenTable
-          tableClassName="min-w-[560px]"
+          tableClassName="min-w-[35rem]"
           columns={[
             { className: "w-[20%]", label: t("DashboardIssuance.newDesign.operations.type") },
             { className: "w-[20%]", label: t("DashboardIssuance.newDesign.operations.status") },
@@ -634,7 +626,7 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
                   </a>
                 ) : (
                   <span className="text-tertiary">
-                    {transaction.status === "pending" || transaction.status === "processing"
+                    {isInFlightTokenTransactionStatus(transaction.status)
                       ? t("DashboardIssuance.newDesign.operations.notConfirmed")
                       : t("DashboardIssuance.newDesign.operations.neverSubmitted")}
                   </span>

@@ -1,6 +1,7 @@
 import type { AssetProfile, Token, TokenTransactionStatus } from "@sdp/types";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
+import type { AccessControlMode } from "../../access-control.utils";
 import { type TokenLifecycle, tokenLifecycle } from "../../issuance-token-state.redesign";
 import type { AssetProfileForm } from "../asset-profile/use-asset-profile-form";
 import type { TokenOperations } from "../asset-profile/use-token-operations";
@@ -87,14 +88,35 @@ export function classificationOf(profile: AssetProfile, t: Translate) {
 }
 
 /** Access control as the design words it. */
-export function accessControlLabel(mode: "allowlist" | "blocklist" | "disabled", t: Translate) {
-  return t(
-    mode === "allowlist"
-      ? "DashboardIssuance.newDesign.access.allowlist"
-      : mode === "blocklist"
-        ? "DashboardIssuance.newDesign.access.blocklist"
-        : "DashboardIssuance.newDesign.access.off"
-  );
+export function accessControlLabel(mode: AccessControlMode, t: Translate) {
+  switch (mode) {
+    case "allowlist":
+      return t("DashboardIssuance.newDesign.access.allowlist");
+    case "blocklist":
+      return t("DashboardIssuance.newDesign.access.blocklist");
+    case "disabled":
+      return t("DashboardIssuance.newDesign.access.off");
+    default: {
+      const unhandled: never = mode;
+      return unhandled;
+    }
+  }
+}
+
+/** Why the token's access list reads as it does, by its mode. */
+export function accessControlWhy(mode: AccessControlMode, t: Translate) {
+  switch (mode) {
+    case "allowlist":
+      return t("DashboardIssuance.newDesign.permissions.allowlistWhy");
+    case "blocklist":
+      return t("DashboardIssuance.newDesign.permissions.blocklistWhy");
+    case "disabled":
+      return t("DashboardIssuance.newDesign.permissions.noListWhy");
+    default: {
+      const unhandled: never = mode;
+      return unhandled;
+    }
+  }
 }
 
 /** A custody wallet's name for an address, the address itself when SDP holds no such wallet. */

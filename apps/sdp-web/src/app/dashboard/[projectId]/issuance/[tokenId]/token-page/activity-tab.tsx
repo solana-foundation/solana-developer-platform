@@ -220,7 +220,7 @@ function ActivityTable({
     // 28px under the toolbar, 8px more than the chips and notes between them.
     <TokenTable
       className="mt-2"
-      tableClassName="min-w-[640px]"
+      tableClassName="min-w-[40rem]"
       columns={[
         { className: "w-[30%]", label: t("DashboardIssuance.newDesign.activity.event") },
         { className: "w-[22%]", label: t("DashboardIssuance.newDesign.activity.actor") },

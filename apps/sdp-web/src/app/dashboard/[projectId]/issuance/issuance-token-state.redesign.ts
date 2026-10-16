@@ -1,3 +1,4 @@
+import { isInFlightTokenTransactionStatus, type TokenTransactionStatus } from "@sdp/types";
 import type { StatusTone } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 
@@ -15,7 +16,7 @@ interface TokenLifecycleShape {
 }
 
 /** The latest deploy transaction's status, where the page has read it. */
-export type DeployAttemptStatus = "pending" | "processing" | "confirmed" | "finalized" | "failed";
+export type DeployAttemptStatus = TokenTransactionStatus;
 
 /**
  * The token's lifecycle state.
@@ -29,7 +30,7 @@ export function tokenLifecycle(
   latestDeploy?: DeployAttemptStatus | null
 ): TokenLifecycle {
   if (!(token.mintAddress || token.deployedAt)) {
-    if (latestDeploy === "pending" || latestDeploy === "processing") return "deploying";
+    if (latestDeploy && isInFlightTokenTransactionStatus(latestDeploy)) return "deploying";
     if (latestDeploy === "failed") return "failed";
     return "draft";
   }

@@ -31,7 +31,7 @@ import {
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
-import { formatDate, formatDecimalAmount } from "../payments-presentation";
+import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "../payments-table";
 import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
@@ -155,7 +155,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDate(request.createdAt, locale)}
+                {formatDateTime(request.createdAt, locale)}
               </TableCell>
               <TableCell className="text-right whitespace-nowrap">
                 <Button

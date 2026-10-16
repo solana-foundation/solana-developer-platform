@@ -1,6 +1,10 @@
 "use client";
 
-import type { TokenTransaction } from "@sdp/types";
+import {
+  isInFlightTokenTransactionStatus,
+  isLandedTokenTransactionStatus,
+  type TokenTransaction,
+} from "@sdp/types";
 import { useEffect, useMemo, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -20,10 +24,10 @@ interface UndeployedToken {
 const isUndeployed = (token: UndeployedToken) => !(token.mintAddress || token.deployedAt);
 
 const inFlight = (status: DeployAttemptStatus | null | undefined) =>
-  status === "pending" || status === "processing";
+  status ? isInFlightTokenTransactionStatus(status) : false;
 
 const landed = (status: DeployAttemptStatus | null | undefined) =>
-  status === "confirmed" || status === "finalized";
+  status ? isLandedTokenTransactionStatus(status) : false;
 
 /** One token's latest deploy transaction status; null when it has none or the read failed. */
 async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus | null> {
@@ -37,7 +41,7 @@ async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus |
         newest === null || transaction.createdAt > newest.createdAt ? transaction : newest,
       null
     );
-    return latest ? (latest.status as DeployAttemptStatus) : null;
+    return latest ? latest.status : null;
   } catch {
     return null;
   }

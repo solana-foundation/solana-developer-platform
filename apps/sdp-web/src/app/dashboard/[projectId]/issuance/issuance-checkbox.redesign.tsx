@@ -43,7 +43,7 @@ export function IssuanceCheckRow({
       <span
         aria-hidden="true"
         className={cn(
-          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none",
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm border transition-colors peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none",
           checked && disabled
             ? "border-transparent bg-fill-strong text-secondary"
             : checked
