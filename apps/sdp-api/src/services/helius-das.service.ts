@@ -7,6 +7,7 @@ import {
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { getDb } from "@/db";
+import { getLogger } from "@/runtime/logger";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
@@ -84,38 +85,45 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
 
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
-  const result = await getDb(env)
-    .prepare(
-      `SELECT t.mint_address, t.symbol, t.decimals
-         FROM issued_tokens t
-         JOIN projects p ON p.id = t.project_id
-        WHERE p.environment = ?
-          AND t.template = 'stablecoin'
-          AND t.mint_address IS NOT NULL
-          AND t.deployed_at IS NOT NULL`
-    )
-    .bind(currentClusterScope().environment)
-    .all<{
-      decimals?: number | null;
-      mint_address?: string | null;
-      symbol?: string | null;
-    }>();
+  try {
+    const result = await getDb(env)
+      .prepare(
+        `SELECT t.mint_address, t.symbol, t.decimals
+           FROM issued_tokens t
+           JOIN projects p ON p.id = t.project_id
+          WHERE p.environment = ?
+            AND t.template = 'stablecoin'
+            AND t.mint_address IS NOT NULL
+            AND t.deployed_at IS NOT NULL`
+      )
+      .bind(currentClusterScope().environment)
+      .all<{
+        decimals?: number | null;
+        mint_address?: string | null;
+        symbol?: string | null;
+      }>();
 
-  for (const row of result.results ?? []) {
-    const mint = row.mint_address?.trim();
-    if (!mint) {
-      continue;
+    for (const row of result.results ?? []) {
+      const mint = row.mint_address?.trim();
+      if (!mint) {
+        continue;
+      }
+
+      trackedAssetsByMint.set(mint, {
+        token: row.symbol?.trim() || mint,
+        mint,
+        decimals:
+          typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
+            ? row.decimals
+            : 6,
+        isUsdStable: true,
+      });
     }
-
-    trackedAssetsByMint.set(mint, {
-      token: row.symbol?.trim() || mint,
-      mint,
-      decimals:
-        typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
-          ? row.decimals
-          : 6,
-      isUsdStable: true,
-    });
+  } catch (error) {
+    getLogger().warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      "resolveTrackedAssets: issued stablecoin lookup failed; pricing built-in assets only"
+    );
   }
 
   return trackedAssetsByMint;
