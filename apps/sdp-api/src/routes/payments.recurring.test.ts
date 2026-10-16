@@ -4534,12 +4534,15 @@ describe("Payments routes — recurring", () => {
         .bind(id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, id, `hash_${id}`, rotatedFrom)
         .run();
     }
+    // The revoke route runs inside the project's cluster scope (projectContextMiddleware).
     const cancelFor = (apiKeyId: string) =>
-      cancelRecurringPaymentsActivatedByKey(env, {
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        apiKeyId,
-      });
+      runInClusterScope({ projectId: TEST_PROJECT.id, environment: "sandbox" }, () =>
+        cancelRecurringPaymentsActivatedByKey(env, {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          apiKeyId,
+        })
+      );
     beforeEach(() => {
       recurringExecution
         .signAndSendMock()
