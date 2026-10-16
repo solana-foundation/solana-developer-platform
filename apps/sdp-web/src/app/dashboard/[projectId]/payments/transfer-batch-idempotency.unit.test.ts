@@ -148,18 +148,36 @@ describe("sendTransferBatchUnderKey", () => {
     expect(second).not.toBe(first);
   });
 
-  it("keeps the key for a malformed success and reuses it for the corrected retry", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>(async () => recorded())
-      .mockResolvedValueOnce(
+  it.each([
+    {
+      label: "missing batch fields",
+      response: () =>
         Response.json({
           data: {
             batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
             recipients: [],
             transfers: [],
           },
-        })
-      );
+        }),
+    },
+    {
+      label: "invalid JSON",
+      response: () => new Response("{", { status: 200 }),
+    },
+    {
+      label: "an unreadable body",
+      response: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("network error"));
+            },
+          }),
+          { status: 200 }
+        ),
+    },
+  ])("keeps the key for $label and reuses it for the corrected retry", async ({ response }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => recorded()).mockResolvedValueOnce(response());
     vi.stubGlobal("fetch", fetchMock);
     const fingerprint = transferBatchRequestFingerprint(batchRequest());
 

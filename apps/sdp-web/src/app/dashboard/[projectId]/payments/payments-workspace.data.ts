@@ -542,7 +542,11 @@ export async function createTransfer(
     );
   }
 
-  const parsed = createdTransferResponseSchema.safeParse(await response.json());
+  const parsed = createdTransferResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.transferMissing"), { cause });
+    })
+  );
   if (
     !parsed.success ||
     parsed.data.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
@@ -699,7 +703,11 @@ export async function createTransferBatch(
       code
     );
   }
-  const parsed = createdTransferBatchResponseSchema.safeParse(await response.json());
+  const parsed = createdTransferBatchResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.batchTransferMissing"), { cause });
+    })
+  );
   if (
     !parsed.success ||
     parsed.data.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||

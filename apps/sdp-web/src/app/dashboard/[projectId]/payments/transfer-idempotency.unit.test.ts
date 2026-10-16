@@ -71,12 +71,32 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
   });
 
-  it("keeps the key for a malformed success and reuses it for the corrected retry", async () => {
+  it.each([
+    {
+      label: "missing transfer fields",
+      response: () =>
+        Response.json({ data: { transfer: { id: "xfr_1", custodyWalletId: "cwlt_1" } } }),
+    },
+    {
+      label: "invalid JSON",
+      response: () => new Response("{", { status: 200 }),
+    },
+    {
+      label: "an unreadable body",
+      response: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("network error"));
+            },
+          }),
+          { status: 200 }
+        ),
+    },
+  ])("keeps the key for $label and reuses it for the corrected retry", async ({ response }) => {
     const fetchMock = vi
       .fn<typeof fetch>(async () => Response.json({ data: { transfer: RECORDED_TRANSFER } }))
-      .mockResolvedValueOnce(
-        Response.json({ data: { transfer: { id: "xfr_1", custodyWalletId: "cwlt_1" } } })
-      );
+      .mockResolvedValueOnce(response());
     vi.stubGlobal("fetch", fetchMock);
     const fingerprint = transferRequestFingerprint(SUBMISSION);
 
