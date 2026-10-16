@@ -279,6 +279,20 @@ export class InProcessRateLimiter {
   }
 }
 
+/** Distinct client IPs the keyed backstop's fallback remembers. */
+const KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED = 10_000;
+
+/**
+ * The keyed per-IP backstop's in-process stand-in while the shared counter
+ * store is down. The auth flood guard counts per key hash, so without this a
+ * client sending a fresh key each request would reach the auth read unbounded
+ * during an outage.
+ */
+export const keyedIpBackstopFallback = new InProcessRateLimiter(
+  "keyed_ip_backstop",
+  KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED
+);
+
 /**
  * Enforces an approximate sliding-window rate limit for the identifier.
  *
@@ -449,7 +463,9 @@ export function skipRateLimitPaths(...paths: string[]) {
 
     const clientIp = getClientIp(c) ?? "unknown";
     if (presentsApiKey) {
-      await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS);
+      await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
+        fallback: keyedIpBackstopFallback,
+      });
     } else {
       const limit = anonymousRequestLimit(c);
       await enforceRateLimit(

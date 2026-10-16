@@ -7,11 +7,7 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { noopObservability } from "@/runtime/observability";
-import {
-  TEST_API_KEY,
-  TEST_CACHED_API_KEY,
-  TEST_PRODUCTION_API_KEY,
-} from "@/test/fixtures/api-keys";
+import { TEST_API_KEY, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";

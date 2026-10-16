@@ -167,7 +167,7 @@ function requestAsRequester(path: string, init: { method: string; body?: unknown
         "Content-Type": "application/json",
         Authorization: `Bearer ${API_KEY.raw}`,
       },
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
     },
     env
   );
