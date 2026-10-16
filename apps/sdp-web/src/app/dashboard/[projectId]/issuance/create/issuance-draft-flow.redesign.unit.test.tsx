@@ -12,16 +12,17 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: "sandbox" }),
 }));
-vi.mock("./actions", () => ({ saveIssuanceDraft: vi.fn() }));
 
 const messages = getMessages("en");
-const wallets = [
+const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-treasury",
+    walletId: "provider-treasury",
+    publicKey: "Treasury1111111111111111111111111111111111",
     label: "Treasury",
-    address: "Treasury1111111111111111111111111111111111",
+    isRuntimeExecutionAllowed: true,
   },
-] as unknown as PaymentsDashboardWallet[];
+];
 
 function renderFlow(demo: boolean) {
   return render(

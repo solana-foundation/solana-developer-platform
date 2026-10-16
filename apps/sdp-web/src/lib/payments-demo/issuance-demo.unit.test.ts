@@ -1,4 +1,9 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import {
+  type AssetProfile,
+  type PublicToken,
+  RAMP_PROVIDERS,
+  type TokenTransactionStatus,
+} from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { tokenLifecycle } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
 import {
@@ -32,8 +37,29 @@ function world() {
   return applyDemoOps(buildWorld(now, RAMP_PROVIDERS), ops, now);
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: tests read loosely shaped API envelopes.
-type Answer = { status: number; body: any };
+interface Row {
+  symbol: string;
+  type: string;
+  action: string;
+  status: TokenTransactionStatus;
+  [field: string]: unknown;
+}
+/** What an issuance answer's `data` holds: a page of rows, or the one record the call names. */
+type AnswerData = Row[] & {
+  token: PublicToken;
+  assetProfile: AssetProfile;
+  transaction: Row;
+  tokenAccount: string;
+  frozenAccount: Row;
+  entry: Row & { id: string };
+  allowlistAuthority: string | null;
+  pauseAuthority: string | null;
+  metadataAuthority: string | null;
+};
+type Answer = {
+  status: number;
+  body: { data: AnswerData; meta: { total: number }; error?: { code?: string } };
+};
 
 function read(path: string): Answer {
   const parts = demoPathParts(path);
@@ -243,6 +269,28 @@ describe("a draft to a live token", () => {
 
 describe("a live token's operations", () => {
   const VUSD = "/v1/issuance/tokens/demo_tok_vusd";
+
+  it("keeps a demo wallet's holdings in step with what is minted to it and burned from it", () => {
+    const holding = () => {
+      const treasury = Object.values(world().wallets).find((wallet) => wallet.id === TREASURY);
+      const mint = token("demo_tok_vusd").mintAddress;
+      return {
+        key: treasury?.publicKey ?? "",
+        uiAmount: treasury?.balances.find((balance) => balance.mint === mint)?.uiAmount ?? "0",
+      };
+    };
+    const { key } = holding();
+    const before = Number(holding().uiAmount);
+
+    write("POST", `${VUSD}/mint`, { mint: { destination: key, amount: "5" } });
+    expect(Number(holding().uiAmount)).toBe(before + 5);
+
+    write("POST", `${VUSD}/burn`, {
+      signingCustodyWalletId: TREASURY,
+      burn: { source: key, amount: "2" },
+    });
+    expect(Number(holding().uiAmount)).toBe(before + 3);
+  });
 
   it("burns, seizes and force-burns only what the source holds", () => {
     // The issuer's treasury signs and holds the seeded supply; ADDRESS holds none of it.

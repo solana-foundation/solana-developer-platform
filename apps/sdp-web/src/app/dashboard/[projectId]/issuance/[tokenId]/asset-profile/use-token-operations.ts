@@ -978,11 +978,9 @@ export function useTokenOperations({
         setMintForm((previous) => ({
           ...previous,
           signingWalletId,
-          ...(demo && {
-            destination: signerAddress(signingWalletId),
-            amount: DEMO_PREFILL_AMOUNTS.mint,
-            memo: DEMO_PREFILL_MEMOS.mint,
-          }),
+          destination: demo ? signerAddress(signingWalletId) : previous.destination,
+          amount: demo ? DEMO_PREFILL_AMOUNTS.mint : previous.amount,
+          memo: demo ? DEMO_PREFILL_MEMOS.mint : previous.memo,
         }));
         break;
       }
@@ -995,11 +993,9 @@ export function useTokenOperations({
         setBurnForm((previous) => ({
           ...previous,
           signingWalletId,
-          ...(demo && {
-            source: signerAddress(signingWalletId),
-            amount: DEMO_PREFILL_AMOUNTS.burn,
-            memo: DEMO_PREFILL_MEMOS.burn,
-          }),
+          source: demo ? signerAddress(signingWalletId) : previous.source,
+          amount: demo ? DEMO_PREFILL_AMOUNTS.burn : previous.amount,
+          memo: demo ? DEMO_PREFILL_MEMOS.burn : previous.memo,
         }));
         break;
       }

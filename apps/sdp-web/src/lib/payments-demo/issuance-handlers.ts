@@ -1,4 +1,9 @@
-import { ASSET_CATEGORIES, isAssetTypeSupported, type PublicToken } from "@sdp/types";
+import {
+  ASSET_CATEGORIES,
+  isAssetTypeSupported,
+  isLandedTokenTransactionStatus,
+  type PublicToken,
+} from "@sdp/types";
 import { z } from "zod";
 import { type DemoWorld, findWallet } from "./demo-fixtures";
 import type { DemoAnswer, DemoWriteResult, WriteContext } from "./demo-handlers";
@@ -284,9 +289,9 @@ function updateProfile(context: WriteContext): DemoWriteResult {
         k: "iss-profile",
         id: profileId,
         at: context.now.getTime(),
-        ...(patch.assetCategory ? { category: patch.assetCategory } : {}),
-        ...(patch.assetType ? { type: patch.assetType } : {}),
-        ...(patch.issuanceMetadata ? { metadata: patch.issuanceMetadata } : {}),
+        category: patch.assetCategory,
+        type: patch.assetType,
+        metadata: patch.issuanceMetadata,
       },
     ],
     (world) => {
@@ -420,7 +425,7 @@ function holdingOf(entry: DemoIssuedToken, address: string): bigint {
   const { decimals } = entry.token;
   let held = 0n;
   for (const tx of entry.transactions) {
-    if (tx.status !== "finalized" && tx.status !== "confirmed") continue;
+    if (!isLandedTokenTransactionStatus(tx.status)) continue;
     const params = (tx.params ?? {}) as Record<string, unknown>;
     if (typeof params.amount !== "string") continue;
     const value = toUnits(params.amount, decimals);

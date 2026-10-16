@@ -1,10 +1,12 @@
 import type {
   AssetCategory,
+  CustodyWalletTokenBalance,
   IssuanceMetadata,
   PublicToken,
   TokenExtensionsConfig,
   TokenTemplate,
 } from "@sdp/types";
+import { z } from "zod";
 import {
   CREATED_BY,
   type DemoWorld,
@@ -58,6 +60,29 @@ function walletKey(world: DemoWorld, walletId: string | null | undefined): strin
   );
 }
 
+/** The parts of an asset profile's metadata the replay reads; the rest is carried untouched. */
+const replayedMetadataSchema = z.object({
+  settings: z.object({ selected: z.record(z.string(), z.unknown()).optional() }).optional(),
+  custom: z
+    .object({
+      customer: z
+        .object({ authorityWalletIds: z.record(z.string(), z.string()).optional() })
+        .optional(),
+    })
+    .optional(),
+});
+
+function readMetadata(raw: Record<string, unknown>) {
+  const parsed = replayedMetadataSchema.safeParse(raw);
+  const read = parsed.success ? parsed.data : {};
+  return {
+    // SAFETY: the op schema guarantees a record, and only the fields parsed above are read from it.
+    metadata: raw as IssuanceMetadata,
+    selected: read.settings?.selected,
+    authorityWalletIds: read.custom?.customer?.authorityWalletIds,
+  };
+}
+
 function accessControlOf(token: Pick<PublicToken, "requiresAllowlist" | "template">) {
   if (token.requiresAllowlist) return "allowlist";
   return token.template === "stablecoin" ? "blocklist" : "off";
@@ -65,17 +90,12 @@ function accessControlOf(token: Pick<PublicToken, "requiresAllowlist" | "templat
 
 function applyCreate(world: DemoWorld, op: DemoOpOf<"iss-create">) {
   const createdAt = iso(op.at);
-  const metadata = op.metadata as IssuanceMetadata;
+  const { metadata, selected: settings, authorityWalletIds = {} } = readMetadata(op.metadata);
   const signerKey = walletKey(world, op.signer);
   const stablecoin = op.template === "stablecoin";
-  const settings = (metadata.settings as { selected?: Record<string, unknown> } | undefined)
-    ?.selected;
   const extensions: TokenExtensionsConfig = {};
   if (stablecoin || settings?.permanentDelegate) extensions.permanentDelegate = signerKey ?? "";
   if (stablecoin || settings?.pauseTransfers) extensions.pausable = { authority: signerKey ?? "" };
-  const authorityWalletIds =
-    ((metadata.custom as { customer?: { authorityWalletIds?: Record<string, string> } } | undefined)
-      ?.customer?.authorityWalletIds as Record<string, string> | undefined) ?? {};
 
   const token: PublicToken = {
     id: op.id,
@@ -250,30 +270,75 @@ function pushSettled(
   );
 }
 
-function applySupply(entry: DemoIssuedToken, op: DemoOpOf<"iss-supply">) {
+/** Moves `units` of the token into (positive) or out of (negative) the demo wallet at `address`. */
+function adjustHolding(
+  world: DemoWorld,
+  token: PublicToken,
+  address: string | null,
+  units: bigint
+): void {
+  const { mintAddress, decimals, symbol } = token;
+  if (!address || !mintAddress) return;
+  const wallet = Object.values(world.wallets).find((candidate) => candidate.publicKey === address);
+  if (!wallet) return;
+  const index = wallet.balances.findIndex((balance) => balance.mint === mintAddress);
+  const held = index === -1 ? 0n : BigInt(wallet.balances[index]?.amount ?? "0");
+  const next = held + units < 0n ? 0n : held + units;
+  const balance: CustodyWalletTokenBalance = {
+    token: symbol,
+    mint: mintAddress,
+    amount: next.toString(),
+    uiAmount: fromUnits(next, decimals),
+    decimals,
+  };
+  if (index === -1) wallet.balances.push(balance);
+  else wallet.balances[index] = balance;
+}
+
+function supplyDelta(type: DemoOpOf<"iss-supply">["type"], units: bigint): bigint {
+  switch (type) {
+    case "mint":
+      return units;
+    case "burn":
+    case "force_burn":
+      return -units;
+    case "seize":
+      return 0n;
+  }
+}
+
+function supplyParams(op: DemoOpOf<"iss-supply">): Record<string, unknown> {
+  const { memo } = op;
+  switch (op.type) {
+    case "mint":
+      return { destination: op.to, amount: op.amount, memo, tokenAccount: op.to };
+    case "burn":
+      return { source: op.from, amount: op.amount, memo };
+    case "seize":
+      return {
+        source: op.from,
+        destination: op.to,
+        amount: op.amount,
+        delegateAuthority: null,
+        memo,
+      };
+    case "force_burn":
+      return { source: op.from, amount: op.amount, delegateAuthority: null, memo };
+  }
+}
+
+/** Supply moves, the transaction lands, and the demo wallets named in it hold the new balances. */
+function applySupply(world: DemoWorld, entry: DemoIssuedToken, op: DemoOpOf<"iss-supply">) {
   const { token } = entry;
-  const delta = toUnits(op.amount, token.decimals);
-  const supply = toUnits(token.totalSupply, token.decimals);
-  const next = op.type === "mint" ? supply + delta : op.type === "seize" ? supply : supply - delta;
-  token.totalSupply = fromUnits(next < 0n ? 0n : next, token.decimals);
+  const units = toUnits(op.amount, token.decimals);
+  const supply = toUnits(token.totalSupply, token.decimals) + supplyDelta(op.type, units);
+  token.totalSupply = fromUnits(supply < 0n ? 0n : supply, token.decimals);
   token.totalSupplyUpdatedAt = iso(op.at);
   token.updatedAt = iso(op.at);
-  const memo = op.memo;
-  const params =
-    op.type === "mint"
-      ? { destination: op.to, amount: op.amount, memo, tokenAccount: op.to }
-      : op.type === "burn"
-        ? { source: op.from, amount: op.amount, memo }
-        : op.type === "seize"
-          ? {
-              source: op.from,
-              destination: op.to,
-              amount: op.amount,
-              delegateAuthority: null,
-              memo,
-            }
-          : { source: op.from, amount: op.amount, delegateAuthority: null, memo };
+  const params = supplyParams(op);
   pushSettled(entry, op, op.type, params, { ...params });
+  if (op.type !== "burn" && op.type !== "force_burn") adjustHolding(world, token, op.to, units);
+  if (op.type !== "mint") adjustHolding(world, token, op.from, -units);
   if (op.type === "mint" && token.requiresAllowlist && op.to) {
     addToList(entry, `${op.tx}_allow`, op.at, op.to, null);
   }
@@ -403,27 +468,20 @@ function applyListRemove(entry: DemoIssuedToken, op: DemoOpOf<"iss-list-remove">
   );
 }
 
-const PATCHABLE = [
-  "name",
-  "symbol",
-  "decimals",
-  "description",
-  "uri",
-  "imageUrl",
-  "requiresAllowlist",
-  "maxSupply",
-  "signingCustodyWalletId",
-] as const;
+/** The patch fields that differ from what the token holds now. */
+function changedFields<T extends object>(current: T, patch: Partial<T>): Partial<T> {
+  const changed: Partial<T> = {};
+  // SAFETY: Object.keys of a Partial<T> yields only keys of T.
+  for (const key of Object.keys(patch) as (keyof T)[]) {
+    const value = patch[key];
+    if (value !== undefined && current[key] !== value) changed[key] = value;
+  }
+  return changed;
+}
 
 function applyUpdate(entry: DemoIssuedToken, op: DemoOpOf<"iss-update">) {
-  const token = entry.token as unknown as Record<string, unknown>;
-  const changed: Record<string, unknown> = {};
-  for (const field of PATCHABLE) {
-    if (field in op.patch && token[field] !== op.patch[field]) {
-      token[field] = op.patch[field];
-      changed[field] = op.patch[field];
-    }
-  }
+  const changed = changedFields(entry.token, op.patch);
+  Object.assign(entry.token, changed);
   if (Object.keys(changed).length === 0) return;
   entry.token.updatedAt = iso(op.at);
   entry.audit.push(
@@ -446,13 +504,9 @@ function applyProfile(world: DemoWorld, op: DemoOpOf<"iss-profile">) {
   if (op.category) profile.assetCategory = op.category;
   if (op.type) profile.assetType = op.type;
   if (op.metadata) {
-    profile.issuanceMetadata = op.metadata as IssuanceMetadata;
-    const ids = (
-      op.metadata.custom as
-        | { customer?: { authorityWalletIds?: Record<string, string> } }
-        | undefined
-    )?.customer?.authorityWalletIds;
-    if (ids) entry.authorityWalletIds = ids;
+    const { metadata, authorityWalletIds } = readMetadata(op.metadata);
+    profile.issuanceMetadata = metadata;
+    if (authorityWalletIds) entry.authorityWalletIds = authorityWalletIds;
   }
   profile.publicMetadata = projectPublicMetadata(
     profile.assetCategory,
@@ -479,7 +533,7 @@ export function applyIssuanceOp(world: DemoWorld, op: IssuanceOp, nowMs: number)
       applyDeploy(world, entry, op, nowMs);
       break;
     case "iss-supply":
-      applySupply(entry, op);
+      applySupply(world, entry, op);
       break;
     case "iss-pause":
       applyPause(entry, op);

@@ -15,6 +15,19 @@ const at = z.number().int().nonnegative();
 const text = z.string().max(200);
 const longText = z.string().max(600);
 
+/** The token fields a PATCH can move: what the handler accepted, so replay never re-checks them. */
+const tokenPatchSchema = z.object({
+  signingCustodyWalletId: id.optional(),
+  name: text.optional(),
+  symbol: text.optional(),
+  decimals: z.number().int().min(0).max(18).optional(),
+  description: longText.nullable().optional(),
+  uri: z.string().max(512).nullable().optional(),
+  imageUrl: z.string().max(512).nullable().optional(),
+  requiresAllowlist: z.boolean().optional(),
+  maxSupply: text.nullable().optional(),
+});
+
 const demoOpSchema = z.discriminatedUnion("k", [
   z.object({
     k: z.literal("contact"),
@@ -172,7 +185,7 @@ const demoOpSchema = z.discriminatedUnion("k", [
   }),
   z.object({ k: z.literal("iss-list-remove"), id, at, entry: id }),
   /** Token fields a PATCH changed, as the API accepts them. */
-  z.object({ k: z.literal("iss-update"), id, at, patch: z.record(z.string(), z.unknown()) }),
+  z.object({ k: z.literal("iss-update"), id, at, patch: tokenPatchSchema }),
   /** An asset profile's PATCH; `id` is the profile's. */
   z.object({
     k: z.literal("iss-profile"),

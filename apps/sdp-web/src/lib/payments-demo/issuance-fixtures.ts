@@ -1,3 +1,4 @@
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   AssetAuditEvent,
   AssetCategory,
@@ -317,22 +318,12 @@ export function demoHolderAddresses(tokenKey: string): string[] {
 
 /** Base units, for supply arithmetic that never loses a digit. */
 export function toUnits(amount: string, decimals: number): bigint {
-  const negative = amount.startsWith("-");
-  const [whole = "0", fraction = ""] = (negative ? amount.slice(1) : amount).split(".");
-  const units =
-    BigInt(whole || "0") * 10n ** BigInt(decimals) +
-    BigInt(fraction.padEnd(decimals, "0").slice(0, decimals) || "0");
-  return negative ? -units : units;
+  return parseDecimalAmount(amount, decimals);
 }
 
 /** A base-unit amount back as the API's decimal string, trailing zeros dropped. */
 export function fromUnits(units: bigint, decimals: number): string {
-  const scale = 10n ** BigInt(decimals);
-  const negative = units < 0n;
-  const magnitude = negative ? -units : units;
-  const whole = magnitude / scale;
-  const fraction = (magnitude % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
-  return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+  return formatDecimalAmount(units, decimals);
 }
 
 export function demoTokenId(key: string): string {
@@ -547,7 +538,7 @@ function seedSupply(context: SeedContext): bigint {
     const burn = amount.startsWith("-");
     const value = burn ? amount.slice(1) : amount;
     const address = holder === 0 ? context.signerKey : holderAddress(spec.key, holder);
-    supply += toUnits(amount, spec.decimals);
+    supply += burn ? -toUnits(value, spec.decimals) : toUnits(value, spec.decimals);
     const params = burn
       ? { source: address, amount: value, memo: null }
       : { destination: address, amount: value, memo: null, tokenAccount: address };
