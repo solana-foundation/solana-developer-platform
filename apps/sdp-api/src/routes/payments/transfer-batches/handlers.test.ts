@@ -2041,7 +2041,7 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
       .bind(productionProjectId, TEST_API_KEY.id)
       .run();
-    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
       projectId: productionProjectId,
       environment: "production",

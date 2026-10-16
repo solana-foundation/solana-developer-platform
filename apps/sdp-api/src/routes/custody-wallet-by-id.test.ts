@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import * as solanaRpc from "@sdp/rpc/solana";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
