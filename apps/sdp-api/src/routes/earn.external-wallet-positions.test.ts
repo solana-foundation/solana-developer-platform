@@ -8,6 +8,7 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
+import * as auth from "@/lib/auth";
 import { collectAllExternalWalletPositionRows } from "@/routes/earn/handlers/external-wallet";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -16,27 +17,13 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const { readVaultPositions, resolveVaultDirectClient, summaryScopeReads } = vi.hoisted(() => {
+const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
   return {
     readVaultPositions,
-    summaryScopeReads: vi.fn(),
     resolveVaultDirectClient: vi.fn((_env: unknown, _provider: string, _deadline: unknown) => ({
       readVaultPositions,
     })),
-  };
-});
-
-vi.mock("@/lib/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth")>();
-  return {
-    ...actual,
-    requireProjectId: (c: Parameters<typeof actual.requireProjectId>[0]) => {
-      if (c.req.path === "/v1/earn/external-wallet/positions/summary") {
-        summaryScopeReads();
-      }
-      return actual.requireProjectId(c);
-    },
   };
 });
 
@@ -446,6 +433,7 @@ describe("external-wallet position reads", () => {
   });
 
   it("coalesces concurrent project-wide live portfolio reads", async () => {
+    const projectScopeReads = vi.spyOn(auth, "requireProjectId");
     await seedPosition({
       ownerAddress: OWNER_A,
       vaultAddress: "vault-coalesced",
@@ -478,7 +466,7 @@ describe("external-wallet position reads", () => {
     const first = get("/v1/earn/external-wallet/positions/summary");
     const second = get("/v1/earn/external-wallet/positions/summary");
     try {
-      await vi.waitFor(() => expect(summaryScopeReads).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(projectScopeReads).toHaveBeenCalledTimes(2));
       await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
     } finally {
       released = true;
