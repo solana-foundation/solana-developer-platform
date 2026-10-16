@@ -335,7 +335,39 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
  */
 export function createClusterRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
+  return pooledClusterRpc(cluster, managedEndpointUrls(cluster));
+}
+
+/**
+ * The scope's cluster client for wallet signature history: the same managed pool with the Helius
+ * endpoint tried first, for its deeper `getSignaturesForAddress` history, and the other providers
+ * as failover. Without a Helius endpoint it is the plain pool. Biome restricts it to observed
+ * transfers, so no other caller reorders the pool.
+ *
+ * @returns The history RPC client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function createClusterHistoryRpc(): SolanaRpc {
+  const { cluster } = currentClusterScope();
+  const heliusUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
   const endpointUrls = managedEndpointUrls(cluster);
+  return pooledClusterRpc(
+    cluster,
+    heliusUrl
+      ? [heliusUrl, ...endpointUrls.filter((endpointUrl) => endpointUrl !== heliusUrl)]
+      : endpointUrls
+  );
+}
+
+/**
+ * One memoized pooled client per cluster and ordered endpoint list.
+ *
+ * @param cluster - The cluster every endpoint must serve.
+ * @param endpointUrls - The endpoints in failover order.
+ * @returns The pooled RPC client.
+ */
+function pooledClusterRpc(cluster: SolanaCluster, endpointUrls: string[]): SolanaRpc {
   const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
   const memoizedRpc = clusterRpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;

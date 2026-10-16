@@ -1,4 +1,4 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
+import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SolanaRpc } from "@sdp/rpc/solana";
@@ -17,6 +17,16 @@ import type { AppContext } from "../context";
 import * as tokenAccounts from "../token-accounts";
 
 export const SIGNATURE_HISTORY_LOOKUP_CONCURRENCY = 5;
+
+/**
+ * The client observed transfers read wallet history through: the scope's cluster pool with
+ * Helius first, for its deeper signature history.
+ *
+ * @returns The history RPC client for the scope's cluster.
+ */
+export function observedHistoryRpc(): SolanaRpc {
+  return createClusterHistoryRpc();
+}
 
 /**
  * Cap on token-account addresses added to the signature search alongside the
@@ -396,7 +406,7 @@ async function fetchParsedTransaction(
     return inFlight;
   }
 
-  const pending = fetchParsedTransactionFromRpc(createClusterRpc(), signature)
+  const pending = fetchParsedTransactionFromRpc(createClusterHistoryRpc(), signature)
     .then((parsedTransaction) => {
       // Cache a body only once the fresh signature history reports the
       // signature finalized. A null means the transaction is not yet indexed

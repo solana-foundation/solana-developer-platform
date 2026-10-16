@@ -98,6 +98,7 @@ import {
   buildObservedTransfersForSignatures,
   dedupeSignatureHistory,
   MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS,
+  observedHistoryRpc,
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
@@ -1066,7 +1067,7 @@ export async function listTransfers(c: AppContext) {
     // ledger query are independent reads, so they start together instead of
     // paying each round-trip serially; only the token-account signature sweeps
     // below need to wait for the token accounts.
-    const historyRpc = createClusterRpc();
+    const historyRpc = observedHistoryRpc();
     const ownerAddress = address(sourceAddress);
     const historyLimit = Math.min(pageSize * 5, 200);
     const signatureSearchAddresses: Address[] = [ownerAddress];
