@@ -38,6 +38,17 @@ export class RpcHttpStatusError extends Error {
   }
 }
 
+/**
+ * An RPC attempt cut off by SDP's own deadline. Callers classify it by type, never by message.
+ * `details.timedOut` stays for readers that walk error records.
+ */
+export class RpcTimeoutError extends SdpRpcError {
+  constructor(timeoutMs: number) {
+    super("SOLANA_RPC_ERROR", `RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+    this.name = "RpcTimeoutError";
+  }
+}
+
 export function solanaRpcError(message: string, details?: Record<string, unknown>): SdpRpcError {
   return new SdpRpcError("SOLANA_RPC_ERROR", message, details);
 }

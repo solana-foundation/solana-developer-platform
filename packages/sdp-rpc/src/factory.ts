@@ -13,7 +13,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
-import { SdpRpcError, solanaRpcError } from "./errors";
+import { RpcTimeoutError, SdpRpcError } from "./errors";
 import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
@@ -46,7 +46,7 @@ const genesisProofExpiry = new Map<string, number>();
 const genesisProbes = new Map<string, Promise<void>>();
 
 /**
- * How long an endpoint that failed or couldn't serve stays at the back of its pool's order, so
+ * How long an endpoint that failed or reported itself unhealthy stays at the back of its pool's order, so
  * requests return to the preferred provider once it recovers.
  */
 const ENDPOINT_COOLDOWN_MS = 30_000;
@@ -74,7 +74,7 @@ function withAttemptDeadline(transport: RpcTransport, timeoutMs: number): RpcTra
       return await transport<TResponse>({ ...rpcRequest, signal });
     } catch (cause) {
       if (signal.aborted && signal.reason === deadlineReason) {
-        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+        throw new RpcTimeoutError(timeoutMs);
       }
       throw cause;
     } finally {
@@ -163,16 +163,93 @@ class UnsentRequestError extends Error {
   }
 }
 
+/** One endpoint attempt: what it answered, or what it threw. */
+type AttemptOutcome<TResponse> = { ok: true; response: TResponse } | { ok: false; cause: unknown };
+
+/** What the pool does after an attempt. */
+interface AttemptVerdict {
+  /** Move the endpoint to the back of the order for `ENDPOINT_COOLDOWN_MS`, for every request. */
+  cooldown: boolean;
+  /** Ask the next endpoint, unless this was the last one. */
+  tryNext: boolean;
+}
+
 /**
- * Whether a JSON-RPC response body says the node can't serve the request yet.
+ * Call one endpoint, capturing a throw as an outcome so the pool judges both the same way.
+ *
+ * @param endpointTransport - The endpoint's guarded transport.
+ * @param rpcRequest - The request to send.
+ * @returns The endpoint's response, or the error it threw.
+ */
+async function attemptEndpoint<TResponse>(
+  endpointTransport: RpcTransport,
+  rpcRequest: Parameters<RpcTransport>[0]
+): Promise<AttemptOutcome<TResponse>> {
+  try {
+    return { ok: true, response: await endpointTransport<TResponse>(rpcRequest) };
+  } catch (cause) {
+    return { ok: false, cause };
+  }
+}
+
+/**
+ * The JSON-RPC error in a response body. Nodes answer "can't serve this" with HTTP 200, and kit's
+ * HTTP transport only throws on non-2xx, so the pool reads it from the body.
  *
  * @param response - The decoded JSON-RPC response.
- * @returns `true` when its error maps to one of `FAILOVER_JSON_RPC_ERROR_CODES`.
+ * @returns The served error, or `null` when the body carries none.
  */
-function asksForAnotherEndpoint(response: unknown): boolean {
-  if (typeof response !== "object" || response === null || !("error" in response)) return false;
-  const servedError = getSolanaErrorFromJsonRpcError(response.error);
-  return FAILOVER_JSON_RPC_ERROR_CODES.some((code) => isSolanaError(servedError, code));
+function servedJsonRpcError(response: unknown) {
+  if (typeof response !== "object" || response === null || !("error" in response)) return null;
+  return getSolanaErrorFromJsonRpcError(response.error);
+}
+
+/**
+ * Decide what the pool does after one attempt:
+ *
+ * | Attempt                                    | Cooldown | Try next |
+ * | ------------------------------------------ | -------- | -------- |
+ * | Caller aborted                             | no       | no       |
+ * | Never sent (`UnsentRequestError`)          | yes      | yes      |
+ * | Read threw a transient error               | yes      | yes      |
+ * | `sendTransaction` threw a transient error  | yes      | no       |
+ * | Threw anything else                        | no       | no       |
+ * | Answered "node unhealthy"                  | yes      | reads    |
+ * | `sendTransaction` answered anything else   | no       | no       |
+ * | Read answered another failover code        | no       | yes      |
+ * | Read answered anything else                | no       | no       |
+ *
+ * A send stops once it left SDP: the failure may arrive after the leader got the transaction, and
+ * resubmitting is the send primitive's decision. Only "node unhealthy" cools a node down; the other
+ * `FAILOVER_JSON_RPC_ERROR_CODES` (behind the caller's `minContextSlot`, missing history or block
+ * status) are about this request, not the node, and a cooldown applies to every request on the
+ * cluster.
+ *
+ * @param outcome - The attempt's outcome.
+ * @param rpcRequest - The request the attempt sent.
+ * @returns Whether to cool the endpoint down and whether to try the next one.
+ */
+function judgeAttempt<TResponse>(
+  outcome: AttemptOutcome<TResponse>,
+  rpcRequest: Parameters<RpcTransport>[0]
+): AttemptVerdict {
+  const isSend =
+    isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
+  if (!outcome.ok) {
+    if (rpcRequest.signal?.aborted) return { cooldown: false, tryNext: false };
+    if (outcome.cause instanceof UnsentRequestError) return { cooldown: true, tryNext: true };
+    if (!isTransientRpcError(outcome.cause)) return { cooldown: false, tryNext: false };
+    return { cooldown: true, tryNext: !isSend };
+  }
+  const servedError = servedJsonRpcError(outcome.response);
+  if (isSolanaError(servedError, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)) {
+    return { cooldown: true, tryNext: !isSend };
+  }
+  if (isSend) return { cooldown: false, tryNext: false };
+  const cannotServe = FAILOVER_JSON_RPC_ERROR_CODES.some((code) =>
+    isSolanaError(servedError, code)
+  );
+  return { cooldown: false, tryNext: cannotServe };
 }
 
 /**
@@ -194,14 +271,9 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
 }
 
 /**
- * Per-request failover across a cluster's endpoints. Every request walks the endpoints in
- * failover order, with those that failed in the last `ENDPOINT_COOLDOWN_MS` moved to the back, so
- * one blip never parks the process on a worse provider. A transient transport failure or a
- * `FAILOVER_JSON_RPC_ERROR_CODES` body moves to the next endpoint; the last endpoint's answer is
- * returned as-is so kit raises its typed error, and a caller abort stops the walk.
- * `sendTransaction` fails over only when the request never left SDP (`UnsentRequestError`): any
- * later failure can arrive after the transaction reached the leader, and resubmitting elsewhere
- * is the send primitive's decision, not the pool's.
+ * Per-request failover across a cluster's endpoints: try each endpoint in `endpointAttemptOrder`
+ * and let `judgeAttempt` decide whether to cool it down and whether to ask the next one. The last
+ * endpoint's answer or error is returned as-is, so kit raises its typed error.
  *
  * @param endpointTransports - The guarded endpoint transports, in failover order.
  * @returns The pool transport.
@@ -209,28 +281,23 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
 function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
   const lastFailedAt = endpointTransports.map(() => Number.NEGATIVE_INFINITY);
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
-    const isSend =
-      isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
     const attemptOrder = endpointAttemptOrder(lastFailedAt, Date.now());
+    // NOTE: perf. A `minContextSlot` no endpoint has reached yet walks every endpoint before the
+    // last one's -32016 is returned, so a caller issuing parallel reads (wallet balances: 3) pays
+    // reads × endpoints requests. Accepted for now: the floor comes from a slot SDP already saw
+    // confirmed, so the full walk is rare. If it shows up, stop after two -32016 answers.
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
+      const outcome = await attemptEndpoint<TResponse>(
+        endpointTransports[endpointIndex],
+        rpcRequest
+      );
+      const verdict = judgeAttempt(outcome, rpcRequest);
+      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       const isLastEndpoint = attempt === attemptOrder.length - 1;
-      let response: TResponse;
-      try {
-        response = await endpointTransports[endpointIndex]<TResponse>(rpcRequest);
-      } catch (error) {
-        if (rpcRequest.signal?.aborted) throw error;
-        const isUnsent = error instanceof UnsentRequestError;
-        const isEndpointFailure = isUnsent || isTransientRpcError(error);
-        if (isEndpointFailure) lastFailedAt[endpointIndex] = Date.now();
-        if (!isLastEndpoint && (isUnsent || (isEndpointFailure && !isSend))) continue;
-        throw error instanceof UnsentRequestError ? error.cause : error;
-      }
-      if (!isSend && !isLastEndpoint && asksForAnotherEndpoint(response)) {
-        lastFailedAt[endpointIndex] = Date.now();
-        continue;
-      }
-      return response;
+      if (verdict.tryNext && !isLastEndpoint) continue;
+      if (outcome.ok) return outcome.response;
+      throw outcome.cause instanceof UnsentRequestError ? outcome.cause.cause : outcome.cause;
     }
   };
 }

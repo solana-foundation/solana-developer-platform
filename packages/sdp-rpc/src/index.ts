@@ -8,7 +8,13 @@ export {
   resolveSolanaRpcProviderUrls,
   type SolanaConfig,
 } from "./config";
-export { RpcHttpStatusError, SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
+export {
+  RpcHttpStatusError,
+  RpcTimeoutError,
+  SdpRpcError,
+  type SdpRpcErrorCode,
+  solanaRpcError,
+} from "./errors";
 export {
   isForbiddenRpcError,
   isTransientRpcError,
