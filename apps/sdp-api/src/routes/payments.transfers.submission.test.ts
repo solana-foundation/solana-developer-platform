@@ -15,6 +15,7 @@ import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -38,6 +39,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
+  installClusterRpcStub();
   describe("signed submission boundary", () => {
     async function latestTransferRow() {
       const row = (await listTransferRows())[0];

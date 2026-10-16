@@ -11,6 +11,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -42,11 +43,6 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
-}));
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
 }));
 
 const SEEDED_PUBLIC_KEYS = {
@@ -282,6 +278,9 @@ describe("Custody wallet scope routes", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
+    vi.spyOn(sponsorshipService, "resolveSponsoredFeePayer").mockImplementation(
+      signerCheckMocks.createSponsorship
+    );
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({

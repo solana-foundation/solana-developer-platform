@@ -13,7 +13,5 @@ export interface WebhookProcessor<Payload = unknown, Event = unknown>
   readonly provider: RampProviderId;
   verify(context: RampWebhookValidationContext): Promise<Payload>;
   parse(payload: Payload | string, environment?: SdpEnvironment): Event;
-  /** The replay-safe body to persist after verification. */
-  bodyForInbox?(rawBody: string): string;
   process(env: Env, environment: SdpEnvironment, event: Event): Promise<RampWebhookBusinessOutcome>;
 }

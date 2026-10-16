@@ -22,6 +22,7 @@ import { closeDatabasePools, getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
@@ -86,6 +87,6 @@ export const apiTestSupport = {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
   TEST_USER,
-  trackPendingTransfers,
+  trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
   withdrawFromVault,
 };

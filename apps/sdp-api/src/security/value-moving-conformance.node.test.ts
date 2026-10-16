@@ -73,7 +73,7 @@ const contracts: ValueMovingContract[] = [
     family: "recurring",
     trustedContext: {
       file: "apps/sdp-api/src/services/payments/recurring-payments/shared.ts",
-      evidence: "createProjectSponsorshipFeePayment(input.env",
+      evidence: "await resolveProjectSponsorshipScope(input.env, {",
     },
     authorization: {
       file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
@@ -260,8 +260,8 @@ const contracts: ValueMovingContract[] = [
   {
     family: "payments",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/payments/context.ts",
-      evidence: "createRequestSponsorshipFeePayment(c, movement)",
+      file: "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
+      evidence: "resolveRequestSponsorshipScope(c),",
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",

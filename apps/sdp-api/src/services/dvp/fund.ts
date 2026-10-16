@@ -35,7 +35,10 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
@@ -367,12 +370,15 @@ export async function executeDvpFunding(
     );
   }
 
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    movement: "dvp.fund",
-    organizationId: plan.signer.organizationId,
-    projectId: plan.signer.projectId,
-    actor: { type: "wallet", id: plan.signer.custodyWalletId },
-  });
+  const feePayment = createSponsorshipFeePayment(
+    env,
+    await resolveProjectSponsorshipScope(env, {
+      organizationId: plan.signer.organizationId,
+      projectId: plan.signer.projectId,
+      actor: { type: "wallet", id: plan.signer.custodyWalletId },
+    }),
+    "dvp.fund"
+  );
   const sponsor = await feePayment.getFeePayer();
   const instruction = getTransferCheckedInstruction(
     { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },

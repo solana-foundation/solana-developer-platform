@@ -8,7 +8,7 @@
 ## Context
 
 Ramps launch with Stripe and MoonPay. Mural, MoneyGram, Lightspark and Coinbase
-(HOO-2035) are removed; BVNK (HOO-2037) is next. Adding a provider touches
+(HOO-2035) and the last headless provider (HOO-2037) are removed. Adding a provider touches
 about 45 files today, 68 for one with KYC. The target is about 14.
 
 `RampProvider` covers estimates, quotes and a synchronous counterparty check.
@@ -17,10 +17,10 @@ bypassed:
 
 - `RAMP_PROVIDER_CLIENTS` is `as const satisfies`, so callers keep the concrete
   client types. Routes call methods that are not on the contract; today every
-  such call is BVNK's.
+  such call belongs to the now retired headless provider.
 - Members use method syntax, which TypeScript checks bivariantly, so an
   implementation can narrow its inputs unnoticed.
-- Core types import provider modules (BVNK compliance input, Stripe customer
+- Core types import provider modules (headless provider compliance input, Stripe customer
   info).
 - `providerFetchJson` casts provider JSON to a free type parameter. Nothing
   checks a response against what the adapter reads.
@@ -28,7 +28,7 @@ bypassed:
   returns in error bodies and writes to transfer rows.
 - No test iterates the registry.
 
-Before deleting BVNK and Lightspark, the BVNK owner asked whether headless,
+Before deleting the headless providers, their owner asked whether
 stateful providers fit the model at all.
 
 ## Decision
@@ -72,7 +72,7 @@ stateful providers fit the model at all.
   them scrubbed as `error_diagnostics` and never serializes them: on
   `sdp_api_payments_provider_error` for failures the error handler answers,
   and on every log that catches a provider failure without rethrowing it,
-  such as the estimate fan-out and the BVNK payout job. The shared
+  such as the estimate fan-out and the now retired payout job. The shared
   vendor-call event stays name and code only (EARN-025).
 - **One contract suite.** A single test iterates the registry. Every provider
   has a test kit of recorded HTTP transcripts, keyed by provider id, so a new
@@ -83,7 +83,7 @@ stateful providers fit the model at all.
 - **Boundary tests:** nothing outside the package imports a provider module,
   only `services/ramps` writes ramp rows, and `@sdp/payments` never sees `Env`.
 - **Headless providers re-enter through this contract**, not a second extension
-  point. A stateful provider like BVNK or Lightspark needs four things, each an
+  point. A stateful provider needs four things, each an
   optional member or port:
   - Requirements: an optional `requirements` member with async `describe` and
     `submit`, answering the existing `CounterpartyRequirements` union. The
@@ -107,7 +107,7 @@ stateful providers fit the model at all.
   see the code, and every contract change must be ported into it.
 - **Keep the removed providers behind the release channel:** rejected. Every
   core step would carry them behind a legacy fence.
-- **Validate responses in each adapter**, as BVNK's `parseBvnkResponse` does:
+- **Validate responses in each adapter**, as the retired adapter's response parser did:
   rejected for the shared fetch, so no adapter can skip it.
 - **Pass a sanitized provider snippet in the public message:** rejected. That is
   the leak this closes.
@@ -118,13 +118,13 @@ stateful providers fit the model at all.
   (HOO-1873) also edits:
   1. This ADR, the error split and the diagnostics log.
   2. Response schemas and the contract suite.
-  3. The contract reshaping and registry typing, after BVNK and Coinbase are
+  3. The contract reshaping and registry typing, after the non-launch providers are
      removed and the cluster-scope stack lands. Credentials land with HOO-2032,
      the webhook member with HOO-2038, status pull with HOO-2040.
 - Provider failures lose the provider's wording in API error bodies. Callers get
   the code, the provider status in `details` and an SDP message; operators read
   the provider's wording from `error_diagnostics` in the logs.
-- Until step 3, BVNK stays on the current interface, named as a legacy entry in
-  the test-kit map.
+- The last headless provider was removed in HOO-2037 before step 3. Its legacy entry is no longer
+  part of the test-kit map.
 - A schema stricter than the provider's real responses turns quotes into 503s,
   so schemas require only what adapters already read.

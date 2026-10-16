@@ -29,8 +29,7 @@ import type { RampProvider } from "./types";
 const KITS = {
   moonpay: MOONPAY_TEST_KIT,
   stripe: STRIPE_TEST_KIT,
-  bvnk: { removedBy: "HOO-2037" },
-} as const satisfies Record<RampProviderId, RampProviderTestKit | { removedBy: string }>;
+} as const satisfies Record<RampProviderId, RampProviderTestKit>;
 
 const DECIMAL = /^\d+(\.\d+)?$/;
 
@@ -127,9 +126,6 @@ function assertQuoteContract(quote: PaymentRampQuote, provider: RampProviderId):
     case "session_widget":
       assert.ok(quote.clientSecret.trim() !== "");
       return;
-    case "manual_instructions":
-      assert.ok(quote.paymentInstructions.length > 0);
-      return;
     default: {
       const exhaustive: never = quote;
       assert.fail(`Unknown delivery mode: ${JSON.stringify(exhaustive)}`);
@@ -172,12 +168,6 @@ describe("ramp provider contract", () => {
 
   for (const provider of RAMP_PROVIDERS) {
     const kit = KITS[provider];
-    if ("removedBy" in kit) {
-      it(`${provider} has no kit because ${kit.removedBy} removes it`, () => {
-        assert.match(kit.removedBy, /^HOO-\d+$/);
-      });
-      continue;
-    }
     const client: RampProvider = RAMP_PROVIDER_CLIENTS[provider];
 
     describe(provider, () => {

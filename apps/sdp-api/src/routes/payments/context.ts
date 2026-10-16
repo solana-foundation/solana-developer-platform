@@ -1,6 +1,4 @@
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
-import type { MovementId } from "@sdp/types";
-import type { Address } from "@solana/kit";
 import type { Context } from "hono";
 import {
   createCounterpartiesRepository,
@@ -12,11 +10,6 @@ import {
 } from "@/db/repositories";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import {
-  createRequestSponsorshipFeePayment,
-  resolveRequestSponsorshipScope,
-  resolveSponsoredFeePayer,
-} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
@@ -52,14 +45,4 @@ export function getPaymentRecurringPaymentsRepository(c: AppContext) {
 
 export function getPaymentTransferBatchesRepository(c: AppContext) {
   return createPaymentTransferBatchesRepository(c.env, getRequestTenantScope(c));
-}
-
-/** The request's sponsor for one movement; it refuses a start the organization may not make. */
-export function getFeePayment(c: AppContext, movement: MovementId) {
-  return createRequestSponsorshipFeePayment(c, movement);
-}
-
-/** The fee payer a prepared transaction names; no way to sponsor-sign escapes it. */
-export async function getSponsoredFeePayer(c: AppContext): Promise<Address> {
-  return resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
 }

@@ -1,13 +1,11 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest } from "@/lib/errors";
-import { bvnkWebhook } from "./bvnk";
 import { moonpayWebhook } from "./moonpay";
 import type { WebhookProcessor } from "./processor";
 import { stripeWebhook } from "./stripe";
 
 export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   moonpay: moonpayWebhook,
-  bvnk: bvnkWebhook,
   stripe: stripeWebhook,
 } as const satisfies Record<RampProviderId, WebhookProcessor<unknown, unknown>>;
 

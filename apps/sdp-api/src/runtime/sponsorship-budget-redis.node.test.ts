@@ -14,6 +14,8 @@ vi.mock("./money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
+const PROJECT_ID = "project_1";
+
 const EMPTY_USAGE = {
   hour: { global: 0, organization: 0, project: 0 },
   day: { global: 0, organization: 0, project: 0 },
@@ -59,37 +61,17 @@ describe("SponsorshipBudgetRedis", () => {
     await flushWorkerRedis(env);
   });
 
-  it("admits organization-only scopes without corrupting Lua argument indexes", async () => {
-    await expect(
-      budget.reserve({
-        network: "devnet",
-        organizationId: "org_1",
-        projectId: null,
-        hourBucket: "2026-08-03T10:00:00.000Z",
-        dayBucket: "2026-08-03T00:00:00.000Z",
-        reservationId: "reservation_org",
-        attempt: 1,
-        amount: 3,
-        policies: [policy("global"), policy("organization")],
-        usage: EMPTY_USAGE,
-      })
-    ).resolves.toBe("admitted");
-
-    const hour = await raw.hgetall("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z");
-    expect(hour).toMatchObject({ global: "3", "organization:org_1": "3" });
-    expect(Object.keys(hour).some((field) => field.includes("undefined"))).toBe(false);
-  });
-
   it("records which scope and limit rejected an admission, with the counters it was rejected against", async () => {
     logEvent.mockClear();
     const policies = [
       policy("global", 1, true, 1000),
       { ...policy("organization", 1, true, 1000), hourlyLamports: 5 },
+      policy("project", 1, true, 1000),
     ];
     const window = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       policies,
@@ -121,6 +103,7 @@ describe("SponsorshipBudgetRedis", () => {
         network: "devnet",
         scope_type: "organization",
         organization_id: "org_1",
+        project_id: PROJECT_ID,
         requested_lamports: 4,
         hourly_lamports: 5,
         hour_used_lamports: 4,
@@ -130,13 +113,17 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("enforces concurrent limits atomically across all applicable scopes", async () => {
-    const policies = [policy("global", 1, true, 5), policy("organization", 1, true, 3)];
+    const policies = [
+      policy("global", 1, true, 5),
+      policy("organization", 1, true, 3),
+      policy("project", 1, true, 5),
+    ];
     const attempts = await Promise.all(
       Array.from({ length: 10 }, (_, index) =>
         budget.reserve({
           network: "devnet",
           organizationId: "org_1",
-          projectId: null,
+          projectId: PROJECT_ID,
           hourBucket: "2026-08-03T10:00:00.000Z",
           dayBucket: "2026-08-03T00:00:00.000Z",
           reservationId: `reservation_${index}`,
@@ -151,15 +138,20 @@ describe("SponsorshipBudgetRedis", () => {
     const hour = await raw.hgetall("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z");
     expect(hour.global).toBe("3");
     expect(hour["organization:org_1"]).toBe("3");
+    expect(hour[`project:${PROJECT_ID}`]).toBe("3");
   });
 
   it("restores each newly-seen organization field from durable usage", async () => {
-    const policies = [policy("global", 1, true, 100), policy("organization", 1, true, 10)];
+    const policies = [
+      policy("global", 1, true, 100),
+      policy("organization", 1, true, 10),
+      policy("project", 1, true, 100),
+    ];
     await expect(
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "reservation_org_1",
@@ -173,7 +165,7 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_2",
-        projectId: null,
+        projectId: "project_2",
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "reservation_org_2",
@@ -181,8 +173,8 @@ describe("SponsorshipBudgetRedis", () => {
         amount: 4,
         policies,
         usage: {
-          hour: { global: 10, organization: 7, project: 0 },
-          day: { global: 10, organization: 7, project: 0 },
+          hour: { global: 10, organization: 7, project: 7 },
+          day: { global: 10, organization: 7, project: 7 },
         },
       })
     ).resolves.toBe("denied");
@@ -196,13 +188,13 @@ describe("SponsorshipBudgetRedis", () => {
     const result = await budget.reserve({
       network: "devnet",
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_stale",
       attempt: 1,
       amount: 1,
-      policies: [policy("global", 1), policy("organization", 1)],
+      policies: [policy("global", 1), policy("organization", 1), policy("project", 1)],
       usage: EMPTY_USAGE,
     });
     expect(result).toBe("stale_policy");
@@ -215,20 +207,23 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_orphan",
       attempt: 1,
       amount: 1,
-      policies: [policy("global", 1), policy("organization", 1)],
+      policies: [policy("global", 1), policy("organization", 1), policy("project", 1)],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
     const killed = policy("global", 2, false);
     await budget.syncPolicy(killed);
     await expect(
-      budget.reserve({ ...input, policies: [killed, policy("organization", 1)] })
+      budget.reserve({
+        ...input,
+        policies: [killed, policy("organization", 1), policy("project", 1)],
+      })
     ).resolves.toBe("stale_policy");
   });
 
@@ -241,13 +236,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: `reservation_settle_${actualLamports}`,
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -273,13 +272,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_owned",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -316,13 +319,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_cancel_missing",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -354,13 +361,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_expired",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -401,13 +412,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_missing",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -445,13 +460,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_rebuilt",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -459,8 +478,8 @@ describe("SponsorshipBudgetRedis", () => {
     const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
     await raw.del("sdp:sponsorship:{devnet}:reservation:reservation_rebuilt:1", hourKey, dayKey);
     const rebuiltUsage = {
-      hour: { global: 2, organization: 2, project: 0 },
-      day: { global: 2, organization: 2, project: 0 },
+      hour: { global: 2, organization: 2, project: 2 },
+      day: { global: 2, organization: 2, project: 2 },
     };
     await expect(
       budget.reserve({
@@ -496,10 +515,14 @@ describe("SponsorshipBudgetRedis", () => {
     const base = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
     };
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
     const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
@@ -524,8 +547,8 @@ describe("SponsorshipBudgetRedis", () => {
         attempt: 1,
         amount: 3,
         usage: {
-          hour: { global: 5, organization: 5, project: 0 },
-          day: { global: 5, organization: 5, project: 0 },
+          hour: { global: 5, organization: 5, project: 5 },
+          day: { global: 5, organization: 5, project: 5 },
         },
         liveReservations: {
           hour: [
@@ -534,7 +557,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -543,7 +566,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -579,13 +602,17 @@ describe("SponsorshipBudgetRedis", () => {
     const hourBucket = "2026-08-03T10:00:00.000Z";
     const dayBucket = "2026-08-03T00:00:00.000Z";
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const policies = [policy("global", 1, true, 20), policy("organization", 1, true, 20)];
+    const policies = [
+      policy("global", 1, true, 20),
+      policy("organization", 1, true, 20),
+      policy("project", 1, true, 20),
+    ];
 
     await expect(
       budget.reserve({
         network: "devnet",
         organizationId: "org_b",
-        projectId: null,
+        projectId: "project_b",
         hourBucket,
         dayBucket,
         reservationId: "res_b",
@@ -604,7 +631,7 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_a",
-        projectId: null,
+        projectId: "project_a",
         hourBucket,
         dayBucket,
         reservationId: "res_a",
@@ -622,7 +649,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_b",
-              projectId: null,
+              projectId: "project_b",
             },
           ],
           day: [
@@ -631,7 +658,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_b",
-              projectId: null,
+              projectId: "project_b",
             },
           ],
         },
@@ -646,7 +673,7 @@ describe("SponsorshipBudgetRedis", () => {
       budget.settle({
         network: "devnet",
         organizationId: "org_b",
-        projectId: null,
+        projectId: "project_b",
         hourBucket,
         dayBucket,
         reservationId: "res_b",
@@ -675,6 +702,10 @@ describe("SponsorshipBudgetRedis", () => {
         "10",
         "__initialized:organization:org_1",
         "1",
+        `project:${PROJECT_ID}`,
+        "10",
+        `__initialized:project:${PROJECT_ID}`,
+        "1",
         "__reservation:res_legacy_retry:1",
         "10"
       );
@@ -684,16 +715,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_legacy_retry",
         attempt: 1,
         amount: 10,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        policies: [
+          policy("global", 1, true, 100),
+          policy("organization", 1, true, 100),
+          policy("project", 1, true, 100),
+        ],
         usage: {
-          hour: { global: 10, organization: 10, project: 0 },
-          day: { global: 10, organization: 10, project: 0 },
+          hour: { global: 10, organization: 10, project: 10 },
+          day: { global: 10, organization: 10, project: 10 },
         },
         liveReservations: { hour: [], day: [] },
       })
@@ -718,6 +753,10 @@ describe("SponsorshipBudgetRedis", () => {
         "10",
         "__initialized:organization:org_1",
         "1",
+        `project:${PROJECT_ID}`,
+        "10",
+        `__initialized:project:${PROJECT_ID}`,
+        "1",
         "__reservation:res_legacy:1",
         "10"
       );
@@ -727,7 +766,7 @@ describe("SponsorshipBudgetRedis", () => {
       budget.settle({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_legacy",
@@ -758,6 +797,10 @@ describe("SponsorshipBudgetRedis", () => {
         "10",
         "__initialized:organization:org_1",
         "1",
+        `project:${PROJECT_ID}`,
+        "10",
+        `__initialized:project:${PROJECT_ID}`,
+        "1",
         "__reservation:res_legacy_cancel:1",
         "10"
       );
@@ -766,7 +809,7 @@ describe("SponsorshipBudgetRedis", () => {
     await budget.cancel({
       network: "devnet",
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "res_legacy_cancel",
@@ -780,12 +823,15 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("counts a tenant once when its field is seeded into an already warm window", async () => {
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const policies = [policy("global", 1, true, 1000), policy("organization", 1, true, 1000)];
+    const policies = [
+      policy("global", 1, true, 1000),
+      policy("organization", 1, true, 1000),
+      policy("project", 1, true, 1000),
+    ];
     const window = {
       network: "devnet" as const,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
-      projectId: null,
       policies,
     };
 
@@ -793,6 +839,7 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         ...window,
         organizationId: "org_a",
+        projectId: "project_a",
         reservationId: "res_a",
         attempt: 1,
         amount: 5,
@@ -806,18 +853,19 @@ describe("SponsorshipBudgetRedis", () => {
       attempt: 1,
       reservedLamports: 10,
       organizationId: "org_b",
-      projectId: null,
+      projectId: "project_b",
     };
     await expect(
       budget.reserve({
         ...window,
         organizationId: "org_b",
+        projectId: "project_b",
         reservationId: "res_b1",
         attempt: 1,
         amount: 10,
         usage: {
-          hour: { global: 15, organization: 10, project: 0 },
-          day: { global: 15, organization: 10, project: 0 },
+          hour: { global: 15, organization: 10, project: 10 },
+          day: { global: 15, organization: 10, project: 10 },
         },
         liveReservations: { hour: [liveB2], day: [liveB2] },
       })
@@ -828,18 +876,19 @@ describe("SponsorshipBudgetRedis", () => {
       attempt: 1,
       reservedLamports: 10,
       organizationId: "org_b",
-      projectId: null,
+      projectId: "project_b",
     };
     await expect(
       budget.reserve({
         ...window,
         organizationId: "org_b",
+        projectId: "project_b",
         reservationId: "res_b2",
         attempt: 1,
         amount: 10,
         usage: {
-          hour: { global: 15, organization: 10, project: 0 },
-          day: { global: 15, organization: 10, project: 0 },
+          hour: { global: 15, organization: 10, project: 10 },
+          day: { global: 15, organization: 10, project: 10 },
         },
         liveReservations: { hour: [liveB1], day: [liveB1] },
       })
@@ -855,16 +904,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_self",
         attempt: 1,
         amount: 11,
-        policies: [policy("global", 1, true, 10), policy("organization", 1, true, 10)],
+        policies: [
+          policy("global", 1, true, 10),
+          policy("organization", 1, true, 10),
+          policy("project", 1, true, 10),
+        ],
         usage: {
-          hour: { global: 11, organization: 11, project: 0 },
-          day: { global: 11, organization: 11, project: 0 },
+          hour: { global: 11, organization: 11, project: 11 },
+          day: { global: 11, organization: 11, project: 11 },
         },
         liveReservations: {
           hour: [
@@ -873,7 +926,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 11,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -882,7 +935,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 11,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -898,16 +951,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_over",
         attempt: 1,
         amount: 5,
-        policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+        policies: [
+          policy("global", 1, true, 20),
+          policy("organization", 1, true, 20),
+          policy("project", 1, true, 20),
+        ],
         usage: {
-          hour: { global: 25, organization: 25, project: 0 },
-          day: { global: 25, organization: 25, project: 0 },
+          hour: { global: 25, organization: 25, project: 25 },
+          day: { global: 25, organization: 25, project: 25 },
         },
         liveReservations: {
           hour: [
@@ -916,7 +973,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -925,7 +982,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -937,10 +994,14 @@ describe("SponsorshipBudgetRedis", () => {
     const base = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
-      policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+      policies: [
+        policy("global", 1, true, 100),
+        policy("organization", 1, true, 100),
+        policy("project", 1, true, 100),
+      ],
     };
     const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
     const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
@@ -952,8 +1013,8 @@ describe("SponsorshipBudgetRedis", () => {
         attempt: 1,
         amount: 5,
         usage: {
-          hour: { global: 8, organization: 8, project: 0 },
-          day: { global: 8, organization: 8, project: 0 },
+          hour: { global: 8, organization: 8, project: 8 },
+          day: { global: 8, organization: 8, project: 8 },
         },
         liveReservations: {
           hour: [
@@ -962,7 +1023,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 8,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -971,7 +1032,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 8,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -988,8 +1049,8 @@ describe("SponsorshipBudgetRedis", () => {
         attempt: 1,
         amount: 8,
         usage: {
-          hour: { global: 13, organization: 13, project: 0 },
-          day: { global: 13, organization: 13, project: 0 },
+          hour: { global: 13, organization: 13, project: 13 },
+          day: { global: 13, organization: 13, project: 13 },
         },
         liveReservations: { hour: [], day: [] },
       })
@@ -1012,6 +1073,10 @@ describe("SponsorshipBudgetRedis", () => {
       "organization:org_1",
       "0",
       "__initialized:organization:org_1",
+      "1",
+      `project:${PROJECT_ID}`,
+      "0",
+      `__initialized:project:${PROJECT_ID}`,
       "1"
     );
 
@@ -1019,16 +1084,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_a",
         attempt: 1,
         amount: 4,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        policies: [
+          policy("global", 1, true, 100),
+          policy("organization", 1, true, 100),
+          policy("project", 1, true, 100),
+        ],
         usage: {
-          hour: { global: 4, organization: 4, project: 0 },
-          day: { global: 4, organization: 4, project: 0 },
+          hour: { global: 4, organization: 4, project: 4 },
+          day: { global: 4, organization: 4, project: 4 },
         },
         liveReservations: {
           hour: [
@@ -1037,7 +1106,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 4,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -1046,7 +1115,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 4,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -1070,6 +1139,10 @@ describe("SponsorshipBudgetRedis", () => {
       "organization:org_1",
       "98",
       "__initialized:organization:org_1",
+      "1",
+      `project:${PROJECT_ID}`,
+      "98",
+      `__initialized:project:${PROJECT_ID}`,
       "1"
     );
 
@@ -1077,16 +1150,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_a",
         attempt: 1,
         amount: 4,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        policies: [
+          policy("global", 1, true, 100),
+          policy("organization", 1, true, 100),
+          policy("project", 1, true, 100),
+        ],
         usage: {
-          hour: { global: 4, organization: 4, project: 0 },
-          day: { global: 98, organization: 98, project: 0 },
+          hour: { global: 4, organization: 4, project: 4 },
+          day: { global: 98, organization: 98, project: 98 },
         },
         liveReservations: {
           hour: [
@@ -1095,7 +1172,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 4,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -1104,7 +1181,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 4,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -1125,16 +1202,20 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_1",
-        projectId: null,
+        projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_a",
         attempt: 1,
         amount: 3,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        policies: [
+          policy("global", 1, true, 100),
+          policy("organization", 1, true, 100),
+          policy("project", 1, true, 100),
+        ],
         usage: {
-          hour: { global: 5, organization: 5, project: 0 },
-          day: { global: 5, organization: 5, project: 0 },
+          hour: { global: 5, organization: 5, project: 5 },
+          day: { global: 5, organization: 5, project: 5 },
         },
         liveReservations: {
           hour: [
@@ -1143,7 +1224,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
           day: [
@@ -1152,7 +1233,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_1",
-              projectId: null,
+              projectId: PROJECT_ID,
             },
           ],
         },
@@ -1173,13 +1254,17 @@ describe("SponsorshipBudgetRedis", () => {
       budget.reserve({
         network: "devnet",
         organizationId: "org_a",
-        projectId: null,
+        projectId: "project_a",
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
         reservationId: "res_a",
         attempt: 1,
         amount: 3,
-        policies: [policy("global", 1, true, 100), policy("organization", 1, true, 100)],
+        policies: [
+          policy("global", 1, true, 100),
+          policy("organization", 1, true, 100),
+          policy("project", 1, true, 100),
+        ],
         usage: {
           hour: { global: 5, organization: 0, project: 0 },
           day: { global: 5, organization: 0, project: 0 },
@@ -1191,7 +1276,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_b",
-              projectId: null,
+              projectId: "project_b",
             },
           ],
           day: [
@@ -1200,7 +1285,7 @@ describe("SponsorshipBudgetRedis", () => {
               attempt: 1,
               reservedLamports: 5,
               organizationId: "org_b",
-              projectId: null,
+              projectId: "project_b",
             },
           ],
         },
@@ -1217,13 +1302,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_mismatch",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
@@ -1249,13 +1338,17 @@ describe("SponsorshipBudgetRedis", () => {
     const input = {
       network: "devnet" as const,
       organizationId: "org_1",
-      projectId: null,
+      projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       reservationId: "reservation_retry",
       attempt: 1,
       amount: 5,
-      policies: [policy("global", 1, true, 20), policy("organization", 1, true, 20)],
+      policies: [
+        policy("global", 1, true, 20),
+        policy("organization", 1, true, 20),
+        policy("project", 1, true, 20),
+      ],
       usage: EMPTY_USAGE,
     };
     await budget.reserve(input);

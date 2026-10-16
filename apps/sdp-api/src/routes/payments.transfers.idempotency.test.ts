@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
@@ -28,6 +29,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
+  installClusterRpcStub();
   it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
     const signAndSendMock = vi
       .fn()

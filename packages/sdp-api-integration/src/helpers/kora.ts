@@ -5,7 +5,7 @@ import { env } from "#env-impl";
 const { resolveKoraEndpoint } = apiTestSupport;
 
 /** The Kora this run targets: the `SOLANA_NETWORK` cluster's `KORA_<CLUSTER>_*` trio, or null. */
-export const koraEndpoint = resolveKoraEndpoint(env);
+export const koraEndpoint = resolveKoraEndpoint(env, resolveDefaultCluster(env));
 
 /** The env var that names {@link koraEndpoint}'s URL, for "missing" messages. */
 export const KORA_URL_ENV_KEY =

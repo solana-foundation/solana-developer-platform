@@ -213,9 +213,7 @@ type RampStatusWriterRoute =
   /** Writes go through `transitionRampTransfer`. */
   | "table"
   /** Still sets the status itself; moves onto the table in HOO-2087. */
-  | "direct"
-  /** Still sets the status itself; deleted with BVNK (HOO-2037). */
-  | "direct_until_bvnk_removal";
+  | "direct";
 
 interface RampStatusWriter {
   writer: string;
@@ -268,27 +266,6 @@ const RAMP_STATUS_WRITERS: RampStatusWriter[] = [
     file: "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
     evidence: 'status: reusedRampTransfer ? "settling" : "confirmed"',
     route: "direct",
-    guardedCalls: 0,
-  },
-  {
-    writer: "BVNK off-ramp quote failure",
-    file: "apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts",
-    evidence: 'fromStatuses: ["pending"]',
-    route: "direct_until_bvnk_removal",
-    guardedCalls: 1,
-  },
-  {
-    writer: "BVNK quote and pay-in route helpers",
-    file: "apps/sdp-api/src/routes/payments/ramps/providers/bvnk.ts",
-    evidence: ".updateTransferStatusGuarded(",
-    route: "direct_until_bvnk_removal",
-    guardedCalls: 2,
-  },
-  {
-    writer: "BVNK pay-in and payout reconciliation",
-    file: "apps/sdp-api/src/db/repositories/bvnk-onramp-transfers.repository.postgres.ts",
-    evidence: "SET status = 'settling'",
-    route: "direct_until_bvnk_removal",
     guardedCalls: 0,
   },
 ];

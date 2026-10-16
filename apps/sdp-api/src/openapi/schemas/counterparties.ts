@@ -187,69 +187,9 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("collect_counterparty"),
-      fields: z.array(requirementFieldSchema),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("collect_counterparty_residence"),
-      fields: z.array(requirementFieldSchema),
-    }),
-    z.object({
-      ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
       reason: z.string(),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("counterparty_collect_agreement"),
-      agreements: z.array(
-        z.object({
-          name: withOpenApi(z.string(), {
-            description: "BVNK agreement identifier (v1 agreements have no id).",
-          }),
-          displayName: withOpenApi(z.string(), { description: "Agreement display name." }),
-          description: withOpenApi(z.string(), {
-            description: "Agreement summary text.",
-          }),
-          url: withOpenApi(z.url(), {
-            description: "Agreement text URL, stored statically on the customer link.",
-          }),
-          privacyPolicyUrl: withOpenApi(z.url(), {
-            description: "Privacy policy URL, stored statically on the customer link.",
-          }),
-        })
-      ),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("customer_verification_required"),
-      verificationUrl: z.url(),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.enum(["customer_verifying", "customer_verification_failed"]),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("counterparty_agreement_signing"),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("customer_funding_account_provisioning"),
-    }),
-    z.object({
-      ...requirementBase,
-      provider: z.literal("bvnk"),
-      status: z.literal("customer_funding_account_provisioning_failed"),
     }),
   ]),
   {
@@ -483,8 +423,7 @@ const customerLinkBaseDocFields = {
   }),
   status: counterpartyAccountStatusSchema,
   providerStatus: withOpenApi(z.string().nullable(), {
-    description:
-      "Provider-side customer status when known; for BVNK links before the customer exists, one of PENDING_AGREEMENT / AGREEMENT_SIGNED.",
+    description: "Provider-side customer status when known.",
     example: "ACTIVE",
   }),
   createdAt: withOpenApi(isoDateTimeSchema, {
@@ -501,7 +440,7 @@ export const counterpartyProviderAccountSchema = withOpenApi(
     }),
     provider: withOpenApi(z.enum(PERSISTED_RAMP_PROVIDERS), {
       description: "Ramp provider owning the account. A retired provider's accounts keep its id.",
-      example: "bvnk",
+      example: "moonpay",
     }),
     kind: withOpenApi(
       z.enum(["customer_link", "payout_account", "funding_wallet", "merchant_wallet"]),
@@ -534,56 +473,14 @@ export const counterpartyProviderAccountSchema = withOpenApi(
     }),
     customerLink: withOpenApi(
       z
-        .discriminatedUnion("provider", [
-          z.object({
-            provider: z.literal("bvnk"),
-            ...customerLinkBaseDocFields,
-            providerCustomerReference: withOpenApi(z.string().nullable(), {
-              description: "BVNK customer reference; null until the v1 customer exists.",
-              example: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-            }),
-            residenceCountryCode: withOpenApi(z.enum(COUNTRY_CODES), {
-              description: "Tax-residence country the agreement session was minted for.",
-              example: "US",
-            }),
-            agreements: withOpenApi(
-              z.array(
-                z.object({
-                  name: withOpenApi(z.string(), {
-                    description: "Agreement identifier.",
-                    example: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
-                  }),
-                  displayName: withOpenApi(z.string(), {
-                    description: "Human-readable agreement title.",
-                    example: "Embedded US Partner Platform Customers Agreement",
-                  }),
-                  url: withOpenApi(z.string(), {
-                    description: "Agreement document URL.",
-                    example: "https://help.bvnk.com/hc/en-us/sections/example",
-                  }),
-                  privacyPolicyUrl: withOpenApi(z.string(), {
-                    description: "Privacy policy document URL.",
-                    example: "https://help.bvnk.com/hc/en-us/articles/example",
-                  }),
-                  signedAt: withOpenApi(isoDateTimeSchema.nullable(), {
-                    description:
-                      "When the counterparty signed the agreement session; null while consent is pending.",
-                    example: "2025-01-01T00:00:00.000Z",
-                  }),
-                })
-              ),
-              { description: "Agreements of the session with their signing state." }
-            ),
+        .object({
+          provider: z.enum(PERSISTED_RAMP_PROVIDERS),
+          ...customerLinkBaseDocFields,
+          providerCustomerReference: withOpenApi(z.string(), {
+            description: "Provider-side customer identifier for the counterparty.",
+            example: "Customer:0193b2c4",
           }),
-          z.object({
-            provider: z.enum(PERSISTED_RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
-            ...customerLinkBaseDocFields,
-            providerCustomerReference: withOpenApi(z.string(), {
-              description: "Provider-side customer identifier for the counterparty.",
-              example: "Customer:0193b2c4",
-            }),
-          }),
-        ])
+        })
         .optional(),
       {
         description:
@@ -637,7 +534,7 @@ export const listCounterpartyProviderAccountsQuerySchema =
     .extend({
       provider: withOpenApi(listCounterpartyProviderAccountsQuerySchemaBase.shape.provider, {
         description: "Filter by ramp provider.",
-        example: "bvnk",
+        example: "moonpay",
       }),
       fiatCurrency: withOpenApi(
         listCounterpartyProviderAccountsQuerySchemaBase.shape.fiatCurrency,

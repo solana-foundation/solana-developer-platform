@@ -233,6 +233,10 @@ export interface Env extends ManagedRpcEnv {
   KORA_MAINNET_URL?: string;
   KORA_MAINNET_API_KEY?: string;
   KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
+  /** The Solana RPC the devnet Kora reads and sends on; sponsorship prices and settles devnet against it. */
+  KORA_DEVNET_RPC_URL?: string;
+  /** The Solana RPC the mainnet Kora reads and sends on; sponsorship prices and settles mainnet against it. */
+  KORA_MAINNET_RPC_URL?: string;
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
@@ -282,15 +286,6 @@ export interface Env extends ManagedRpcEnv {
   MOONPAY_SANDBOX_SECRET_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
 
-  // BVNK ramps configuration
-  BVNK_HAWK_AUTH_ID?: string;
-  BVNK_HAWK_SECRET_KEY?: string;
-  BVNK_WALLET_ID?: string;
-  BVNK_WEBHOOK_SECRET?: string;
-  BVNK_SANDBOX_HAWK_AUTH_ID?: string;
-  BVNK_SANDBOX_HAWK_SECRET_KEY?: string;
-  BVNK_SANDBOX_WALLET_ID?: string;
-  BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
   // Stripe sandbox only: production projects bring their own Stripe account.
   STRIPE_SANDBOX_SECRET_KEY?: string;

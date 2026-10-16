@@ -23,19 +23,16 @@ export type RampProviderOption = {
 
 export const RAMP_PROVIDER_LOGOS = {
   moonpay: "/provider-logos/moonpay.svg",
-  bvnk: "/provider-logos/bvnk.svg",
   stripe: "/provider-logos/stripe.svg",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_WEBSITES = {
   moonpay: "https://www.moonpay.com",
-  bvnk: "https://www.bvnk.com",
   stripe: "https://stripe.com",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "moonpay", title: "MoonPay" },
-  { id: "bvnk", title: "BVNK" },
   { id: "stripe", title: "Stripe" },
 ];
 
@@ -122,7 +119,12 @@ export function rampPairKey(pair: SelectedRampPair): string {
 }
 
 export function getRampProviderLabel(provider: PersistedRampProviderId): string {
-  return RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ?? provider;
+  return (
+    RAMP_PROVIDER_OPTIONS.find((option) => option.id === provider)?.title ??
+    (provider.length <= 4
+      ? provider.toUpperCase()
+      : provider.charAt(0).toUpperCase() + provider.slice(1))
+  );
 }
 
 /** A retired provider has no logo; its stored rows render with the label alone. */

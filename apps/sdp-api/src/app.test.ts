@@ -76,7 +76,7 @@ function buildApp(observability: Observability) {
     throw new SdpPaymentsError(
       "PROVIDER_UNAVAILABLE",
       "Invalid apiKey=ramp-secret",
-      { apiKey: "ramp-secret", provider: "bvnk" },
+      { apiKey: "ramp-secret", provider: "moonpay" },
       { providerMessage: "quote service down for jane.doe@example.com" }
     );
   });
@@ -404,7 +404,7 @@ describe("createApp onError capture", () => {
     expect(body.error.message).toBe("Invalid apiKey=[REDACTED]");
     expect(body.error.details).toEqual({
       apiKey: "[REDACTED]",
-      provider: "bvnk",
+      provider: "moonpay",
     });
     const logged = loggerError.mock.calls.find(
       ([payload]) =>

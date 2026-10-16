@@ -1,61 +1,23 @@
 "use client";
 
-import { isTerminalRampTransferStatus } from "@sdp/types";
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard.redesign";
 import { walletComboboxOptions } from "../wallet-options";
-import { BvnkAgreementConsent } from "./bvnk-agreement-consent.redesign";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
-import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
-import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
-import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector.redesign";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
 import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
-
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-function OfframpManualQuoteStep({
-  wizard,
-  quote,
-  t,
-}: {
-  wizard: OfframpWizard;
-  quote: Extract<NonNullable<OfframpWizard["quote"]>, { deliveryMode: "manual_instructions" }>;
-  t: Translate;
-}) {
-  const { selectedRampPair, fields, transferStatus } = wizard;
-
-  if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
-    return <RampStatusPanel direction="offramp" transfer={transferStatus} />;
-  }
-
-  const cryptoToken = getCryptoRailAssetLabel(selectedRampPair.assetRail);
-  const depositCopy = { amount: fields.amount.trim(), token: cryptoToken };
-
-  return (
-    <ManualInstructionsQuote
-      amount={fields.amount.trim()}
-      quote={quote}
-      fiatCurrency={selectedRampPair.fiatCurrency}
-      instructions={quote.paymentInstructions}
-      description={t("DashboardPayments.ramps.offrampManualDescription", depositCopy)}
-    />
-  );
-}
 
 function OfframpWalletStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
@@ -148,43 +110,8 @@ function OfframpWithdrawStep({ wizard }: { wizard: OfframpWizard }) {
 }
 
 function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
-  const {
-    requirementFields,
-    collectedData,
-    setCollectedField,
-    requirementsBlocker,
-    onboarding,
-    isAdvancing,
-    retryOnboarding,
-    pendingAgreements,
-    acceptedAgreements,
-    toggleAgreement,
-  } = wizard;
-
-  if (pendingAgreements !== null) {
-    return (
-      <BvnkAgreementConsent
-        agreements={pendingAgreements}
-        acceptedAgreements={acceptedAgreements}
-        onToggle={toggleAgreement}
-        disabled={isAdvancing}
-      />
-    );
-  }
-
-  if (
-    onboarding !== null &&
-    hasOnboardingLifecycle(onboarding.provider) &&
-    isOnboardingPanelStatus(onboarding)
-  ) {
-    return (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
-    );
-  }
-
-  // Native fieldset[disabled] freezes every nested input and combobox trigger
-  // while the advance POST is in flight, so mid-flight edits can't desync the
-  // form from what the provider was sent.
+  const { requirementFields, collectedData, setCollectedField, requirementsBlocker, isAdvancing } =
+    wizard;
   return (
     <div className="space-y-4">
       <RequirementsBlocker message={requirementsBlocker} />
@@ -202,15 +129,8 @@ function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
 function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const demo = usePaymentsDemo();
-  const {
-    quote,
-    transferStatus,
-    quoteCreationError,
-    quoteCreationRetrying,
-    retryQuoteCreation,
-    onboarding,
-    retryOnboarding,
-  } = wizard;
+  const { quote, transferStatus, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } =
+    wizard;
 
   if (!quote) {
     if (quoteCreationError) {
@@ -222,19 +142,6 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
         />
       );
     }
-    if (
-      onboarding &&
-      hasOnboardingLifecycle(onboarding.provider) &&
-      isOnboardingPanelStatus(onboarding)
-    ) {
-      return (
-        <RampOnboardingPanel
-          direction="offramp"
-          onboarding={onboarding}
-          onRetry={retryOnboarding}
-        />
-      );
-    }
     return <RampQuoteSkeleton />;
   }
 
@@ -243,7 +150,7 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   }
 
   // A provider's own page or widget can't open on sample data; the demo stands in for it.
-  if (demo && quote.deliveryMode !== "manual_instructions") {
+  if (demo) {
     return (
       <div className="space-y-6">
         <DemoProviderCheckout
@@ -265,10 +172,6 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
         src={quote.hostedUrl}
       />
     );
-  }
-
-  if (quote.deliveryMode === "manual_instructions") {
-    return <OfframpManualQuoteStep wizard={wizard} quote={quote} t={t} />;
   }
 
   return <RampQuoteSkeleton />;

@@ -59,6 +59,5 @@ export const {
   newDesignPayDeposit,
   newDesignActivity,
   rampProviderMoonpay,
-  rampProviderBvnk,
   rampProviderStripe,
 } = flags;

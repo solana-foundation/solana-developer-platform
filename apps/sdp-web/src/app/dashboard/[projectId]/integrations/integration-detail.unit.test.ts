@@ -62,7 +62,7 @@ describe("integration detail", () => {
   });
 
   it("resolves no detail for a provider the project cannot use", () => {
-    for (const provider of ["fireblocks", "bvnk", "trm"]) {
+    for (const provider of ["fireblocks", "coinbase", "trm"]) {
       expect(resolveIntegrationDetail({ provider, ...INPUTS })).toBeNull();
     }
   });

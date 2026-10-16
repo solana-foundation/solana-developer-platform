@@ -4,6 +4,7 @@ import {
   type PaymentTransferBatchRecipientStatus,
   type PaymentTransferBatchStatus,
   type PaymentTransferStatus,
+  type SdpEnvironment,
   type TransferChainVerdictStatus,
 } from "@sdp/types";
 
@@ -332,6 +333,8 @@ export interface PaymentTransferBatchesRepository {
    * System-only (the reconciliation job), oldest first.
    */
   listStrandedTransferBatches(input: {
+    /** Only batches whose project is in this environment, so one job run settles one cluster's batches. */
+    environment: SdpEnvironment;
     createdBefore: string;
     limit: number;
   }): Promise<RecomputeTransferBatchStatusInput[]>;

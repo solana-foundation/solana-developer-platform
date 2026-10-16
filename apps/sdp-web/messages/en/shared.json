@@ -521,7 +521,6 @@
     "emptyTitle": "No integrations match",
     "emptyBody": "Try a different search or clear the filters.",
     "rampMoonpayDescription": "Card and bank fiat onramp and offramp.",
-    "rampBvnkDescription": "Business payments between fiat and stablecoins.",
     "rampStripeDescription": "Fiat onramp through Stripe checkout.",
     "complianceRangeDescription": "Transaction screening and risk monitoring for Solana.",
     "complianceEllipticDescription": "Blockchain analytics and transaction screening.",

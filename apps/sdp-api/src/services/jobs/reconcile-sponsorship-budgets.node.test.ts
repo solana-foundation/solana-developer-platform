@@ -1,9 +1,11 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import { address } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   SponsorshipBudgetPolicy,
   SponsorshipReconciliationReservation,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
 import {
@@ -173,6 +175,39 @@ function harness(candidate: SponsorshipReconciliationReservation) {
 }
 
 describe("reconcileSponsorshipBudgets", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads a mainnet reservation's chain state through the mainnet Kora RPC", async () => {
+    const env: Env = {
+      ...testEnv,
+      KORA_DEVNET_RPC_URL: "https://kora-devnet-rpc.reconcile.invalid",
+      KORA_MAINNET_RPC_URL: "https://kora-mainnet-rpc.reconcile.invalid",
+    };
+    const { repository, budgetRedis, getTransaction } = harness(
+      reservation({ id: "reservation_mainnet", network: "mainnet" })
+    );
+    const createRpcSpy = vi.spyOn(solanaRpc, "createRpc");
+    const getTransactionSpy = vi
+      .spyOn(solanaRpc, "getTransaction")
+      .mockImplementation(getTransaction);
+
+    await reconcileSponsorshipBudgets(env, {
+      repository,
+      budgetRedis,
+      getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
+      now: () => new Date("2026-08-03T10:05:00.000Z"),
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(createRpcSpy).toHaveBeenCalledExactlyOnceWith(env, {
+      rpcUrl: "https://kora-mainnet-rpc.reconcile.invalid",
+    });
+    expect(getTransactionSpy).toHaveBeenCalledWith(
+      createRpcSpy.mock.results[0]?.value,
+      TEST_SIGNATURE
+    );
+  });
+
   it("runs one pass per network every tick, whether or not a paymaster is wired", async () => {
     // Reservations outlive configuration: a mainnet reservation made while a
     // mainnet Kora was wired must still be settled after it is unwired, so no

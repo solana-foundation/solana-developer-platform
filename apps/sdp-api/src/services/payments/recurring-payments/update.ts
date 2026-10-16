@@ -4,7 +4,8 @@ import {
   getRecurringPaymentOperationStaleBefore,
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -61,7 +62,10 @@ import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
@@ -861,7 +865,7 @@ async function runMetadataScheduleUpdate(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planUpdateSignature = parseNullableStoredSignature(attempt.plan_update_signature);
 
@@ -950,7 +954,6 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     await confirmSubscriptionSignature(
-      input.env,
       planUpdateSignature,
       "Recurring payment update failed on-chain"
     );
@@ -1032,11 +1035,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     authorizationSetupSignature: initSignature,
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment update failed on-chain"
-  );
+  await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -1360,7 +1359,7 @@ async function runReplacementUpdate(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   let attempt = input.attempt;
   let planCreationSignature = parseNullableStoredSignature(attempt.plan_creation_signature);
   let authorizationSignature = parseNullableStoredSignature(attempt.authorization_signature);
@@ -1469,7 +1468,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     planCreationSignature,
     "Recurring payment replacement plan creation failed on-chain"
   );
@@ -1537,12 +1535,15 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      movement: "recurring.update",
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
-    });
+    const feePayment = createSponsorshipFeePayment(
+      input.env,
+      await resolveProjectSponsorshipScope(input.env, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+      }),
+      "recurring.update"
+    );
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
@@ -1599,7 +1600,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     authorizationSignature,
     "Recurring payment replacement authorization failed on-chain"
   );
@@ -1651,7 +1651,6 @@ async function runReplacementUpdate(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     oldCancelSignature,
     "Recurring payment old subscription cancellation failed on-chain"
   );

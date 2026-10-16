@@ -338,32 +338,35 @@ export function createPostgresPaymentRecurringPaymentsRepository(
   db: DatabaseExecutor
 ): PaymentRecurringPaymentsRepository {
   return {
-    async listStaleLifecyclePayments({ staleBefore, limit }) {
+    async listStaleLifecyclePayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
-          `SELECT * FROM payment_recurring_payments
-          WHERE status = ANY(?::text[])
-            AND updated_at <= ? ORDER BY updated_at ASC LIMIT ?`
+          `SELECT rp.* FROM payment_recurring_payments rp
+           JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ?
+            AND rp.status = ANY(?::text[])
+            AND rp.updated_at <= ? ORDER BY rp.updated_at ASC LIMIT ?`
         )
-        .bind([...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
+        .bind(environment, [...RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON], staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecurringPaymentRow);
     },
-    async listStaleUpdatePayments({ staleBefore, limit }) {
+    async listStaleUpdatePayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
-          `SELECT organization_id, project_id, id, updated_at,
-                COUNT(*) OVER () AS stale_count, MIN(updated_at) OVER () AS oldest_updated_at
-           FROM payment_recurring_payments WHERE status = 'updating' AND updated_at <= ?
-          ORDER BY updated_at DESC, id DESC LIMIT ?`
+          `SELECT rp.organization_id, rp.project_id, rp.id, rp.updated_at,
+                COUNT(*) OVER () AS stale_count, MIN(rp.updated_at) OVER () AS oldest_updated_at
+           FROM payment_recurring_payments rp JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ? AND rp.status = 'updating' AND rp.updated_at <= ?
+          ORDER BY rp.updated_at DESC, rp.id DESC LIMIT ?`
         )
-        .bind(staleBefore, limit)
+        .bind(environment, staleBefore, limit)
         .all<Record<string, unknown>>();
       return result.rows.map(
         (row): StalePaymentRecurringPaymentUpdateRow => staleUpdateRowSchema.parse(row)
       );
     },
-    async listRecoverableCollectionPayments({ staleBefore, limit }) {
+    async listRecoverableCollectionPayments({ environment, staleBefore, limit }) {
       const result = await db
         .prepare(
           `SELECT * FROM (
@@ -373,13 +376,16 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              JOIN payment_subscription_collection_attempts a
                ON a.organization_id = rp.organization_id AND a.project_id = rp.project_id
               AND a.subscription_id = rp.subscription_id AND a.due_at = rp.next_collection_due_at
-            WHERE rp.status = ANY(?::text[])
+             JOIN projects p ON p.id = rp.project_id
+            WHERE p.environment = ?
+              AND rp.status = ANY(?::text[])
               AND rp.next_collection_due_at IS NOT NULL
               AND a.status = ANY(?::text[])
               AND ((a.status = 'processing' AND a.updated_at <= ?) OR (rp.status = 'active' AND a.status = 'confirmed'))
          ) recoverable_attempts WHERE attempt_rank = 1 ORDER BY attempt_updated_at ASC LIMIT ?`
         )
         .bind(
+          environment,
           [...RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION],
           [...COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER],
           staleBefore,
@@ -388,11 +394,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .all<Record<string, unknown>>();
       return result.rows.map(mapRecoverableCollectionRecurringPaymentRow);
     },
-    async listDueCollectionPayments({ dueBefore, retryBefore, limit }) {
+    async listDueCollectionPayments({ environment, dueBefore, retryBefore, limit }) {
       const result = await db
         .prepare(
           `SELECT rp.* FROM payment_recurring_payments rp
-          WHERE rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
+           JOIN projects p ON p.id = rp.project_id
+          WHERE p.environment = ? AND rp.status = 'active' AND rp.next_collection_due_at IS NOT NULL AND rp.next_collection_due_at <= ?
             AND NOT EXISTS (SELECT 1 FROM payment_subscription_collection_attempts active_attempt
               WHERE active_attempt.organization_id = rp.organization_id AND active_attempt.project_id = rp.project_id
                 AND active_attempt.subscription_id = rp.subscription_id AND active_attempt.due_at = rp.next_collection_due_at
@@ -403,7 +410,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                 AND failed_attempt.status = 'failed' AND failed_attempt.updated_at > ?)
           ORDER BY rp.next_collection_due_at ASC LIMIT ?`
         )
-        .bind(dueBefore, [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE], retryBefore, limit)
+        .bind(
+          environment,
+          dueBefore,
+          [...COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE],
+          retryBefore,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.rows.map(mapCollectibleRecurringPaymentRow);
     },

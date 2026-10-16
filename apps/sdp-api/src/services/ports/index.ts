@@ -7,7 +7,6 @@
 
 // Fee payment port - gasless transaction sponsorship
 export type {
-  ExtendedFeePaymentPort,
   FeePaymentErrorCode,
   FeePaymentPort,
 } from "@sdp/fee-payment/port";

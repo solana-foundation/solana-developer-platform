@@ -846,7 +846,9 @@ export function createPostgresPaymentTransferBatchesRepository(
         .prepare(
           `SELECT b.id, b.organization_id, b.project_id
              FROM payment_transfer_batches b
-            WHERE b.status = 'processing'
+             JOIN projects p ON p.id = b.project_id
+            WHERE p.environment = ?
+              AND b.status = 'processing'
               AND b.created_at < ?
               AND EXISTS (
                 SELECT 1 FROM payment_transfer_recipients r
@@ -855,7 +857,7 @@ export function createPostgresPaymentTransferBatchesRepository(
             ORDER BY b.created_at
             LIMIT ?`
         )
-        .bind(input.createdBefore, input.limit)
+        .bind(input.environment, input.createdBefore, input.limit)
         .all<{ id: string; organization_id: string; project_id: string }>();
       return result.results.map((row) => ({
         batchId: row.id,

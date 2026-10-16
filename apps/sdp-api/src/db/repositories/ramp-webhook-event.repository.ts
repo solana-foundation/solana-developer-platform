@@ -24,7 +24,7 @@ export interface RampWebhookEventRow {
   /** A retired provider's row still reads, and parks for want of a processor. */
   provider: PersistedRampProviderId;
   environment: SdpEnvironment;
-  /** Verified replay body; BVNK bank details are removed before persistence. */
+  /** Verified provider body, retained only until the event is discharged. */
   rawBody: string;
   providerEventId: string | null;
   applyOutcome: RampWebhookApplyOutcome | null;

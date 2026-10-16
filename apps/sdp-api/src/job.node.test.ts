@@ -1,4 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
+import { SDP_ENVIRONMENTS } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEarnCatalogueSyncIfDue } from "@/cron/earn-catalogue-sync";
 import { runEarnMetricsRefreshTick } from "@/cron/earn-metrics-refresh";
@@ -276,8 +277,8 @@ describe("runCronJob", () => {
       expect.any(Object),
       { deadlineMs: -10_000 }
     );
-    expect(trackPendingTransfers).toHaveBeenCalledOnce();
-    expect(collectDueRecurringPayments).toHaveBeenCalledOnce();
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledOnce();
   });
 
@@ -397,7 +398,7 @@ describe("runCronJob", () => {
     const sweepOrder = vi.mocked(reconcileRevokedApiKeyCache).mock.invocationCallOrder[0];
     const transfersOrder = vi.mocked(trackPendingTransfers).mock.invocationCallOrder[0];
     expect(sweepOrder).toBeLessThan(transfersOrder);
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     // The same ramp list the in-process scheduler runs (cron/ramp-transfers.ts),
     // right after the transfers tick.
@@ -410,7 +411,9 @@ describe("runCronJob", () => {
     });
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
-    expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env, expect.any(Date));
+    expect(vi.mocked(collectDueRecurringPayments).mock.calls).toEqual(
+      SDP_ENVIRONMENTS.map(() => [env, expect.any(Date)])
+    );
     // The rings poll gates itself on the flag plus the http adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
@@ -449,13 +452,13 @@ describe("runCronJob", () => {
     );
     await vi.waitFor(() => {
       expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
-      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     });
     expect(settled).toBe(false);
 
     transfers.resolve(undefined);
     await expect(running).rejects.toThrow("credential cleanup down");
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -469,7 +472,7 @@ describe("runCronJob", () => {
     const completion = expect(runCronJob()).rejects.toThrow("credential cleanup down");
     try {
       await vi.waitFor(() => {
-        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
@@ -494,7 +497,7 @@ describe("runCronJob", () => {
   it("waits for in-flight cleanup when pending transfers fail", async () => {
     const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+    vi.mocked(trackPendingTransfers).mockRejectedValueOnce(new Error("transfers down"));
 
     const running = runCronJob();
     let settled = false;
@@ -508,7 +511,7 @@ describe("runCronJob", () => {
     );
     await vi.waitFor(() => {
       expect(cleanupRetiredProviderCredentialSecrets).toHaveBeenCalledTimes(1);
-      expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+      expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     });
     expect(settled).toBe(false);
 
@@ -517,7 +520,7 @@ describe("runCronJob", () => {
   });
 
   it("fails the job on a recurring-collection error but still releases pools", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 
@@ -530,7 +533,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("ramp inbox down");
 
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
@@ -629,7 +632,7 @@ describe("runCronJob", () => {
   });
 
   it("emits an error-status sdp_cron_run event when a tick fails", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 
@@ -674,7 +677,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).resolves.toBeUndefined();
 
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -690,7 +693,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).resolves.toBeUndefined();
 
     expect(pruneIdempotencyKeysModule.pruneIdempotencyKeys).toHaveBeenCalledExactlyOnceWith(env);
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
   });
 
   it("keeps DvP failures non-fatal and runs later ticks alongside credential cleanup", async () => {
@@ -781,7 +784,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("sync exploded");
 
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
     expect(closeAllRedisClients).toHaveBeenCalledTimes(1);
@@ -823,7 +826,7 @@ describe("runCronJob", () => {
   });
 
   it("reconciles sponsorship budgets even when pending-transfer tracking fails", async () => {
-    vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
+    vi.mocked(trackPendingTransfers).mockRejectedValueOnce(new Error("transfers down"));
 
     await expect(runCronJob()).rejects.toThrow("transfers down");
 

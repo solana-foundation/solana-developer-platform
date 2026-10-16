@@ -18,7 +18,11 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import * as solanaServices from "@/services/solana";
-import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
+import {
+  createSponsorshipFeePayment,
+  resolveRequestSponsorshipScope,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
 import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
@@ -135,13 +139,17 @@ export async function createTransferBatch(
 ) {
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
-  const resolved = await resolveBatchMovement(c, body, authorized);
+  const resolved = await resolveBatchMovement(body, authorized);
   // The credential-bound record key (ADR 0009), never the raw client key, and
   // the key layer's fingerprint, which canonicalizes the batch body.
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
 
-  const feePayment = getFeePayment(c, "payments.transfer_batch");
+  const feePayment = createSponsorshipFeePayment(
+    c.env,
+    resolveRequestSponsorshipScope(c),
+    "payments.transfer_batch"
+  );
   const [signer, feePayer, lifetime] = await Promise.all([
     solanaServices.createOrgSignerForCustodyWallet(
       c.env,

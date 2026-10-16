@@ -1,11 +1,9 @@
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured } from "../errors";
-import { BvnkRampClient } from "./providers/bvnk/client";
 import { MoonpayRampClient } from "./providers/moonpay/client";
 import { StripeRampClient } from "./providers/stripe/client";
 import type { RampProvider } from "./types";
 
-export { BvnkRampClient } from "./providers/bvnk/client";
 export { hasMoonpayManagedKeys, MoonpayRampClient } from "./providers/moonpay/client";
 export { hasStripeManagedKeys, StripeRampClient } from "./providers/stripe/client";
 export type {
@@ -24,7 +22,6 @@ export { providerRailSupportSnapshotSchema } from "./types";
 
 export const RAMP_PROVIDER_CLIENTS = {
   moonpay: new MoonpayRampClient(),
-  bvnk: new BvnkRampClient(),
   stripe: new StripeRampClient(),
 } as const satisfies Record<RampProviderId, RampProvider>;
 

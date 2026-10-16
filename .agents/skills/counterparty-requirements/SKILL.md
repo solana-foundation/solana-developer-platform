@@ -59,7 +59,6 @@ The full status union, discriminated on `(provider, status)`:
 | Provider | Statuses |
 |---|---|
 | every provider | `ready`, `collect(fields)`, `unsupported(reason)` |
-| bvnk | `onboarding_not_started`, `customer_verification_required(verificationUrl)`, `customer_verifying`, `customer_verification_failed`, `funding_account_provisioning`, `provisioning_failed` |
 
 The authoritative union is `CounterpartyRequirements` in `packages/sdp-types/src/ramp-requirements.ts` — re-read it before editing; this table goes stale. Extend it only when generic `ready` / `collect` / `unsupported` cannot represent the provider.
 
@@ -86,11 +85,11 @@ The POST handler re-runs `validateCounterparty`, validates submitted `collectedD
 
 ## Listing accounts
 
-`GET /v1/counterparties/:id/provider-accounts` (own route module, `apps/sdp-api/src/routes/counterparty-provider-accounts/`) lists the rows as stored, adding each referenced BVNK funding wallet's live balance; nothing read live is written back. A retired provider's rows still list. The surface is provider-generic — never special-case a provider in the endpoint, response schema, or UI.
+`GET /v1/counterparties/:id/provider-accounts` (own route module, `apps/sdp-api/src/routes/counterparty-provider-accounts/`) lists the rows as stored. A retired provider's rows still list. The surface is provider-generic — never special-case a provider in the endpoint, response schema, or UI.
 
 ## Gating
 
-Quotes consume the provisioned state: a verification-gated provider needs its active `customer_link` and any required resource rows (a BVNK off-ramp also needs its provisioned `funding_wallet`). If it's not there, the quote throws `counterpartyNotProvisioned` — it does not fall back to an ungated quote.
+Quotes consume the provisioned state when a provider requires it: a verification-gated provider needs its active `customer_link` and any required resource rows. If they are missing, the quote throws `counterpartyNotProvisioned` — it does not fall back to an ungated quote.
 
 ## Rules + verify
 

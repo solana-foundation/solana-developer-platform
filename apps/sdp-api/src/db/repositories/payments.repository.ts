@@ -8,6 +8,7 @@ import {
   RAMP_TRANSFER_TYPES,
   type RampTransferTransitionId,
   type RampTransferType,
+  type SdpEnvironment,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
@@ -26,7 +27,7 @@ export type { PaymentTransferStatus, PaymentTransferType, RampTransferType };
 export interface PaymentTransferRow {
   id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   custody_wallet_id: string | null;
   wallet_id: string;
   counterparty_id: string | null;
@@ -80,7 +81,7 @@ export interface CreatePaymentTransferInput {
   /** Server-generated transfer id reserved before an external provider call. */
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   custodyWalletId: string;
   walletId: string;
   counterpartyId: string | null;
@@ -110,7 +111,7 @@ export interface CreatePaymentTransferInput {
 export interface UpdatePaymentTransferInput {
   transferId: string;
   organizationId?: string;
-  projectId?: string | null;
+  projectId?: string;
   expectedStatus?: PaymentTransferStatus;
   status?: PaymentTransferStatus;
   signature?: string | null;
@@ -141,14 +142,14 @@ export interface TransferStatusChangeFields {
 export interface RampTransferTransitionInput extends TransferStatusChangeFields {
   transferId: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   transition: RampTransferTransitionId;
   updatedAt: string;
 }
 
 export interface ListTransfersInput {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   walletAuthorization?: {
     custodyWalletIds: string[];
     providerWalletIds: string[];
@@ -174,6 +175,8 @@ export interface ListTransfersInput {
 }
 
 export interface ListTransfersByStatusInput {
+  /** Only transfers whose project is in this environment, so one job run reads one cluster. */
+  environment: SdpEnvironment;
   statuses: PaymentTransferStatus[];
   types?: readonly PaymentTransferType[];
   hasSignature?: boolean;
@@ -194,7 +197,7 @@ export type GetTransferByProviderReferenceInput = {
 } & (
   | {
       organizationId: string;
-      projectId: string | null;
+      projectId: string;
     }
   | {
       organizationId?: never;
@@ -215,7 +218,7 @@ export interface PaymentsRepository {
   updateOnchainTransferForRamp(input: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     custodyWalletId: string;
     walletId: string;
     sourceAddress: string;
@@ -233,14 +236,14 @@ export interface PaymentsRepository {
   }): Promise<PaymentTransferRow | null>;
   findTransferByIdempotency(params: {
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     signature: string;
     signedTransaction: string;
     lastValidBlockHeight: string;
@@ -249,7 +252,7 @@ export interface PaymentsRepository {
   markTransferSubmissionStarted(input: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     startedAt: string;
   }): Promise<PaymentTransferRow | null>;
   /**
@@ -261,7 +264,7 @@ export interface PaymentsRepository {
     input: TransferStatusChangeFields & {
       transferId: string;
       organizationId: string;
-      projectId: string | null;
+      projectId: string;
       fromStatuses: readonly PaymentTransferStatus[];
       toStatus: PaymentTransferStatus;
       updatedAt: string;
@@ -293,7 +296,7 @@ export interface PaymentsRepository {
   claimTransferProviderData(input: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     expectedStatus: PaymentTransferStatus;
     claimPath: readonly string[];
     providerData: Record<string, unknown>;
@@ -318,7 +321,7 @@ export interface PaymentsRepository {
   releaseTransferProviderDataClaim(input: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     expectedStatus: PaymentTransferStatus;
     claimPath: readonly string[];
     claimValue: Record<string, unknown>;
@@ -330,10 +333,11 @@ export interface PaymentsRepository {
    * next: least-recently-polled first (never-polled rows first), bounded to
    * rows confirmed after the given floor. System-only.
    *
-   * @param params - The confirmed_at eligibility floor and the page size.
+   * @param params - The project environment, the confirmed_at eligibility floor and the page size.
    * @returns The next page of the finalization poll queue.
    */
   listConfirmedTransfersToPoll(params: {
+    environment: SdpEnvironment;
     confirmedAfter: string;
     limit: number;
   }): Promise<PaymentTransferRow[]>;
@@ -358,17 +362,17 @@ export interface PaymentsRepository {
   getTransferById(params: {
     transferId: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
   }): Promise<PaymentTransferRow | null>;
   getTransferBySignature(params: {
     signature: string;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByIds(params: {
     transferIds: string[];
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
   }): Promise<PaymentTransferRow[]>;
   getTransferByProviderReference(
     params: GetTransferByProviderReferenceInput
@@ -387,7 +391,7 @@ export interface PaymentsRepository {
   listTransfersBySignatures(params: {
     signatures: string[];
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
   }): Promise<PaymentTransferRow[]>;
   listTransfers(params: ListTransfersInput): Promise<ListTransfersResult>;
 }

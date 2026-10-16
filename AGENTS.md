@@ -69,6 +69,12 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **Prod never rolls back on its own after a promotion.** A rollout that fails before its canary is
+  restored; three failed canary runs leave the new revision serving. Either way prod is held
+  (`sdp_prod_hold`), as after a manual dispatch, until a dispatch with `clear_hold` passes its canary,
+  and going back is the one-click `rollback-sdp-api-gcp-prod.yml`. A `breaking` migration deploys
+  only while prod serves the commit before its last pending edit (`commit` on `/health/ready`) and is
+  never restored. Runbook: `docs/ops/release-operations.md`, "Production Rollback".
 - **Idempotency-Key goes through one step, after authorize (hard rule).** Mutating routes of
   `stable` modules run `validate → authorize(fn) → idempotent()`; money routes use
   `key: "required"` at any stage. `authorize` checks access to every resource the request names

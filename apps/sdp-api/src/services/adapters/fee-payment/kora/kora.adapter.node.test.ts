@@ -15,6 +15,14 @@ const fakeClient = {
 } as unknown as KoraClient;
 
 const TX = new Uint8Array([1, 2, 3, 4]);
+
+function scopedKoraAdapter(): KoraAdapter {
+  return new KoraAdapter({
+    rpcUrl: "http://kora",
+    userId: "sdp:v1:sandbox:org_1:project:project_1:api_key:key_1",
+    client: fakeClient,
+  });
+}
 const ZERO_OUTFLOW_FEE_PAYER_POLICY = {
   system: {
     allow_transfer: false,
@@ -95,7 +103,7 @@ describe("KoraAdapter user_id forwarding", () => {
   });
 
   it("uses Kora config instead of free-pricing fee estimates", async () => {
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toEqual({
       signerAddress: "FeePayer111",
       maxAllowedLamports: 1_000_000n,
@@ -108,7 +116,7 @@ describe("KoraAdapter user_id forwarding", () => {
     getConfig.mockResolvedValueOnce({
       validation_config: { max_allowed_lamports: "2000000", fee_payer_policy: {} },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       maxAllowedLamports: 2_000_000n,
       feePayerMayTransferLamports: true,
@@ -122,7 +130,7 @@ describe("KoraAdapter user_id forwarding", () => {
         fee_payer_policy: { system: { allow_transfer: false } },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       maxAllowedLamports: 2_000_000n,
       feePayerMayTransferLamports: true,
@@ -209,7 +217,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: false,
     });
@@ -226,7 +234,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: false,
     });
@@ -242,7 +250,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -255,7 +263,7 @@ describe("KoraAdapter user_id forwarding", () => {
         fee_payer_policy: Object.create(ZERO_OUTFLOW_FEE_PAYER_POLICY),
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -274,7 +282,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -290,7 +298,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -309,7 +317,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -331,7 +339,7 @@ describe("KoraAdapter user_id forwarding", () => {
         },
       },
     });
-    const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+    const adapter = scopedKoraAdapter();
     await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
       feePayerMayTransferLamports: true,
     });
@@ -346,7 +354,7 @@ describe("KoraAdapter user_id forwarding", () => {
           fee_payer_policy: feePayerPolicy,
         },
       });
-      const adapter = new KoraAdapter({ rpcUrl: "http://kora", client: fakeClient });
+      const adapter = scopedKoraAdapter();
       await expect(adapter.getSponsorshipConfiguration()).resolves.toMatchObject({
         maxAllowedLamports: 2_000_000n,
         feePayerMayTransferLamports: true,
@@ -364,28 +372,6 @@ describe("KoraAdapter user_id forwarding", () => {
     expect(signTransaction).toHaveBeenCalledWith(
       expect.objectContaining({ user_id: "usr_abc123" })
     );
-  });
-
-  it("uses a fail-closed user_id on signAndSend when no scoped identity is configured", async () => {
-    const adapter = new KoraAdapter({
-      rpcUrl: "http://kora",
-      client: fakeClient,
-    });
-    await adapter.signAndSend(TX);
-    const arg = signAndSendTransaction.mock.calls[0]?.[0] ?? {};
-    expect(arg).toHaveProperty("user_id", "sdp:unscoped");
-    expect(arg).toHaveProperty("transaction");
-  });
-
-  it("uses a fail-closed user_id on signAsFeePayer when no scoped identity is configured", async () => {
-    const adapter = new KoraAdapter({
-      rpcUrl: "http://kora",
-      client: fakeClient,
-    });
-    await adapter.signAsFeePayer(TX);
-    const arg = signTransaction.mock.calls[0]?.[0] ?? {};
-    expect(arg).toHaveProperty("user_id", "sdp:unscoped");
-    expect(arg).toHaveProperty("transaction");
   });
 
   it("adds a Cloud Run service identity while preserving Kora API-key auth", async () => {
@@ -413,7 +399,8 @@ describe("KoraAdapter user_id forwarding", () => {
         KORA_DEVNET_API_KEY: "kora-api-key",
         KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
       },
-      "sdp:v1:production:org:project:user:actor"
+      "sdp:v1:production:org:project:user:actor",
+      "devnet"
     );
 
     await adapter.signAsFeePayer(TX);
@@ -440,7 +427,8 @@ describe("KoraAdapter user_id forwarding", () => {
           KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
           KORA_DEVNET_CLOUD_RUN_AUDIENCE: "https://private-kora.example",
         },
-        "sdp:v1:production:org:organization:api_key:key"
+        "sdp:v1:production:org:project:prj:api_key:key",
+        "devnet"
       )
     ).toThrow(
       "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"
@@ -453,7 +441,7 @@ describe("KoraAdapter user_id forwarding", () => {
         new KoraAdapter({
           rpcUrl: "http://private-kora.example",
           identityTokenAudience: "http://private-kora.example",
-          userId: "sdp:v1:production:org:organization:api_key:key",
+          userId: "sdp:v1:production:org:project:prj:api_key:key",
         })
     ).toThrow(
       "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"

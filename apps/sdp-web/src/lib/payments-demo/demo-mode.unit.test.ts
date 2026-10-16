@@ -151,19 +151,6 @@ describe("scope", () => {
     expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();
   });
 
-  it("refuses a demo-only write outside the demo instead of sending it to the API", async () => {
-    const verify = () =>
-      call("POST", "/v1/payments/demo/verifications", {
-        provider: "bvnk",
-        counterpartyId: "demo_cpty_jane",
-      });
-    browser.demoMode = false;
-    expect((await verify()).status).toBe(404);
-    browser.demoMode = true;
-    browser.jar.delete("sdp-payments-demo");
-    expect((await verify()).status).toBe(404);
-  });
-
   it("answers anything about payment data itself, and lets project reads through", async () => {
     expect((await call("GET", "/v1/counterparties/cpty_real")).status).toBe(404);
     expect((await call("GET", "/v1/payments/transfers/xfr_real")).status).toBe(404);
@@ -201,7 +188,7 @@ describe("scope", () => {
 
   it("offers only the ramp providers the channel-capped flags leave on", async () => {
     browser.projectHeader = PROJECT;
-    browser.rampProviders = ["moonpay", "bvnk"];
+    browser.rampProviders = ["moonpay"];
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
@@ -213,7 +200,6 @@ describe("scope", () => {
     const body = await response?.json();
     const ramps = body.data.providers.ramps as Record<RampProviderId, { enabled: boolean }>;
     expect(RAMP_PROVIDERS.filter((provider) => ramps[provider].enabled).sort()).toEqual([
-      "bvnk",
       "moonpay",
     ]);
     upstream.mockClear();
@@ -391,17 +377,6 @@ describe("ramps and the release channel", () => {
 });
 
 describe("ramps", () => {
-  /** Walks a contact through BVNK's demo onboarding: agreements, the identity check, review. */
-  async function onboardBvnk(counterpartyId: string) {
-    await call("POST", `/v1/counterparties/${counterpartyId}/requirements`, {
-      provider: "bvnk",
-      direction: "offramp",
-      agreementConsent: true,
-    });
-    await call("POST", "/v1/payments/demo/verifications", { provider: "bvnk", counterpartyId });
-    vi.setSystemTime(new Date(Date.now() + 14_000));
-  }
-
   it("runs a deposit from quote to a completed transfer, then credits the wallet", async () => {
     const requirements = await data<{ status: string }>(
       "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
@@ -445,14 +420,13 @@ describe("ramps", () => {
   });
 
   it("pays out once the crypto is sent", async () => {
-    await onboardBvnk("demo_cpty_jane");
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
 
     const quoted = await call("POST", "/v1/payments/ramps/offramp/quote", {
-      provider: "bvnk",
+      provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
@@ -460,8 +434,12 @@ describe("ramps", () => {
       fiatCurrency: "USD",
     });
     const { quote, transferId } = quoted.body.data;
-    const deposit = quote.paymentInstructions[0];
-    expect(deposit.kind).toBe("crypto_deposit");
+    expect(quote.deliveryMode).toBe("hosted");
+    const waiting = await data<{ transfer: { cryptoDeposit: { destinationAddress: string } } }>(
+      `/v1/payments/transfers/${transferId}`
+    );
+    const deposit = waiting.transfer.cryptoDeposit;
+    expect(deposit.destinationAddress).toBeTruthy();
 
     const funded = await call("POST", "/v1/payments/transfers", {
       transferId,
@@ -524,8 +502,8 @@ describe("every ramp provider", () => {
       provider: string;
       estimate: { cryptoAmount: string; fees: { total: string } };
     }[] = estimate.body.data.estimates;
-    expect(results.map((result) => result.provider).sort()).toEqual(["bvnk", "moonpay", "stripe"]);
-    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(3);
+    expect(results.map((result) => result.provider).sort()).toEqual(["moonpay", "stripe"]);
+    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(2);
     // 250 USD less MoonPay's 3.5%, at 148.20 USD a SOL.
     expect(results.find((result) => result.provider === "moonpay")?.estimate.cryptoAmount).toBe(
       "1.6279"
@@ -552,57 +530,6 @@ describe("every ramp provider", () => {
       });
     }
   );
-
-  it("runs BVNK's onboarding: agreements, a simulated identity check, review, then the deposit", async () => {
-    const path =
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=EUR";
-    const status = async () => (await data<{ status: string }>(path)).status;
-    const advance = (extra: Record<string, unknown>) =>
-      call("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
-        provider: "bvnk",
-        direction: "onramp",
-        assetRail: "usdc.solana",
-        fiatCurrency: "EUR",
-        ...extra,
-      });
-    const simulateVerification = (counterpartyId = "demo_cpty_jane", provider = "bvnk") =>
-      call("POST", "/v1/payments/demo/verifications", { provider, counterpartyId });
-
-    expect(await status()).toBe("counterparty_collect_agreement");
-    expect((await advance({ collectedData: {} })).body.data.status).toBe(
-      "counterparty_collect_agreement"
-    );
-    expect((await simulateVerification()).status).toBe(409);
-    expect((await onrampQuote("bvnk", "usdc.solana", "EUR")).status).toBe(409);
-
-    const consented = await advance({ agreementConsent: true });
-    expect(consented.body.data).toMatchObject({
-      status: "customer_verification_required",
-      verificationUrl: expect.stringMatching(/^https:\/\//),
-    });
-    expect(await status()).toBe("customer_verification_required");
-
-    expect((await simulateVerification("demo_cpty_jane", "moonpay")).status).toBe(400);
-    expect((await simulateVerification()).status).toBe(200);
-    expect(await status()).toBe("customer_verifying");
-    expect((await simulateVerification()).status).toBe(409);
-    expect((await onrampQuote("bvnk", "usdc.solana", "EUR")).status).toBe(409);
-
-    vi.setSystemTime(new Date(Date.now() + 9_000));
-    expect(await status()).toBe("customer_funding_account_provisioning");
-    vi.setSystemTime(new Date(Date.now() + 5_000));
-    expect(await status()).toBe("ready");
-    expect((await advance({ collectedData: {} })).body.data.status).toBe("ready");
-
-    const quoted = await onrampQuote("bvnk", "usdc.solana", "EUR");
-    const { quote, transferId } = quoted.body.data;
-    expect(quote.paymentInstructions[0]).toMatchObject({
-      kind: "fiat_funding",
-      onboardingStatus: "ready",
-    });
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
-    expect((await statusAfterSettling(transferId)).status).toBe("completed");
-  });
 
   it("refuses a provider on a pair it doesn't run", async () => {
     const refused = await onrampQuote("stripe", "usdc.solana", "EUR");
