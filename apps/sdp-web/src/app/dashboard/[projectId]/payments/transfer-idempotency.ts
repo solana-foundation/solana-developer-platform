@@ -1,10 +1,12 @@
 "use client";
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
+import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+  createIdempotencyKeyStore,
+  resetIdempotencyKeyStoresForTests,
+  settleMoneyIdempotencyKey,
+} from "@/lib/idempotency-key-store";
 import {
   type CreateTransferInput,
   createTransfer,
@@ -17,17 +19,18 @@ import {
  *
  * Without a key, pressing Send again after a timeout is a new payment to the
  * API, and both can send the money. With the same key the API's replay finds
- * the first transfer and sends nothing more. Storage, expiry and holds are the
- * shared store's; this module owns what makes two sends the same payment.
+ * the first transfer and sends nothing more. Storage and the
+ * retire rule are the shared store's; this module owns what makes two sends
+ * the same payment.
  */
 
-const store = createPaymentIdempotencyStore("sdp:payments:transfer:idempotency:v1");
+const store = createIdempotencyKeyStore("sdp:payments:transfer:idempotency:v1");
 type TransferSendResult = { transfer: TransferRecord; fingerprint: string };
 const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferIdempotencyStateForTests(): void {
-  store.resetForTests();
+  resetIdempotencyKeyStoresForTests();
   pendingSends.clear();
 }
 
@@ -48,17 +51,12 @@ export function transferRequestFingerprint(input: CreateTransferInput): string {
 
 /** The key for this payment, the same one on every retry until it is released. */
 export function claimTransferIdempotencyKey(fingerprint: string): string {
-  return store.claim(fingerprint);
+  return store.claim(fingerprint).key;
 }
 
-/** Retire the key once the API recorded the transfer or refused it with a 4xx. */
-export function releaseTransferIdempotencyKey(fingerprint: string): void {
-  store.release(fingerprint);
-}
-
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
+/** Retire the key once an answer retires it (`answerRetiresKey`). */
+export function releaseTransferIdempotencyKey(fingerprint: string, key: string): void {
+  store.release(fingerprint, key);
 }
 
 /**
@@ -78,34 +76,29 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
-  // A provider may repeat its signature callback after a lost event response.
-  // Its session still names the same payment, even after the transfer lands.
-  if (providerSession) store.hold(fingerprint);
+  const { key, persisted } = store.claim(fingerprint);
   let transfer: TransferRecord;
   try {
-    transfer = await createTransfer(submission, t, idempotencyKey);
+    transfer = await createTransfer(submission, t, { value: key, persisted });
   } catch (error) {
-    // A provider session always names the same payment, including after an
-    // expired login rejects a callback retry. Never release its recorded key.
-    // A 4xx for a new manual send frees the key. A 5xx or a network
-    // failure keeps it: the API may have recorded the transfer before the
-    // answer was lost. A 409 under our own key keeps it too.
-    if (
-      !providerSession &&
-      error instanceof TransferRequestError &&
-      error.status >= 400 &&
-      error.status < 500 &&
-      !isTransferKeyConflict(error.status)
-    ) {
-      releaseTransferIdempotencyKey(fingerprint);
+    // A provider may repeat its signature callback after a lost event response,
+    // and its session always names the same payment, so its key is never
+    // released. Otherwise the money rule decides (`moneyAnswerRetiresKey`).
+    if (!providerSession && error instanceof TransferRequestError) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
+        // The key is kept, so the next press is answered under it: send nothing new.
+        throw new TransferRequestError(t(uncertain), error.status, error.replayed, error.code);
+      }
     }
     throw error;
   }
   if (!providerSession) {
     // The transfer row exists, so the key is spent: the next identical send is a
     // new payment rather than a retry of this one.
-    releaseTransferIdempotencyKey(fingerprint);
+    releaseTransferIdempotencyKey(fingerprint, key);
   }
   return { transfer, fingerprint };
 }

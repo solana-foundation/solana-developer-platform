@@ -146,6 +146,11 @@ export interface ProvisionCoinbaseCdpOptions {
    */
   reuseExisting?: boolean;
   accountPolicy?: string;
+  /**
+   * Sent as CDP's `X-Idempotency-Key`, so a retried create is answered with
+   * the account the first attempt made. A fresh UUID when omitted.
+   */
+  idempotencyKey?: string;
 }
 
 export interface CoinbaseCdpProvisioningConfig {
@@ -332,15 +337,10 @@ export async function provisionPrivyWallet(
     : undefined;
   const credentialRequest =
     options.credentialRequest === true || externalWalletLookup !== undefined;
-  if (externalWalletLookup) {
-    const existing = await findPrivyWalletByExternalId(
-      runtime,
-      config,
-      externalWalletLookup.externalId
-    );
-    if (existing) return existing;
-  }
 
+  // POST first: Privy dedupes a retry on privy-idempotency-key and external_id,
+  // so the wallet is looked up by external ID only when the create does not
+  // answer with it (a duplicate external_id, a conflict, or no answer).
   try {
     const created = await privyRequest<PrivyWalletResponse>(runtime, {
       apiBaseUrl,
@@ -393,11 +393,14 @@ function isPrivyProvisioningConflict(error: unknown): error is SigningError {
   return error instanceof SigningError && error.code === "CONFLICT";
 }
 
+/**
+ * A create failure the external-ID lookup cannot resolve. A duplicate
+ * external_id is not one: Privy answers it 409, which privyRequest reports as
+ * PROVIDER_NOT_CONFIGURED, and a CONFLICT (the answer's identity does not match)
+ * is settled by the lookup, which rethrows a conflict it finds itself.
+ */
 function isTerminalPrivyProvisioningError(error: unknown): error is SigningError {
-  return (
-    error instanceof SigningError &&
-    (error.code === "CONFLICT" || error.code === "PROVIDER_CREDENTIAL_INVALID")
-  );
+  return error instanceof SigningError && error.code === "PROVIDER_CREDENTIAL_INVALID";
 }
 
 function validatePrivyProvisionOptions(options: ProvisionPrivyOptions): void {
@@ -455,7 +458,7 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId,
       apiKeySecret,
       walletSecret,
-      idempotencyKey: runtime.randomUUID(),
+      idempotencyKey: options.idempotencyKey ?? runtime.randomUUID(),
       body: {
         name,
         ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),

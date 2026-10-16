@@ -362,7 +362,6 @@ const USD_PER_UNIT: Record<string, number> = {
 const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
   bvnk: 0.008,
   moonpay: 0.035,
-  coinbase: 0.015,
   stripe: 0.029,
 };
 const QUOTE_TTL_MS = 15 * MINUTE_MS;
@@ -519,7 +518,7 @@ function bvnkBankAccount(fiatCurrency: string, reference: string) {
 /** A provider's on-ramp quote: bank instructions, a hosted checkout, or a widget session. */
 function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQuote {
   const base = { id: q.quoteId, status: "pending" as const };
-  const { amounts, fiatCurrency, reference } = q;
+  const { fiatCurrency, reference } = q;
   switch (provider) {
     case "bvnk":
       return {
@@ -546,26 +545,6 @@ function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQ
         provider,
         deliveryMode: "hosted",
         hostedUrl: `https://buy-sandbox.moonpay.com/?externalTransactionId=${q.transferId}`,
-      };
-    case "coinbase":
-      return {
-        ...base,
-        provider,
-        deliveryMode: "hosted",
-        hostedUrl: `https://pay.coinbase.com/v2/api-onramp/purchase?orderId=${q.quoteId}`,
-        paymentCurrency: fiatCurrency,
-        paymentSubtotal: scaled(amounts.fiat - amounts.fee, 2),
-        paymentTotal: scaled(amounts.fiat, 2),
-        purchaseCurrency: amounts.symbol,
-        purchaseAmount: q.crypto,
-        exchangeRate: scaled(1 / amounts.rate, 2),
-        fees: [
-          {
-            feeAmount: scaled(amounts.fee, 2),
-            feeCurrency: fiatCurrency,
-            feeType: "FEE_TYPE_EXCHANGE",
-          },
-        ],
       };
     case "stripe":
       return {
@@ -610,7 +589,6 @@ function offrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRamp
         deliveryMode: "hosted",
         hostedUrl: `https://sell-sandbox.moonpay.com/?externalTransactionId=${q.transferId}`,
       };
-    case "coinbase":
     case "stripe":
       throw new Error(`${getRampProviderLabel(provider)} runs no off-ramp in the demo.`);
   }

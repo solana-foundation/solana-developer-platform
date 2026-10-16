@@ -156,7 +156,7 @@ describe("private-channel transfer actions", () => {
       message: "Gateway unavailable",
       // A plain Error is not an API response: nothing proves the request was
       // never recorded, so the browser must KEEP the key and replay.
-      status: null,
+      answer: { status: null, replayed: false, code: null },
     });
   });
 

@@ -3,12 +3,14 @@
 import type { CustodyProvider } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { createConnectionWalletAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
@@ -76,12 +78,16 @@ function AddWalletForm({
   t: ReturnType<typeof useTranslations>;
 }) {
   const [label, setLabel] = useState("");
+  const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const input = JSON.stringify([connectionId, label.trim()]);
     const formData = new FormData();
     formData.set("connectionId", connectionId);
     formData.set("label", label);
+    const key = actionKey.keyFor(input);
+    formData.set("idempotencyKey", key);
 
     const result = await run(() => createConnectionWalletAction(formData, provider), {
       successTitle: t("DashboardCustody.addWalletSuccessTitle"),
@@ -89,6 +95,7 @@ function AddWalletForm({
       failedTitle: t("DashboardCustody.addWalletFailedTitle"),
       unknownTitle: t("DashboardCustody.addWalletUnknownTitle"),
     });
+    actionKey.settled(input, key, result);
     if (result.status === "success") {
       onClose();
     }

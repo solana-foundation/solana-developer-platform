@@ -14,6 +14,52 @@
       }
     ]
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const header = pm.request.headers.find((h) => h.key.toLowerCase() === \"idempotency-key\");",
+          "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+          "const variable = saved && saved[1];",
+          "if (variable && !pm.collectionVariables.get(variable)) {",
+          "  pm.collectionVariables.set(variable, pm.variables.replaceIn(\"{{$guid}}\"));",
+          "}",
+          "if (variable) pm.variables.set(\"idempotencyKeySent\", pm.collectionVariables.get(variable));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const header = pm.request.headers.find((h) => h.key.toLowerCase() === \"idempotency-key\");",
+          "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+          "const variable = saved && saved[1];",
+          "const sent = pm.variables.get(\"idempotencyKeySent\");",
+          "if (variable && sent && pm.collectionVariables.get(variable) === sent) {",
+          "  const status = pm.response.code;",
+          "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
+          "  let body;",
+          "  try { body = pm.response.json(); } catch (e) {}",
+          "  const code = body && body.error ? body.error.code : undefined;",
+          "  const rejected = status === 422 && code !== \"IDEMPOTENCY_KEY_REUSED\";",
+          "  const data = body && typeof body.data === 'object' ? body.data : null;",
+          "  const moving = new Set([\"pending\",\"processing\",\"awaiting_payment\",\"settling\",\"activating\",\"canceling\",\"resuming\",\"updating\"]);",
+          "  const inFlight = data !== null && [data.transfer, data.batch, data.recurringPayment, data.collectionAttempt]",
+          "    .some((record) => record && moving.has(record.status));",
+          "  // A 2xx whose body is unreadable or names no data says nothing final: keep the key.",
+          "  const settled = status >= 200 && status < 300 ? data !== null && !inFlight : replayed;",
+          "  if (settled || rejected) {",
+          "    pm.collectionVariables.unset(variable);",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
   "variable": [
     {
       "key": "baseUrl",
@@ -217,7 +263,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
+            "description": "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400. With an Idempotency-Key, SDP never records a second wallet for one key: a retry returns the wallet an earlier attempt recorded, including after the 24-hour key window. Privy and Coinbase CDP also receive a request id derived from the key, so they dedupe at the provider. A provider failure is stored as a 503, and a new key is a new provider request. A 503 can mean the provider created the wallet before the error, and with a provider other than Privy or Coinbase CDP, a failure that left no SDP wallet row makes even the same key a new provider request after 24 hours: before any retry after an ambiguous failure, whatever the key, check GET /v1/wallets and, if the wallet is not there, the provider account. The provider request id and the recorded-wallet lookup both include the credential, so after an API key rotation, once the key's 24-hour record has expired, the same key under the new credential is a new provider request and can create a second wallet: after a rotation, list wallets with GET /v1/wallets and check the provider account before retrying a create.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Treasury wallet\",\n  \"purpose\": \"transfer\"\n}",
@@ -1162,10 +1208,15 @@
                 "key": "Content-Type",
                 "value": "application/json",
                 "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createPaymentTransfer}}",
+                "type": "text"
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
@@ -1228,10 +1279,15 @@
                 "key": "Content-Type",
                 "value": "application/json",
                 "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createPaymentTransferBatch}}",
+                "type": "text"
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1270,6 +1326,11 @@
                 "key": "Content-Type",
                 "value": "application/json",
                 "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.createPaymentRecurringPayment}}",
+                "type": "text"
               }
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments",
@@ -1303,10 +1364,15 @@
                 "key": "Content-Type",
                 "value": "application/json",
                 "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.updatePaymentRecurringPayment}}",
+                "type": "text"
               }
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}",
-            "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
+            "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records. Requires an Idempotency-Key, because an edit can sign and broadcast a replacement subscription. A same-key retry of a completed edit replays its answer. A retry of an interrupted edit gets 409 IDEMPOTENCY_KEY_IN_FLIGHT with Retry-After until the attempt is stale, then resumes from the last step SDP recorded. If a step was sent but not yet recorded when the edit was interrupted, which is rare, the retry can fail or send that step again, so read the recurring payment with GET before editing it again.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
@@ -1322,7 +1388,13 @@
           "name": "Activate recurring payment",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.activatePaymentRecurringPayment}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/activate",
             "description": "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures."
           }
@@ -1331,7 +1403,13 @@
           "name": "Cancel recurring payment",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.cancelPaymentRecurringPayment}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
             "description": "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently."
           }
@@ -1340,7 +1418,13 @@
           "name": "Collect recurring payment",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.collectPaymentRecurringPayment}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
             "description": "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation."
           }
@@ -1349,7 +1433,13 @@
           "name": "Resume recurring payment",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.resumePaymentRecurringPayment}}",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/resume",
             "description": "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status."
           }

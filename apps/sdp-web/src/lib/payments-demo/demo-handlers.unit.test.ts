@@ -119,7 +119,7 @@ describe("ramp requirements", () => {
   });
 
   it("is ready at once with providers that run no onboarding", () => {
-    for (const provider of ["moonpay", "coinbase", "stripe"]) {
+    for (const provider of ["moonpay", "stripe"]) {
       expect(
         read(`/v1/counterparties/demo_cpty_jane/requirements?provider=${provider}`).body.data.status
       ).toBe("ready");
@@ -277,7 +277,7 @@ describe("ramp estimates and quotes", () => {
   it("refuses an on-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
       write("POST", "/v1/payments/ramps/onramp/quote", {
-        provider: "coinbase",
+        provider: "moonpay",
         counterpartyId: "demo_cpty_jane",
         destinationCustodyWalletId: TREASURY,
         assetRail: "usdc.solana",
@@ -318,7 +318,6 @@ describe("ramp estimates and quotes", () => {
     expect(modes).toEqual({
       moonpay: "hosted",
       bvnk: "manual_instructions",
-      coinbase: "hosted",
       stripe: "session_widget",
     });
   });

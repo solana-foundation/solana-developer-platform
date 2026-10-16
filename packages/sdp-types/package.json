@@ -39,6 +39,11 @@
       "import": "./src/earn-wire.ts",
       "default": "./src/earn-wire.ts"
     },
+    "./network-metrics": {
+      "types": "./src/network-metrics.ts",
+      "import": "./src/network-metrics.ts",
+      "default": "./src/network-metrics.ts"
+    },
     "./earn": {
       "types": "./src/earn.ts",
       "import": "./src/earn.ts",

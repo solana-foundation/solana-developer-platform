@@ -466,3 +466,18 @@ export function unifiedAuthMiddleware() {
     throw new AppError("UNAUTHORIZED", "API key required");
   };
 }
+
+/**
+ * Refuses a request no dashboard session made: an API key passes `unifiedAuthMiddleware` but not
+ * this. Mount it after `unifiedAuthMiddleware`.
+ *
+ * @returns Hono middleware that throws 401 without a Clerk session.
+ */
+export function requireClerkSession() {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    if (!c.get("clerk")) {
+      throw new AppError("UNAUTHORIZED", "Clerk JWT required");
+    }
+    await next();
+  };
+}

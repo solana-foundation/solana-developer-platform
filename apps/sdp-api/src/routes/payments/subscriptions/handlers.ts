@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   ListPaymentSubscriptionCollectionAttemptsResponse,
@@ -22,7 +22,7 @@ import {
   getTransferSubscriptionOverlayInstructionAsync,
 } from "@solana/subscriptions";
 import { z } from "zod";
-import { createCounterpartiesRepository } from "@/db/repositories";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -31,7 +31,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
@@ -41,15 +41,16 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
 import {
   hasSubscriptionPlanPuller,
   resolveSubscriptionPlanRole,
 } from "../subscription-plans/wallets";
+import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
@@ -83,12 +84,9 @@ function mapSubscription(row: PaymentSubscriptionRow): PaymentSubscription {
   };
 }
 
-async function getExpectedSubscriptionExpiresAtTs(
-  c: AppContext,
-  subscriptionPda: Address
-): Promise<bigint> {
+async function getExpectedSubscriptionExpiresAtTs(subscriptionPda: Address): Promise<bigint> {
   const onChainSubscription = await fetchMaybeSubscriptionDelegation(
-    solanaRpc.createRpc(c.env),
+    createClusterRpc(),
     subscriptionPda,
     { commitment: "confirmed" }
   );
@@ -166,24 +164,6 @@ async function getSubscriptionWithPlan(
   return { plan, subscription };
 }
 
-async function requireActiveCounterparty(c: AppContext, counterpartyId: string): Promise<void> {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const repo = createCounterpartiesRepository(c.env, getRequestTenantScope(c));
-  const counterparty = await repo.getCounterpartyById({
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!counterparty) {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
-  }
-  if (counterparty.status !== "active") {
-    throw badRequest("Counterparty must be active before creating a subscription");
-  }
-}
-
 export const createSubscription = async (
   c: ValidatedBodyContext<typeof createSubscriptionSchema>
 ) => {
@@ -192,20 +172,18 @@ export const createSubscription = async (
   const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
-  const plan = await repo.getPlanById({
-    planId: body.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
+  // Both loaded in the project, whatever their status, by the route's authorize step.
+  const { plan, counterparty } = getAuthorized<{
+    plan: PaymentSubscriptionPlanRow;
+    counterparty: CounterpartyRow;
+  }>(c);
   if (plan.status === "archived") {
     throw badRequest("Cannot create a subscription for an archived plan");
   }
-
-  await requireActiveCounterparty(c, body.counterpartyId);
+  // An inactive counterparty reads as missing, as the active-only lookup answered.
+  if (counterparty.status !== "active") {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
@@ -277,7 +255,7 @@ export const prepareSubscriptionAuthorization = async (
     body.subscriberTokenAccount,
     "subscriberTokenAccount"
   );
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const expectedCreatedAt = parseU64String(body.expectedPlanCreatedAt, "expectedPlanCreatedAt");
   const expectedSubscriptionAuthorityInitId = parseI64String(
     body.expectedSubscriptionAuthorityInitId,
@@ -289,7 +267,7 @@ export const prepareSubscriptionAuthorization = async (
     user: subscriber,
   });
   const [subscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
-  const feePayer = await getSponsoredFeePayer(c);
+  const feePayer = await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
   const payer = createNoopSigner(feePayer);
   const subscriberSigner = createNoopSigner(subscriber);
   const initAuthorityInstruction = await getInitSubscriptionAuthorityOverlayInstructionAsync({
@@ -316,7 +294,6 @@ export const prepareSubscriptionAuthorization = async (
     subscriptionPda,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     feePayer,
     [initAuthorityInstruction, subscribeInstruction],
     [subscriber]
@@ -414,15 +391,14 @@ async function prepareSubscriptionLifecycle(
           subscriptionPda,
         })
       : await getResumeSubscriptionOverlayInstructionAsync({
-          expectedExpiresAtTs: await getExpectedSubscriptionExpiresAtTs(c, subscriptionPda),
+          expectedExpiresAtTs: await getExpectedSubscriptionExpiresAtTs(subscriptionPda),
           planPda,
           subscriber: subscriberSigner,
           subscriptionPda,
           tokenMint,
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [subscriber]
   );
@@ -466,8 +442,9 @@ export const prepareSubscriptionCollection = async (
     plan,
     hasSubscriptionPlanPuller(plan) ? "puller" : "owner"
   );
+  assertPaymentWalletExactAccess(c, callerWallet.id, ["payments:write"]);
 
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -487,8 +464,7 @@ export const prepareSubscriptionCollection = async (
     tokenProgram,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [caller]
   );

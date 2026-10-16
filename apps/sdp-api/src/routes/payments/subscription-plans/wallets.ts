@@ -1,20 +1,14 @@
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { AppError } from "@/lib/errors";
 import type { AppContext } from "../context";
-import {
-  assertPaymentWalletExactAccess,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 
 export async function resolveSubscriptionPlanWalletSelector(
   c: AppContext,
   custodyWalletId: string
 ) {
   const scope = await resolveScope(c);
-  const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
-  return wallet;
+  return resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
 }
 
 export function hasSubscriptionPlanPuller(plan: PaymentSubscriptionPlanRow): boolean {

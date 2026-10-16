@@ -7,6 +7,7 @@ import {
   initIntegrationApiSuite,
   requestWithApiKey,
 } from "../helpers/integration";
+import { KORA_URL_ENV_KEY, koraEndpoint } from "../helpers/kora";
 
 const { createSigningService, getDb, SponsorshipBudgetRepository, TEST_ORG, TEST_PROJECT } =
   apiTestSupport;
@@ -109,7 +110,7 @@ function assertKoraLiveSmokeEnvConfigured() {
   const missing: string[] = [];
   if (env.RUN_INTEGRATION_TESTS !== "true") missing.push("RUN_INTEGRATION_TESTS=true");
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (koraEndpoint === null) missing.push(KORA_URL_ENV_KEY);
   if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
   if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
 

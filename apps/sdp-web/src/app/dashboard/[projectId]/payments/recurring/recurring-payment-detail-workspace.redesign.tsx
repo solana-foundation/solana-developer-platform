@@ -38,7 +38,10 @@ import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentRunHistory } from "./recurring-payment-collection-history.redesign";
-import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
+import {
+  getRecurringPaymentDetailState,
+  refreshIfOutcomeUnknown,
+} from "./recurring-payment-detail-state";
 import { RecurringPaymentEditForm } from "./recurring-payment-edit-form";
 import {
   type RecurringPaymentAction,
@@ -732,6 +735,7 @@ export function RecurringPaymentDetailWorkspace({
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
       router.refresh();
     } catch (error) {
+      refreshIfOutcomeUnknown(error, () => router.refresh());
       const message =
         error instanceof Error
           ? error.message

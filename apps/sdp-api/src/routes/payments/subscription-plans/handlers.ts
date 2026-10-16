@@ -15,6 +15,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
@@ -23,10 +24,11 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
+import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
   listSubscriptionPlansQuerySchema,
@@ -132,7 +134,7 @@ export const createSubscriptionPlan = async (
     ownerWalletId: ownerWallet.walletId,
     ownerCustodyWalletId: ownerWallet.id,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token, c.env),
+    token: normalizePaymentToken(body.token),
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),
@@ -237,6 +239,7 @@ export const prepareCreateSubscriptionPlan = async (
   }
 
   const ownerWallet = await resolveSubscriptionPlanRole(c, plan, "owner");
+  assertPaymentWalletExactAccess(c, ownerWallet.id, ["payments:write"]);
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
 
@@ -250,14 +253,15 @@ export const prepareCreateSubscriptionPlan = async (
     );
   }
 
-  const defaultPuller =
-    body.pullers === undefined && hasSubscriptionPlanPuller(plan)
-      ? await resolveSubscriptionPlanRole(c, plan, "puller")
-      : ownerWallet;
+  let defaultPuller = ownerWallet;
+  if (body.pullers === undefined && hasSubscriptionPlanPuller(plan)) {
+    defaultPuller = await resolveSubscriptionPlanRole(c, plan, "puller");
+    assertPaymentWalletExactAccess(c, defaultPuller.id, ["payments:write"]);
+  }
   const pullers = (body.pullers ?? [defaultPuller.publicKey]).map((value) =>
     assertValidAddress(value, "pullers entry")
   );
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
   const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
 
@@ -275,8 +279,7 @@ export const prepareCreateSubscriptionPlan = async (
   });
   const updatedPlan = await persistPlanPda(c, plan, planPda);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [owner]
   );
@@ -303,15 +306,8 @@ export const updateSubscriptionPlan = async (
   const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
-  const existingPlan = await repo.getPlanById({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!existingPlan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
+  // Loaded in the project, its wallets' access checked, by the route's authorize step.
+  const existingPlan = getAuthorized<PaymentSubscriptionPlanRow>(c);
 
   await resolveSubscriptionPlanRole(c, existingPlan, "owner");
 

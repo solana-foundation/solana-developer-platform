@@ -55,7 +55,7 @@ const auditContext = new Context<{
   Bindings: Env;
 }>(new Request("http://localhost/dvp"), { env });
 
-const createProjectSponsorshipFeePayment = vi.fn();
+const createSponsorshipFeePayment = vi.fn();
 
 const getFeePayer = vi.fn();
 
@@ -153,8 +153,9 @@ describe("createDvpTrade", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
-    vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
-      createProjectSponsorshipFeePayment
+    vi.spyOn(sponsorshipService, "resolveProjectSponsorshipScope");
+    vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(
+      createSponsorshipFeePayment
     );
     vi.spyOn(mints, "validateDvpMints").mockImplementation(validateDvpMints);
     vi.spyOn(mintInspector, "inspectDvpMint").mockImplementation(inspectDvpMint);
@@ -191,7 +192,7 @@ describe("createDvpTrade", () => {
       }
     );
     observeDvpTradeNow.mockResolvedValue(null);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createSponsorshipFeePayment.mockReturnValue({
       getFeePayer,
       prepareOwnedSubmission,
     });
@@ -320,7 +321,9 @@ describe("createDvpTrade", () => {
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);
-      createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+      createSponsorshipFeePayment.mockImplementationOnce(() => {
+        throw new Error("Sponsor unavailable");
+      });
       await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
         "Sponsor unavailable"
       );
@@ -366,7 +369,7 @@ describe("createDvpTrade", () => {
       byokChannelRefusal()
     );
     expect(await rowsInDb()).toEqual([]);
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     expect(
       await getDb(env).queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")
@@ -395,7 +398,7 @@ describe("createDvpTrade", () => {
         statusCode: unavailable === "entitlement" ? 403 : 409,
       });
       expect(await rowsInDb()).toEqual([]);
-      expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+      expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
       expect(await db.queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")).toEqual([
         { custody_wallet_id: "cwlt_settlement" },
       ]);
@@ -407,9 +410,10 @@ describe("createDvpTrade", () => {
     const trade = await createDvpTrade(env, auditContext, tradeInput());
     expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
     expect(sendTransaction).toHaveBeenCalledOnce();
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
-      expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
+      expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } }),
+      "dvp.create"
     );
   });
   it("replays the recorded create after BYOK leaves the release channel without sponsoring again", async () => {
@@ -425,19 +429,21 @@ describe("createDvpTrade", () => {
     });
     expect(await rowsInDb()).toHaveLength(1);
     expect(sendTransaction).toHaveBeenCalledOnce();
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+    expect(createSponsorshipFeePayment).toHaveBeenCalledOnce();
   });
   it("admits a new attempt after a failed create instead of replaying through an out-of-channel authority", async () => {
     await seedConnectionAuthority();
     const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
-    createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+    createSponsorshipFeePayment.mockImplementationOnce(() => {
+      throw new Error("Sponsor unavailable");
+    });
     await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
     custodyReleaseChannel.outOfChannelMode = "byok";
     await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject(
       byokChannelRefusal()
     );
     expect(await rowsInDb()).toMatchObject([{ status: "create_failed" }]);
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+    expect(createSponsorshipFeePayment).toHaveBeenCalledOnce();
     expect(sendTransaction).not.toHaveBeenCalled();
   });
   it("has the trade durably recorded at `creating` before the bytes go out", async () => {
@@ -526,7 +532,7 @@ describe("createDvpTrade", () => {
     await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
       /ScaledUiAmountConfig/
     );
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(prepareOwnedSubmission).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
@@ -618,7 +624,7 @@ describe("createDvpTrade", () => {
     expect(second.id).toBe(first.id);
     await expect(rowsInDb()).resolves.toHaveLength(1);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledTimes(1);
+    expect(createSponsorshipFeePayment).toHaveBeenCalledTimes(1);
     expect(getFeePayer).toHaveBeenCalledTimes(1);
     expect(prepareOwnedSubmission).toHaveBeenCalledTimes(1);
   });
@@ -648,7 +654,7 @@ describe("createDvpTrade", () => {
         partyB: { address: address(SETTLEMENT_AUTHORITY) },
       })
     ).rejects.toThrow(/settlementAuthority must not be/);
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(prepareOwnedSubmission).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
     await expect(rowsInDb()).resolves.toEqual([]);
@@ -770,12 +776,21 @@ describe("createDvpTrade", () => {
       instructions: [{ accountIndices: expect.arrayContaining([0]) }],
     });
     expect(trade.createSignature).toBe(getSignatureFromTransaction(transaction));
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
+    expect(sponsorshipService.resolveProjectSponsorshipScope).toHaveBeenCalledWith(env, {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       actor: { type: "wallet", id: "cwlt_settlement" },
-      movement: "dvp.create",
     });
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      {
+        environment: "sandbox",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        actor: { type: "wallet", id: "cwlt_settlement" },
+      },
+      "dvp.create"
+    );
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {
     const refusal = new SponsorMessageMismatchError();

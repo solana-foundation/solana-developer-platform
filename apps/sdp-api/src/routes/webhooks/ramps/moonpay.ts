@@ -18,18 +18,21 @@ import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
 
+/**
+ * The key that signs `environment`'s MoonPay events. SDP holds the sandbox key
+ * only: production projects bring their own MoonPay account (HOO-1942).
+ */
 function readMoonpayWebhookKey(
   env: Record<string, string | undefined>,
   environment: SdpEnvironment
 ): string {
-  const webhookKey = (
-    environment === "sandbox" ? env.MOONPAY_SANDBOX_WEBHOOK_KEY : env.MOONPAY_WEBHOOK_KEY
-  )?.trim();
+  if (environment === "production") {
+    throw providerNotConfigured("MoonPay webhooks are not configured for production.");
+  }
+  const webhookKey = env.MOONPAY_SANDBOX_WEBHOOK_KEY?.trim();
   if (!webhookKey) {
     throw providerNotConfigured(
-      environment === "sandbox"
-        ? "MoonPay sandbox webhook key is not configured (MOONPAY_SANDBOX_WEBHOOK_KEY)."
-        : "MoonPay webhook key is not configured (MOONPAY_WEBHOOK_KEY)."
+      "MoonPay sandbox webhook key is not configured (MOONPAY_SANDBOX_WEBHOOK_KEY)."
     );
   }
   return webhookKey;

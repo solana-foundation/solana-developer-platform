@@ -13,6 +13,11 @@ export interface SnippetRequest {
 
 const API_KEY_VARIABLE = "SDP_API_KEY";
 
+/** Every write carries its own Idempotency-Key, so a retried call runs once (HOO-1918). */
+function isWrite(method: string): boolean {
+  return method.toUpperCase() !== "GET";
+}
+
 /** JSON with every line after the first pushed in by `indent`, to sit inside a call. */
 function nestedJson(value: unknown, indent: string): string {
   return JSON.stringify(value, null, 2).replace(/\n/g, `\n${indent}`);
@@ -51,6 +56,10 @@ function curlSnippet({ method, url, body }: SnippetRequest): string {
     `curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)} \\`,
     `  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`,
   ];
+  if (isWrite(method)) {
+    lines[lines.length - 1] += " \\";
+    lines.push('  -H "Idempotency-Key: $(uuidgen)"');
+  }
   if (body !== null) {
     lines[lines.length - 1] += " \\";
     lines.push(
@@ -63,6 +72,7 @@ function curlSnippet({ method, url, body }: SnippetRequest): string {
 
 function typeScriptSnippet({ method, url, body }: SnippetRequest): string {
   const headers = [`    Authorization: \`Bearer \${process.env.${API_KEY_VARIABLE}}\``];
+  if (isWrite(method)) headers.push('    "Idempotency-Key": crypto.randomUUID()');
   if (body !== null) headers.push('    "Content-Type": "application/json"');
   const lines = [
     `const res = await fetch(${JSON.stringify(url)}, {`,
@@ -77,15 +87,17 @@ function typeScriptSnippet({ method, url, body }: SnippetRequest): string {
 }
 
 function pythonSnippet({ method, url, body }: SnippetRequest): string {
+  const idempotency = isWrite(method) ? ', "Idempotency-Key": str(uuid.uuid4())' : "";
   const call = [
     `r = requests.${method.toLowerCase()}(${JSON.stringify(url)},`,
-    `  headers={"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"}`,
+    `  headers={"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"${idempotency}}`,
   ];
   if (body !== null) {
     call[call.length - 1] += ",";
     call.push(`  json=${pythonLiteral(body).replace(/\n/g, "\n  ")}`);
   }
-  return ["import os, requests", "", `${call.join("\n")})`].join("\n");
+  const imports = isWrite(method) ? "import os, requests, uuid" : "import os, requests";
+  return [imports, "", `${call.join("\n")})`].join("\n");
 }
 
 /**

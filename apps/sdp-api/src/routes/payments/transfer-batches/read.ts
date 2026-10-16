@@ -45,7 +45,7 @@ export async function listTransferBatches(c: AppContext) {
       query.data.sourceCustodyWalletId || walletAuthorization === null
         ? undefined
         : walletAuthorization,
-    token: query.data.token ? normalizePaymentToken(query.data.token, c.env) : undefined,
+    token: query.data.token ? normalizePaymentToken(query.data.token) : undefined,
     status: query.data.status,
     externalId: query.data.externalId,
     limit: query.data.pageSize,

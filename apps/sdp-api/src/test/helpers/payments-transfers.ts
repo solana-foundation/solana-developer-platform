@@ -24,7 +24,11 @@ import {
 } from "@/test/helpers/payments-routes";
 
 export interface PostTransferOptions {
-  idempotencyKey?: string;
+  /**
+   * The Idempotency-Key the route requires (HOO-1918). Omitted: a fresh key per
+   * call. `null`: send none, to test the refusal.
+   */
+  idempotencyKey?: string | null;
   auth?:
     | {
         kind: "api_key";
@@ -61,8 +65,10 @@ export async function postRawTransfer(
       headers.Authorization = `Bearer ${options.auth.raw}`;
     }
   }
-  if (options.idempotencyKey !== undefined) {
-    headers["Idempotency-Key"] = options.idempotencyKey;
+  const idempotencyKey =
+    options.idempotencyKey === undefined ? crypto.randomUUID() : options.idempotencyKey;
+  if (idempotencyKey !== null) {
+    headers["Idempotency-Key"] = idempotencyKey;
   }
   return app.request(
     "/v1/payments/transfers",

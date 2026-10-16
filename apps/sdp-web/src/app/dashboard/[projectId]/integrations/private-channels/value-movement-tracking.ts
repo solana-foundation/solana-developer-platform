@@ -1,6 +1,10 @@
 "use client";
 
-import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
+import type { ApiAnswer } from "@/lib/idempotency";
+import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "@/lib/idempotency-key-store";
+import type { CreateDepositResult } from "./deposit/actions";
+import type { CreateTransferResult } from "./transfer/actions";
+import type { CreateWithdrawalResult } from "./withdraw/actions";
 
 /**
  * Idempotency-key stores for the three Private Channels value movements.
@@ -28,6 +32,43 @@ export const privateChannelWithdrawalIdempotencyKeyStore = createIdempotencyKeyS
 export const privateChannelTransferIdempotencyKeyStore = createIdempotencyKeyStore(
   "sdp:private-channels:transfer:idempotency:v1"
 );
+
+/**
+ * The key a movement is sent under, or `null` when the browser will not keep
+ * it across a reload: these move money, so like every money route they are not
+ * sent then (the dashboard's 428), or a reload and retry could move it twice.
+ * Only a key this claim minted is dropped; a kept one belongs to an earlier
+ * attempt that may have run, and its retry still needs it.
+ */
+export function claimMovementKey(store: IdempotencyKeyStore, fingerprint: string): string | null {
+  const kept = store.has(fingerprint);
+  const { key, persisted } = store.claim(fingerprint);
+  if (persisted) return key;
+  if (!kept) store.release(fingerprint, key);
+  return null;
+}
+
+/**
+ * What sdp-api answered a movement, for the retire rule (`answerRetiresKey`).
+ * A validation refusal never reached the API, so it is no answer.
+ *
+ * @param result - What the movement's server action returned.
+ */
+export function movementAnswer(
+  result: CreateDepositResult | CreateWithdrawalResult | CreateTransferResult
+): ApiAnswer {
+  if (result.ok) return { status: 200, replayed: false, code: null };
+  switch (result.kind) {
+    case "server":
+      return result.answer;
+    case "validation":
+      return { status: null, replayed: false, code: null };
+    default: {
+      const unreachable: never = result;
+      throw new Error(`Unknown movement result: ${JSON.stringify(unreachable)}`);
+    }
+  }
+}
 
 /**
  * What makes two submissions the SAME deposit: the source wallet, the mint, the

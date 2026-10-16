@@ -152,8 +152,6 @@ export function useOnrampWizard(props: UseRampWizardProps) {
         assetRail,
         fiatCurrency: selectedRampPair.fiatCurrency,
         fiatAmount: fields.amount.trim(),
-        // Coinbase renders its Apple Pay link on this domain; must match a CDP-verified domain.
-        domain: window.location.hostname,
         rampsMemo,
       }) satisfies PaymentOnrampQuoteRequest,
     onQuoteCreated: () => {

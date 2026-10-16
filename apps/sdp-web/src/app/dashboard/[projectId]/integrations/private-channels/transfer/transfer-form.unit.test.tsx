@@ -478,6 +478,24 @@ describe("TransferForm", () => {
     await screen.findByText("Progress: submitted");
   });
 
+  // Jina (#2333): a refused key write sent nothing but left the form marked as
+  // submitting, so every later press was ignored until a remount.
+  it("takes a retry in the same form once storage keeps the transfer's key again", async () => {
+    mocks.createTransferAction.mockResolvedValue({ ok: true, transfer: makeTransfer() });
+    const user = await renderReadyForm();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+    expect(await screen.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
+    expect(mocks.createTransferAction).not.toHaveBeenCalled();
+    setItem.mockRestore();
+
+    await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+
+    await waitFor(() => expect(mocks.createTransferAction).toHaveBeenCalledTimes(1));
+  });
+
   it("freezes financial fields during a slow submit and keeps result labels", async () => {
     const response = deferred<{ ok: true; transfer: PrivateChannelTransfer }>();
     mocks.createTransferAction.mockReturnValue(response.promise);

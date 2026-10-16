@@ -4,19 +4,19 @@ import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import baseApp from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcResponder, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  mockRecurringActivationRpc,
   seedCounterparty,
   TEST_CUSTODY_WALLET_ID,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -24,6 +24,10 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { withIdempotencyKeys } from "./idempotency-keys";
+
+// Every mutation carries a fresh key unless a test sets its own (HOO-1918).
+const app = withIdempotencyKeys(baseApp);
 
 const recurringResponseSchema = successResponseSchema(paymentRecurringPaymentResponseSchema);
 const collectionResponseSchema = successResponseSchema(
@@ -40,6 +44,7 @@ export function testSignature(seed: number): Signature {
 }
 
 export function installRecurringExecutionHooks() {
+  const rpc = installClusterRpcResponder();
   let sourceSigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let signAsFeePayerMock: ReturnType<
     typeof vi.fn<(transaction: Uint8Array) => Promise<Uint8Array>>
@@ -50,7 +55,7 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    mockRecurringActivationRpc({});
+    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
@@ -68,6 +73,7 @@ export function installRecurringExecutionHooks() {
   });
 
   return {
+    rpc,
     sourceSigner: () => sourceSigner,
     signAsFeePayerMock: () => signAsFeePayerMock,
     signAndSendMock: () => signAndSendMock,

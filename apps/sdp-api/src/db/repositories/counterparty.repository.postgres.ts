@@ -225,7 +225,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'active'`
+              ${params.status === "any" ? "" : "AND status = 'active'"}`
         )
         .bind(params.counterpartyId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();

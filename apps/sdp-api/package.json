@@ -44,7 +44,6 @@
   },
   "dependencies": {
     "@clerk/backend": "3.20.1",
-    "@coinbase/cdp-sdk": "1.56.0",
     "@hono/node-server": "2.1.1",
     "@sdp/custody": "workspace:*",
     "@sdp/dvp": "workspace:*",

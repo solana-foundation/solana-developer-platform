@@ -3,7 +3,6 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { AppError } from "@/lib/errors";
-import { resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -57,30 +56,6 @@ export function mapRecipientRow(row: PaymentTransferRecipientRow) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-/**
- * Looks up an existing batch for an Idempotency-Key, verifying the stored
- * payload fingerprint matches before treating the request as a replay.
- *
- * @param repository - Transfer-batches repository.
- * @param idempotencyKey - Idempotency-Key header value.
- * @param fingerprint - Fingerprint of the current request payload.
- * @returns The original batch row, or null when no replay applies.
- */
-export async function resolveTransferBatchIdempotencyReplay(
-  repository: ReturnType<typeof getPaymentTransferBatchesRepository>,
-  organizationId: string,
-  projectId: string,
-  idempotencyKey: string,
-  fingerprint: string,
-  sourceCustodyWalletId: string
-): Promise<PaymentTransferBatchRow | null> {
-  return resolveIdentityBoundIdempotencyReplay(
-    () => repository.findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }),
-    fingerprint,
-    (row) => row.source_custody_wallet_id === sourceCustodyWalletId
-  );
 }
 
 /**

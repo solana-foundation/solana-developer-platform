@@ -1,4 +1,3 @@
-import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 import { proxyQueryErrorResponse, vaultDepositsProxyQuery } from "../provider-query";
 
@@ -7,10 +6,6 @@ export async function POST(request: Request) {
     request,
     traceSource: "route.dashboard.earn.vault_deposits.create",
     path: "/v1/earn/vault-deposits",
-    // Do not pass the inbound header bag. The key is the only client-owned
-    // transport metadata the endpoint accepts; proxyToSdpApi owns every other
-    // upstream header.
-    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }
 

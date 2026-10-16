@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_ENVIRONMENTS, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { BackgroundRunner } from "@/runtime/background";
 import { reconcileBvnkOnrampPayouts } from "@/services/jobs/reconcile-bvnk-onramp-payouts";
@@ -34,7 +34,7 @@ describe("runPendingTransfersReconciliation", () => {
     runPendingTransfersReconciliation({ env, bg });
     await vi.mocked(bg.run).mock.calls[0]?.[0];
 
-    expect(trackPendingTransfers).toHaveBeenCalledExactlyOnceWith(env);
+    expect(vi.mocked(trackPendingTransfers).mock.calls).toEqual(SDP_ENVIRONMENTS.map(() => [env]));
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileBvnkOnrampPayouts).toHaveBeenCalledExactlyOnceWith(
       env,

@@ -2,6 +2,7 @@ import { apiTestSupport } from "@sdp/api/test-support";
 import { probeGatewayHealth } from "@sdp/private-channels";
 import { env } from "#env-impl";
 import { getIntegrationCustodyProvider } from "./custody-provider";
+import { KORA_URL_ENV_KEY, koraEndpoint } from "./kora";
 import { privateChannelProbeTransport } from "./private-channels";
 
 const { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS, KoraClient } = apiTestSupport;
@@ -45,19 +46,19 @@ async function runPreflight(): Promise<void> {
   // `kora,spc`); otherwise it is inferred from configured env for back-compat, so
   // existing Kora/on-chain shards keep working unchanged.
   const requested = getRequestedSuites();
-  const koraInScope = requested ? requested.has("kora") : !!env.KORA_RPC_URL;
+  const koraInScope = requested ? requested.has("kora") : koraEndpoint !== null;
   // DvP needs a cluster, custody signer, and Kora sponsorship. Private Channels
   // remains independent because the DvP lane never calls its gateway.
   const dvpInScope = requested === null ? false : requested.has("dvp");
   const spcInScope = requested
     ? requested.has("spc")
-    : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
+    : koraEndpoint === null && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
 
   if (!koraInScope && !spcInScope && !dvpInScope) {
     // biome-ignore lint/security/noSecrets: environment variable names in a help message, not a secret.
     const suites = "SDP_INTEGRATION_SUITE=kora|spc|dvp";
     throw new Error(
-      `Integration preflight: no suite in scope. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites}.`
+      `Integration preflight: no suite in scope. Set ${KORA_URL_ENV_KEY} or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites}.`
     );
   }
 
@@ -88,7 +89,7 @@ async function preflightDvpSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (koraEndpoint === null) missing.push(KORA_URL_ENV_KEY);
   if (integrationCustodyProvider === "local" && !env.CUSTODY_PRIVATE_KEY) {
     missing.push("CUSTODY_PRIVATE_KEY");
   }
@@ -155,7 +156,7 @@ async function preflightKoraSuite(): Promise<void> {
   const integrationCustodyProvider = getIntegrationCustodyProvider();
   const missing: string[] = [];
   if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
+  if (koraEndpoint === null) missing.push(KORA_URL_ENV_KEY);
   if (integrationCustodyProvider === "local") {
     if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
   } else {
@@ -171,16 +172,15 @@ async function preflightKoraSuite(): Promise<void> {
 
   // Narrow optional env vars to concrete strings (Biome forbids non-null assertions).
   const solanaRpcUrl = env.SOLANA_RPC_URL;
-  const koraUrl = env.KORA_RPC_URL;
-  if (!solanaRpcUrl || !koraUrl) {
+  if (!solanaRpcUrl || koraEndpoint === null) {
     // This should be unreachable because of the `missing` check above.
     throw new Error("Integration preflight internal error: required env vars were missing.");
   }
 
   // Validate Kora connectivity and that it can sponsor transactions (fee payer exists and is funded).
   const koraClient = new KoraClient({
-    rpcUrl: koraUrl,
-    ...(env.KORA_API_KEY ? { apiKey: env.KORA_API_KEY } : {}),
+    rpcUrl: koraEndpoint.rpcUrl,
+    apiKey: koraEndpoint.apiKey,
   });
 
   // These are independent read-only checks. Run them together so the two Kora

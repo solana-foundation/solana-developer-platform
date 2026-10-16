@@ -16,8 +16,6 @@ const MANUAL_INSTRUCTIONS_STUB = "manual-instructions-stub";
 vi.mock("./manual-instructions-quote.redesign", () => ({
   ManualInstructionsQuote: () => <div>manual-instructions-stub</div>,
 }));
-vi.mock("./coinbase/quote-summary.redesign", () => ({ CoinbaseQuoteSummary: () => null }));
-vi.mock("./coinbase/ramp-frame", () => ({ CoinbaseRampFrame: () => null }));
 vi.mock("./memo-step-content.redesign", () => ({ MemoStepContent: () => null }));
 vi.mock("./moonpay-ramp-frame", () => ({ MoonpayRampFrame: () => null }));
 vi.mock("./ramp-complete-screen.redesign", () => ({ RampCompleteScreen: () => null }));

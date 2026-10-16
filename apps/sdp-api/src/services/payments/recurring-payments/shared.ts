@@ -1,4 +1,4 @@
-import { getSolanaConfig } from "@sdp/rpc";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -48,7 +48,10 @@ import {
   SOL_MINT,
 } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+} from "@/services/sponsorship.service";
 import {
   type SignedSubmissionStore,
   submitSponsoredTransaction,
@@ -61,7 +64,7 @@ const RECURRING_PAYMENT_TOKEN_ERROR =
 
 /**
  * Resolves a recurring-payment token to its mint, allowing only well-known USD
- * stablecoins on the configured cluster or active tokens issued in the project.
+ * stablecoins on the open scope's cluster or active tokens issued in the project.
  */
 export async function assertRecurringPaymentTokenMint(
   token: string,
@@ -73,11 +76,10 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const mint = assertValidAddress(normalizePaymentToken(token, env), "token");
+  const mint = assertValidAddress(normalizePaymentToken(token), "token");
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
-    const cluster = getSolanaConfig(env).network;
-    if (wellKnown.isUsdStable && wellKnown.clusters.includes(cluster)) {
+    if (wellKnown.isUsdStable) {
       return mint;
     }
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
@@ -113,11 +115,10 @@ export async function derivePlanAddresses(
 }
 
 export async function resolvePlanRuntime(
-  env: Env,
   plan: PaymentSubscriptionPlanRow
 ): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
   const mint = assertSubscriptionTokenMint(plan.token);
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const [tokenProgram, decimals] = await Promise.all([
     resolveMintTokenProgram(rpc, mint),
     resolveMintDecimals(rpc, mint),
@@ -132,12 +133,11 @@ export async function resolvePlanRuntime(
 }
 
 export async function buildPreparedSubscriptionTransaction(
-  env: Env,
   feePayer: Address,
   instructions: Instruction[],
   requiredSigners: Address[]
 ): Promise<PreparedPaymentSubscriptionTransaction> {
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
@@ -266,14 +266,17 @@ export async function sendSubscriptionInstructions(input: {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-    movement: input.movement,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    actor: { type: "wallet", id: input.sponsorshipActorWalletId },
-  });
+  const feePayment = createSponsorshipFeePayment(
+    input.env,
+    await resolveProjectSponsorshipScope(input.env, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      actor: { type: "wallet", id: input.sponsorshipActorWalletId },
+    }),
+    input.movement
+  );
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -296,11 +299,10 @@ export async function sendSubscriptionInstructions(input: {
 }
 
 export async function confirmSubscriptionSignature(
-  env: Env,
   signature: Signature,
   message: string
 ): Promise<void> {
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const confirmation = await solanaRpc.confirmTransaction(rpc, signature, {
     commitment: "confirmed",
   });

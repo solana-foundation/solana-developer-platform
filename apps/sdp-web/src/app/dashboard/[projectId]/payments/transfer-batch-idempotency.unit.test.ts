@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
+  sendTransferBatchUnderKey,
   transferBatchRequestFingerprint,
 } from "./transfer-batch-idempotency";
+
+const t: Translate = (key) => key;
 
 function batchRequest(
   overrides: Partial<PaymentTransferBatchRequest> = {}
@@ -56,16 +59,6 @@ describe("canonicalTransferBatchRequest", () => {
   });
 });
 
-describe("isTransferBatchKeyConflict", () => {
-  it("singles out the 409 that must keep the key", () => {
-    expect(isTransferBatchKeyConflict(409)).toBe(true);
-    expect(isTransferBatchKeyConflict(400)).toBe(false);
-    expect(isTransferBatchKeyConflict(403)).toBe(false);
-    expect(isTransferBatchKeyConflict(422)).toBe(false);
-    expect(isTransferBatchKeyConflict(500)).toBe(false);
-  });
-});
-
 describe("transferBatchRequestFingerprint", () => {
   it("is stable across recipient selection order", () => {
     const forward = batchRequest();
@@ -98,7 +91,7 @@ describe("claim / release", () => {
     const first = claimTransferBatchIdempotencyKey(fingerprint);
     expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(first);
 
-    releaseTransferBatchIdempotencyKey(fingerprint);
+    releaseTransferBatchIdempotencyKey(fingerprint, first);
     expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(first);
   });
 
@@ -115,22 +108,115 @@ describe("claim / release", () => {
     resetTransferBatchIdempotencyStateForTests();
     expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
   });
+});
 
-  it("expires an unheld key after the TTL", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T12:00:00Z"));
-    const fingerprint = "fingerprint-ttl";
-    const key = claimTransferBatchIdempotencyKey(fingerprint);
+describe("sendTransferBatchUnderKey", () => {
+  const recorded = () =>
+    Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
 
-    vi.setSystemTime(new Date("2026-08-20T12:14:00Z"));
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
+  function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
+    return fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+  }
 
-    vi.setSystemTime(new Date("2026-08-20T12:16:00Z"));
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(key);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retires the key once the API records the batch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => recorded());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [first, second] = sentKeys(fetchMock);
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it("retires a fresh key on a first-attempt refusal", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(Response.json({ error: { message: "bad" } }, { status: 422 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
+      status: 422,
+    });
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [refused, next] = sentKeys(fetchMock);
+    expect(next).not.toBe(refused);
+  });
+
+  // A money movement never mints a fresh key while the original may have run:
+  // the next press is answered under the same key.
+  it("keeps the key on an unknown outcome and resends under it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
+          { status: 409 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "Shared.idempotency.outcomeUnknownCheckList"
+    );
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [unknown, next] = sentKeys(fetchMock);
+    expect(next).toBe(unknown);
+  });
+
+  // Browser test (HOO-1918): the API recorded the batch but the answer was lost;
+  // a refusal after that settles nothing about the recorded batch, so the third
+  // press must replay it under the first key, not pay every recipient again.
+  it.each([
+    ["a rate limit", 429],
+    ["an expired session", 401],
+  ])("keeps a lost attempt's key through %s", async (_label, status) => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(Response.json({ error: { message: "refused" } }, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow("Failed to fetch");
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({ status });
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const keys = sentKeys(fetchMock);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
   });
 });
 
 describe("degraded storage", () => {
+  // A batch whose key lives in memory only could be sent twice by a reload and
+  // retry, so it is refused like every other money movement.
+  it("refuses to send a batch whose key storage refused", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
+        name: "TransferBatchRequestError",
+        status: 428,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the key stable in memory when sessionStorage refuses writes", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("QuotaExceededError");
@@ -147,7 +233,7 @@ describe("degraded storage", () => {
   it("prefers memory over stale readable storage after a failed write", () => {
     const fingerprint = "fingerprint-diverged";
     const stale = claimTransferBatchIdempotencyKey(fingerprint);
-    releaseTransferBatchIdempotencyKey(fingerprint);
+    releaseTransferBatchIdempotencyKey(fingerprint, stale);
 
     // The release reached storage; now the NEXT claim's write fails, leaving
     // storage stale while memory holds the fresh key.

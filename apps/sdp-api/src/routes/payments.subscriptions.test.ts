@@ -1,5 +1,5 @@
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import app from "@/index";
@@ -16,6 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
@@ -25,9 +26,10 @@ import {
   getAccountInfoMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
-  mockTokenSupplyDecimalsOnce,
+  MAINNET_USDC_MINT,
   seedCachedKey,
   seedCounterparty,
+  seedProductionPrivyWallet,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -86,6 +88,42 @@ function expectPreparedSubscriptionTransaction(
 
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  beforeEach(() => {
+    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+  });
+
+  it("stores a Production plan's USDC as the mainnet mint", async () => {
+    await seedProductionPrivyWallet({
+      custodyWalletId: "cwlt_subscription_plan_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: { ...SUBSCRIPTION_HEADERS, "Idempotency-Key": "plan-production-usdc" },
+        body: JSON.stringify({
+          ownerCustodyWalletId: "cwlt_subscription_plan_production",
+          token: "USDC",
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+
+    expect(planRes.status).toBe(201);
+    const planBody = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await planRes.json()
+    );
+    expect(planBody.data.subscriptionPlan).toMatchObject({
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      token: MAINNET_USDC_MINT,
+    });
+  });
 
   it.each(["project", "organization"] as const)(
     "rejects an exact plan wallet outside its %s scope",
@@ -277,7 +315,6 @@ describe("Payments routes — subscriptions", () => {
         },
         env
       );
-    mockTokenSupplyDecimalsOnce();
     expect((await prepare()).status).toBe(200);
     await getDb(env)
       .prepare(
@@ -345,7 +382,6 @@ describe("Payments routes — subscriptions", () => {
         },
         env
       );
-    mockTokenSupplyDecimalsOnce();
     const refused = await collect();
     expect(refused.status).toBe(409);
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
@@ -418,7 +454,6 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(created.status).toBe(201);
     const planId = (await created.json()).data.subscriptionPlan.id;
-    mockTokenSupplyDecimalsOnce();
     const prepared = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -796,7 +831,6 @@ describe("Payments routes — subscriptions", () => {
       status: "active",
     });
 
-    mockTokenSupplyDecimalsOnce();
     const preparePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -909,7 +943,6 @@ describe("Payments routes — subscriptions", () => {
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
 
-    mockTokenSupplyDecimalsOnce();
     const prepareAuthorizationRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
       {
@@ -1013,7 +1046,6 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(amountOverrideRes.status).toBe(400);
 
-    mockTokenSupplyDecimalsOnce();
     const prepareCollectionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
       {
