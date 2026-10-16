@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { type SdpEnvironment, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { type SdpEnvironment, type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { normalizePaymentToken, rampTransferTokenMint } from "@/services/payment-operation.service";
 
@@ -25,6 +25,32 @@ describe("normalizePaymentToken", () => {
       )
     ).toThrow("USDT is not available on devnet");
   });
+
+  it.each([
+    [
+      "sandbox",
+      "devnet",
+      WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
+    ],
+    [
+      "production",
+      "mainnet-beta",
+      WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
+      WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+    ],
+  ] as const satisfies readonly (readonly [SdpEnvironment, SolanaCluster, string, string])[])(
+    "keeps the %s scope's USDC mint address and refuses the other cluster's",
+    (environment, cluster, ownMint, foreignMint) => {
+      const normalizeInScope = (token: string) =>
+        runInClusterScope({ projectId: null, environment }, () => normalizePaymentToken(token));
+
+      expect(normalizeInScope(ownMint)).toBe(ownMint);
+      expect(() => normalizeInScope(foreignMint)).toThrow(
+        `USDC mint ${foreignMint} is not available on ${cluster}`
+      );
+    }
+  );
 
   it("refuses to resolve a symbol outside a cluster scope", () => {
     expect(() => normalizePaymentToken("USDC")).toThrow("No cluster scope is open for this work");

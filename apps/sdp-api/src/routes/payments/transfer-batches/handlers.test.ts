@@ -1915,14 +1915,14 @@ describe("payment transfer batches", () => {
     {
       label: "legacy SPL Token",
       tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
-      requestToken: TEST_SOLANA_ADDRESSES.mint,
-      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+      requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
     {
       label: "Token-2022",
       tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
-      requestToken: TEST_SOLANA_ADDRESSES.mint,
-      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+      requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
     {
       label: "well-known symbol USDC",
