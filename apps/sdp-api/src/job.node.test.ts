@@ -691,7 +691,7 @@ describe("runCronJob", () => {
     await expect(runCronJob()).resolves.toBeUndefined();
 
     expect(pruneIdempotencyKeysModule.pruneIdempotencyKeys).toHaveBeenCalledExactlyOnceWith(env);
-    expect(trackPendingTransfers).toHaveBeenCalledTimes(1);
+    expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
   });
 
   it("keeps DvP failures non-fatal and runs later ticks alongside credential cleanup", async () => {
