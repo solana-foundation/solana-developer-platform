@@ -16,9 +16,11 @@ import {
   enforceRateLimit,
   InProcessRateLimiter,
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
+  keyedIpBackstopFallback,
   RATE_LIMIT_WINDOW_MS,
+  skipRateLimitPaths,
 } from "@/middleware/rate-limit";
-import type { KVStoreSet } from "@/runtime/kv";
+import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -33,6 +35,21 @@ import type { Env } from "@/types/env";
  * silently move these tests to the "unknown" bucket.
  */
 const CLIENT_IP = "203.0.113.7";
+
+/** A counter store whose every call fails, as during a Redis outage. */
+function unavailableKvStoreSet(): KVStoreSet {
+  const down = () => Promise.reject(new Error("kv down"));
+  const store: KVStore = {
+    get: down,
+    put: down,
+    delete: down,
+    compareAndSet: down,
+    compareAndDelete: down,
+    list: down,
+    admitSlidingWindow: down,
+  };
+  return { rateLimits: store, cache: store };
+}
 
 async function keyedRequest(): Promise<Response> {
   return await app.request(
@@ -430,11 +447,7 @@ describe("Rate limiting", () => {
       });
       if (options.kv === "broken") {
         mini.use("*", async (c, next) => {
-          c.set("kv", {
-            rateLimits: {
-              admitSlidingWindow: () => Promise.reject(new Error("kv down")),
-            },
-          } as unknown as KVStoreSet);
+          c.set("kv", unavailableKvStoreSet());
           await next();
         });
       }
@@ -526,9 +539,7 @@ describe("Rate limiting", () => {
           : c.text("error", 500)
       );
       app.use("*", async (c, next) => {
-        c.set("kv", {
-          rateLimits: { admitSlidingWindow: () => Promise.reject(new Error("kv down")) },
-        } as unknown as KVStoreSet);
+        c.set("kv", unavailableKvStoreSet());
         await next();
       });
       app.use("*", authMiddleware());
@@ -555,6 +566,48 @@ describe("Rate limiting", () => {
       });
       read.mockClear();
       expect((await request()).status).toBe(429);
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it("bounds fresh-key spray per IP in memory while Redis is down", async () => {
+      const backstop = vi.spyOn(keyedIpBackstopFallback, "enforce");
+      const read = vi.spyOn(organizationAccess, "authorizeApiKey");
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError
+          ? c.json(err.toResponse(), err.statusCode as 401 | 429)
+          : c.text("error", 500)
+      );
+      app.use("*", async (c, next) => {
+        c.set("kv", unavailableKvStoreSet());
+        await next();
+      });
+      app.use("*", skipRateLimitPaths());
+      app.use("*", authMiddleware());
+      app.get("/resource", (c) => c.text("ok"));
+      const request = (key: string) =>
+        app.request(
+          "/resource",
+          { headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": CLIENT_IP } },
+          env
+        );
+
+      // A fresh key per request misses every per-hash counter; the IP one counts.
+      expect((await request("sk_test_spray_one")).status).toBe(401);
+      expect((await request("sk_test_spray_two")).status).toBe(401);
+      expect(backstop).toHaveBeenCalledTimes(2);
+      expect(backstop).toHaveBeenLastCalledWith(
+        expect.anything(),
+        CLIENT_IP,
+        KEYED_IP_BACKSTOP_MAX_REQUESTS,
+        RATE_LIMIT_WINDOW_MS
+      );
+
+      backstop.mockImplementationOnce(() => {
+        throw rateLimited("Rate limit exceeded.");
+      });
+      read.mockClear();
+      expect((await request("sk_test_spray_three")).status).toBe(429);
       expect(read).not.toHaveBeenCalled();
     });
   });
