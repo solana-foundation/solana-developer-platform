@@ -431,7 +431,7 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
   const provider = parseRampWebhookProvider(c.req.param("provider"));
   const rawBody = await c.req.raw.text();
-  const processor: WebhookProcessor<unknown, unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
+  const processor: WebhookProcessor<unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[provider];
 
   await processor.verify({
     env: c.env as unknown as Record<string, string | undefined>,

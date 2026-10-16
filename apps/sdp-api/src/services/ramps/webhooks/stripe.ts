@@ -149,7 +149,7 @@ export const stripeWebhook = {
     environment,
     headers,
     rawBody,
-  }: RampWebhookValidationContext): Promise<unknown> {
+  }: RampWebhookValidationContext): Promise<string> {
     const secret = readStripeWebhookSecret(env, environment);
     const signatureHeader = headers.get("stripe-signature")?.trim();
     if (!signatureHeader) {
@@ -172,14 +172,12 @@ export const stripeWebhook = {
     return rawBody;
   },
 
-  parse(payload: unknown, environment?: SdpEnvironment): RampSettlementEvent {
-    let decoded: unknown = payload;
-    if (typeof payload === "string") {
-      try {
-        decoded = JSON.parse(payload);
-      } catch {
-        throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
-      }
+  parse(rawBody: string, environment?: SdpEnvironment): RampSettlementEvent {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(rawBody);
+    } catch {
+      throw badRequest("Stripe webhook body must be valid JSON", { provider: this.provider });
     }
     const mode = stripeEventModeSchema.safeParse(decoded);
     if (environment !== undefined && !mode.success) {
@@ -273,4 +271,4 @@ export const stripeWebhook = {
     }
     return (await applyRampSettlementEvent(env, event)).outcome;
   },
-} satisfies WebhookProcessor<unknown, RampSettlementEvent>;
+} satisfies WebhookProcessor<RampSettlementEvent>;

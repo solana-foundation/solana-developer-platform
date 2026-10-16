@@ -115,8 +115,7 @@ export async function applyStoredRampWebhookEvent(
     });
     return false;
   }
-  const processor: WebhookProcessor<unknown, unknown> =
-    RAMP_PROVIDER_WEBHOOK_PROCESSOR[row.provider];
+  const processor: WebhookProcessor<unknown> = RAMP_PROVIDER_WEBHOOK_PROCESSOR[row.provider];
   try {
     let parsed: unknown;
     try {

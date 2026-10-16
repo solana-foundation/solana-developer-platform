@@ -7,7 +7,7 @@ import { stripeWebhook } from "./stripe";
 export const RAMP_PROVIDER_WEBHOOK_PROCESSOR = {
   moonpay: moonpayWebhook,
   stripe: stripeWebhook,
-} as const satisfies Record<RampProviderId, WebhookProcessor<unknown, unknown>>;
+} as const satisfies Record<RampProviderId, WebhookProcessor<unknown>>;
 
 export type WebhookRampProvider = keyof typeof RAMP_PROVIDER_WEBHOOK_PROCESSOR;
 

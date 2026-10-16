@@ -10,6 +10,10 @@ function signStripeBody(rawBody: string, timestamp: string, secret: string): str
   return createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
 }
 
+function parseStripeEvent(body: Record<string, unknown>) {
+  return stripeWebhook.parse(JSON.stringify(body));
+}
+
 /** Verifies `body` signed with the sandbox secret at the `environment` endpoint. */
 async function verifySigned(body: Record<string, unknown>, environment: "sandbox" | "production") {
   const rawBody = JSON.stringify(body);
@@ -32,21 +36,20 @@ describe("stripeWebhook", () => {
   });
 
   it("maps onramp session statuses to settlement event kinds", () => {
-    const processor = stripeWebhook;
     const event = (status: string, extra?: Record<string, unknown>) => ({
       type: "crypto.onramp_session.updated",
       data: { object: extra ? { id: "cos_1", status, ...extra } : { id: "cos_1", status } },
     });
 
-    expect(processor.parse(event("requires_payment"))).toMatchObject({
+    expect(parseStripeEvent(event("requires_payment"))).toMatchObject({
       kind: "awaiting_payment",
       reference: "cos_1",
     });
-    expect(processor.parse(event("fulfillment_processing"))).toMatchObject({
+    expect(parseStripeEvent(event("fulfillment_processing"))).toMatchObject({
       kind: "settling",
     });
     expect(
-      processor.parse(
+      parseStripeEvent(
         event("fulfillment_complete", {
           transaction_details: {
             destination_amount: "0.5",
@@ -56,17 +59,16 @@ describe("stripeWebhook", () => {
         })
       )
     ).toMatchObject({ kind: "settled", reference: "cos_1", receivedAmount: "0.5" });
-    expect(processor.parse(event("rejected"))).toMatchObject({ kind: "failed" });
-    expect(processor.parse(event("initialized"))).toMatchObject({ kind: "ignore" });
-    expect(processor.parse({ type: "crypto.onramp_session.created", data: {} })).toMatchObject({
+    expect(parseStripeEvent(event("rejected"))).toMatchObject({ kind: "failed" });
+    expect(parseStripeEvent(event("initialized"))).toMatchObject({ kind: "ignore" });
+    expect(parseStripeEvent({ type: "crypto.onramp_session.created", data: {} })).toMatchObject({
       kind: "ignore",
     });
   });
 
   it("reports the rail a completed session delivered, null for an asset SDP does not sell", () => {
-    const processor = stripeWebhook;
     const completed = (transactionDetails: Record<string, unknown>) =>
-      processor.parse({
+      parseStripeEvent({
         type: "crypto.onramp_session.updated",
         data: {
           object: {
@@ -89,9 +91,8 @@ describe("stripeWebhook", () => {
   });
 
   it("throws on a completed session without its destination currency or network", () => {
-    const processor = stripeWebhook;
     const completed = (transactionDetails?: Record<string, unknown>) => () =>
-      processor.parse({
+      parseStripeEvent({
         type: "crypto.onramp_session.updated",
         data: {
           object: {
@@ -110,18 +111,17 @@ describe("stripeWebhook", () => {
   });
 
   it("throws on a known event type with a malformed envelope", () => {
-    const processor = stripeWebhook;
-    expect(() => processor.parse({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
+    expect(() => parseStripeEvent({ type: "crypto.onramp_session.updated", data: {} })).toThrow(
       "missing the session object"
     );
     expect(() =>
-      processor.parse({
+      parseStripeEvent({
         type: "crypto.onramp_session.updated",
         data: { object: { status: "rejected" } },
       })
     ).toThrow("missing the session id");
     expect(() =>
-      processor.parse({ type: "crypto.onramp_session.updated", data: { object: { id: "cos_1" } } })
+      parseStripeEvent({ type: "crypto.onramp_session.updated", data: { object: { id: "cos_1" } } })
     ).toThrow("missing the session status");
   });
 

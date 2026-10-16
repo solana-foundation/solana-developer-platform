@@ -108,7 +108,7 @@ export const moonpayWebhook = {
     environment,
     headers,
     rawBody,
-  }: RampWebhookValidationContext): Promise<unknown> {
+  }: RampWebhookValidationContext): Promise<string> {
     const webhookKey = readMoonpayWebhookKey(env, environment);
     const signatureHeader = headers.get("moonpay-signature-v2")?.trim();
     if (!signatureHeader) {
@@ -135,14 +135,12 @@ export const moonpayWebhook = {
     return rawBody;
   },
 
-  parse(payload: unknown): MoonpaySettlementEvent {
-    let decoded: unknown = payload;
-    if (typeof payload === "string") {
-      try {
-        decoded = JSON.parse(payload);
-      } catch {
-        throw badRequest("MoonPay webhook body must be valid JSON", { provider: this.provider });
-      }
+  parse(rawBody: string): MoonpaySettlementEvent {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(rawBody);
+    } catch {
+      throw badRequest("MoonPay webhook body must be valid JSON", { provider: this.provider });
     }
     const root = readRecord(decoded);
     if (!root) {
@@ -217,4 +215,4 @@ export const moonpayWebhook = {
     }
     return (await applyRampSettlementEvent(env, event)).outcome;
   },
-} satisfies WebhookProcessor<unknown, MoonpaySettlementEvent>;
+} satisfies WebhookProcessor<MoonpaySettlementEvent>;
