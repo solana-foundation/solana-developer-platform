@@ -2,6 +2,7 @@ import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
 import { SOL_MINT } from "@sdp/types";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
@@ -14,7 +15,6 @@ import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
-  enableMainnetSponsorship,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
@@ -53,7 +53,6 @@ async function seedProductionRequestWallet(): Promise<RequestWallet> {
     createdBy: TEST_USER.id,
     ...PRODUCTION_REQUEST_WALLET,
   });
-  await enableMainnetSponsorship();
   return PRODUCTION_REQUEST_WALLET;
 }
 
@@ -61,6 +60,19 @@ const REQUEST_WALLET_BY_ENVIRONMENT = {
   sandbox: async () => SANDBOX_REQUEST_WALLET,
   production: seedProductionRequestWallet,
 } as const satisfies Record<SdpEnvironment, () => Promise<RequestWallet>>;
+
+const sponsoredTransactionResponseSchema = z.object({ transaction: z.string() });
+
+const sponsoredGrantAuditSchema = z.object({
+  action: z.string(),
+  organization_id: z.string(),
+  metadata: z.string(),
+});
+
+const sponsoredGrantMetadataSchema = z.object({
+  sponsoredAccount: z.string(),
+  signature: z.string().min(1),
+});
 
 const CLUSTER_CASES = [
   { environment: "sandbox", cluster: "devnet" },
@@ -176,12 +188,16 @@ describe("Public payment request routes", () => {
     it.for(CLUSTER_CASES)(
       "builds a $environment request's sponsored transaction on $cluster only",
       async ({ environment, cluster }) => {
-        stubSponsorship();
-        const request = await createAwaitingPaymentRequest(
-          await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
-        );
+        const sponsorship = stubSponsorship();
+        const wallet = await REQUEST_WALLET_BY_ENVIRONMENT[environment]();
+        const request = await createAwaitingPaymentRequest(wallet);
 
         expect((await postTransaction(request.public_token)).status).toBe(200);
+        expect(sponsorship).toHaveBeenCalledWith(
+          env,
+          expect.objectContaining({ environment, projectId: wallet.projectId }),
+          "payments.pay_request"
+        );
         expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
         expect(calledClusters()).toEqual(new Set([cluster]));
@@ -197,11 +213,11 @@ describe("Public payment request routes", () => {
 
       const first = await postTransaction(request.public_token);
       expect(first.status).toBe(200);
-      const firstBody = (await first.json()) as { transaction: string };
+      const firstBody = sponsoredTransactionResponseSchema.parse(await first.json());
 
       const second = await postTransaction(request.public_token);
       expect(second.status).toBe(200);
-      const secondBody = (await second.json()) as { transaction: string };
+      const secondBody = sponsoredTransactionResponseSchema.parse(await second.json());
 
       expect(secondBody.transaction).toBe(firstBody.transaction);
       expect(sponsorship).toHaveBeenCalledTimes(1);
@@ -321,12 +337,11 @@ describe("Public payment request routes", () => {
         .bind(request.id)
         .all();
       expect(rows.results).toHaveLength(1);
-      const row = rows.results[0] as Record<string, unknown>;
-      expect(row.action).toBe("sign");
-      expect(row.organization_id).toBe(TEST_ORG.id);
-      const metadata = JSON.parse(String(row.metadata));
-      expect(metadata.sponsoredAccount).toBe(TEST_SOLANA_ADDRESSES.wallet2);
-      expect(metadata.signature).toBeTruthy();
+      const entry = sponsoredGrantAuditSchema.parse(rows.results[0]);
+      expect(entry).toMatchObject({ action: "sign", organization_id: TEST_ORG.id });
+      expect(sponsoredGrantMetadataSchema.parse(JSON.parse(entry.metadata))).toMatchObject({
+        sponsoredAccount: TEST_SOLANA_ADDRESSES.wallet2,
+      });
     });
 
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
@@ -343,8 +358,8 @@ describe("Public payment request routes", () => {
       const claim = await getDb(env)
         .prepare("SELECT sponsored_tx_signed FROM payment_requests WHERE id = ?")
         .bind(request.id)
-        .first();
-      expect(claim?.sponsored_tx_signed ?? null).toBeNull();
+        .first<{ sponsored_tx_signed: string | null }>();
+      expect(claim).toEqual({ sponsored_tx_signed: null });
 
       const retried = await postTransaction(request.public_token);
       expect(retried.status).toBe(200);
