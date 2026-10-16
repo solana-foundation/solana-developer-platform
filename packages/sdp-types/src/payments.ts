@@ -452,20 +452,27 @@ export interface PaymentTransferEnvelope {
   };
 }
 
-export type PaymentTransferBatchStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "partially_failed"
-  | "archived";
+export const PAYMENT_TRANSFER_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "partially_failed",
+  "archived",
+] as const;
+
+export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
+
+export const PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "archived",
+] as const;
 
 export type PaymentTransferBatchRecipientStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "archived";
+  (typeof PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES)[number];
 
 export interface PaymentTransferBatchRecipientRequest {
   externalId?: string;

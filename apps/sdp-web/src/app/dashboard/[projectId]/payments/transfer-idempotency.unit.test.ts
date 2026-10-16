@@ -22,6 +22,7 @@ const RECORDED_TRANSFER = {
   custodyWalletId: "cwlt_1",
   rampsMemo: {},
   status: "confirmed",
+  signature: null,
 };
 
 beforeEach(() => {
@@ -68,6 +69,31 @@ describe("sendTransferUnderKey", () => {
       "DashboardPayments.workspace.transferMissing"
     );
     expect(claimTransferIdempotencyKey(fingerprint)).toBe(sentKey(fetchMock));
+  });
+
+  it("keeps the key for a malformed success and reuses it for the corrected retry", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => Response.json({ data: { transfer: RECORDED_TRANSFER } }))
+      .mockResolvedValueOnce(
+        Response.json({ data: { transfer: { id: "xfr_1", custodyWalletId: "cwlt_1" } } })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = transferRequestFingerprint(SUBMISSION);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow(
+      "DashboardPayments.workspace.transferMissing"
+    );
+    const originalKey = sentKey(fetchMock);
+    expect(originalKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claimTransferIdempotencyKey(fingerprint)).toBe(originalKey);
+
+    const { transfer } = await sendTransferUnderKey(SUBMISSION, t);
+    expect(transfer.id).toBe("xfr_1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("Idempotency-Key")).toBe(
+      originalKey
+    );
+    expect(claimTransferIdempotencyKey(fingerprint)).not.toBe(originalKey);
   });
 
   // A refusal moved nothing, so the key is free. A lost answer may have

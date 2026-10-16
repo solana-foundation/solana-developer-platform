@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/security/noSecrets: Public Solana fixture account; no private keys. */
 import { expect, type Page, test } from "@playwright/test";
-import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
 import { Client } from "pg";
 import { z } from "zod";
 import { projectHref } from "@/lib/dashboard-project-path";
@@ -461,7 +461,7 @@ test.describe
       }
       const legacyId = `xfr_pr2_legacy_${crypto.randomUUID()}`;
       const failedId = `xfr_pr2_failed_${crypto.randomUUID()}`;
-      const historyRows: Array<[string, string | null, "finalized" | "failed", string | null]> = [
+      const historyRows: Array<[string, string | null, PaymentTransferStatus, string | null]> = [
         [legacyId, null, "finalized", "retained-e2e-legacy-signature"],
         [failedId, alias.id, "failed", null],
       ];

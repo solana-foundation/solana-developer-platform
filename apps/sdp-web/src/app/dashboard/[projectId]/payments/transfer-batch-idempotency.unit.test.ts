@@ -112,7 +112,19 @@ describe("claim / release", () => {
 
 describe("sendTransferBatchUnderKey", () => {
   const recorded = () =>
-    Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
+    Response.json({
+      data: {
+        batch: {
+          id: "batch_1",
+          sourceCustodyWalletId: "cwlt_1",
+          status: "processing",
+          recipientCount: 2,
+          transactionCount: 1,
+        },
+        recipients: [],
+        transfers: [],
+      },
+    });
 
   function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
     return fetchMock.mock.calls.map(([, init]) =>
@@ -134,6 +146,34 @@ describe("sendTransferBatchUnderKey", () => {
     const [first, second] = sentKeys(fetchMock);
     expect(first).toMatch(/^[0-9a-f-]{36}$/);
     expect(second).not.toBe(first);
+  });
+
+  it("keeps the key for a malformed success and reuses it for the corrected retry", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+            recipients: [],
+            transfers: [],
+          },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = transferBatchRequestFingerprint(batchRequest());
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "DashboardPayments.workspace.batchTransferMissing"
+    );
+    const [originalKey] = sentKeys(fetchMock);
+    expect(originalKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(originalKey);
+
+    const result = await sendTransferBatchUnderKey(batchRequest(), t);
+    expect(result.batch.id).toBe("batch_1");
+    expect(sentKeys(fetchMock)).toEqual([originalKey, originalKey]);
+    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(originalKey);
   });
 
   it("retires a fresh key on a first-attempt refusal", async () => {

@@ -22,6 +22,7 @@ const TRANSFER = {
   custodyWalletId: "cwlt_1",
   rampsMemo: {},
   status: "confirmed",
+  signature: null,
 };
 
 afterEach(() => {

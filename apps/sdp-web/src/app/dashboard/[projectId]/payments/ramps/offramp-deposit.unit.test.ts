@@ -34,6 +34,7 @@ describe("off-ramp deposit feedback", () => {
             custodyWalletId: submission.sourceCustodyWalletId,
             rampsMemo: {},
             status: "processing",
+            signature: null,
           },
         },
       })
@@ -90,6 +91,8 @@ describe("off-ramp deposit feedback", () => {
               id: "xfr_other",
               custodyWalletId: submission.sourceCustodyWalletId,
               rampsMemo: {},
+              status: "processing",
+              signature: null,
             },
           },
         })

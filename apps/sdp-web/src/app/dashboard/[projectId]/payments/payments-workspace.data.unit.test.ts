@@ -83,6 +83,8 @@ describe("Payments write requests", () => {
                 id: "trf_1",
                 custodyWalletId,
                 providerWalletId: "same-provider-reference",
+                status: "pending",
+                signature: null,
               },
             },
           })
@@ -109,12 +111,31 @@ describe("Payments write requests", () => {
     ).toEqual(transfer);
   });
 
+  it("refuses a successful transfer with an invalid result status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: {
+            transfer: { id: "trf_1", custodyWalletId: "cwlt_1", status: 42, signature: null },
+          },
+        })
+      )
+    );
+
+    await expect(
+      createTransfer(transferInput, t, { value: "idem_transfer_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
+  });
+
   it("keeps provider metadata opaque when creating a transfer with the exact source", async () => {
     const transfer = {
       id: "trf_1",
       custodyWalletId: "cwlt_1",
       providerWalletId: "retained provider reference",
-      rampsMemo: {},
+      status: "pending",
+      signature: null,
+      rampsMemo: ["opaque metadata"],
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { transfer } })));
 
@@ -224,7 +245,13 @@ describe("Payments write requests", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
-            batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+            batch: {
+              id: "batch_1",
+              sourceCustodyWalletId: "cwlt_1",
+              status: "pending",
+              recipientCount: 0,
+              transactionCount: 0,
+            },
             recipients: [],
             transfers: [],
           },
@@ -258,6 +285,9 @@ describe("Payments write requests", () => {
               id: "batch_1",
               sourceCustodyWalletId: "cwlt_1",
               sourceProviderWalletId: "retained provider reference",
+              status: "confirmed",
+              recipientCount: 0,
+              transactionCount: 1,
             },
             recipients: [],
             transfers: [
@@ -265,6 +295,8 @@ describe("Payments write requests", () => {
                 id: "trf_chunk",
                 custodyWalletId: "cwlt_1",
                 providerWalletId: "retained provider reference",
+                status: "confirmed",
+                signature: "sig_1",
               },
             ],
           },
@@ -283,6 +315,9 @@ describe("Payments write requests", () => {
         id: "batch_1",
         sourceCustodyWalletId: "cwlt_1",
         sourceProviderWalletId: "retained provider reference",
+        status: "confirmed",
+        recipientCount: 0,
+        transactionCount: 1,
       },
       recipients: [],
       transfers: [
@@ -290,9 +325,55 @@ describe("Payments write requests", () => {
           id: "trf_chunk",
           custodyWalletId: "cwlt_1",
           providerWalletId: "retained provider reference",
+          status: "confirmed",
+          signature: "sig_1",
         },
       ],
     });
+  });
+
+  it("refuses a successful batch with an invalid recipient amount", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: {
+            batch: {
+              id: "batch_1",
+              sourceCustodyWalletId: "cwlt_1",
+              status: "confirmed",
+              recipientCount: 1,
+              transactionCount: 1,
+            },
+            recipients: [
+              {
+                id: "recipient_1",
+                transferId: "trf_chunk",
+                counterpartyAccountId: "acct_1",
+                amount: 42,
+                destination: "destination",
+                status: "confirmed",
+              },
+            ],
+            transfers: [
+              {
+                id: "trf_chunk",
+                custodyWalletId: "cwlt_1",
+                status: "confirmed",
+                signature: "sig_1",
+              },
+            ],
+          },
+        })
+      )
+    );
+
+    await expect(
+      createTransferBatch({ sourceCustodyWalletId: "cwlt_1", token: "mint", recipients: [] }, t, {
+        value: "idem_batch_1",
+        persisted: true,
+      })
+    ).rejects.toThrow("DashboardPayments.workspace.batchTransferMissing");
   });
 
   it.each([
@@ -313,6 +394,9 @@ describe("Payments write requests", () => {
                 id: "batch_1",
                 sourceCustodyWalletId: batchSource,
                 sourceProviderWalletId: "shared-provider-reference",
+                status: "confirmed",
+                recipientCount: 0,
+                transactionCount: 1,
               },
               recipients: [],
               transfers: [
@@ -320,6 +404,8 @@ describe("Payments write requests", () => {
                   id: "trf_chunk",
                   custodyWalletId: chunkSource,
                   providerWalletId: "shared-provider-reference",
+                  status: "confirmed",
+                  signature: "sig_1",
                 },
               ],
             },
