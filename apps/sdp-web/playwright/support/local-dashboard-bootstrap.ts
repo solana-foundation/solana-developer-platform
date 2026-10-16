@@ -119,6 +119,7 @@ interface PlaywrightOrganizationFixture {
 
 interface EnsureLinkedOrgOptions {
   tier?: OrganizationTier;
+  preserveExistingFixtures?: boolean;
 }
 
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
@@ -331,7 +332,8 @@ async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promi
     await client.query(
       `UPDATE organizations
        SET settings = $2, updated_at = sdp_datetime_now()
-       WHERE id = $1`,
+       WHERE id = $1
+         AND settings::jsonb #>> '{providerOverrides,custody,local}' IS DISTINCT FROM 'true'`,
       [
         organizationId,
         JSON.stringify({
@@ -683,6 +685,18 @@ export async function ensureLinkedOrg(
   identity: ClerkTestIdentity,
   options?: EnsureLinkedOrgOptions
 ): Promise<PlaywrightOrganizationFixture> {
+  if (options?.preserveExistingFixtures) {
+    const existing = await withDatabaseClient(async (client) => {
+      const result = await client.query<PlaywrightOrganizationFixture>(
+        `SELECT org.id, org.name, org.slug FROM organizations org
+         JOIN auth_organization_identities identity ON identity.organization_id = org.id
+         WHERE identity.provider = 'clerk' AND identity.provider_org_id = $1`,
+        [identity.organizationId]
+      );
+      return result.rows[0];
+    });
+    if (existing) return existing;
+  }
   const organization = buildPlaywrightOrganizationFixture(identity);
   const tier = options?.tier ?? "enterprise";
 
@@ -692,7 +706,7 @@ export async function ensureLinkedOrg(
     await client.query("BEGIN");
 
     try {
-      await clearPlaywrightOrganizations(client, identity);
+      if (!options?.preserveExistingFixtures) await clearPlaywrightOrganizations(client, identity);
       const userId = await ensureLocalUserIdentity(client, identity);
 
       await client.query(
@@ -783,6 +797,7 @@ export async function bootstrapLocalWalletFixtures(input: {
   fundSourceWallet?: boolean;
   fundSourceAmountSol?: number;
   tier?: OrganizationTier;
+  preserveExistingFixtures?: boolean;
 }): Promise<WalletBootstrapResult> {
   const { identity, bearerToken } = input;
   const walletCount = Math.max(1, input.walletCount ?? 1);
@@ -797,6 +812,7 @@ export async function bootstrapLocalWalletFixtures(input: {
 
   const organization = await ensureLinkedOrg(identity, {
     tier: input.tier,
+    preserveExistingFixtures: input.preserveExistingFixtures,
   });
   if (provider === "local") {
     await enableLocalCustodyForPlaywrightOrg(organization.id);
@@ -806,9 +822,19 @@ export async function bootstrapLocalWalletFixtures(input: {
   const projectId = projects.sandbox;
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
-  const createdWalletIds = [
-    await initializeOrCreateWallet(api, provider, input.walletLabel ?? "Treasury"),
-  ];
+  const retainedLocalWallets =
+    input.preserveExistingFixtures && provider === "local"
+      ? (await listWallets(api)).filter(
+          (wallet) => wallet.provider === "local" && wallet.custodyConfigId
+        )
+      : [];
+  if (retainedLocalWallets.length > 1) {
+    throw new Error("Expected one exact retained local wallet for the isolated fixture");
+  }
+  const retainedLocalWallet = retainedLocalWallets[0];
+  const createdWalletIds = retainedLocalWallet
+    ? []
+    : [await initializeOrCreateWallet(api, provider, input.walletLabel ?? "Treasury")];
 
   for (let index = 1; index < walletCount; index += 1) {
     const created = await api.post<CreateWalletResponse>("/v1/wallets", {
@@ -819,10 +845,12 @@ export async function bootstrapLocalWalletFixtures(input: {
   }
 
   const listedWallets = await listWallets(api);
-  const wallets = createdWalletIds
-    .map((walletId) => listedWallets.find((wallet) => wallet.walletId === walletId))
-    .filter((wallet): wallet is PaymentsDashboardWallet => Boolean(wallet))
-    .map(toFixtureWallet);
+  const wallets = retainedLocalWallet
+    ? [toFixtureWallet(retainedLocalWallet)]
+    : createdWalletIds
+        .map((walletId) => listedWallets.find((wallet) => wallet.walletId === walletId))
+        .filter((wallet): wallet is PaymentsDashboardWallet => Boolean(wallet))
+        .map(toFixtureWallet);
 
   if (wallets.length !== walletCount) {
     throw new Error(`Failed to resolve ${walletCount} seeded wallet(s) for Playwright bootstrap`);

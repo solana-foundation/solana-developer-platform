@@ -6,6 +6,7 @@ import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 
@@ -94,7 +95,7 @@ describe("Payments routes — subscription plan wallets before the key", () => {
 
   it("refuses an owner wallet outside the caller's project with 404 and stores nothing", async () => {
     const response = await postPlan(
-      { ownerWalletId: "wal_other_organization" },
+      { ownerCustodyWalletId: "cwlt_other_organization" },
       "plan-foreign-owner"
     );
     expect(response.status).toBe(404);
@@ -103,7 +104,10 @@ describe("Payments routes — subscription plan wallets before the key", () => {
 
   it("refuses a puller wallet outside the caller's project with 404 and stores nothing", async () => {
     const response = await postPlan(
-      { ownerWalletId: TEST_WALLET_ID, pullerWalletId: "wal_other_organization" },
+      {
+        ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        pullerCustodyWalletId: "cwlt_other_organization",
+      },
       "plan-foreign-puller"
     );
     expect(response.status).toBe(404);

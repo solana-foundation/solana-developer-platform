@@ -567,13 +567,34 @@ describe("Payments routes — recurring", () => {
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
-    const created = await createRecurringPaymentFixture({
-      ...DEFAULT_RECURRING_FIXTURE,
-      headers: RECURRING_HEADERS,
+    const counterpartyId = await seedCounterparty();
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    expect((await createRes.clone().json()).data.recurringPayment).not.toHaveProperty(
+      "sourceProviderWalletId"
+    );
+    const created = (await parseRecurringResponse(createRes)).data.recurringPayment;
     expect(created.id).toMatch(/^prp_/);
     expect(created.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(created.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(created.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
     expect(created.token).toBe(DEVNET_USDC_MINT);
     expect(created.amount).toBe("25.00");
@@ -585,9 +606,11 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(listRes.status).toBe(200);
+    const rawListBody = await listRes.json();
     const listBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
-      await listRes.json()
+      rawListBody
     );
+    expect(rawListBody.data.recurringPayments[0]).not.toHaveProperty("sourceProviderWalletId");
     expect(listBody.data.total).toBe(1);
     expect(listBody.data.recurringPayments[0]?.id).toBe(created.id);
 
@@ -597,6 +620,8 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(getRes.status).toBe(200);
+    const rawGetBody = await getRes.clone().json();
+    expect(rawGetBody.data.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
     const getBody = await parseRecurringResponse(getRes);
     expect(getBody.data.recurringPayment.id).toBe(created.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
@@ -659,6 +684,13 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(scopedDetail.status).toBe(200);
+    const historicalPayment = (await scopedDetail.json()).data.recurringPayment;
+    expect(historicalPayment).toMatchObject({
+      id: legacy.id,
+      sourceCustodyWalletId: null,
+      sourceAddress: recurringExecution.sourceSigner().address,
+    });
+    expect(historicalPayment).not.toHaveProperty("sourceProviderWalletId");
     const unauthorizedDetail = await app.request(
       `/v1/payments/recurring-payments/${unauthorized.id}`,
       { headers: RECURRING_HEADERS },
@@ -680,6 +712,50 @@ describe("Payments routes — recurring", () => {
     expect(tenantList.status).toBe(200);
     expect(await tenantList.json()).toMatchObject({ data: { total: 3 } });
   });
+
+  it.each(["sourceWalletId", "sourceProviderWalletId"])(
+    "rejects %s without ignoring it on recurring create or update",
+    async (legacySelector) => {
+      const payment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const create = await app.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            [legacySelector]: TEST_WALLET_ID,
+            counterpartyId: payment.counterpartyId,
+            counterpartyAccountId: payment.counterpartyAccountId,
+            token: DEVNET_USDC_MINT,
+            amount: "26.00",
+            periodHours: 720,
+          }),
+        },
+        env
+      );
+      expect(create.status).toBe(400);
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ amount: "26.00", [legacySelector]: TEST_WALLET_ID }),
+        },
+        env
+      );
+      expect(update.status).toBe(400);
+      const detail = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect((await detail.json()).data.recurringPayment).toMatchObject({
+        amount: "25.00",
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      });
+    }
+  );
 
   it.each(["all", "selected"] as const)(
     "fails closed before signing a null-pin recurring payment with %s wallet scope",
@@ -999,6 +1075,296 @@ describe("Payments routes — recurring", () => {
     });
   });
 
+  it("preserves legacy activation retry without a recurring sponsorship ledger", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await paymentRecurringPaymentsRepositoryPostgres
+      .createPostgresPaymentRecurringPaymentsRepository(getDb(env))
+      .createActivationAttempt({
+        id: "prpa_legacy_unknown",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recurringPaymentId: created.id,
+        status: "failed",
+        stage: "create_plan",
+        planCreationSignature: null,
+        authorizationSignature: null,
+        error: "Submission outcome unknown",
+        metadata: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = await parseRecurringResponse(response);
+    expect(body.data.recurringPayment.status).toBe("active");
+    expect(recurringExecution.signAndSendMock()).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps supported self-hosted recurring activation free of SDP reservations", async () => {
+    const originalMode = env.SDP_DEPLOYMENT_MODE;
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    onTestFinished(() => {
+      env.SDP_DEPLOYMENT_MODE = originalMode;
+    });
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    expect(activated.status).toBe("active");
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM sponsorship_budget_reservations")
+        .first()
+    ).toEqual({ count: 0 });
+  });
+
+  it("keeps the saved fee actor through activation, collection, cancel and resume after provider alias drift", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id = ?")
+      .bind("provider_alias_after_identity_migration", TEST_CUSTODY_WALLET_ID)
+      .run();
+
+    const activate = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(activate.status).toBe(200);
+    const activated = (await parseRecurringResponse(activate)).data.recurringPayment;
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
+
+    if (!activated.subscriptionId) throw new Error("Expected activated subscription");
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(collect.status).toBe(200);
+    const collected = (await parseCollectionResponse(collect)).data;
+    expect(collected.collectionAttempt.status).toBe("confirmed");
+    expect(
+      await getDb(env)
+        .prepare("SELECT custody_wallet_id, wallet_id FROM payment_transfers WHERE id = ?")
+        .bind(collected.transfer.id)
+        .first()
+    ).toEqual({ custody_wallet_id: TEST_CUSTODY_WALLET_ID, wallet_id: TEST_WALLET_ID });
+    for (const operation of ["cancel", "resume"] as const) {
+      recurringExecution
+        .signAndSendMock()
+        .mockResolvedValueOnce(testSignature(operation === "cancel" ? 3 : 4));
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/${operation}`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
+        `recurring.${operation}`
+      );
+    }
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
+  });
+
+  it("preserves the fee actor through pending edits and active term replacement after provider alias drift", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id = ?")
+      .bind("provider_alias_after_identity_migration", TEST_CUSTODY_WALLET_ID)
+      .run();
+    const metadataUri = "https://example.com/recurring/identity-migration.json";
+    const pendingEdit = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ metadataUri }),
+      },
+      env
+    );
+    expect(pendingEdit.status).toBe(200);
+    expect((await parseRecurringResponse(pendingEdit)).data.recurringPayment).toMatchObject({
+      id: created.id,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      metadataUri,
+    });
+    const activate = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(activate.status).toBe(200);
+    const activated = (await parseRecurringResponse(activate)).data.recurringPayment;
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValueOnce(testSignature(3))
+      .mockResolvedValueOnce(testSignature(4))
+      .mockResolvedValueOnce(testSignature(5));
+    const replaceTerms = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "35.00" }),
+      },
+      env
+    );
+    expect(replaceTerms.status).toBe(200);
+    const replaced = (await parseRecurringResponse(replaceTerms)).data.recurringPayment;
+    expect(replaced).toMatchObject({
+      id: created.id,
+      status: "active",
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      sourceAddress: activated.sourceAddress,
+      amount: "35.00",
+      metadataUri,
+    });
+    expect(replaced.planId).not.toBe(activated.planId);
+    if (!replaced.subscriptionId) throw new Error("Expected replacement subscription");
+    await setRecurringCollectionDue({
+      recurringPaymentId: replaced.id,
+      subscriptionId: replaced.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(collect.status).toBe(200);
+    expect((await parseCollectionResponse(collect)).data.collectionAttempt.status).toBe(
+      "confirmed"
+    );
+    expect(new Set(createFeePaymentAdapterMock.mock.calls.map(([, userId]) => userId))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test",
+      ])
+    );
+  });
+
+  it("refuses partial activation with a saved plan signature when current money admission fails", async () => {
+    const sponsor = recurringExecution
+      .signAndSendMock()
+      .mockReset()
+      .mockResolvedValueOnce(testSignature(1))
+      .mockRejectedValueOnce(new Error("Authorization outcome unknown"));
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const activate = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: "{}",
+        },
+        env
+      );
+    expect((await activate()).status).toBe(500);
+    const retained = await getDb(env)
+      .prepare(`SELECT plan_creation_signature, authorization_signature
+      FROM payment_recurring_payments WHERE id = ?`)
+      .bind(created.id)
+      .first();
+    expect(retained).toEqual({
+      plan_creation_signature: testSignature(1),
+      authorization_signature: null,
+    });
+    deleteTestOrganizationAfterAuth();
+
+    expect((await activate()).status).toBe(403);
+    expect(sponsor).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses new managed collection when the configured plan puller is unresolved", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    if (!activated.planId) throw new Error("Expected activated recurring plan");
+    await createPostgresPaymentSubscriptionsRepository(getDb(env)).updatePlan({
+      planId: activated.planId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      pullerCustodyWalletId: null,
+      updatedAt: new Date().toISOString(),
+    });
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const signed = recurringExecution.signAsFeePayerMock().mock.calls.length;
+    const sent = sendTransactionMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(recurringExecution.signAsFeePayerMock()).toHaveBeenCalledTimes(signed);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sent);
+  });
+
+  it("keeps plan roles required for a new resume while cancellation remains an exit", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await createPostgresPaymentSubscriptionsRepository(getDb(env)).updatePlan({
+      planId: activated.planId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      pullerCustodyWalletId: null,
+      updatedAt: new Date().toISOString(),
+    });
+    const sponsor = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+    const cancel = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+    expect(cancel.status).toBe(200);
+    const resume = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: "{}",
+      },
+      env
+    );
+    expect(resume.status).toBe(409);
+    expect(sponsor).toHaveBeenCalledTimes(3);
+  });
+
   it("rolls back subscription and recurring activation finalization together", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const createRepository =
@@ -1264,6 +1630,15 @@ describe("Payments routes — recurring", () => {
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
     });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET wallet_id = ? WHERE id IN (?, ?)")
+      .bind(
+        "provider_alias_after_identity_migration",
+        TEST_CUSTODY_WALLET_ID,
+        replacementCustodyWalletId
+      )
+      .run();
+    const feePaymentCallsBeforeReplacement = createFeePaymentAdapterMock.mock.calls.length;
     const firstCollectionAt = "2026-07-02T00:00:00.000Z";
     await getDb(env)
       .prepare("UPDATE payment_recurring_payments SET first_collection_at = ? WHERE id = ?")
@@ -1299,6 +1674,31 @@ describe("Payments routes — recurring", () => {
     expect(updateBody.data.recurringPayment.planId).not.toBe(activated.planId);
     expect(updateBody.data.recurringPayment.subscriptionId).not.toBe(activated.subscriptionId);
     expect(signAndSendMock).toHaveBeenCalledTimes(5);
+    const replacementActors = createFeePaymentAdapterMock.mock.calls
+      .slice(feePaymentCallsBeforeReplacement)
+      .map(([, userId]) => userId);
+    expect(new Set(replacementActors.slice(0, -1))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:provider_alias_after_identity_migration",
+      ])
+    );
+    expect(replacementActors.at(-1)).toBe(
+      "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:wal_payments_test"
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      replacementCustodyWalletId,
+      "recurring.update"
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.update_cancel_old"
+    );
 
     const oldSubscription = await getDb(env)
       .prepare("SELECT status FROM payment_subscriptions WHERE id = ?")
@@ -4208,6 +4608,10 @@ describe("Payments routes — recurring", () => {
         now,
         now
       )
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_plans SET owner_custody_wallet_id = ? WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID, planId)
       .run();
     await getDb(env)
       .prepare(

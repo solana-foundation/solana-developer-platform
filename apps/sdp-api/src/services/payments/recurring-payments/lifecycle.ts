@@ -37,6 +37,7 @@ import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
+  assertRecurringPlanSourceWallet,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
@@ -571,6 +572,7 @@ async function runRecurringPaymentLifecycle(
     // failure reset, which matches the subscription on chain.
     if (!signature && input.operation === "resume") {
       await input.admitStart();
+      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
     }
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
@@ -606,6 +608,7 @@ async function runRecurringPaymentLifecycle(
 
       signature = await sendSubscriptionInstructions({
         movement: LIFECYCLE_MOVEMENTS[input.operation],
+        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

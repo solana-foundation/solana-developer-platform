@@ -73,7 +73,6 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     organizationId: row.organization_id,
     projectId: row.project_id,
     sourceCustodyWalletId: row.source_custody_wallet_id,
-    sourceProviderWalletId: row.source_wallet_id,
     sourceAddress: row.source_address,
     counterpartyId: row.counterparty_id,
     counterpartyAccountId: row.counterparty_account_id,

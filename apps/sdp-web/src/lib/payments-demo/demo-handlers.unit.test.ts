@@ -579,6 +579,25 @@ describe("schedules", () => {
   const act = (id: string, action: string) =>
     write("POST", `/v1/payments/recurring-payments/${id}/${action}`);
 
+  it("rejects legacy and mixed source selectors without recording an operation", () => {
+    for (const field of ["sourceWalletId", "sourceProviderWalletId"]) {
+      expect(create({ [field]: "demo_wallet_treasury" })?.status).toBe(400);
+      expect(
+        create({ sourceCustodyWalletId: undefined, [field]: "demo_wallet_treasury" })?.status
+      ).toBe(400);
+      expect(update("demo_rp_lumen_retainer", { [field]: "demo_wallet_treasury" })?.status).toBe(
+        400
+      );
+      expect(
+        update("demo_rp_lumen_retainer", {
+          sourceCustodyWalletId: TREASURY,
+          [field]: "demo_wallet_treasury",
+        })?.status
+      ).toBe(400);
+    }
+    expect(ops).toEqual([]);
+  });
+
   it("refuses a schedule the API would", () => {
     expect(create({ periodHours: 0 })?.status).toBe(400);
     expect(create({ sourceCustodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
@@ -586,6 +605,33 @@ describe("schedules", () => {
     expect(create({ counterpartyAccountId: "demo_cpa_nobody" })?.status).toBe(400);
     expect(create({ firstCollectionAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(create({ firstCollectionAt: "2026-10-01T00:00:00.000Z" })?.status).toBe(201);
+  });
+
+  it("never resolves a provider alias from the exact source field", () => {
+    expect(create({ sourceCustodyWalletId: "demo_privy_treasury" })?.status).toBe(404);
+    expect(
+      update("demo_rp_lumen_retainer", { sourceCustodyWalletId: "demo_privy_treasury" })?.status
+    ).toBe(404);
+    expect(ops).toEqual([]);
+  });
+
+  it("returns internal source identity for saved and changed schedules", () => {
+    const created = create({ metadataUri: "https://example.com/schedule" });
+    const schedule = created?.body.data.recurringPayment;
+    expect(schedule).toMatchObject({ sourceCustodyWalletId: TREASURY, amount: "10" });
+    expect(schedule).not.toHaveProperty("sourceProviderWalletId");
+    const changed = update(schedule.id, {
+      sourceCustodyWalletId: "demo_cwlt_settlement",
+      firstCollectionAt: null,
+      nextCollectionDueAt: null,
+      metadataUri: null,
+    });
+    expect(changed?.body.data.recurringPayment).toMatchObject({
+      id: schedule.id,
+      sourceCustodyWalletId: "demo_cwlt_settlement",
+      amount: "10",
+    });
+    expect(changed?.body.data.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
   });
 
   it("refuses a change the API would, and applies every field it accepts", () => {

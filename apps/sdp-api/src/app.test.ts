@@ -11,6 +11,7 @@ import { rootLogger } from "@/runtime/logger";
 import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtime/observability";
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
+import { clearKVStores } from "@/test/mocks/kv";
 
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
@@ -28,6 +29,10 @@ const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
+
+beforeEach(async () => {
+  await clearKVStores(baseEnv);
+});
 
 function makeObservability(): {
   obs: Observability;
@@ -440,7 +445,8 @@ describe("createApp onError capture", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
+    expect(res.status).toBe(500);
 
     const logged = JSON.stringify(consoleError.mock.calls);
     const captured = JSON.stringify(captureException.mock.calls);
@@ -465,6 +471,7 @@ describe("createApp onError capture", () => {
       {},
       { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
     );
+    expect(res.status).toBe(500);
 
     const logged = JSON.stringify(loggerError.mock.calls);
     const capturedError = captureException.mock.calls[0][0] as Error & {

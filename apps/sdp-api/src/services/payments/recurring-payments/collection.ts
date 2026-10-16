@@ -86,6 +86,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   recurringPaymentErrorMessage,
@@ -731,7 +732,7 @@ async function claimCollectionUnderRecurringLock(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       custodyWalletId: input.sourceWallet.id,
-      walletId: input.sourceWallet.walletId,
+      walletId: recurringPayment.source_wallet_id,
       counterpartyId: recurringPayment.counterparty_id,
       sourceAddress: input.sourceWallet.publicKey,
       destinationAddress: recurringPayment.destination_address,
@@ -1664,6 +1665,7 @@ export async function collectRecurringPayment(input: {
     if (!plan) {
       throw notFound("Subscription plan");
     }
+    assertRecurringPlanSourceWallet(plan, input.sourceWallet);
     if (plan.status !== "active") {
       throw badRequest("Subscription plan must be active before collection");
     }
@@ -1774,7 +1776,7 @@ export async function collectRecurringPayment(input: {
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
-        actor: { type: "wallet", id: input.sourceWallet.walletId },
+        actor: { type: "wallet", id: input.recurringPayment.source_wallet_id },
       }),
       "recurring.collect"
     );
@@ -1814,6 +1816,7 @@ export async function collectRecurringPayment(input: {
 
     const signature = await sendSubscriptionInstructions({
       movement: "recurring.collect",
+      sponsorshipActorWalletId: input.recurringPayment.source_wallet_id,
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,

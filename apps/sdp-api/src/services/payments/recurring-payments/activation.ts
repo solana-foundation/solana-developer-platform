@@ -52,6 +52,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPlanSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
@@ -103,7 +104,8 @@ async function getOrCreateActivationPlan(input: {
     id: `psp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    ownerWalletId: input.sourceWallet.walletId,
+    ownerWalletId: input.claimed.source_wallet_id,
+    ownerCustodyWalletId: input.sourceWallet.id,
     ownerAddress: input.sourceWallet.publicKey,
     token: input.claimed.token,
     amount: input.claimed.amount,
@@ -111,7 +113,8 @@ async function getOrCreateActivationPlan(input: {
     programPlanId: generateProgramPlanId(),
     planPda: null,
     destinationAddress: input.destination,
-    pullerWalletId: input.sourceWallet.walletId,
+    pullerWalletId: input.claimed.source_wallet_id,
+    pullerCustodyWalletId: input.sourceWallet.id,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.claimed.metadata_uri,
     status: "draft",
@@ -544,6 +547,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   projectId: string;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   sourceWallet: CustodyWallet;
+  sponsorshipActorWalletId: string;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
   subscriptionAuthority: Awaited<
@@ -580,6 +584,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       });
   const initSignature = await sendSubscriptionInstructions({
     movement: "recurring.activate",
+    sponsorshipActorWalletId: input.sponsorshipActorWalletId,
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -744,6 +749,8 @@ export async function activateRecurringPayment(input: {
       destination,
       createdBy: input.createdBy,
     });
+    if (!planCreationSignature || !authorizationSignature)
+      assertRecurringPlanSourceWallet(plan, input.sourceWallet);
 
     const programPlanId = parseU64String(plan.program_plan_id, "programPlanId");
     const [planPda] = await subscriptionsProgram.findPlanPda({ owner, planId: programPlanId });
@@ -790,6 +797,7 @@ export async function activateRecurringPayment(input: {
       );
       planCreationSignature = await sendSubscriptionInstructions({
         movement: "recurring.activate",
+        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -909,7 +917,7 @@ export async function activateRecurringPayment(input: {
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
-          actor: { type: "wallet", id: input.sourceWallet.walletId },
+          actor: { type: "wallet", id: claimed.source_wallet_id },
         }),
         "recurring.activate"
       );
@@ -917,6 +925,7 @@ export async function activateRecurringPayment(input: {
       const payer = createNoopSigner(feePayer);
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
+        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         recurringRepo,
         attempt,
@@ -950,6 +959,7 @@ export async function activateRecurringPayment(input: {
       });
       authorizationSignature = await sendSubscriptionInstructions({
         movement: "recurring.activate",
+        sponsorshipActorWalletId: claimed.source_wallet_id,
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

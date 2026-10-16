@@ -111,12 +111,7 @@ async function RecurringPaymentDetailRoute({
       if (!recurringPaymentResult.ok) {
         throw new Error(recurringPaymentResult.error);
       }
-      const recurringPaymentResultData = recurringPaymentResult.data;
-      const sourceCustodyWalletId = recurringPaymentResultData.sourceCustodyWalletId;
-      if (sourceCustodyWalletId === null) {
-        throw new Error("Recurring payment source wallet is unresolved");
-      }
-      const recurringPayment = { ...recurringPaymentResultData, sourceCustodyWalletId };
+      const recurringPayment = recurringPaymentResult.data;
 
       const wallets = walletsResult.data ?? [];
       const wallet =

@@ -17,6 +17,8 @@ import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navi
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace.redesign";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace.redesign";
 
+import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace.redesign";
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 beforeEach(() => {
@@ -49,7 +51,6 @@ const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   organizationId: "org_test",
   projectId: "proj_test",
   sourceCustodyWalletId: source.id,
-  sourceProviderWalletId: source.walletId,
   sourceAddress: source.publicKey,
   counterpartyId: "cpty_receiver",
   counterpartyAccountId: "cpa_receiver",
@@ -114,6 +115,54 @@ afterEach(() => {
 });
 
 describe("Recurring Payment exact source selection", () => {
+  it("searches unresolved history by its full saved address", () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    render(
+      <RecurringPaymentsWorkspace
+        initialRecurringPayments={[{ ...recurring, sourceCustodyWalletId: null }]}
+        total={1}
+        listState={{ page: 1, pageSize: 25, status: null }}
+        wallets={[source]}
+        counterparties={[counterparty]}
+        issuedTokensByMint={{}}
+      />,
+      { wrapper }
+    );
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: source.publicKey } });
+    expect(document.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: "Treasury" })).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "privy_shared" } });
+    expect(document.querySelectorAll("tbody tr")).toHaveLength(0);
+  });
+
+  it("shows saved address for an unresolved source without selecting its provider alias", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [source] } }));
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={{ ...recurring, sourceCustodyWalletId: null }}
+        wallet={null}
+        wallets={[source]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    expect(screen.queryByText(/privy_shared/)).toBeNull();
+    expect(screen.getAllByText("111111…1111").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Treasury" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getAllByText(/Source wallet unavailable/i).length).toBeGreaterThan(0)
+    );
+  });
+
   it("does not carry a previous wallet preload into another Project's inventory", async () => {
     let inventory = [source];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
@@ -163,8 +212,8 @@ describe("Recurring Payment exact source selection", () => {
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
   });
 
-  it("saves a pending payment with a Connection wallet even when signing is unavailable", async () => {
-    const unavailable = { ...source, isRuntimeExecutionAllowed: false };
+  it("saves an unnamed Connection wallet by exact ID when signing is unavailable", async () => {
+    const unavailable = { ...source, label: null, isRuntimeExecutionAllowed: false };
     const writes: unknown[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("/wallets?"))
@@ -195,13 +244,14 @@ describe("Recurring Payment exact source selection", () => {
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     // The contact's only Solana address is the destination; no field asks for it.
     await user.click(screen.getByRole("button", { name: "Source wallet" }));
-    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await user.click(screen.getByRole("button", { name: /^111111/ }));
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
     const next = () => screen.getByRole("button", { name: "Continue" });
     await waitFor(() => expect(next().hasAttribute("disabled")).toBe(false));
     await user.click(next());
     await user.click(next());
+    expect(screen.queryByText(/privy_shared/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Create the schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({

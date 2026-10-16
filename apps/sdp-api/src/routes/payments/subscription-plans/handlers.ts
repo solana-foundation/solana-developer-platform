@@ -17,7 +17,6 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -29,7 +28,7 @@ import {
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
-import { resolveScope, resolveWallet } from "../wallets";
+import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
   listSubscriptionPlansQuerySchema,
@@ -37,13 +36,18 @@ import {
   subscriptionPlanIdParamsSchema,
   type updateSubscriptionPlanSchema,
 } from "./schemas";
+import {
+  hasSubscriptionPlanPuller,
+  resolveSubscriptionPlanRole,
+  resolveSubscriptionPlanWalletSelector,
+} from "./wallets";
 
 function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
   return {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    ownerWalletId: row.owner_wallet_id,
+    ownerCustodyWalletId: row.owner_custody_wallet_id,
     ownerAddress: row.owner_address,
     token: row.token,
     amount: row.amount,
@@ -51,7 +55,7 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
     programPlanId: row.program_plan_id,
     planPda: row.plan_pda,
     destinationAddress: row.destination_address,
-    pullerWalletId: row.puller_wallet_id,
+    pullerCustodyWalletId: row.puller_custody_wallet_id,
     pullerAddress: row.puller_address,
     metadataUri: row.metadata_uri,
     status: row.status,
@@ -83,22 +87,29 @@ async function persistPlanPda(
 
 async function resolvePullerWalletAddress(
   c: AppContext,
-  pullerWalletId: string | null | undefined
+  pullerCustodyWalletId: string | null | undefined
 ): Promise<{
   pullerWalletId: string | null | undefined;
+  pullerCustodyWalletId: string | null | undefined;
   pullerAddress: string | null | undefined;
 }> {
-  if (pullerWalletId === undefined) {
-    return { pullerWalletId: undefined, pullerAddress: undefined };
+  if (pullerCustodyWalletId === undefined) {
+    return {
+      pullerWalletId: undefined,
+      pullerCustodyWalletId: undefined,
+      pullerAddress: undefined,
+    };
   }
-  if (pullerWalletId === null) {
-    return { pullerWalletId: null, pullerAddress: null };
+  if (pullerCustodyWalletId === null) {
+    return { pullerWalletId: null, pullerCustodyWalletId: null, pullerAddress: null };
   }
 
-  // The route's authorize step checked the credential's access to the puller wallet.
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, pullerWalletId);
-  return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
+  const wallet = await resolveSubscriptionPlanWalletSelector(c, pullerCustodyWalletId);
+  return {
+    pullerWalletId: wallet.walletId,
+    pullerCustodyWalletId: wallet.id,
+    pullerAddress: wallet.publicKey,
+  };
 }
 
 export const createSubscriptionPlan = async (
@@ -107,11 +118,10 @@ export const createSubscriptionPlan = async (
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // The route's authorize step checked the credential's access to both wallets.
-  const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
+  const auth = getAuth(c);
+  const ownerWallet = await resolveSubscriptionPlanWalletSelector(c, body.ownerCustodyWalletId);
 
-  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
+  const puller = await resolvePullerWalletAddress(c, body.pullerCustodyWalletId);
   const now = new Date().toISOString();
   const id = `psp_${crypto.randomUUID()}`;
   const createdBy = await resolveCreatorUserId(c);
@@ -119,9 +129,10 @@ export const createSubscriptionPlan = async (
 
   const plan = await repo.createPlan({
     id,
-    organizationId: scope.auth.organizationId,
+    organizationId: auth.organizationId,
     projectId,
     ownerWalletId: ownerWallet.walletId,
+    ownerCustodyWalletId: ownerWallet.id,
     ownerAddress: ownerWallet.publicKey,
     token: normalizePaymentToken(body.token),
     amount: body.amount,
@@ -130,6 +141,7 @@ export const createSubscriptionPlan = async (
     planPda: body.planPda ?? null,
     destinationAddress: body.destinationAddress ?? null,
     pullerWalletId: puller.pullerWalletId ?? null,
+    pullerCustodyWalletId: puller.pullerCustodyWalletId ?? null,
     pullerAddress: puller.pullerAddress ?? null,
     metadataUri: body.metadataUri ?? null,
     status: body.status,
@@ -226,17 +238,10 @@ export const prepareCreateSubscriptionPlan = async (
     throw badRequest("Cannot prepare an archived subscription plan");
   }
 
-  const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
+  const ownerWallet = await resolveSubscriptionPlanRole(c, plan, "owner");
+  assertPaymentWalletExactAccess(c, ownerWallet.id, ["payments:write"]);
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
-  if (ownerWallet.publicKey !== owner) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Subscription plan owner wallet does not match owner address"
-    );
-  }
 
   const destinations = (
     body.destinations ?? (plan.destination_address ? [plan.destination_address] : [])
@@ -248,9 +253,14 @@ export const prepareCreateSubscriptionPlan = async (
     );
   }
 
-  const pullers = (
-    body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
-  ).map((value) => assertValidAddress(value, "pullers entry"));
+  let defaultPuller = ownerWallet;
+  if (body.pullers === undefined && hasSubscriptionPlanPuller(plan)) {
+    defaultPuller = await resolveSubscriptionPlanRole(c, plan, "puller");
+    assertPaymentWalletExactAccess(c, defaultPuller.id, ["payments:write"]);
+  }
+  const pullers = (body.pullers ?? [defaultPuller.publicKey]).map((value) =>
+    assertValidAddress(value, "pullers entry")
+  );
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
   const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
@@ -299,10 +309,9 @@ export const updateSubscriptionPlan = async (
   // Loaded in the project, its wallets' access checked, by the route's authorize step.
   const existingPlan = getAuthorized<PaymentSubscriptionPlanRow>(c);
 
-  const scope = await resolveScope(c);
-  resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
+  await resolveSubscriptionPlanRole(c, existingPlan, "owner");
 
-  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
+  const puller = await resolvePullerWalletAddress(c, body.pullerCustodyWalletId);
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,
@@ -310,6 +319,7 @@ export const updateSubscriptionPlan = async (
     planPda: body.planPda,
     destinationAddress: body.destinationAddress,
     pullerWalletId: puller.pullerWalletId,
+    pullerCustodyWalletId: puller.pullerCustodyWalletId,
     pullerAddress: puller.pullerAddress,
     metadataUri: body.metadataUri,
     status: body.status,

@@ -211,11 +211,31 @@ export function assertRecurringPaymentSourceWallet(
   if (recurringPayment.source_custody_wallet_id !== sourceWallet.id) {
     throw badRequest("Recurring payment exact source wallet does not match request");
   }
-  if (recurringPayment.source_wallet_id !== sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
   if (recurringPayment.source_address !== sourceWallet.publicKey) {
     throw badRequest("Recurring payment source address does not match wallet");
+  }
+}
+
+export function assertRecurringPlanSourceWallet(
+  plan: PaymentSubscriptionPlanRow,
+  wallet: CustodyWallet
+): void {
+  if (plan.owner_custody_wallet_id !== wallet.id) {
+    throw conflict("Recurring payment plan owner is unresolved or does not match its exact source");
+  }
+  if (plan.owner_address !== wallet.publicKey)
+    throw conflict("Recurring payment plan owner address does not match source wallet");
+  const absentPuller =
+    plan.puller_custody_wallet_id === null &&
+    plan.puller_wallet_id === null &&
+    plan.puller_address === null;
+  if (
+    !absentPuller &&
+    (plan.puller_custody_wallet_id !== wallet.id || plan.puller_address !== wallet.publicKey)
+  ) {
+    throw conflict(
+      "Recurring payment plan puller is unresolved or does not match its exact source"
+    );
   }
 }
 
@@ -226,6 +246,7 @@ export async function sendSubscriptionInstructions(input: {
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
+  sponsorshipActorWalletId: string;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
   feePayer?: Address;
@@ -252,7 +273,7 @@ export async function sendSubscriptionInstructions(input: {
     await resolveProjectSponsorshipScope(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      actor: { type: "wallet", id: input.sourceWallet.walletId },
+      actor: { type: "wallet", id: input.sponsorshipActorWalletId },
     }),
     input.movement
   );

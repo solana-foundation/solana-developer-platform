@@ -33,7 +33,6 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -47,7 +46,11 @@ import {
 } from "@/services/sponsorship.service";
 import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
-import { resolveScope, resolveWallet } from "../wallets";
+import {
+  hasSubscriptionPlanPuller,
+  resolveSubscriptionPlanRole,
+} from "../subscription-plans/wallets";
+import { assertPaymentWalletExactAccess } from "../wallets";
 import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
@@ -434,9 +437,12 @@ export const prepareSubscriptionCollection = async (
     throw badRequest("Subscription plan must be active before collection");
   }
 
-  const scope = await resolveScope(c);
-  const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, callerWallet.walletId, ["payments:write"]);
+  const callerWallet = await resolveSubscriptionPlanRole(
+    c,
+    plan,
+    hasSubscriptionPlanPuller(plan) ? "puller" : "owner"
+  );
+  assertPaymentWalletExactAccess(c, callerWallet.id, ["payments:write"]);
 
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);
