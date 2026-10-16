@@ -1,5 +1,5 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import type { Signature } from "@sdp/rpc/solana";
-import * as solanaRpc from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
@@ -101,7 +101,7 @@ async function settlePaymentRequestIfPaid(
     throw internalError("payment_requests row is missing project_id");
   }
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(

@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -81,7 +82,7 @@ export async function issuePaymentRequestTransaction(
 ): Promise<SponsoredPaymentTransaction> {
   const { request, payer } = params;
   const repository = createSystemPaymentRequestsRepository(c.env);
-  const rpc = solanaRpc.createRpc(c.env);
+  const rpc = createClusterRpc();
   const currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
 
   const serveLiveClaim = async (): Promise<SponsoredPaymentTransaction | null> => {
