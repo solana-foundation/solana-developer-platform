@@ -60,7 +60,8 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * because a signed transaction is a bearer instrument until its blockhash expires, and two live
  * ones would double the sponsor's exposure.
  *
- * @param c - The request context, for the bindings and the sponsor-signature audit entry.
+ * @param c - The request context, under the payment request's cluster scope (it builds and reads
+ *   on that cluster), for the bindings and the sponsor-signature audit entry.
  * @param params - The payable request and the parties to the transfer.
  * @param params.request - The reconciled, payable payment request; its Project sponsors.
  * @param params.payer - The account that pays and signs client-side.
