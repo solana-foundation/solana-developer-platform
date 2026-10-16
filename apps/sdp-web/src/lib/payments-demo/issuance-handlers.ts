@@ -7,7 +7,7 @@ import {
 import { z } from "zod";
 import { type DemoWorld, findWallet } from "./demo-fixtures";
 import type { DemoAnswer, DemoWriteResult, WriteContext } from "./demo-handlers";
-import { type DemoOp, newDemoId } from "./demo-ops";
+import { type DemoOp, newDemoId, TOKEN_TEMPLATES } from "./demo-ops";
 import {
   type DemoIssuedToken,
   findIssuedToken,
@@ -135,7 +135,7 @@ const createSchema = z
     uri: z.url().max(512).optional(),
     imageUrl: z.url().max(512).optional(),
     maxSupply: z.string().regex(DECIMAL).optional(),
-    template: z.enum(["stablecoin", "rwa", "arcade", "tokenized-security", "custom"]).optional(),
+    template: z.enum(TOKEN_TEMPLATES).optional(),
     requiresAllowlist: z.boolean().optional(),
     isMintable: z.boolean().optional(),
     isFreezable: z.boolean().optional(),

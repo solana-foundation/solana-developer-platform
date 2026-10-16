@@ -1,10 +1,8 @@
 import type {
-  AssetCategory,
   CustodyWalletTokenBalance,
   IssuanceMetadata,
   PublicToken,
   TokenExtensionsConfig,
-  TokenTemplate,
 } from "@sdp/types";
 import { z } from "zod";
 import {
@@ -113,7 +111,7 @@ function applyCreate(world: DemoWorld, op: DemoOpOf<"iss-create">) {
     description: op.description,
     uri: null,
     imageUrl: null,
-    template: op.template as TokenTemplate,
+    template: op.template,
     extensions: Object.keys(extensions).length > 0 ? extensions : null,
     totalSupply: "0",
     totalSupplyUpdatedAt: null,
@@ -127,7 +125,7 @@ function applyCreate(world: DemoWorld, op: DemoOpOf<"iss-create">) {
     createdAt,
     updatedAt: createdAt,
   };
-  const category = op.category as AssetCategory;
+  const category = op.category;
   const entry: DemoIssuedToken = {
     token,
     profile: {

@@ -1,5 +1,5 @@
 // biome-ignore lint/style/noRestrictedImports: recognises a provider id stored in the demo session; what the demo offers comes from the channel-capped flags (see demo-mode.ts)
-import { ASSET_CATEGORIES, RAMP_PROVIDERS } from "@sdp/types";
+import { ASSET_CATEGORIES, RAMP_PROVIDERS, type TokenTemplate } from "@sdp/types";
 import { z } from "zod";
 
 /*
@@ -9,6 +9,14 @@ import { z } from "zod";
  * every screen until the page is reloaded. Times are epoch milliseconds; ids carry the
  * `demo_new_` prefix, so nothing about them can reach the real API.
  */
+
+export const TOKEN_TEMPLATES = [
+  "stablecoin",
+  "rwa",
+  "arcade",
+  "tokenized-security",
+  "custom",
+] as const satisfies readonly TokenTemplate[];
 
 const id = z.string().min(1).max(80);
 const at = z.number().int().nonnegative();
@@ -128,7 +136,7 @@ const demoOpSchema = z.discriminatedUnion("k", [
     symbol: text,
     description: longText.nullable(),
     decimals: z.number().int().min(0).max(18),
-    template: text,
+    template: z.enum(TOKEN_TEMPLATES),
     category: z.enum(ASSET_CATEGORIES),
     type: text,
     requiresAllowlist: z.boolean(),
