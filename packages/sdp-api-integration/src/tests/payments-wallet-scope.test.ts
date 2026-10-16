@@ -9,7 +9,6 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-  TEST_PROJECT,
 } from "../helpers/integration";
 
 type CreateApiKeyResponse = {

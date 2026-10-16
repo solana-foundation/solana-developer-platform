@@ -624,10 +624,14 @@ export async function activateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
   /**
-   * Money admission (HOO-1955), run once, and only when the plan or the
-   * authorization still has to be signed. A refusal fails the attempt and
-   * returns the row to `pending_activation`, keeping any stored signatures so
-   * a later activation confirms or adopts them instead of signing again.
+   * Money admission (HOO-1955), run once. A fresh activation runs it before
+   * the claim commits, so a refusal leaves the row untouched: the job
+   * recovers a claimed activation as its mandate, and a claim must never
+   * exist for a caller the waist would refuse (HOO-2099). A stale one runs it
+   * after the claim, only when the plan or the authorization still has to be
+   * signed; a refusal then fails the attempt and returns the row to
+   * `pending_activation`, keeping any stored signatures so a later activation
+   * confirms or adopts them instead of signing again.
    */
   admitStart: () => Promise<void>;
   /** The request's Idempotency-Key, written on the attempt it claims; null for the cron. */
@@ -665,6 +669,9 @@ export async function activateRecurringPayment(input: {
   const recoveringStaleActivation = isActivatingRecurringPaymentStatus(
     input.recurringPayment.status
   );
+  if (!recoveringStaleActivation) {
+    await input.admitStart();
+  }
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentActivation({
@@ -713,7 +720,7 @@ export async function activateRecurringPayment(input: {
   );
 
   try {
-    if (!planCreationSignature || !authorizationSignature) {
+    if (recoveringStaleActivation && (!planCreationSignature || !authorizationSignature)) {
       await input.admitStart();
     }
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");

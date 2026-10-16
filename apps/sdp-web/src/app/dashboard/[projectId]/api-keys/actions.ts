@@ -152,10 +152,7 @@ async function deactivateApiKeyRequest(input: {
       recurringPayments: { canceled: string[]; failed: string[] } | null;
     }>(`/v1/api-keys/${keyId}`, {
       method: "DELETE",
-      body: JSON.stringify({
-        confirmation,
-        ...(cancelRecurringPayments ? { cancelRecurringPayments: true } : {}),
-      }),
+      body: JSON.stringify({ confirmation, cancelRecurringPayments }),
     });
 
     const deactivated = t("DashboardCustody.apiKeyDeactivated", { name: keyName });

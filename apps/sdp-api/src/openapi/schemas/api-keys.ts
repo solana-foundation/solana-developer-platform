@@ -246,7 +246,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:
-        "Which custody wallets the key may sign with: `all` in its project, or only the `selected` ones in `walletIds` (plus a provisioned wallet). Required.",
+        "Which custody wallets the key may sign with: `all` in its project, or only the `selected` ones in `walletIds`. Required.",
       example: "selected",
     }),
     walletIds: withOpenApi(apiKeyCreateSchemaBase.shape.walletIds, {

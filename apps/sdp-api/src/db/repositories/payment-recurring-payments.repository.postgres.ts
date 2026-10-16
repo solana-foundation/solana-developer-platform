@@ -9,6 +9,7 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
+  type PaymentRecurringPaymentStatus,
   RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
@@ -49,6 +50,18 @@ import type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
+
+/**
+ * A recurring payment that collects, or will once its activation, update or
+ * resume in flight finishes: revoke-and-cancel must see both, or one mid-way
+ * would become active after the revoke that was meant to stop it.
+ */
+const LIVE_RECURRING_PAYMENT_STATUSES = [
+  ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "activating",
+  "updating",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
@@ -1338,7 +1351,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       });
     },
 
-    async listActiveRecurringPaymentsActivatedByApiKey(params) {
+    async listLiveRecurringPaymentsActivatedByApiKey(params) {
       const rows = await db
         .prepare(
           // The key and every predecessor it was rotated from, in this project.
@@ -1367,7 +1380,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           params.projectId,
           params.organizationId,
           params.projectId,
-          [...COLLECTABLE_RECURRING_PAYMENT_STATUSES]
+          [...LIVE_RECURRING_PAYMENT_STATUSES]
         )
         .all<Record<string, unknown>>();
       return rows.results.map(mapRecurringPaymentRow);
