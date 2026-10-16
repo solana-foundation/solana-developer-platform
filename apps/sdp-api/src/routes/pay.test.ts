@@ -1,5 +1,4 @@
-import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
 import { SOL_MINT } from "@sdp/types";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,13 +7,14 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
-import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { clusterOfRpcClient, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
-  createRpcMock,
+  enableMainnetSponsorship,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
@@ -26,29 +26,76 @@ import {
 } from "@/test/helpers/payments-routes";
 import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
-const reconcilePaymentRequest = paymentRequests.reconcilePaymentRequest;
+interface RequestWallet {
+  projectId: string;
+  custodyWalletId: string;
+  walletId: string;
+  publicKey: string;
+}
 
-const reconcilePaymentRequestSpy = vi.spyOn(paymentRequests, "reconcilePaymentRequest");
+const SANDBOX_REQUEST_WALLET: RequestWallet = {
+  projectId: TEST_PROJECT.id,
+  custodyWalletId: TEST_CUSTODY_WALLET_ID,
+  walletId: TEST_WALLET_ID,
+  publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+};
+
+const PRODUCTION_REQUEST_WALLET: RequestWallet = {
+  projectId: TEST_PRODUCTION_PROJECT_ID,
+  custodyWalletId: "cwlt_pay_production",
+  walletId: "privy_pay_production",
+  publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+};
+
+async function seedProductionRequestWallet(): Promise<RequestWallet> {
+  await seedUnreadPrivyWallet(getDb(env), {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    ...PRODUCTION_REQUEST_WALLET,
+  });
+  await enableMainnetSponsorship();
+  return PRODUCTION_REQUEST_WALLET;
+}
+
+const REQUEST_WALLET_BY_ENVIRONMENT = {
+  sandbox: async () => SANDBOX_REQUEST_WALLET,
+  production: seedProductionRequestWallet,
+} as const satisfies Record<SdpEnvironment, () => Promise<RequestWallet>>;
+
+const CLUSTER_CASES = [
+  { environment: "sandbox", cluster: "devnet" },
+  { environment: "production", cluster: "mainnet-beta" },
+] as const satisfies readonly { environment: SdpEnvironment; cluster: SolanaCluster }[];
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
 
-  function createAwaitingPaymentRequest(projectId: string) {
+  beforeEach(() => {
+    rpc.answer("getSignaturesForAddress", []);
+    rpc.answer("getBlockHeight", 900);
+  });
+
+  function createAwaitingPaymentRequest(wallet: RequestWallet) {
     return createPaymentRequestsRepository(
       env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId })
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
     ).createPaymentRequest({
       organizationId: TEST_ORG.id,
-      projectId,
+      projectId: wallet.projectId,
       counterpartyId: null,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      custodyWalletId: wallet.custodyWalletId,
+      walletId: wallet.walletId,
+      destinationAddress: wallet.publicKey,
       token: SOL_MINT,
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
     });
+  }
+
+  function calledClusters() {
+    return new Set(rpc.calls.map((call) => call.cluster));
   }
 
   function postTransaction(publicToken: string) {
@@ -63,15 +110,6 @@ describe("Public payment request routes", () => {
     );
   }
 
-  function recordReconcileScopes() {
-    const scopes: ClusterScope[] = [];
-    reconcilePaymentRequestSpy.mockImplementationOnce((...args) => {
-      scopes.push(currentClusterScope());
-      return reconcilePaymentRequest(...args);
-    });
-    return scopes;
-  }
-
   function stubSponsorship() {
     return vi.spyOn(sponsorshipService, "createSponsorshipFeePayment").mockImplementation(() => ({
       providerId: "test",
@@ -82,20 +120,27 @@ describe("Public payment request routes", () => {
     }));
   }
 
-  it("reads a payment request under its Project's cluster scope", async () => {
-    const request = await createAwaitingPaymentRequest(TEST_PRODUCTION_PROJECT_ID);
-    const scopes = recordReconcileScopes();
+  it.for(CLUSTER_CASES)(
+    "reports and reads a $environment request on $cluster only",
+    async ({ environment, cluster }) => {
+      const request = await createAwaitingPaymentRequest(
+        await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
+      );
 
-    const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      const response = await app.request(`/pay/${request.public_token}`, {}, env);
 
-    expect(response.status).toBe(200);
-    expect(scopes).toEqual([
-      { projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production", cluster: "mainnet-beta" },
-    ]);
-  });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        status: "awaiting_payment",
+        network: cluster,
+      });
+      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+      expect(calledClusters()).toEqual(new Set([cluster]));
+    }
+  );
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
-    const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+    const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
     await getDb(env)
       .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
       .bind(request.id)
@@ -128,27 +173,27 @@ describe("Public payment request routes", () => {
   });
 
   describe("sponsored transaction window", () => {
-    beforeEach(() => {
-      createRpcMock.mockReturnValue({
-        getSignaturesForAddress: () => ({ send: async () => [] }),
-        getBlockHeight: () => ({ send: async () => 900n }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-    });
+    it.for(CLUSTER_CASES)(
+      "builds a $environment request's sponsored transaction on $cluster only",
+      async ({ environment, cluster }) => {
+        stubSponsorship();
+        const request = await createAwaitingPaymentRequest(
+          await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
+        );
 
-    it("builds the sponsored transaction under the payment request's Project cluster scope", async () => {
-      stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
-      const scopes = recordReconcileScopes();
-
-      expect((await postTransaction(request.public_token)).status).toBe(200);
-      expect(scopes).toEqual([
-        { projectId: TEST_PROJECT.id, environment: "sandbox", cluster: "devnet" },
-      ]);
-    });
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+        expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+        expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
+        expect(calledClusters()).toEqual(new Set([cluster]));
+        expect(
+          new Set(getRecentBlockhashMock.mock.calls.map(([client]) => clusterOfRpcClient(client)))
+        ).toEqual(new Set([cluster]));
+      }
+    );
 
     it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
 
       const first = await postTransaction(request.public_token);
       expect(first.status).toBe(200);
@@ -164,7 +209,7 @@ describe("Public payment request routes", () => {
 
     it("stops sponsoring a production request once its organization loses the entitlement (APE-351)", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PRODUCTION_PROJECT_ID);
+      const request = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
@@ -182,7 +227,7 @@ describe("Public payment request routes", () => {
 
     it("stops sponsoring every request once its organization is deleted (HOO-1955)", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       await getDb(env)
         .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
         .bind(TEST_ORG.id)
@@ -203,13 +248,13 @@ describe("Public payment request routes", () => {
         .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
         .bind(TEST_ORG.id)
         .run();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
     });
 
     it("answers a different account with 429 and Retry-After while the claim is live", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
       const other = await app.request(
@@ -227,13 +272,10 @@ describe("Public payment request routes", () => {
 
     it("lets a new account claim after the window expires", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      createRpcMock.mockReturnValue({
-        getSignaturesForAddress: () => ({ send: async () => [] }),
-        getBlockHeight: () => ({ send: async () => 2_000n }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      rpc.answer("getBlockHeight", 2_000);
 
       const other = await app.request(
         `/pay/${request.public_token}/tx`,
@@ -257,7 +299,7 @@ describe("Public payment request routes", () => {
         signAndSend: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
 
       expect((await postTransaction(request.public_token)).status).toBe(500);
       const retried = await postTransaction(request.public_token);
@@ -267,7 +309,7 @@ describe("Public payment request routes", () => {
 
     it("audits a fresh sponsored grant exactly once and keeps replay polls off the ledger", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
       expect((await postTransaction(request.public_token)).status).toBe(200);
@@ -289,7 +331,7 @@ describe("Public payment request routes", () => {
 
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const failure = vi
         .spyOn(AuditService.prototype, "log")
         .mockRejectedValueOnce(new Error("checkpoint store down"));
@@ -317,7 +359,7 @@ describe("Public payment request routes", () => {
 
     it("does not open a claim for a payload it cannot build a transaction from", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
 
       const malformed = await app.request(
         `/pay/${request.public_token}/tx`,

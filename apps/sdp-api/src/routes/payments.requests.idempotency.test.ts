@@ -5,6 +5,7 @@ import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
+  MAINNET_USDC_MINT,
   TEST_API_KEY,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
@@ -70,6 +71,30 @@ describe("Payments routes — payment request access before the key", () => {
 
     expect(response.status).toBe(201);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
+  });
+});
+
+describe("Payments routes — payment request token cluster", () => {
+  installPaymentsRouteTestHooks();
+
+  it("refuses the mainnet USDC mint on a Sandbox project and stores no request", async () => {
+    const response = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: MAINNET_USDC_MINT, amount: "1" },
+      "payreq-mainnet-mint-on-sandbox"
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: `USDC mint ${MAINNET_USDC_MINT} is not available on devnet`,
+      },
+    });
+    const stored = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE token = ?")
+      .bind(MAINNET_USDC_MINT)
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
   });
 });
 
