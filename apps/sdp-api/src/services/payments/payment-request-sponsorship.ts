@@ -39,7 +39,10 @@ import {
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
-export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
+export type PayablePaymentRequest = PaymentRequestRow & {
+  project_id: string;
+  custody_wallet_id: string;
+};
 
 /**
  * What a payer scanning a payment request gets: the sponsored transaction to sign, or how long
@@ -133,6 +136,7 @@ export async function issuePaymentRequestTransaction(
         token: request.token,
         destination: request.destination_address,
         walletId: request.wallet_id,
+        custodyWalletId: request.custody_wallet_id,
         signature,
         claimHash: await hashString(unsignedBase64),
       },

@@ -1,4 +1,5 @@
 import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
 import * as solanaPay from "@solana/pay";
 import { FindReferenceError, ValidateTransferError } from "@solana/pay";
 import {
@@ -13,6 +14,7 @@ import {
 } from "vitest";
 import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import type { CreatePaymentTransferInput } from "@/db/repositories/payments.repository";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
@@ -88,6 +90,65 @@ async function listInboundTransfers() {
     .bind(TEST_WALLET_ID)
     .all<Record<string, unknown>>();
   return result.results;
+}
+
+async function createRecordedTransfer(overrides: Partial<CreatePaymentTransferInput> = {}) {
+  const transfer = await createPaymentsRepository(
+    env,
+    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+  ).createTransfer({
+    id: "xfr_recorded_request_signature",
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT_ID,
+    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    walletId: TEST_WALLET_ID,
+    counterpartyId: null,
+    sourceAddress: null,
+    destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
+    token: SOL_MINT,
+    amount: "1.5",
+    memo: null,
+    type: "transfer",
+    direction: "inbound",
+    status: "confirmed",
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
+    serializedTx: null,
+    signature: SIGNATURE,
+    slot: 1,
+    initiatedByKeyId: null,
+    ...overrides,
+  });
+  if (!transfer) throw new Error("Expected recorded transfer fixture creation to succeed");
+  return transfer;
+}
+
+async function createSharedAliasWallet() {
+  const db = getDb(env);
+  await db
+    .prepare(
+      `INSERT INTO custody_configs
+         (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+       VALUES (?, ?, ?, 'privy', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+    )
+    .bind(`${TEST_CONFIG_ID}_alias`, TEST_ORG.id, TEST_PROJECT_ID)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       VALUES (?, ?, ?, ?, 'active')`
+    )
+    .bind(
+      `${TEST_CUSTODY_WALLET_ID}_alias`,
+      `${TEST_CONFIG_ID}_alias`,
+      TEST_WALLET_ID,
+      TEST_CUSTODY_PUBLIC_KEY
+    )
+    .run();
 }
 
 describe("reconcilePaymentRequest", () => {
@@ -190,6 +251,86 @@ describe("reconcilePaymentRequest", () => {
 
     expect(a.status).toBe("paid");
     expect(b.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("confirms the retained recipient pin despite an active wallet sharing its aliases", async () => {
+    const request = await createRequest();
+    await createSharedAliasWallet();
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE custody_configs SET status = 'archived' WHERE id = ?")
+      .bind(TEST_CONFIG_ID)
+      .run();
+    mockSettlementSucceeds();
+
+    const settled = await reconcilePaymentRequest(env, request, { bestEffort: false });
+
+    expect(settled.status).toBe("paid");
+    expect(settled.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect((await listInboundTransfers())[0]?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+  });
+
+  it("continues interrupted settlement with the matching finalized transfer", async () => {
+    const request = await createRequest();
+    const recorded = await createRecordedTransfer({ status: "finalized" });
+    mockSettlementSucceeds();
+
+    const settled = await reconcilePaymentRequest(env, request, { bestEffort: false });
+    const repeated = await reconcilePaymentRequest(env, settled, { bestEffort: false });
+
+    expect(settled.fulfilled_by_transfer_id).toBe(recorded.id);
+    expect(repeated.fulfilled_by_transfer_id).toBe(recorded.id);
+    expect(await listInboundTransfers()).toHaveLength(1);
+    expect(settled.public_token).toBe(request.public_token);
+    expect(settled.reference).toBe(request.reference);
+  });
+
+  it("refuses another exact recipient's signature even when provider and address aliases agree", async () => {
+    const request = await createRequest();
+    await createSharedAliasWallet();
+    const recorded = await createRecordedTransfer({
+      custodyWalletId: `${TEST_CUSTODY_WALLET_ID}_alias`,
+    });
+    mockSettlementSucceeds();
+
+    await expect(
+      reconcilePaymentRequest(env, request, { bestEffort: false })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+    });
+    expect((await listInboundTransfers())[0]?.id).toBe(recorded.id);
+    const stored = await createPaymentRequestsRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+    ).getPaymentRequestById({
+      requestId: request.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+    });
+    expect(stored?.status).toBe("awaiting_payment");
+    expect(stored?.fulfilled_by_transfer_id).toBeNull();
+  });
+
+  it.each([
+    { amount: "2" },
+    { token: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address },
+    { direction: "outbound" as const },
+  ])("refuses mismatched recorded payment terms even on best-effort reads: %j", async (terms) => {
+    const request = await createRequest();
+    await createRecordedTransfer(terms);
+    mockSettlementSucceeds();
+
+    await expect(reconcilePaymentRequest(env, request, { bestEffort: true })).rejects.toMatchObject(
+      {
+        code: "CONFLICT",
+        statusCode: 409,
+      }
+    );
     expect(await listInboundTransfers()).toHaveLength(1);
   });
 

@@ -426,7 +426,7 @@ function PaymentRequestCreateForm({
   const defaultToken =
     tokens.find((token) => token.symbol === DEFAULT_TOKEN_SYMBOL) ?? tokens.at(0) ?? null;
   const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
-  const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
+  const wallet = wallets.find((option) => option.id === pickedWallet) ?? null;
   const contact = contacts.find((option) => option.id === pickedFrom) ?? null;
 
   const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
@@ -439,7 +439,7 @@ function PaymentRequestCreateForm({
     let created: PaymentRequest | undefined;
     try {
       const input = JSON.stringify([
-        wallet.walletId,
+        wallet.id,
         token.mintAddress,
         amount.trim(),
         contact?.id ?? null,
@@ -459,7 +459,7 @@ function PaymentRequestCreateForm({
         {
           method: "POST",
           body: {
-            walletId: wallet.walletId,
+            custodyWalletId: wallet.id,
             token: token.mintAddress,
             amount: amount.trim(),
             counterpartyId: contact ? contact.id : null,
@@ -545,10 +545,10 @@ function PaymentRequestCreateForm({
               className="-my-px text-secondary"
             />
           }
-          value={wallet ? wallet.walletId : null}
+          value={wallet ? wallet.id : null}
           onChange={setPickedWallet}
           options={wallets.map((option) => ({
-            value: option.walletId,
+            value: option.id,
             label: option.label ?? shortenAddress(option.publicKey),
             description: shortenAddress(option.publicKey),
           }))}

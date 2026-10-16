@@ -940,7 +940,13 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
@@ -953,7 +959,7 @@ export interface PaymentRequest {
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
-  walletId: string;
+  custodyWalletId: string | null;
   destinationAddress: string;
   token: string;
   amount: string;

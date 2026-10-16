@@ -1141,7 +1141,7 @@ function buildRequest(
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     counterpartyId: spec.contact ? world.contacts[spec.contact].id : null,
-    walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     destinationAddress: wallet.publicKey,
     token: DEMO_TOKENS.USDC.mint,
     amount: spec.amount,

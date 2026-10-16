@@ -1,10 +1,13 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
+import { z } from "zod";
+import { paymentRequestSchema } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
+import { buildWorld, DEMO_TOKENS, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
 import { applyDemoOps, tokenKeyForRail, transferById } from "./demo-replay";
+import { decodeDemoOps, encodeDemoOps } from "./demo-session";
 
 /*
  * The demo's write handlers on their own: each refuses what the SDP API would refuse, with the
@@ -531,9 +534,12 @@ describe("transfers and batches", () => {
 });
 
 describe("requests", () => {
+  const requestsResponseSchema = z.object({
+    data: z.object({ paymentRequests: z.array(paymentRequestSchema) }),
+  });
   const request = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/requests", {
-      walletId: TREASURY,
+      custodyWalletId: TREASURY,
       token: USDC,
       amount: "40",
       ...body,
@@ -541,7 +547,7 @@ describe("requests", () => {
 
   it("refuses a request the API would", () => {
     expect(request({ amount: "" })?.status).toBe(400);
-    expect(request({ walletId: "demo_cwlt_nobody" })?.status).toBe(404);
+    expect(request({ custodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(request({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
     expect(request({ expiresAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(request({ expiresAt: "not a date" })?.status).toBe(400);
@@ -556,10 +562,127 @@ describe("requests", () => {
     expect(created?.status).toBe(201);
     expect(created?.body.data).toEqual(
       expect.objectContaining({
+        custodyWalletId: TREASURY,
         counterpartyId: "demo_cpty_acme",
         expiresAt: "2026-10-28T00:00:00.000Z",
       })
     );
+    expect(created?.body.data).not.toHaveProperty("walletId");
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
+    expect(response.data.paymentRequests.some(({ id }) => id === created?.body.data.id)).toBe(true);
+  });
+
+  it("replays an existing recorded Request without replacing its terms or session entry", () => {
+    const recorded: DemoOp = {
+      k: "request",
+      id: "demo_new_preq_recorded",
+      at: NOW.getTime() - 1_000,
+      wallet: TREASURY,
+      token: USDC,
+      amount: "17.25",
+      cp: "demo_cpty_acme",
+      expires: "2026-10-28T00:00:00.000Z",
+    };
+    ops = decodeDemoOps(encodeDemoOps([recorded]));
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
+    const saved = response.data.paymentRequests.find(({ id }) => id === recorded.id);
+    expect(saved).toMatchObject({
+      id: recorded.id,
+      custodyWalletId: TREASURY,
+      token: USDC,
+      amount: "17.25",
+      counterpartyId: "demo_cpty_acme",
+      expiresAt: "2026-10-28T00:00:00.000Z",
+      createdAt: "2026-09-28T11:59:59.000Z",
+    });
+    expect(saved?.publicToken).toMatch(/^demo_pt_/);
+    expect(saved?.reference).toBeTruthy();
+    expect(ops).toEqual([recorded]);
+  });
+
+  it("keeps seeded Request history without exposing provider wallet references", () => {
+    const body = demoWorldBody(world(), "/v1/payments/requests");
+    const response = requestsResponseSchema.parse(body);
+    expect(response.data.paymentRequests.length).toBeGreaterThan(0);
+    const rawRequests = z
+      .object({
+        data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }),
+      })
+      .parse(body).data.paymentRequests;
+    for (const request of rawRequests) {
+      expect(request).not.toHaveProperty("walletId");
+      expect(request).not.toHaveProperty("providerWalletId");
+    }
+    expect(world().wallets.treasury.walletId).toBe("demo_privy_treasury");
+    expect(ops).toEqual([]);
+  });
+
+  it("rejects legacy provider selectors, including when the exact selector is also present", () => {
+    const providerReference = world().wallets.treasury.walletId;
+    const priorOps = [...ops];
+    for (const body of [
+      { walletId: providerReference },
+      { custodyWalletId: TREASURY, walletId: providerReference },
+    ]) {
+      expect(
+        refusal(write("POST", "/v1/payments/requests", { token: USDC, amount: "5", ...body }))
+      ).toEqual([400, "invalid_request"]);
+    }
+    for (const body of [
+      { custodyWalletId: providerReference },
+      { custodyWalletId: null },
+      { custodyWalletId: " " },
+      { custodyWalletID: TREASURY },
+      { custodyWalletId: TREASURY, unexpected: true },
+      {},
+    ]) {
+      const result = write("POST", "/v1/payments/requests", { token: USDC, amount: "5", ...body });
+      expect(result?.status).toBeGreaterThanOrEqual(400);
+    }
+    expect(ops).toEqual(priorOps);
+  });
+
+  it("does not interpret a replayed Request's exact wallet ID as a provider reference", () => {
+    const recorded: DemoOp = {
+      k: "request",
+      id: "demo_new_preq_unresolved",
+      at: NOW.getTime(),
+      wallet: world().wallets.treasury.walletId,
+      token: USDC,
+      amount: "5",
+      cp: null,
+      expires: null,
+    };
+    ops = decodeDemoOps(encodeDemoOps([recorded]));
+    const response = requestsResponseSchema.parse(demoWorldBody(world(), "/v1/payments/requests"));
+    expect(response.data.paymentRequests.some(({ id }) => id === recorded.id)).toBe(false);
+    expect(ops).toEqual([recorded]);
+  });
+
+  it("refuses legacy aliases while retaining each exact demo recipient", () => {
+    const aliasedWorld = world();
+    const wallet = aliasedWorld.wallets.treasury;
+    aliasedWorld.wallets.settlement = {
+      ...aliasedWorld.wallets.settlement,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+    };
+    const attempt = (selector: Record<string, string>) =>
+      demoWrite("POST", {
+        segments: ["payments", "requests"],
+        body: { ...selector, token: USDC, amount: "5" },
+        world: aliasedWorld,
+        ops: [],
+        now,
+      });
+    const refused = attempt({ walletId: wallet.walletId });
+    expect(refused?.answer(aliasedWorld)).toMatchObject({
+      status: 400,
+      body: { error: { code: "invalid_request" } },
+    });
+    expect(refused?.ops).toEqual([]);
+    const exact = attempt({ custodyWalletId: aliasedWorld.wallets.settlement.id });
+    expect(exact?.ops).toMatchObject([{ wallet: "demo_cwlt_settlement" }]);
   });
 });
 

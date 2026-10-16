@@ -961,8 +961,8 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
 
 // ─── Requests ────────────────────────────────────────────────────────────────
 
-const requestSchema = z.object({
-  walletId: z.string().min(1),
+const requestSchema = z.strictObject({
+  custodyWalletId: z.string().min(1).regex(/^\S+$/),
   token: z.string().min(1),
   amount: amountSchema,
   counterpartyId: z.string().nullish(),
@@ -972,7 +972,9 @@ const requestSchema = z.object({
 function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
   const input = parse(requestSchema, body);
   if ("failure" in input) return input.failure;
-  const wallet = findWallet(world, input.data.walletId);
+  const wallet = Object.values(world.wallets).find(
+    (candidate) => candidate.id === input.data.custodyWalletId
+  );
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
   const counterpartyId = input.data.counterpartyId ?? null;
   if (counterpartyId !== null && !contactById(world, counterpartyId)) {

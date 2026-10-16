@@ -16,6 +16,7 @@ import {
   type UnifiedTransaction,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import type { ComponentProps, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as counterpartyAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/accounts/route";
 import { GET as providerAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/provider-accounts/route";
@@ -67,6 +68,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data.redesign";
 import PaymentRequestDetailRoute from "@/app/dashboard/[projectId]/payments/requests/[requestId]/page";
 import PaymentRequestsPage from "@/app/dashboard/[projectId]/payments/requests/page";
+import type { PaymentRequestDetailWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
 import { fetchPaymentRequests } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
 import {
@@ -291,6 +293,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   // Every read a covered screen makes must have a demo answer.
   expect(harness.state.unhandled).toEqual([]);
@@ -706,6 +709,65 @@ describe("Requests", () => {
       expect(props.contactName === null).toBe(request.counterpartyId === null);
     }
   });
+
+  it.each([
+    { custodyWalletId: "cwlt_recipient_b", expectedName: "Recipient B" },
+    { custodyWalletId: null, expectedName: null },
+    { custodyWalletId: "cwlt_unavailable", expectedName: null },
+  ])(
+    "joins recipient $custodyWalletId only through its exact stored pin",
+    async ({ custodyWalletId, expectedName }) => {
+      const fixture = demoData<{ paymentRequests: PaymentRequest[] }>("/v1/payments/requests")
+        .paymentRequests[0];
+      if (!fixture) throw new Error("Missing seeded Payment Request");
+      const request = {
+        ...fixture,
+        custodyWalletId,
+        walletId: "provider_shared",
+        counterpartyId: null,
+      };
+      const originalRequest = harness.apiClient.request;
+      vi.spyOn(harness.apiClient, "request").mockImplementation(async (path, init) => {
+        if (path.startsWith("/v1/payments/requests")) {
+          return Response.json({ data: { paymentRequests: [request], total: 1 } });
+        }
+        if (path.startsWith("/v1/wallets")) {
+          return Response.json({
+            data: {
+              wallets: [
+                {
+                  id: "cwlt_recipient_a",
+                  custodyConfigId: "cfg_a",
+                  walletId: "provider_shared",
+                  publicKey: request.destinationAddress,
+                  label: "Recipient A",
+                  isRuntimeExecutionAllowed: true,
+                },
+                {
+                  id: "cwlt_recipient_b",
+                  custodyConfigId: "cfg_b",
+                  walletId: "provider_shared",
+                  publicKey: request.destinationAddress,
+                  label: "Recipient B",
+                  isRuntimeExecutionAllowed: true,
+                },
+              ],
+            },
+          });
+        }
+        return originalRequest(path, init);
+      });
+      const detail = propsOf<{
+        children: ReactElement<ComponentProps<typeof PaymentRequestDetailWorkspace>>;
+      }>(
+        await PaymentRequestDetailRoute({
+          params: Promise.resolve({ requestId: request.id }),
+        })
+      );
+      expect(detail.children.props.walletName).toBe(expectedName);
+      expect(detail.children.props.request?.destinationAddress).toBe(request.destinationAddress);
+    }
+  );
 });
 
 describe("Schedules", () => {

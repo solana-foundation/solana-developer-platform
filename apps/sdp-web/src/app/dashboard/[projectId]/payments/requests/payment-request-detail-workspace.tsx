@@ -1,6 +1,6 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentRequest } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,7 +24,10 @@ import {
   RecordStateBand,
 } from "../payments-record";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
-import { deriveTokenOptions } from "./payment-requests-page.data";
+import {
+  deriveTokenOptions,
+  type DashboardPaymentRequest as PaymentRequest,
+} from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 

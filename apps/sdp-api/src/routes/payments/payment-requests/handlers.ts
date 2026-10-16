@@ -12,7 +12,7 @@ import {
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { resolveScope, resolveWallet } from "../wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
@@ -23,7 +23,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     organizationId: row.organization_id,
     projectId: row.project_id,
     counterpartyId: row.counterparty_id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id,
     destinationAddress: row.destination_address,
     token: row.token,
     amount: row.amount,
@@ -79,7 +79,7 @@ export async function createPaymentRequest(
   // Access to the wallet and counterparty was checked by authorizePaymentRequest, before the
   // key. Whether the wallet is operational is state, checked here.
   const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.walletId);
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, body.custodyWalletId);
 
   const row = await createPaymentRequestsRepository(
     c.env,

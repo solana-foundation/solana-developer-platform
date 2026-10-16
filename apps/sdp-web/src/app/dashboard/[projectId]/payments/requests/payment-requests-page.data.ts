@@ -1,11 +1,12 @@
 import {
-  type ListPaymentRequestsResponse,
+  PAYMENT_REQUEST_STATUSES,
   type PaginatedResponse,
   type PaymentRequest,
   type SolanaCluster,
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
 } from "@sdp/types";
+import { z } from "zod";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -17,9 +18,39 @@ export interface PaymentRequestTokenOption {
 }
 
 export type PaymentRequestsLocalErrorCode = "paymentRequestsLoadFailed";
-export type PaymentRequestsResult = PaginatedResponse<PaymentRequest> & {
+export type DashboardPaymentRequest = PaymentRequest;
+export type PaymentRequestsResult = PaginatedResponse<DashboardPaymentRequest> & {
   localErrorCode?: PaymentRequestsLocalErrorCode;
 };
+
+const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES);
+export const paymentRequestSchema = z.object({
+  id: z.string(),
+  publicToken: z.string().min(1),
+  organizationId: z.string(),
+  projectId: z.string().nullable(),
+  counterpartyId: z.string().nullable(),
+  custodyWalletId: z.string().min(1).regex(/^\S+$/).nullable(),
+  destinationAddress: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  reference: z.string(),
+  status: paymentRequestStatusSchema,
+  expiresAt: z.string().nullable(),
+  fulfilledByTransferId: z.string().nullable(),
+  canceledBy: z.string().nullable(),
+  lifecycle: z.array(z.object({ status: paymentRequestStatusSchema, at: z.string() })),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) satisfies z.ZodType<DashboardPaymentRequest>;
+
+const paymentRequestsResponseSchema = z.object({
+  data: z.object({
+    paymentRequests: z.array(paymentRequestSchema),
+    total: z.number().int().nonnegative(),
+  }),
+});
 
 /**
  * Well-known tokens deployed on the given cluster. Payment requests are
@@ -60,8 +91,11 @@ export async function fetchPaymentRequests(
     if (!response.ok) {
       return { ok: false, data: [], total: 0, error: await response.text() };
     }
-    const json = (await response.json()) as { data: ListPaymentRequestsResponse };
-    return { ok: true, data: json.data.paymentRequests, total: json.data.total };
+    const parsed = paymentRequestsResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      return { ok: false, data: [], total: 0, error: "Invalid payment request response" };
+    }
+    return { ok: true, data: parsed.data.data.paymentRequests, total: parsed.data.data.total };
   } catch (error) {
     return {
       ok: false,
@@ -75,13 +109,6 @@ export async function fetchPaymentRequests(
 
 /** Rows a page of the Requests list shows until the user picks another size. */
 export const PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE = 25;
-
-const PAYMENT_REQUEST_STATUSES = [
-  "awaiting_payment",
-  "paid",
-  "canceled",
-  "expired",
-] as const satisfies readonly PaymentRequest["status"][];
 
 /** Longest search the Requests list carries in its URL. */
 const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
@@ -152,7 +179,7 @@ const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
  * @returns `true` when any of those fields contains the needle.
  */
 export function paymentRequestMatchesSearch(
-  request: PaymentRequest,
+  request: DashboardPaymentRequest,
   needle: string,
   counterpartyNames: ReadonlyMap<string, string>
 ): boolean {
@@ -242,7 +269,7 @@ export async function loadPaymentRequestsList(
 }
 
 export type PaymentRequestDetailResult =
-  | { status: "found"; request: PaymentRequest }
+  | { status: "found"; request: DashboardPaymentRequest }
   | { status: "not_found" }
   | { status: "error"; error: string | undefined };
 

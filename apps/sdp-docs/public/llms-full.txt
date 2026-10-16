@@ -124,7 +124,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "walletId": "privy_wallet_123",
+    "custodyWalletId": "cwlt_123",
     "counterpartyId": "cp_...",
     "token": "USDC",
     "amount": "25.00",

@@ -353,7 +353,7 @@ function applyRampCancel(world: DemoWorld, op: DemoOpOf<"ramp-cancel">): void {
 }
 
 function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
-  const wallet = findWallet(world, op.wallet);
+  const wallet = Object.values(world.wallets).find((candidate) => candidate.id === op.wallet);
   if (!wallet) return;
   const createdAt = iso(op.at);
   world.requests.push({
@@ -362,7 +362,7 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     counterpartyId: op.cp,
-    walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     destinationAddress: wallet.publicKey,
     token: op.token,
     amount: op.amount,

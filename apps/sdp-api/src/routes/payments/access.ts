@@ -6,7 +6,12 @@ import {
   getCounterpartiesRepository,
   getPaymentSubscriptionsRepository,
 } from "./context";
-import { authorizeProviderWallet, findRetainedPaymentWalletByWalletId } from "./wallets";
+import {
+  authorizeCustodyPaymentWallet,
+  authorizeProviderWallet,
+  findRetainedPaymentWallet,
+  findRetainedPaymentWalletByWalletId,
+} from "./wallets";
 
 /**
  * Access checks for the payment routes that name wallets, plans and
@@ -27,12 +32,13 @@ function planIdParam(input: AuthorizeInput): string {
 
 /** Payment-request create: the receiving wallet and any counterparty, in the caller's project. */
 export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
-  const { walletId, counterpartyId } = body<{ walletId: string; counterpartyId: string | null }>(
-    input
-  );
-  authorizeProviderWallet(c, walletId, ["payments:write"]);
+  const { custodyWalletId, counterpartyId } = body<{
+    custodyWalletId: string;
+    counterpartyId: string | null;
+  }>(input);
+  authorizeCustodyPaymentWallet(c, custodyWalletId, ["payments:write"]);
   const [wallet, counterparty] = await Promise.all([
-    findRetainedPaymentWalletByWalletId(c, walletId),
+    findRetainedPaymentWallet(c, custodyWalletId),
     counterpartyId
       ? getCounterpartiesRepository(c).getCounterpartyById({
           counterpartyId,

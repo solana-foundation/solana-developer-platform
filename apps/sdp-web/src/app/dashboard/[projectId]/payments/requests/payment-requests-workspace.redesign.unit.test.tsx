@@ -40,6 +40,7 @@ const paymentRequest = {
   id: "preq_1",
   publicToken: "tok_1",
   counterpartyId: null,
+  custodyWalletId: "cwlt_recipient",
   destinationAddress: "11111111111111111111111111111111",
   token: "So11111111111111111111111111111111111111112",
   amount: "5",
