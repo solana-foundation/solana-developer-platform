@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -9,28 +10,29 @@ import { parseIssuanceListQuery } from "../issuance-list-query";
 import { fetchIssuanceTokenFacets, fetchIssuanceTokensPage } from "../issuance-tokens.data";
 import { IssuanceWorkspace } from "../issuance-workspace.redesign";
 
-interface IssuanceTemplateView {
-  id: string;
-  name: string;
-  description?: string;
-}
+const templatesResponseSchema = z.object({
+  data: z.object({
+    templates: z.array(
+      z.object({ id: z.string(), name: z.string(), description: z.string().optional() })
+    ),
+  }),
+});
+type IssuanceTemplateView = z.infer<typeof templatesResponseSchema>["data"]["templates"][number];
 
-/** The token templates the playground's create examples offer; empty when they fail to load. */
+/**
+ * The token templates the playground's create examples offer. A failed read, or a response that
+ * is not a list of templates, comes back as `failed` with none, and the playground says so.
+ */
 async function fetchTemplates(
   request: SdpApiClient["request"]
 ): Promise<{ templates: IssuanceTemplateView[]; failed: boolean }> {
   try {
     const response = await request("/v1/issuance/templates");
     if (!response.ok) return { templates: [], failed: true };
-    const json = (await response.json()) as {
-      data?: { templates?: Array<{ id?: string; name?: string; description?: string }> };
-    };
-    const templates = (json.data?.templates ?? []).flatMap((entry) =>
-      typeof entry.id === "string" && typeof entry.name === "string"
-        ? [{ id: entry.id, name: entry.name, description: entry.description }]
-        : []
-    );
-    return { templates, failed: false };
+    const parsed = templatesResponseSchema.safeParse(await response.json());
+    return parsed.success
+      ? { templates: parsed.data.data.templates, failed: false }
+      : { templates: [], failed: true };
   } catch {
     return { templates: [], failed: true };
   }
