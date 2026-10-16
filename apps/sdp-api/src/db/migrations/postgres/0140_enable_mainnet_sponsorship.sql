@@ -1,3 +1,4 @@
+-- sdp:migration-compat: breaking
 -- Mainnet fee sponsorship was seeded disabled in 0055 pending operator
 -- approval; this is that approval. Only the seeded row flips: a global policy
 -- an operator killed or the sponsorship breaker tripped no longer carries
