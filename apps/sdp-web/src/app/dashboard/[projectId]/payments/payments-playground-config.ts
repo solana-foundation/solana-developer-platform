@@ -47,10 +47,7 @@ function buildTransferOptions(
 function buildRampProviderOptions(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundFieldOption[] {
-  return [
-    { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
-    { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
-  ];
+  return [{ label: t("DashboardPayments.playground.moonPay"), value: "moonpay" }];
 }
 
 function buildSelectBackedField(

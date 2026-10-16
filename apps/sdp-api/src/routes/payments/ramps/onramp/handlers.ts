@@ -1,29 +1,17 @@
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import {
-  BVNK_FUNDING_WALLET_FIAT,
-  isBvnkCustomerVerified,
-  normalizeBvnkCurrencyAndNetwork,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { getCryptoRailAssetLabel, type PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampQuote } from "@sdp/types";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { getClientIp } from "@/lib/client-ip";
-import {
-  AppError,
-  badRequest,
-  badRequestQuery,
-  counterpartyNotProvisioned,
-  internalError,
-} from "@/lib/errors";
+import { AppError, badRequestQuery, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
 import {
   buildProviderDetails,
   type CreateOnrampQuoteBody,
@@ -168,63 +156,6 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         });
         throw error;
       }
-      break;
-    }
-    case "bvnk": {
-      if (input.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
-        throw badRequest("BVNK on-ramp funding is USD only.");
-      }
-      const { currency, network } = normalizeBvnkCurrencyAndNetwork(
-        getCryptoRailAssetLabel(input.assetRail)
-      );
-      const bvnkCustomer = await readBvnkCustomerLink(c.env, counterparty);
-      if (!bvnkCustomer || !isBvnkCustomerVerified(bvnkCustomer.status)) {
-        throw counterpartyNotProvisioned("bvnk", "onramp", {
-          customerStatus: bvnkCustomer === null ? undefined : bvnkCustomer.status,
-        });
-      }
-      const apiKey = c.get("apiKey");
-      const pendingTransfer = await getPaymentsRepository(c).createTransfer({
-        id: reservedTransferId,
-        organizationId: scope.auth.organizationId,
-        projectId,
-        custodyWalletId: destinationWallet.id,
-        walletId: destinationWallet.walletId,
-        counterpartyId: counterparty.id,
-        sourceAddress: null,
-        destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail),
-        amount: null,
-        memo: null,
-        type: "onramp",
-        direction: "inbound",
-        status: "pending",
-        provider: "bvnk",
-        providerReference: reservedTransferId,
-        deliveryMode: "manual_instructions",
-        fiatCurrency: input.fiatCurrency,
-        fiatAmount: input.fiatAmount,
-        rampsMemo: input.rampsMemo,
-        providerData: { bvnk: {} },
-        serializedTx: null,
-        signature: null,
-        slot: null,
-        initiatedByKeyId: apiKey ? apiKey.id : null,
-      });
-      if (!pendingTransfer) {
-        throw internalError("Failed to create BVNK on-ramp transfer record");
-      }
-      precreatedTransferId = pendingTransfer.id;
-      const bvnkResult = await bvnkOnrampQuote(c, {
-        counterparty,
-        projectId,
-        transferId: pendingTransfer.id,
-        network,
-        currency,
-        destinationWalletAddress,
-        fiatCurrency: input.fiatCurrency,
-      });
-      quote = bvnkResult.quote;
       break;
     }
     case "stripe": {

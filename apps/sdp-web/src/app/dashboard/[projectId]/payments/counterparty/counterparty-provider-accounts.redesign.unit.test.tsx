@@ -1,8 +1,7 @@
-import {
-  BVNK_FUNDING_WALLET_STATUS,
-  type CounterpartyAccount,
-  type CounterpartyProviderAccount,
-  type PaymentTransferSummary,
+import type {
+  CounterpartyAccount,
+  CounterpartyProviderAccount,
+  PaymentTransferSummary,
 } from "@sdp/types";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -55,7 +54,7 @@ function providerAccount(
 ): CounterpartyProviderAccount {
   return {
     id: "cpa_1",
-    provider: "bvnk",
+    provider: "lightspark",
     kind: "payout_account",
     fiatCurrency: "USD",
     destinationCountry: "US",
@@ -76,35 +75,33 @@ describe("groupProviderAccounts", () => {
         fiatCurrency: "USD",
         destinationCountry: null,
         paymentRail: null,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        providerStatus: "provisioned_funding_wallet",
         providerAccountReference: "a:10000000000002:TESTWLT:1",
         balance: { state: "available", amount: "9.90", currency: "USD" },
         customerLink: {
-          provider: "bvnk",
+          provider: "lightspark",
           id: "cpa_link",
           providerCustomerReference: "cust-1",
           status: "active",
           providerStatus: "VERIFIED",
           createdAt: "2026-01-01T00:00:00.000Z",
-          residenceCountryCode: "US",
-          agreements: [],
         },
       }),
       providerAccount({
         id: "cpa_payout",
-        provider: "lightspark",
+        provider: "coinbase",
         providerStatus: "VERIFIED",
       }),
     ]);
 
     expect(groups).toHaveLength(2);
-    const bvnk = groups.find((group) => group.provider === "bvnk");
-    expect(bvnk?.fundingWallets.map((account) => account.id)).toEqual(["cpa_funding"]);
-    expect(bvnk?.payoutAccounts).toEqual([]);
-    expect(bvnk?.customerLink?.provider).toBe("bvnk");
     const lightspark = groups.find((group) => group.provider === "lightspark");
-    expect(lightspark?.payoutAccounts.map((account) => account.id)).toEqual(["cpa_payout"]);
-    expect(lightspark?.fundingWallets).toEqual([]);
+    expect(lightspark?.fundingWallets.map((account) => account.id)).toEqual(["cpa_funding"]);
+    expect(lightspark?.payoutAccounts).toEqual([]);
+    expect(lightspark?.customerLink?.provider).toBe("lightspark");
+    const coinbase = groups.find((group) => group.provider === "coinbase");
+    expect(coinbase?.payoutAccounts.map((account) => account.id)).toEqual(["cpa_payout"]);
+    expect(coinbase?.fundingWallets).toEqual([]);
   });
 });
 
@@ -195,25 +192,15 @@ describe("counterparty provider accounts table", () => {
       kind: "funding_wallet",
       destinationCountry: null,
       paymentRail: null,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      providerStatus: "provisioned_funding_wallet",
       providerAccountReference: "a:10000000000002:TESTWLT:1",
       customerLink: {
-        provider: "bvnk",
+        provider: "lightspark",
         id: "cpa_link",
         providerCustomerReference: "00000000-0000-4000-8000-00000000c058",
         status: "active",
         providerStatus: "VERIFIED",
         createdAt: "2026-01-01T00:00:00.000Z",
-        residenceCountryCode: "US",
-        agreements: [
-          {
-            name: "test_agreement",
-            displayName: "Test Wallet Agreement",
-            url: "https://help.bvnk.com/test-agreement",
-            privacyPolicyUrl: "https://help.bvnk.com/test-privacy",
-            signedAt: null,
-          },
-        ],
       },
       ...overrides,
     });
@@ -234,7 +221,7 @@ describe("counterparty provider accounts table", () => {
     {
       name: "provisioning em dash",
       overrides: {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        providerStatus: "provisioning_funding_wallet",
         providerAccountReference: undefined,
         balance: undefined,
       },
@@ -248,7 +235,7 @@ describe("counterparty provider accounts table", () => {
     copy: boolean;
   }>)("renders $name in the wallet row", async ({ overrides, text, copy }) => {
     const row = await renderWallet(walletAccount(overrides));
-    expect(row.textContent).toContain("BVNK");
+    expect(row.textContent).toContain("Lightspark");
     expect(row.textContent).toContain(
       "DashboardPayments.counterparty.providerAccountFundingWallet USD"
     );
@@ -257,9 +244,6 @@ describe("counterparty provider accounts table", () => {
       'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.walletidlabel"]'
     );
     expect(Boolean(copyButton)).toBe(copy);
-    // The agreement the provider wants accepted is listed once, under the table.
-    expect(row.textContent).not.toContain("Test Wallet Agreement");
-    expect(container.textContent?.split("Test Wallet Agreement")).toHaveLength(2);
   });
 
   it("gives a customer link carried on the provider's accounts its own row, once", async () => {
@@ -274,7 +258,9 @@ describe("counterparty provider accounts table", () => {
       'tr[data-provider-account-kind="customer_link"]'
     );
     expect(customerRows).toHaveLength(1);
-    expect(customerRows[0]?.textContent).toContain("US");
+    expect(customerRows[0]?.textContent).toContain(
+      "DashboardPayments.counterparty.detail.customerProfile"
+    );
     expect(
       customerRows[0]?.querySelector(
         'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.customeridlabel"]'
@@ -294,7 +280,9 @@ describe("counterparty provider accounts table", () => {
     await renderAccounts([walletAccount({ id: "cpa_wallet" })]);
 
     const customerRow = container.querySelector('tr[data-provider-account-kind="customer_link"]');
-    expect(customerRow?.textContent).toContain("US");
+    expect(customerRow?.textContent).toContain(
+      "DashboardPayments.counterparty.detail.customerProfile"
+    );
     expect(
       customerRow?.querySelector(
         'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.customeridlabel"]'
@@ -303,7 +291,6 @@ describe("counterparty provider accounts table", () => {
     expect(
       container.querySelectorAll('tr[data-provider-account-kind="funding_wallet"]')
     ).toHaveLength(1);
-    expect(container.textContent).toContain("Test Wallet Agreement");
     expect(container.textContent).toContain(
       "DashboardPayments.counterparty.detail.providerAccountsRefreshFailed"
     );
@@ -324,8 +311,9 @@ describe("counterparty provider accounts table", () => {
     // The wallet row renders a dash for the missing currency; the customer row must survive it.
     await renderAccounts([walletAccount({ id: "cpa_wallet", fiatCurrency: null })]);
     const customerRow = container.querySelector('tr[data-provider-account-kind="customer_link"]');
-    expect(customerRow?.textContent).toContain("US");
-    expect(container.textContent).toContain("Test Wallet Agreement");
+    expect(customerRow?.textContent).toContain(
+      "DashboardPayments.counterparty.detail.customerProfile"
+    );
   });
 
   function payout(id: string, amount: string): PaymentTransferSummary {

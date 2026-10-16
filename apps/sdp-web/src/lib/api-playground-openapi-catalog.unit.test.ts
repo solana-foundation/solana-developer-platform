@@ -102,7 +102,7 @@ describe("API playground release channel", () => {
     );
     const batches = payments.find((endpoint) => endpoint.id === "create-payment-transfer-batch");
     expect(JSON.stringify(batches?.expectedResponse)).toMatch(/"transfers":\[\{/);
-    expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|bvnk|stripe/);
+    expect(JSON.stringify(batches?.expectedResponse)).not.toMatch(/moonpay|stripe/);
 
     const transfers = payments.find((endpoint) => endpoint.id === "list-payment-transfers");
     expect(transfers?.pathFields.map((field) => field.key)).not.toContain("provider");

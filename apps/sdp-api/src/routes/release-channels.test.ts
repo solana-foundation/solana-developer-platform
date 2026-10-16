@@ -116,6 +116,4 @@ describe("release channels at the API", () => {
   );
 });
 
-// Background jobs assert their own release channel gates against seeded rows:
-// replay-ramp-webhook-events in webhooks.ramp-event-inbox.test.ts and
-// reconcile-bvnk-onramp-payouts in its own test file.
+// Background jobs assert their own release channel gates against seeded rows.

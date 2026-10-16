@@ -79,7 +79,7 @@ Some features need external vendor credentials and may not work in a clean local
 | Dashboard authentication | Clerk |
 | Managed custody providers | Privy, Coinbase CDP, Turnkey, Fireblocks, Para, or similar |
 | Compliance screening | TRM, Chainalysis, Elliptic, Range, or similar |
-| Fiat ramps | MoonPay, BVNK, or similar |
+| Fiat ramps | MoonPay, Stripe, or similar |
 | Integration tests | Provider credentials and devnet infrastructure |
 
 Keep real credentials in local environment files or the team secret manager. Do not commit secrets or provider-issued tokens.

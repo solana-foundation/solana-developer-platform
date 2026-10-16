@@ -35,7 +35,6 @@ export interface IntegrationEntry<TProvider extends string = string> {
 
 const RAMP_DESCRIPTION_KEYS: Record<RampProviderId, MessageKey> = {
   moonpay: "Shared.integrations.rampMoonpayDescription",
-  bvnk: "Shared.integrations.rampBvnkDescription",
   stripe: "Shared.integrations.rampStripeDescription",
 };
 
@@ -48,7 +47,6 @@ const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
 
 export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",
-  bvnk: "BVNK",
   stripe: "Stripe",
 };
 

@@ -62,10 +62,6 @@ const demoOpSchema = z.discriminatedUnion("k", [
   /** An on-ramp's pay-in arrived (the sandbox simulation), or an off-ramp's crypto was sent. */
   z.object({ k: z.literal("ramp-paid"), id, at }),
   z.object({ k: z.literal("ramp-cancel"), id, at }),
-  /** A contact accepted a ramp provider's agreements (BVNK asks before its first ramp). */
-  z.object({ k: z.literal("consent"), id, at, provider: z.enum(RAMP_PROVIDERS) }),
-  /** A ramp provider approved a contact's identity check (demo mode's Simulate verification). */
-  z.object({ k: z.literal("verified"), id, at, provider: z.enum(RAMP_PROVIDERS) }),
   z.object({
     k: z.literal("request"),
     id,

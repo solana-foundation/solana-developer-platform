@@ -102,7 +102,7 @@ Recommended launch classification, using today's lower-exposure set as the basel
 | Custody/signing | Privy, Coinbase CDP, Para, Turnkey | Fireblocks, Dfns, IBM Digital Asset Haven, Anchorage, Utila |
 | RPC | Default RPC, Alchemy, Helius, QuickNode, Triton, Validation Cloud | None |
 | Compliance | None | Range, Elliptic, TRM, Chainalysis |
-| Ramps | MoonPay, BVNK, Coinbase Onramp, Stripe | None |
+| Ramps | MoonPay, Stripe | None |
 | Payments add-ons | None pending contract review | Kora fee payment, MagicBlock private payments |
 
 Notes:
@@ -206,7 +206,7 @@ Before opening signup, confirm or increase capacity for every generally availabl
 - the deployed Cloudflare Workers, Hyperdrive, KV, database, and Redis accounts
 - every RPC account: default Solana RPC, Alchemy, Helius, QuickNode, Triton, and Validation Cloud
 - Privy, Coinbase CDP wallets, Para, and Turnkey
-- every ramp account: MoonPay, BVNK, Coinbase Onramp, and Stripe
+- every ramp account: MoonPay and Stripe
 - Resend, Sentry, Google Places, and GCP Secret Manager
 - Kora fee-payer balance and per-wallet limits if Kora becomes generally available
 

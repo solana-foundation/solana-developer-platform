@@ -1,24 +1,12 @@
-import { RAMP_PROVIDER_CLIENTS, resolveRampProviderClient } from "@sdp/payments/ramps";
-import {
-  BVNK_FUNDING_WALLET_FIAT,
-  bvnkOnrampRemittance,
-  readBvnkOnrampTransferData,
-} from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { toNumberAmount } from "@sdp/solana/amount";
+import { resolveRampProviderClient } from "@sdp/payments/ramps";
 import { CANCELABLE_RAMP_TRANSFER_STATUSES, isCancelableRampTransferStatus } from "@sdp/types";
-import { getDb } from "@/db";
-import {
-  createPostgresCounterpartyProviderAccountsRepository,
-  isRampTransferType,
-} from "@/db/repositories";
+import { isRampTransferType } from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
-import { noContent, success } from "@/lib/response";
+import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getCounterpartiesRepository } from "@/routes/counterparties/context";
-import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
-import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../context";
+import { getPaymentsRepository, resolveSdpEnvironment } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
 import { admitRamp } from "./admission";
@@ -96,73 +84,5 @@ export async function simulateSandboxTransfer(
   }
   const provider = resolveRampProviderClient(transfer.provider).id;
   await assertProviderAvailable(c, { family: "ramps", provider });
-  if (transfer.counterparty_id === null) {
-    throw internalError("On-ramp transfer has no counterparty.");
-  }
-  if (transfer.fiat_amount === null || transfer.fiat_currency === null) {
-    throw internalError("On-ramp transfer has no fiat amount.");
-  }
-  const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
-    counterpartyId: transfer.counterparty_id,
-    organizationId: scope.auth.organizationId,
-    projectId,
-  });
-  if (!counterparty) {
-    throw notFound("Counterparty");
-  }
-  let simulate: () => Promise<unknown>;
-  switch (provider) {
-    case "bvnk": {
-      // TODO(PRO-2035): remove with the legacy `bvnk.simulation` codec field.
-      if (readBvnkOnrampTransferData(transfer.provider_data).simulation !== undefined) {
-        throw conflict(
-          "Sandbox simulation was already requested for this transfer. Create a new quote."
-        );
-      }
-      const fundingRow = await createPostgresCounterpartyProviderAccountsRepository(
-        getDb(c.env)
-      ).getAccountByKindAndCurrency({
-        organizationId: scope.auth.organizationId,
-        projectId,
-        counterpartyId: transfer.counterparty_id,
-        provider: "bvnk",
-        kind: "funding_wallet",
-        fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
-      });
-      if (fundingRow === null || fundingRow.external_account_reference === null) {
-        throw internalError("BVNK on-ramp counterparty has no funding wallet.");
-      }
-      const payload = {
-        walletId: fundingRow.external_account_reference,
-        amount: toNumberAmount(transfer.fiat_amount),
-        currency: transfer.fiat_currency,
-        originatorName: counterparty.display_name,
-        remittanceInformation: bvnkOnrampRemittance(transfer.id),
-        idempotencyKey: transfer.id,
-      };
-      simulate = () => RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), payload);
-      break;
-    }
-    case "moonpay":
-    case "stripe":
-      throw badRequest(`Sandbox simulation is not available for provider: ${provider}.`);
-    default: {
-      const exhaustive: never = provider;
-      throw internalError(`Unknown ramp provider: ${String(exhaustive)}`);
-    }
-  }
-
-  const outcome = await sendOnceUnderTransferClaim({
-    repository,
-    transferId: transfer.id,
-    organizationId: scope.auth.organizationId,
-    projectId,
-    expectedStatus: "awaiting_payment",
-    claimKey: "sandboxSimulation",
-    send: simulate,
-  });
-  if (!outcome.claimed) {
-    throw conflict("Sandbox simulation was already requested for this transfer.");
-  }
-  return noContent(c);
+  throw badRequest(`Sandbox simulation is not available for provider: ${provider}.`);
 }

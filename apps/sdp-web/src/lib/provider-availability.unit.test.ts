@@ -80,7 +80,7 @@ describe("isProviderAvailableForProject", () => {
 
   it("rejects an unavailable provider of every other family", () => {
     expect(isProviderAvailableForProject(AVAILABILITY, "chainalysis")).toBe(false);
-    expect(isProviderAvailableForProject(AVAILABILITY, "bvnk")).toBe(false);
+    expect(isProviderAvailableForProject(AVAILABILITY, "coinbase")).toBe(false);
     expect(isProviderAvailableForProject(AVAILABILITY, "veda")).toBe(false);
   });
 

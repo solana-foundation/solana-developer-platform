@@ -55,25 +55,31 @@ describe("wallet selection during payments", () => {
       const url = String(input);
       if (url.includes("/wallets?")) return Response.json({ data: { wallets: [source] } });
       if (url.includes("/requirements"))
-        return Response.json({ data: { provider: "bvnk", direction: "offramp", status: "ready" } });
+        return Response.json({
+          data: { provider: "moonpay", direction: "offramp", status: "ready" },
+        });
       if (url.endsWith("/quote"))
         return Response.json({
           data: {
             transferId: "transfer_ramp",
             quote: {
               id: "quote_ramp",
-              provider: "bvnk",
+              provider: "moonpay",
               status: "pending",
-              deliveryMode: "manual_instructions",
-              paymentInstructions: [
-                { kind: "crypto_deposit", destinationAddress: wallet.publicKey },
-              ],
+              deliveryMode: "hosted",
+              hostedUrl: "https://sell-sandbox.moonpay.com/",
             },
           },
         });
       if (url.includes("/transfers/"))
         return Response.json({
-          data: { transfer: { id: "transfer_ramp", status: "awaiting_payment" } },
+          data: {
+            transfer: {
+              id: "transfer_ramp",
+              status: "awaiting_payment",
+              cryptoDeposit: { destinationAddress: wallet.publicKey, amount: "1" },
+            },
+          },
         });
       if (init?.method === "POST") sent.push(JSON.parse(String(init.body)));
       return Response.json({ data: { counterparties: [], total: 0 } });
@@ -83,7 +89,7 @@ describe("wallet selection during payments", () => {
         wizard: useOfframpWizard({
           wallets: [source],
           walletsError: null,
-          enabledRampProviders: ["bvnk"],
+          enabledRampProviders: ["moonpay"],
           rampProviderAccess: null,
           counterpartiesResult: { ok: true, data: [] },
           selectedCounterparty: null,
@@ -97,7 +103,7 @@ describe("wallet selection during payments", () => {
     act(() => {
       result.current.wizard.setField("walletId", source.id);
       result.current.wizard.setField("amount", "1");
-      result.current.wizard.selectProvider("bvnk");
+      result.current.wizard.selectProvider("moonpay");
     });
     await act(() => result.current.wizard.handlePrimary());
     await waitFor(() => expect(result.current.wizard.canProceed).toBe(true));

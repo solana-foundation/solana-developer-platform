@@ -120,7 +120,7 @@ describe("providerFetch abort signal", () => {
       });
     };
 
-    const result = await providerFetch("bvnk", "https://api.example.test/ping", {
+    const result = await providerFetch("moonpay", "https://api.example.test/ping", {
       method: "GET",
       signal: controller.signal,
     });

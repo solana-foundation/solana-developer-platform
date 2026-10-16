@@ -49,23 +49,23 @@ or an explicit entry there.
 
 ## Counterparty provider lookups
 
-Provider webhooks resolve tenants from provider references held on
+Retired provider webhooks resolved tenants from provider references held on
 `counterparty_provider_accounts` rows of kind `customer_link`
 (`provider_customer_reference`). Migration
 `0080_counterparty_provider_lookup_integrity.sql` (re-scoped by
 `0082_scope_customer_link_uniqueness.sql`) makes the
-`(provider, provider_customer_reference)` pair unique among active BVNK and
-Lightspark customer links. A reference therefore resolves to at most one
-tenant; two tenants racing to claim the same reference get a
-unique-violation failure instead of a silent cross-tenant resolution. 0080
-also made a now-retired ramp provider's counterparty-row lookup key unique.
-Nothing reads or writes that key any more, but its unique indexes remain until
-a follow-up migration removes them.
+`(provider, provider_customer_reference)` pair unique for two retired providers'
+customer links. Both providers are retired; these constraints preserve the
+integrity of historical rows. While those providers were active, a reference
+resolved to at most one tenant, and two tenants racing to claim the same
+reference received a unique-violation failure. 0080 also made a retired ramp
+provider's counterparty-row lookup key unique. Nothing reads or writes that key
+any more, but its unique indexes remain until a follow-up migration removes
+them.
 
-The customer-link uniqueness applies only to providers whose customers SDP
-creates one-per-counterparty (BVNK, which also routes webhooks by customer
-reference, and the now-retired Lightspark). MoonPay settlements are matched
-by the transfer's `provider_reference` and record the customer link as a
+The customer-link uniqueness applies only to the two retired integrations whose
+customers SDP created one-per-counterparty. MoonPay settlements are matched by
+the transfer's `provider_reference` and record the customer link as a
 byproduct, and one MoonPay account legitimately links to many
 counterparties (the buyer owns the MoonPay account and can be a
 counterparty of several organizations), so MoonPay links are many-to-one

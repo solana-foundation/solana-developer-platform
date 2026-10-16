@@ -723,10 +723,6 @@
                 "value": "moonpay"
               },
               {
-                "label": "bvnk",
-                "value": "bvnk"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3012,10 +3008,6 @@
                 "value": "moonpay"
               },
               {
-                "label": "bvnk",
-                "value": "bvnk"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3252,10 +3244,6 @@
                 "value": "moonpay"
               },
               {
-                "label": "bvnk",
-                "value": "bvnk"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3273,7 +3261,7 @@
               {
                 "source": "usdc.solana",
                 "dest": "USD",
-                "providers": ["moonpay", "bvnk"]
+                "providers": ["moonpay"]
               }
             ],
             "providerDetails": {
@@ -3324,23 +3312,7 @@
               "id": "ramp_quote_example",
               "provider": "moonpay",
               "status": "pending",
-              "deliveryMode": "hosted",
-              "paymentInstructions": [
-                {
-                  "provider": "bvnk",
-                  "kind": "fiat_funding",
-                  "onboardingStatus": "ready",
-                  "fiatCurrency": "USD",
-                  "beneficiaryAddress": "11111111111111111111111111111111",
-                  "network": "SOLANA",
-                  "paymentReference": "SDP-ONRAMP xfr_9f3b1c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
-                  "remittanceInformationPrefix": "LCA-ONRAMP",
-                  "bankAccount": {
-                    "routingNumber": "021000021"
-                  },
-                  "instructionsNotes": "example"
-                }
-              ]
+              "deliveryMode": "hosted"
             },
             "transferId": "transfer_example"
           },
@@ -4151,17 +4123,13 @@
             "key": "provider",
             "label": "provider",
             "description": "Filter by ramp provider.",
-            "defaultValue": "bvnk",
+            "defaultValue": "moonpay",
             "required": false,
             "kind": "select",
             "options": [
               {
                 "label": "moonpay",
                 "value": "moonpay"
-              },
-              {
-                "label": "bvnk",
-                "value": "bvnk"
               },
               {
                 "label": "stripe",
@@ -5189,7 +5157,7 @@
             "accounts": [
               {
                 "id": "counterparty_provider_account_example",
-                "provider": "bvnk",
+                "provider": "moonpay",
                 "kind": "funding_wallet",
                 "fiatCurrency": "USD",
                 "destinationCountry": "US",
@@ -5198,22 +5166,12 @@
                 "providerStatus": "ACTIVE",
                 "createdAt": "2025-01-01T00:00:00.000Z",
                 "customerLink": {
-                  "provider": "bvnk",
+                  "provider": "moonpay",
                   "id": "counterparty_provider_account_customer",
                   "status": "active",
                   "providerStatus": "ACTIVE",
                   "createdAt": "2025-01-01T00:00:00.000Z",
-                  "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-                  "residenceCountryCode": "US",
-                  "agreements": [
-                    {
-                      "name": "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
-                      "displayName": "Embedded US Partner Platform Customers Agreement",
-                      "url": "https://help.bvnk.com/hc/en-us/sections/example",
-                      "privacyPolicyUrl": "https://help.bvnk.com/hc/en-us/articles/example",
-                      "signedAt": "2025-01-01T00:00:00.000Z"
-                    }
-                  ]
+                  "providerCustomerReference": "Customer:0193b2c4"
                 },
                 "providerAccountReference": "a:26091815750755:c1aVEgc:1",
                 "balance": {
@@ -8125,9 +8083,6 @@
     "moonpay": {
       "rampProvider": "moonpay"
     },
-    "bvnk": {
-      "rampProvider": "bvnk"
-    },
     "stripe": {
       "rampProvider": "stripe"
     },
@@ -8144,6 +8099,9 @@
       "module": "ramps"
     },
     "coinbase": {
+      "module": "ramps"
+    },
+    "bvnk": {
       "module": "ramps"
     }
   }

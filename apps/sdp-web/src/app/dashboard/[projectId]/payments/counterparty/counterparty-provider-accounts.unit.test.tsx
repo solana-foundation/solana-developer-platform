@@ -1,4 +1,4 @@
-import { BVNK_FUNDING_WALLET_STATUS, type CounterpartyProviderAccount } from "@sdp/types";
+import type { CounterpartyProviderAccount } from "@sdp/types";
 import { act } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -37,7 +37,7 @@ function providerAccount(
 ): CounterpartyProviderAccount {
   return {
     id: "cpa_1",
-    provider: "bvnk",
+    provider: "lightspark",
     kind: "payout_account",
     fiatCurrency: "USD",
     destinationCountry: "US",
@@ -58,35 +58,33 @@ describe("groupProviderAccounts", () => {
         fiatCurrency: "USD",
         destinationCountry: null,
         paymentRail: null,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        providerStatus: "provisioned_funding_wallet",
         providerAccountReference: "a:10000000000002:TESTWLT:1",
         balance: { state: "available", amount: "9.90", currency: "USD" },
         customerLink: {
-          provider: "bvnk",
+          provider: "lightspark",
           id: "cpa_link",
           providerCustomerReference: "cust-1",
           status: "active",
           providerStatus: "VERIFIED",
           createdAt: "2026-01-01T00:00:00.000Z",
-          residenceCountryCode: "US",
-          agreements: [],
         },
       }),
       providerAccount({
         id: "cpa_payout",
-        provider: "lightspark",
+        provider: "coinbase",
         providerStatus: "VERIFIED",
       }),
     ]);
 
     expect(groups).toHaveLength(2);
-    const bvnk = groups.find((group) => group.provider === "bvnk");
-    expect(bvnk?.fundingWallets.map((account) => account.id)).toEqual(["cpa_funding"]);
-    expect(bvnk?.payoutAccounts).toEqual([]);
-    expect(bvnk?.customerLink?.provider).toBe("bvnk");
     const lightspark = groups.find((group) => group.provider === "lightspark");
-    expect(lightspark?.payoutAccounts.map((account) => account.id)).toEqual(["cpa_payout"]);
-    expect(lightspark?.fundingWallets).toEqual([]);
+    expect(lightspark?.fundingWallets.map((account) => account.id)).toEqual(["cpa_funding"]);
+    expect(lightspark?.payoutAccounts).toEqual([]);
+    expect(lightspark?.customerLink?.provider).toBe("lightspark");
+    const coinbase = groups.find((group) => group.provider === "coinbase");
+    expect(coinbase?.payoutAccounts.map((account) => account.id)).toEqual(["cpa_payout"]);
+    expect(coinbase?.fundingWallets).toEqual([]);
   });
 });
 
@@ -144,8 +142,8 @@ describe("counterparty provider wallet card", () => {
     await renderWorkspace(account, true);
     const toggle = Array.from(
       container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')
-    ).find((button) => button.textContent?.includes("BVNK"));
-    if (toggle === undefined) throw new Error("Expected collapsed BVNK provider accordion");
+    ).find((button) => button.textContent?.includes("Lightspark"));
+    if (toggle === undefined) throw new Error("Expected collapsed Lightspark provider accordion");
     return toggle;
   }
   function walletAccount(overrides: Partial<CounterpartyProviderAccount>) {
@@ -153,25 +151,15 @@ describe("counterparty provider wallet card", () => {
       kind: "funding_wallet",
       destinationCountry: null,
       paymentRail: null,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      providerStatus: "provisioned_funding_wallet",
       providerAccountReference: "a:10000000000002:TESTWLT:1",
       customerLink: {
-        provider: "bvnk",
+        provider: "lightspark",
         id: "cpa_link",
         providerCustomerReference: "00000000-0000-4000-8000-00000000c058",
         status: "active",
         providerStatus: "VERIFIED",
         createdAt: "2026-01-01T00:00:00.000Z",
-        residenceCountryCode: "US",
-        agreements: [
-          {
-            name: "test_agreement",
-            displayName: "Test Wallet Agreement",
-            url: "https://help.bvnk.com/test-agreement",
-            privacyPolicyUrl: "https://help.bvnk.com/test-privacy",
-            signedAt: null,
-          },
-        ],
       },
       ...overrides,
     });
@@ -198,7 +186,7 @@ describe("counterparty provider wallet card", () => {
     {
       name: "provisioning em dash",
       overrides: {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        providerStatus: "provisioning_funding_wallet",
         providerAccountReference: undefined,
         balance: undefined,
       },
@@ -212,7 +200,6 @@ describe("counterparty provider wallet card", () => {
     copy: boolean;
   }>)("renders $name in the expanded wallet row", async ({ overrides, text, copy }) => {
     const toggle = await renderWallet(walletAccount(overrides));
-    expect(container.textContent).not.toContain("Test Wallet Agreement");
     expect(container.querySelector("li")).toBeNull();
     await act(async () => toggle.click());
     const row = container.querySelector("li");
@@ -224,10 +211,7 @@ describe("counterparty provider wallet card", () => {
       'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.walletidlabel"]'
     );
     expect(Boolean(copyButton)).toBe(copy);
-    expect(container.textContent?.split("Test Wallet Agreement")).toHaveLength(2);
-    expect(toggle.textContent).not.toContain("Test Wallet Agreement");
     await act(async () => toggle.click());
-    expect(container.textContent).not.toContain("Test Wallet Agreement");
     expect(container.querySelector("li")).toBeNull();
   });
 });

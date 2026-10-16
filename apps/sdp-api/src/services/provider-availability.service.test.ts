@@ -82,9 +82,6 @@ const providerEnvKeys = [
   "CHAINALYSIS_API_KEY",
   "MOONPAY_SANDBOX_API_KEY",
   "MOONPAY_SANDBOX_SECRET_KEY",
-  "BVNK_HAWK_AUTH_ID",
-  "BVNK_HAWK_SECRET_KEY",
-  "BVNK_WALLET_ID",
   "UPSHIFT_API_KEY",
   "UPSHIFT_SANDBOX_API_KEY",
   "PERENA_API_KEY",
@@ -361,27 +358,6 @@ describe("provider-availability.service", () => {
     });
 
     expect(availability.providers.ramps.moonpay?.enabled).toBe(true);
-    expect(availability.providers.ramps.bvnk?.enabled).toBe(false);
-  });
-
-  it("treats partially configured multi-secret providers as not configured", async () => {
-    await setOrganizationTier("enterprise");
-    env.BVNK_WALLET_ID = "bvnk_wallet";
-    env.BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
-    env.BVNK_HAWK_SECRET_KEY = undefined;
-
-    const availability = await getProviderAvailability(
-      env,
-      getDb(env),
-      TEST_ORG_ID,
-      MANIFEST_STAGES
-    );
-
-    expect(availability.providers.ramps.bvnk).toEqual({
-      entitled: true,
-      configured: false,
-      enabled: false,
-    });
   });
 
   it("treats local custody as override-only and configurable only in a self-hosted deployment", async () => {
@@ -502,7 +478,7 @@ describe("provider-availability.service", () => {
       enabled: false,
     });
     expect(availability.providers.compliance.range.entitled).toBe(false);
-    expect(availability.providers.ramps.bvnk.entitled).toBe(true);
+    expect(availability.providers.ramps.moonpay.entitled).toBe(true);
   });
 
   it("honors a custody override disabling local the same way in self-hosted mode", async () => {

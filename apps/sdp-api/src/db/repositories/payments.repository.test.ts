@@ -428,7 +428,7 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
     };
-    const providerData = { bvnk: {} };
+    const providerData = { moonpay: {} };
     const claimValue = { requestedAt: "2026-09-01T12:00:00.000Z" };
     const claimInput: Parameters<PaymentsRepository["claimTransferProviderData"]>[0] = {
       ...scope,
@@ -465,9 +465,9 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         type: "onramp",
         direction: "inbound",
         status: claimInput.expectedStatus,
-        provider: "bvnk",
+        provider: "moonpay",
         providerReference: scope.transferId,
-        deliveryMode: "manual_instructions",
+        deliveryMode: "hosted",
         fiatCurrency: "USD",
         fiatAmount: "25.00",
         providerData,

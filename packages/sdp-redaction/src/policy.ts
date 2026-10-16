@@ -103,12 +103,12 @@ const PII_KEYS = new Set([
   // (it collides with Solana addresses), so a postal address is defused one
   // component at a time instead — which means every spelling a provider uses
   // for the street line has to be here by name. `address1`/`physicalAddress`
-  // are a retired ramp provider's, kept so its logged history still scrubs,
-  // `addressLine1`/`addressLine2` are BVNK's (`BvnkRuleEntityAddress`), and
-  // `line1`/`line2` are SDP's own `CounterpartyAddress`.
+  // and `addressLine1`/`addressLine2` came from retired ramp providers and
+  // remain here so their logged history still scrubs. `line1`/`line2` are
+  // SDP's own `CounterpartyAddress`.
   //
-  // These are unambiguous postal keys, unlike the `*Address` suffix: BVNK's
-  // `beneficiaryAddress` holds `destinationWalletAddress`, a crypto address,
+  // These are unambiguous postal keys, unlike the `*Address` suffix: a retired
+  // provider's `beneficiaryAddress` held a crypto destination address,
   // which is exactly why no blanket suffix rule can exist here.
   "line1",
   "line2",

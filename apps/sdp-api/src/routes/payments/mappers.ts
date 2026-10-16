@@ -11,36 +11,13 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { bvnkProviderReference } from "./ramps/providers/bvnk";
 
-/**
- * The provider-side payout reference mapped for a ramp transfer row. BVNK
- * routes through {@link bvnkProviderReference} (the payout uuid once the
- * on-ramp settlement exists, omitted before); every other provider, retired
- * ones included, keeps the stored `provider_reference` as-is. The switch is
- * exhaustive over the live ramp provider union.
- *
- * @param row - The payment transfer row being mapped.
- * @returns The provider reference to present, or undefined when omitted.
- */
+/** The stored provider reference for a ramp transfer, including retired providers. */
 function rampProviderReference(row: TransferRow): string | undefined {
-  switch (row.provider) {
-    case "bvnk":
-      return bvnkProviderReference(row);
-    case "moonpay":
-    case "stripe":
-      return row.provider_reference === null ? undefined : row.provider_reference;
-    default: {
-      if (row.provider === null) {
-        throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
-      }
-      if (isRetiredRampProviderId(row.provider)) {
-        return row.provider_reference === null ? undefined : row.provider_reference;
-      }
-      const exhaustive: never = row.provider;
-      return exhaustive;
-    }
+  if (row.provider === null) {
+    throw new AppError("INTERNAL_ERROR", "Ramp transfer is missing provider.");
   }
+  return row.provider_reference ?? undefined;
 }
 
 /**
