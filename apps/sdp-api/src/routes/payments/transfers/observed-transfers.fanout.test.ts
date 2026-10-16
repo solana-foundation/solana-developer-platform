@@ -9,8 +9,8 @@ import {
   parsedTokenBalance,
   parsedTransactionResult,
   parsedTransferChecked,
+  signatureHistoryEntry,
   syntheticAddress,
-  syntheticSignature,
 } from "@/test/helpers/parsed-transactions";
 import {
   buildObservedTransfersForSignatures,
@@ -25,16 +25,6 @@ const context = {
   projectId: "prj_fanout_test",
   walletIdsByAddress: new Map([[WALLET_ADDRESS, "wal_fanout_test"]]),
 };
-
-function historyEntry(index: number): SignatureInfo {
-  return {
-    signature: syntheticSignature(index),
-    slot: BigInt(index),
-    blockTime: 1700000000n,
-    err: null,
-    confirmationStatus: "confirmed",
-  };
-}
 
 function buildOnSandbox(signatures: SignatureInfo[]) {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
@@ -66,7 +56,7 @@ describe("buildObservedTransfersForSignatures", () => {
     });
 
     const rows = await buildOnSandbox(
-      Array.from({ length: 25 }, (_, index) => historyEntry(index))
+      Array.from({ length: 25 }, (_, index) => signatureHistoryEntry(index, "confirmed"))
     );
 
     expect(rows).toEqual([]);
@@ -90,7 +80,7 @@ describe("buildObservedTransfersForSignatures", () => {
           uiAmountString: formatDecimalAmount(BigInt(amount), 6),
         },
       });
-    const observed = historyEntry(0);
+    const observed = signatureHistoryEntry(0, "confirmed");
     rpc.answer(
       "getTransaction",
       parsedTransactionResult({

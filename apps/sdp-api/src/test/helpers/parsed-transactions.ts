@@ -1,5 +1,6 @@
+import type { SignatureInfo } from "@sdp/rpc/solana";
 import { getBase58Decoder } from "@solana/codecs";
-import { type Address, address, type Signature, signature } from "@solana/kit";
+import { type Address, address, type Commitment, type Signature, signature } from "@solana/kit";
 import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { JsonRpcResult } from "@/test/helpers/cluster-rpc";
@@ -37,6 +38,26 @@ export function syntheticAddress(index: number): Address {
   return address(getBase58Decoder().decode(syntheticBytes(32, index)));
 }
 
+/**
+ * A `getSignaturesForAddress` entry as `@sdp/rpc/solana` returns it, distinct for every index.
+ *
+ * @param index - Any non-negative integer up to 2^32 - 1; also the entry's slot.
+ * @param confirmationStatus - The commitment the history reports the signature at.
+ * @returns The history entry.
+ */
+export function signatureHistoryEntry(
+  index: number,
+  confirmationStatus: Commitment
+): SignatureInfo {
+  return {
+    signature: syntheticSignature(index),
+    slot: BigInt(index),
+    blockTime: 1700000000n,
+    err: null,
+    confirmationStatus,
+  };
+}
+
 /** A token amount as the RPC's `jsonParsed` encoding serves it. */
 interface ParsedTokenAmount {
   amount: string;
@@ -60,8 +81,8 @@ function uiTokenAmount(tokenAmount: ParsedTokenAmount): JsonRpcResult {
 }
 
 /**
- * A `jsonParsed` system-program `transfer` instruction; `lamports` is a JSON number, as agave
- * serves it.
+ * A top-level `jsonParsed` system-program `transfer` instruction; `lamports` is a JSON number, as
+ * agave serves it.
  *
  * @param transfer - The source, destination and lamports moved.
  * @param transfer.source - The paying account.
@@ -85,13 +106,13 @@ export function parsedSystemTransfer(transfer: {
         lamports: transfer.lamports,
       },
     },
-    stackHeight: null,
+    stackHeight: 1,
   };
 }
 
 /**
- * A `jsonParsed` spl-token `transferChecked` instruction; `tokenAmount.decimals` is a JSON
- * number, as agave serves it.
+ * A top-level `jsonParsed` spl-token `transferChecked` instruction; `tokenAmount.decimals` is a
+ * JSON number, as agave serves it.
  *
  * @param transfer - The token accounts, mint, authority and amount.
  * @param transfer.source - The source token account.
@@ -121,12 +142,13 @@ export function parsedTransferChecked(transfer: {
         tokenAmount: uiTokenAmount(transfer.tokenAmount),
       },
     },
-    stackHeight: null,
+    stackHeight: 1,
   };
 }
 
 /**
- * A `jsonParsed` spl-token `mintTo` instruction; its `amount` is a string, as agave serves it.
+ * A top-level `jsonParsed` spl-token `mintTo` instruction; its `amount` is a string, as agave
+ * serves it.
  *
  * @param mint - The mint, destination token account, mint authority and raw amount.
  * @param mint.mint - The token mint.
@@ -153,7 +175,7 @@ export function parsedMintTo(mint: {
         amount: mint.amount,
       },
     },
-    stackHeight: null,
+    stackHeight: 1,
   };
 }
 

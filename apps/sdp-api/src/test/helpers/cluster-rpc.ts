@@ -335,7 +335,7 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
 }
 
 /** A jsonParsed SPL token account a stubbed `getTokenAccountsByOwner` answers with. */
-interface StubTokenAccount {
+export interface StubTokenAccount {
   pubkey: string;
   mint: string;
   amount: string;

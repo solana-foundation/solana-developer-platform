@@ -15,7 +15,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { createClusterRpc } from "./factory";
+import { createClusterHistoryRpc, createClusterRpc } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
@@ -200,20 +200,24 @@ function slotRead(url: string): RpcCall {
   return { url, method: "getSlot" };
 }
 
-describe("createClusterRpc", () => {
-  beforeEach(() => {
-    ambientPool = Object.fromEntries(
-      Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
-    );
-    clearManagedPool();
-  });
+function isolateManagedPool(): void {
+  ambientPool = Object.fromEntries(
+    Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
+  );
+  clearManagedPool();
+}
 
-  afterEach(() => {
-    mock.timers.reset();
-    globalThis.fetch = originalFetch;
-    clearManagedPool();
-    Object.assign(process.env, ambientPool);
-  });
+function restoreManagedPool(): void {
+  mock.timers.reset();
+  globalThis.fetch = originalFetch;
+  clearManagedPool();
+  Object.assign(process.env, ambientPool);
+}
+
+describe("createClusterRpc", () => {
+  beforeEach(isolateManagedPool);
+
+  afterEach(restoreManagedPool);
 
   it("refuses to build a client outside a cluster scope", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-unscoped.example.test" });
@@ -696,6 +700,101 @@ describe("createClusterRpc", () => {
       genesisProbe(unproven),
       genesisProbe(proven),
       { url: proven, method: "sendTransaction" },
+    ]);
+  });
+});
+
+describe("createClusterHistoryRpc", () => {
+  beforeEach(isolateManagedPool);
+
+  afterEach(restoreManagedPool);
+
+  it("tries the scope's own cluster Helius endpoint first, on a client apart from the plain pool", async () => {
+    const devnetTriton = "https://devnet-history-triton.example.test";
+    const devnetHelius = "https://devnet-history-helius.example.test";
+    const devnetAlchemy = "https://devnet-history-alchemy.example.test";
+    const mainnetTriton = "https://mainnet-history-triton.example.test";
+    const mainnetHelius = "https://mainnet-history-helius.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnetTriton,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: devnetHelius,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: devnetAlchemy,
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnetTriton,
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: mainnetHelius,
+    });
+    const calls = stubEndpoints({
+      [devnetTriton]: SERVES_DEVNET,
+      [devnetHelius]: SERVES_DEVNET,
+      [devnetAlchemy]: SERVES_DEVNET,
+      [mainnetTriton]: SERVES_MAINNET,
+      [mainnetHelius]: SERVES_MAINNET,
+    });
+    const sandboxHistoryRpc = runInClusterScope(SANDBOX, createClusterHistoryRpc);
+    const sandboxRpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.notEqual(sandboxHistoryRpc, sandboxRpc);
+    assert.equal(
+      runInClusterScope(
+        { projectId: "proj_factory_other", environment: "sandbox" },
+        createClusterHistoryRpc
+      ),
+      sandboxHistoryRpc
+    );
+
+    assert.equal(await sandboxHistoryRpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(await sandboxRpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(
+      await runInClusterScope(PRODUCTION, createClusterHistoryRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(devnetHelius),
+      slotRead(devnetHelius),
+      genesisProbe(devnetTriton),
+      slotRead(devnetTriton),
+      genesisProbe(mainnetHelius),
+      slotRead(mainnetHelius),
+    ]);
+  });
+
+  it("is the plain pool when the scope's cluster has no Helius endpoint, whatever another cluster has", async () => {
+    const devnetTriton = "https://devnet-no-helius-triton.example.test";
+    const devnetAlchemy = "https://devnet-no-helius-alchemy.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnetTriton,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: devnetAlchemy,
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet-only-helius.example.test",
+    });
+    const calls = stubEndpoints({
+      [devnetTriton]: SERVES_DEVNET,
+      [devnetAlchemy]: SERVES_DEVNET,
+    });
+    const historyRpc = runInClusterScope(SANDBOX, createClusterHistoryRpc);
+
+    assert.equal(historyRpc, runInClusterScope(SANDBOX, createClusterRpc));
+    assert.equal(await historyRpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(calls, [genesisProbe(devnetTriton), slotRead(devnetTriton)]);
+  });
+
+  it("fails over from Helius to the rest of the pool without retrying Helius under another provider's key", async () => {
+    const helius = "https://devnet-history-down-helius.example.test";
+    const alchemy = "https://devnet-history-up-alchemy.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: helius,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: helius,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: alchemy,
+    });
+    const calls = stubEndpoints({ [helius]: DEVNET_FETCH_FAILS, [alchemy]: SERVES_DEVNET });
+
+    assert.equal(
+      await runInClusterScope(SANDBOX, createClusterHistoryRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(helius),
+      slotRead(helius),
+      genesisProbe(alchemy),
+      slotRead(alchemy),
     ]);
   });
 });
