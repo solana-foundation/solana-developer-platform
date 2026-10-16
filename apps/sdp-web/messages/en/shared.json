@@ -543,6 +543,7 @@
   "idempotency": {
     "outcomeUnknownCheckList": "We couldn’t confirm whether this was created — check the list before trying again.",
     "keyReusedRestoreOriginal": "This differs from the request first sent for this action, which may already have gone through. Restore the original details to retry it, or check the list for its outcome.",
+    "processingCheckStatus": "This payment is still processing. Check its status before sending it again; sending the same details now returns this payment.",
     "keyNotPersisted": "This browser isn’t keeping the request’s retry key (private browsing or storage full), so it wasn’t sent. Allow site storage and try again."
   }
 }

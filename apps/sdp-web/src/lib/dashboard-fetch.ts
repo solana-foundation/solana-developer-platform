@@ -7,6 +7,7 @@ import {
   apiErrorCode,
   IDEMPOTENCY_KEY_HEADER,
   moneyAnswerRetiresKey,
+  movementStatusOf,
   storageFingerprint,
 } from "./idempotency";
 import {
@@ -145,12 +146,21 @@ function answerOf(response: Response, text: string): ApiAnswer | null {
   if (isBodylessHttpStatus(response.status)) {
     return { status: response.status, replayed, code: null };
   }
+  let json: unknown;
   try {
-    JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
     return null;
   }
-  return { status: response.status, replayed, code: response.ok ? null : apiErrorCode(text) };
+  if (response.ok) {
+    return {
+      status: response.status,
+      replayed,
+      code: null,
+      movementStatus: movementStatusOf(json),
+    };
+  }
+  return { status: response.status, replayed, code: apiErrorCode(text) };
 }
 
 /**

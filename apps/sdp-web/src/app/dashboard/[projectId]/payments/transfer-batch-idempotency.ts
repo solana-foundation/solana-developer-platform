@@ -101,7 +101,7 @@ export function releaseTransferBatchIdempotencyKey(fingerprint: string, key: str
  * Sends one batch under the key that makes a retry a retry: claimed and pinned
  * before the request goes out (a batch whose key storage refused is not sent;
  * see `createTransferBatch`), and retired only on the dashboard-wide rule
- * (`moneyAnswerRetiresKey`): a recorded batch, a replay or a 422 retires it, and
+ * (`moneyAnswerRetiresKey`): a recorded batch no longer processing, a replay or a 422 retires it, and
  * anything else keeps it, since an earlier attempt may have paid every
  * recipient. A 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` or a 422
  * `IDEMPOTENCY_KEY_REUSED` keeps it too and tells the user to check the list.
@@ -131,8 +131,14 @@ export async function sendTransferBatchUnderKey(
     }
     throw error;
   }
-  // The batch row exists, so the key is spent: the next identical batch is a
-  // new intent rather than a retry of this one.
-  releaseTransferBatchIdempotencyKey(fingerprint, key);
+  // The batch row exists, so once it is final the key is spent and the next
+  // identical batch is a new intent. While it is still processing the key is
+  // kept, so that send is answered by the replay (APE-461).
+  settleMoneyIdempotencyKey(store, fingerprint, key, {
+    status: 200,
+    replayed: false,
+    code: null,
+    movementStatus: result.batch.status,
+  });
   return result;
 }

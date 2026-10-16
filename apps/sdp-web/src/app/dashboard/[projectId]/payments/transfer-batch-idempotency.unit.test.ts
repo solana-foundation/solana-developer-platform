@@ -136,6 +136,25 @@ describe("sendTransferBatchUnderKey", () => {
     expect(second).not.toBe(first);
   });
 
+  // APE-461: the same rule as a single transfer, on a batch still processing.
+  it("keeps the key while the batch is processing and retires it once a replay shows it final", async () => {
+    const statuses = ["processing", "confirmed", "pending"];
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        data: { batch: { id: "batch_1", status: statuses.shift() }, recipients: [], transfers: [] },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [first, replay, next] = sentKeys(fetchMock);
+    expect(replay).toBe(first);
+    expect(next).not.toBe(first);
+  });
+
   it("retires a fresh key on a first-attempt refusal", async () => {
     const fetchMock = vi
       .fn<typeof fetch>(async () => recorded())

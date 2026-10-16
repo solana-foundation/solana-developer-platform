@@ -18,6 +18,7 @@ import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { isMovementInFlight } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
@@ -160,9 +161,12 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
-        description: transfer.signature
-          ? t("DashboardPayments.onchainSend.transactionSent")
-          : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
+        // Still processing: the key is kept, so a resend returns this payment (APE-461).
+        description: isMovementInFlight(transfer.status)
+          ? t("Shared.idempotency.processingCheckStatus")
+          : transfer.signature
+            ? t("DashboardPayments.onchainSend.transactionSent")
+            : t("DashboardPayments.onchainSend.transferStatus", { status: transfer.status }),
         position: "bottom-right",
       });
     } catch (error) {

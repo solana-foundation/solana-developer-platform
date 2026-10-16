@@ -379,7 +379,9 @@ function TransferFormState({
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,
           idempotencyKey,
-          movementAnswer(result)
+          result.ok
+            ? { ...movementAnswer(result), movementStatus: result.transfer.status }
+            : movementAnswer(result)
         );
         if (result.ok) {
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
@@ -391,8 +393,10 @@ function TransferFormState({
             toast.success(t("DashboardPrivateChannels.transfer.confirmedToast"));
           } else {
             // `submitted`/`pending`: accepted but no execution verdict, so this must
-            // not be a success toast.
-            toast.warning(t("DashboardPrivateChannels.transfer.submittedToast"));
+            // not be a success toast. The key is kept until it has one (APE-593).
+            toast.warning(t("DashboardPrivateChannels.transfer.submittedToast"), {
+              description: t("Shared.idempotency.processingCheckStatus"),
+            });
           }
         } else if (result.kind === "server") {
           updateState({ error: result.message });

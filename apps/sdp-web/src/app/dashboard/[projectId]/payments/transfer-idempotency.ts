@@ -96,9 +96,15 @@ async function performTransferUnderKey(
     throw error;
   }
   if (!providerSession) {
-    // The transfer row exists, so the key is spent: the next identical send is a
-    // new payment rather than a retry of this one.
-    releaseTransferIdempotencyKey(fingerprint, key);
+    // The transfer row exists, so once it is final the key is spent and the
+    // next identical send is a new payment. While it is still processing the
+    // key is kept, so that send is answered by the replay (APE-461).
+    settleMoneyIdempotencyKey(store, fingerprint, key, {
+      status: 200,
+      replayed: false,
+      code: null,
+      movementStatus: transfer.status,
+    });
   }
   return { transfer, fingerprint };
 }

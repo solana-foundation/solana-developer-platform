@@ -49,6 +49,26 @@ describe("sendTransferUnderKey", () => {
     expect(claimTransferIdempotencyKey(fingerprint)).not.toBe(sentKey(fetchMock));
   });
 
+  // APE-461: a 2xx retired the key while the transfer was still processing, so
+  // the next identical press was a new payment under a new key.
+  it("keeps the key while the transfer is processing and retires it once a replay shows it final", async () => {
+    const statuses = ["processing", "finalized", "pending"];
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: { transfer: { id: "xfr_1", status: statuses.shift() } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferUnderKey(SUBMISSION, t);
+    await sendTransferUnderKey(SUBMISSION, t);
+    await sendTransferUnderKey(SUBMISSION, t);
+
+    const [first, replay, next] = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(replay).toBe(first);
+    expect(next).not.toBe(first);
+  });
+
   // A refusal moved nothing, so the key is free. A lost answer may have
   // recorded the payment, so it is not.
   it.each([

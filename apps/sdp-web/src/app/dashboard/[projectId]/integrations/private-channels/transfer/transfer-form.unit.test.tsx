@@ -11,6 +11,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import {
+  privateChannelTransferIdempotencyKeyStore,
+  privateChannelTransferRequestFingerprint,
+} from "../value-movement-tracking";
 
 const mocks = vi.hoisted(() => ({
   createTransferAction: vi.fn(),
@@ -18,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   fetchWalletBalancesAction: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock("./actions", () => ({
@@ -28,7 +34,7 @@ vi.mock("../wallet-balances", () => ({
   fetchWalletBalancesAction: mocks.fetchWalletBalancesAction,
 }));
 vi.mock("sonner", () => ({
-  toast: { success: mocks.toastSuccess, error: mocks.toastError },
+  toast: { success: mocks.toastSuccess, error: mocks.toastError, warning: mocks.toastWarning },
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 vi.mock("@/components/ui/button", () => ({
@@ -234,6 +240,9 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // A transfer still `submitted` keeps its key (APE-593), so each spec starts clean.
+  resetIdempotencyKeyStoresForTests();
+  window.sessionStorage.clear();
   mocks.fetchWalletBalancesAction.mockResolvedValue({ channel: "10", onChain: "5" });
 });
 
@@ -434,6 +443,30 @@ describe("TransferForm", () => {
     await screen.findByText("Progress: failed");
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.toastError).toHaveBeenCalledWith("Insufficient shared wallet balance.");
+  });
+
+  // APE-593: an HTTP-200 transfer still without a verdict retired its key, so
+  // the next identical press was a new transfer under a new key.
+  it.each([
+    ["keeps", "submitted", true],
+    ["keeps", "pending", true],
+    ["retires", "confirmed", false],
+  ] as const)("%s the key for a transfer answered %s", async (_verb, status, kept) => {
+    mocks.createTransferAction.mockResolvedValue({ ok: true, transfer: makeTransfer({ status }) });
+    const user = await renderReadyForm();
+
+    await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+    await screen.findByText(`Progress: ${status}`);
+
+    const sent = mocks.createTransferAction.mock.calls[0]?.[0];
+    expect(
+      privateChannelTransferIdempotencyKeyStore.has(privateChannelTransferRequestFingerprint(sent))
+    ).toBe(kept);
+    if (kept) {
+      expect(mocks.toastWarning).toHaveBeenCalledWith(expect.any(String), {
+        description: expect.stringContaining("still processing"),
+      });
+    }
   });
 
   it("refreshes the sender balance when starting a new transfer after confirmation", async () => {
