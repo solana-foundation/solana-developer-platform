@@ -471,7 +471,6 @@ async function settleActiveActivationAttempt(input: {
 }
 
 async function fetchConfirmedActivationPlan(input: {
-  env: Env;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   planPda: Address;
   planCreationSignature: Signature;
@@ -504,7 +503,6 @@ async function fetchConfirmedActivationPlan(input: {
 }
 
 async function fetchConfirmedSubscriptionDelegation(input: {
-  env: Env;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   subscriptionPda: Address;
   authorizationSignature: Signature;
@@ -826,7 +824,6 @@ export async function activateRecurringPayment(input: {
     }
 
     const onChainPlan = await fetchConfirmedActivationPlan({
-      env: input.env,
       rpc,
       planPda,
       planCreationSignature,
@@ -989,7 +986,6 @@ export async function activateRecurringPayment(input: {
 
     currentStage = "finalize";
     const onChainSubscription = await fetchConfirmedSubscriptionDelegation({
-      env: input.env,
       rpc,
       subscriptionPda,
       authorizationSignature,

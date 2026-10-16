@@ -406,7 +406,6 @@ async function matchesRecurringTransferInstruction(input: {
 }
 
 async function verifyRecurringPaymentCollection(input: {
-  env: Env;
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   attempt: PaymentSubscriptionCollectionAttemptRow;
@@ -1459,7 +1458,6 @@ async function recoverRecurringPaymentCollection(input: {
           token: currentRecurringPayment.token,
         });
     const proof = await verifyRecurringPaymentCollection({
-      env: input.env,
       recurringPayment: currentRecurringPayment,
       subscription: currentSubscription,
       attempt: recoveredAttempt,
@@ -1865,7 +1863,6 @@ export async function collectRecurringPayment(input: {
 
     await confirmSubscriptionSignature(signature, "Recurring payment collection failed on-chain");
     const proof = await verifyRecurringPaymentCollection({
-      env: input.env,
       recurringPayment: recurringPaymentWithDestination,
       subscription,
       attempt,

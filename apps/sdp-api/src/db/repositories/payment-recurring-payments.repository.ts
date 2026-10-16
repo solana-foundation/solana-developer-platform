@@ -457,21 +457,25 @@ export interface StalePaymentRecurringPaymentUpdateRow {
 
 export interface PaymentRecurringPaymentsRepository {
   listStaleLifecyclePayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
     environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<PaymentRecurringPaymentRow[]>;
   listStaleUpdatePayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
     environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<StalePaymentRecurringPaymentUpdateRow[]>;
   listRecoverableCollectionPayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
     environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<RecoverableCollectionRecurringPaymentRow[]>;
   listDueCollectionPayments(params: {
+    /** Only rows whose project is in this environment, so one job run reads one cluster. */
     environment: SdpEnvironment;
     dueBefore: string;
     retryBefore: string;

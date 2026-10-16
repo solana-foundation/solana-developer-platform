@@ -148,6 +148,7 @@ function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error:
   getLogger().error(
     {
       error: error.message,
+      environment: currentClusterScope().environment,
       organization_id: row.organization_id,
       project_id: row.project_id,
       recurring_payment_id: row.id,
