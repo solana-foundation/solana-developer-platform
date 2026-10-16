@@ -1541,7 +1541,7 @@ describe("payment transfer batches", () => {
       .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), batchId)
       .run();
 
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
 
     const batch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")

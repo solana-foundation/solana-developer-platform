@@ -1,8 +1,11 @@
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -243,4 +246,158 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     );
     expect(authorizationDenied).toEqual({ rows: [], total: 0 });
   });
+});
+
+describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres)", () => {
+  const PROJECT_IDS = {
+    sandbox: TEST_PROJECT_ID,
+    production: `${TEST_PROJECT_ID}_production`,
+  } as const satisfies Record<SdpEnvironment, string>;
+  const SOURCE_WALLETS = {
+    sandbox: { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
+    production: {
+      custodyWalletId: "cwlt_transfer_batches_repo_production",
+      walletId: "wallet_transfer_batches_repo_production",
+    },
+  } as const satisfies Record<SdpEnvironment, { custodyWalletId: string; walletId: string }>;
+  const strandedBatchIds = new Map<SdpEnvironment, string>();
+  let repo: PaymentTransferBatchesRepository;
+
+  afterAll(async () => {
+    await seedTestDatabase(env);
+  });
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    const db = getDb(env);
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: PROJECT_IDS,
+    });
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_transfer_batches_stranded",
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_IDS.sandbox,
+          provider: "local",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: SOURCE_WALLETS.sandbox.custodyWalletId,
+          owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_stranded" },
+          walletId: SOURCE_WALLETS.sandbox.walletId,
+          publicKey: "Source111",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
+    await seedTestPrivyConnection(db, {
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_IDS.production,
+      connectionId: "cconn_transfer_batches_repo_production",
+      credentialId: "pcred_transfer_batches_repo_production",
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+      providerAccountFingerprint: "sha256:transfer-batches-repo-production",
+      wallets: [
+        {
+          id: SOURCE_WALLETS.production.custodyWalletId,
+          walletId: SOURCE_WALLETS.production.walletId,
+          publicKey: "Production111",
+          label: null,
+          purpose: "transfer",
+          status: "active",
+        },
+      ],
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: SOURCE_WALLETS.production.custodyWalletId,
+    });
+    repo = createPostgresPaymentTransferBatchesRepository(db);
+    strandedBatchIds.clear();
+    for (const environment of SDP_ENVIRONMENTS) {
+      await seedProjectCryptoWalletCounterparty(db, {
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_IDS[environment],
+        createdBy: TEST_USER.id,
+        counterpartyId: `cpty_stranded_${environment}`,
+        counterpartyAccountId: `cpacct_stranded_${environment}`,
+        walletAddress: "Dest111",
+      });
+      const { batch } = await repo.createTransferBatchWithRecipients({
+        batch: {
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_IDS[environment],
+          sourceCustodyWalletId: SOURCE_WALLETS[environment].custodyWalletId,
+          sourceWalletId: SOURCE_WALLETS[environment].walletId,
+          sourceAddress: "Source111",
+          token: "SOL",
+          status: "processing",
+          totalAmount: "1",
+          recipientCount: 1,
+          transactionCount: 1,
+          options: {},
+          initiatedByKeyId: null,
+          idempotencyKey: `stranded-${environment}`,
+          idempotencyFingerprint: `fp-stranded-${environment}`,
+        },
+        recipients: [
+          {
+            organizationId: TEST_ORG.id,
+            projectId: PROJECT_IDS[environment],
+            externalId: null,
+            counterpartyId: `cpty_stranded_${environment}`,
+            counterpartyAccountId: `cpacct_stranded_${environment}`,
+            destinationAddress: "Dest111",
+            amount: "1",
+            status: "pending",
+            error: null,
+          },
+        ],
+      });
+      strandedBatchIds.set(environment, batch.id);
+    }
+    await db
+      .prepare("UPDATE payment_transfer_batches SET created_at = ?")
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+      .run();
+  });
+
+  it.each(SDP_ENVIRONMENTS)(
+    "lists only %s stranded batches for that environment's sweep",
+    async (environment) => {
+      const stranded = await repo.listStrandedTransferBatches({
+        environment,
+        createdBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        limit: 50,
+      });
+
+      expect(stranded).toEqual([
+        {
+          batchId: strandedBatchIds.get(environment),
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_IDS[environment],
+        },
+      ]);
+    }
+  );
 });
