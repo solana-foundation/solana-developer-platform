@@ -54,23 +54,6 @@ interface HeliusTokenInfo {
   } | null;
 }
 
-interface HeliusSearchAssetItem {
-  id?: string;
-  content?: {
-    metadata?: {
-      symbol?: string | null;
-    };
-  };
-  token_info?: HeliusTokenInfo | null;
-}
-
-interface HeliusSearchAssetsResponse {
-  error?: HeliusRpcError;
-  result?: {
-    items?: HeliusSearchAssetItem[];
-  };
-}
-
 interface HeliusGetAssetBatchItem {
   id?: string;
   content?: {
@@ -101,39 +84,38 @@ async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetD
 
   const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
 
-  try {
-    const result = await getDb(env)
-      .prepare(
-        `SELECT mint_address, symbol, decimals
-         FROM issued_tokens
-        WHERE template = 'stablecoin'
-          AND mint_address IS NOT NULL
-          AND deployed_at IS NOT NULL`
-      )
-      .all<{
-        decimals?: number | null;
-        mint_address?: string | null;
-        symbol?: string | null;
-      }>();
+  const result = await getDb(env)
+    .prepare(
+      `SELECT t.mint_address, t.symbol, t.decimals
+         FROM issued_tokens t
+         JOIN projects p ON p.id = t.project_id
+        WHERE p.environment = ?
+          AND t.template = 'stablecoin'
+          AND t.mint_address IS NOT NULL
+          AND t.deployed_at IS NOT NULL`
+    )
+    .bind(currentClusterScope().environment)
+    .all<{
+      decimals?: number | null;
+      mint_address?: string | null;
+      symbol?: string | null;
+    }>();
 
-    for (const row of result.results ?? []) {
-      const mint = row.mint_address?.trim();
-      if (!mint) {
-        continue;
-      }
-
-      trackedAssetsByMint.set(mint, {
-        token: row.symbol?.trim() || mint,
-        mint,
-        decimals:
-          typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
-            ? row.decimals
-            : 6,
-        isUsdStable: true,
-      });
+  for (const row of result.results ?? []) {
+    const mint = row.mint_address?.trim();
+    if (!mint) {
+      continue;
     }
-  } catch {
-    // Ignore database lookup failures and fall back to built-in tracked assets.
+
+    trackedAssetsByMint.set(mint, {
+      token: row.symbol?.trim() || mint,
+      mint,
+      decimals:
+        typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
+          ? row.decimals
+          : 6,
+      isUsdStable: true,
+    });
   }
 
   return trackedAssetsByMint;
@@ -178,84 +160,6 @@ function parseIntegerString(value: number | string | null | undefined): string |
   return null;
 }
 
-function parseDecimalString(value: number | string | null | undefined): string | null {
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    return /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    return value.toString();
-  }
-
-  return null;
-}
-
-function decimalToRawAmount(value: string, decimals: number): string {
-  const [wholePart, fractionalPart = ""] = value.split(".");
-  const normalizedWhole = wholePart.replace(/^0+(?=\d)/, "") || "0";
-  const normalizedFraction = fractionalPart.slice(0, decimals).padEnd(decimals, "0");
-  const combined = `${normalizedWhole}${normalizedFraction}`.replace(/^0+(?=\d)/, "");
-  return combined || "0";
-}
-
-function resolveUiAmount(tokenInfo: HeliusTokenInfo, rawAmount: string, decimals: number): string {
-  const directUiAmount =
-    parseDecimalString(tokenInfo.uiAmountString) ??
-    parseDecimalString(tokenInfo.ui_amount_string) ??
-    parseDecimalString(tokenInfo.uiAmount) ??
-    parseDecimalString(tokenInfo.ui_amount);
-
-  if (directUiAmount) {
-    return directUiAmount;
-  }
-
-  return formatDecimalAmount(BigInt(rawAmount), decimals);
-}
-
-function toTrackedTokenBalance(
-  item: HeliusSearchAssetItem,
-  trackedAssets: Map<string, TrackedAssetDefinition>
-): CustodyWalletTokenBalance | null {
-  const tokenInfo = item.token_info;
-  if (!tokenInfo) {
-    return null;
-  }
-
-  const mint = tokenInfo.mint?.trim() || item.id?.trim() || "";
-  const symbol = tokenInfo.symbol?.trim() || item.content?.metadata?.symbol?.trim() || "";
-  const trackedAsset =
-    (mint ? trackedAssets.get(mint) : null) ??
-    [...trackedAssets.values()].find((asset) => asset.token === symbol.toUpperCase());
-
-  if (!trackedAsset) {
-    return null;
-  }
-
-  const decimals =
-    typeof tokenInfo.decimals === "number" && Number.isFinite(tokenInfo.decimals)
-      ? tokenInfo.decimals
-      : trackedAsset.decimals;
-  const rawAmountCandidate =
-    parseIntegerString(tokenInfo.balance) ?? parseIntegerString(tokenInfo.amount);
-  const uiAmountCandidate =
-    parseDecimalString(tokenInfo.uiAmountString) ??
-    parseDecimalString(tokenInfo.ui_amount_string) ??
-    parseDecimalString(tokenInfo.uiAmount) ??
-    parseDecimalString(tokenInfo.ui_amount);
-  const rawAmount =
-    rawAmountCandidate ??
-    (uiAmountCandidate ? decimalToRawAmount(uiAmountCandidate, decimals) : "0");
-
-  return {
-    token: trackedAsset.token,
-    mint: mint || trackedAsset.mint,
-    amount: rawAmount,
-    uiAmount: resolveUiAmount(tokenInfo, rawAmount, decimals),
-    decimals,
-  };
-}
-
 async function dasRequest(init: RequestInit): Promise<unknown> {
   const startedAt = Date.now();
   const fail = (error: unknown) => {
@@ -282,36 +186,6 @@ async function dasRequest(init: RequestInit): Promise<unknown> {
     return fail(new Error(rpcError));
   }
   return payload;
-}
-
-async function fetchTrackedBalancesForOwner(
-  ownerAddress: string,
-  trackedAssets: Map<string, TrackedAssetDefinition>
-): Promise<CustodyWalletTokenBalance[]> {
-  const payload = (await dasRequest({
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: `wallet-balances-${ownerAddress.slice(-8)}`,
-      method: "searchAssets",
-      params: {
-        ownerAddress,
-        tokenType: "fungible",
-        page: 1,
-        limit: 1000,
-        displayOptions: {
-          showFungible: true,
-        },
-      },
-    }),
-  })) as HeliusSearchAssetsResponse;
-
-  return (payload.result?.items ?? [])
-    .map((item) => toTrackedTokenBalance(item, trackedAssets))
-    .filter((balance): balance is CustodyWalletTokenBalance => Boolean(balance));
 }
 
 async function fetchFungibleAssetsByMint(
@@ -406,6 +280,8 @@ function enrichBalancesWithTokenSymbols(
   });
 }
 
+// Symbols and USD values decorate balances: with no Helius endpoint on the scope's cluster they
+// stay unset, and a balance read never fails on them.
 export async function attachTokenSymbolsToBalances(
   balances: CustodyWalletTokenBalance[]
 ): Promise<CustodyWalletTokenBalance[]> {
@@ -541,40 +417,6 @@ export async function attachUsdValuesToBalanceMap(
       enrichBalancesWithUsdValues(balances, pricesByMint, trackedAssets),
     ])
   );
-}
-
-export async function getTrackedWalletBalancesByOwner(
-  env: Env,
-  ownerAddresses: string[]
-): Promise<Map<string, CustodyWalletTokenBalance[]>> {
-  const balancesByOwner = new Map<string, CustodyWalletTokenBalance[]>();
-
-  for (const ownerAddress of ownerAddresses) {
-    balancesByOwner.set(ownerAddress, []);
-  }
-
-  if (!isHeliusDasConfigured() || ownerAddresses.length === 0) {
-    return balancesByOwner;
-  }
-
-  const trackedAssets = await resolveTrackedAssets(env);
-  const uniqueOwners = [...new Set(ownerAddresses)];
-  const results = await Promise.allSettled(
-    uniqueOwners.map(async (ownerAddress) => ({
-      ownerAddress,
-      balances: await fetchTrackedBalancesForOwner(ownerAddress, trackedAssets),
-    }))
-  );
-
-  for (const result of results) {
-    if (result.status !== "fulfilled") {
-      continue;
-    }
-
-    balancesByOwner.set(result.value.ownerAddress, result.value.balances);
-  }
-
-  return balancesByOwner;
 }
 
 export function aggregateTrackedWalletBalances(
