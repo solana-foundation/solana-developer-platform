@@ -5,7 +5,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -311,26 +311,13 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
         },
       ],
     });
-    await seedTestPrivyConnection(db, {
+    await seedUnreadPrivyWallet(db, {
       organizationId: TEST_ORG.id,
       projectId: PROJECT_IDS.production,
-      connectionId: "cconn_transfer_batches_repo_production",
-      credentialId: "pcred_transfer_batches_repo_production",
       createdBy: TEST_USER.id,
-      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
-      providerAccountFingerprint: "sha256:transfer-batches-repo-production",
-      wallets: [
-        {
-          id: SOURCE_WALLETS.production.custodyWalletId,
-          walletId: SOURCE_WALLETS.production.walletId,
-          publicKey: "Production111",
-          label: null,
-          purpose: "transfer",
-          status: "active",
-        },
-      ],
-      lastCheckStatus: "success",
-      defaultCustodyWalletId: SOURCE_WALLETS.production.custodyWalletId,
+      custodyWalletId: SOURCE_WALLETS.production.custodyWalletId,
+      walletId: SOURCE_WALLETS.production.walletId,
+      publicKey: "Production111",
     });
     repo = createPostgresPaymentTransferBatchesRepository(db);
     strandedBatchIds.clear();

@@ -10,7 +10,7 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
-import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -1238,26 +1238,13 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await resetPaymentFixtures();
-    await seedTestPrivyConnection(getDb(env), {
+    await seedUnreadPrivyWallet(getDb(env), {
       organizationId: TEST_ORG.id,
       projectId: PRODUCTION_PROJECT_ID,
-      connectionId: "cconn_payments_repo_production",
-      credentialId: "pcred_payments_repo_production",
       createdBy: TEST_USER.id,
-      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
-      providerAccountFingerprint: "sha256:payments-repo-production",
-      wallets: [
-        {
-          id: "cwlt_payments_repo_production",
-          walletId: "wallet_payments_repo_production",
-          publicKey: "Production111",
-          label: null,
-          purpose: "transfer",
-          status: "active",
-        },
-      ],
-      lastCheckStatus: "success",
-      defaultCustodyWalletId: "cwlt_payments_repo_production",
+      custodyWalletId: "cwlt_payments_repo_production",
+      walletId: "wallet_payments_repo_production",
+      publicKey: "Production111",
     });
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer({

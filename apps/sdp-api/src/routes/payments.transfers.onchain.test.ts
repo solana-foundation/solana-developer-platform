@@ -7,7 +7,6 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
-import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -343,7 +342,7 @@ describe("Payments routes — on-chain transfers", () => {
       counterpartyId: null,
       sourceAddress: productionSigner.address,
       destinationAddress: null,
-      token: rampTransferTokenMint("usdc.solana", "mainnet-beta"),
+      token: MAINNET_USDC_MINT,
       amount: "1",
       memo: null,
       type: "offramp",
