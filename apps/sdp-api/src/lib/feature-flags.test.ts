@@ -15,7 +15,6 @@ import {
   SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
-import type { Env } from "@/types/env";
 import {
   assertSdpReleaseChannelConfigured,
   isAssetProfilesEnabled,
@@ -87,20 +86,6 @@ describe("isAssetProfilesEnabled", () => {
   });
 });
 
-describe("isPrivateChannelsEnabled", () => {
-  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
-      false
-    );
-  });
-
-  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
-      true
-    );
-  });
-});
-
 describe("isCustodyProviderAvailable", () => {
   const nonByokCustodyProviders = CUSTODY_PROVIDERS.filter(
     (provider) => !isByokCustodyProvider(provider)
@@ -127,46 +112,18 @@ describe("isCustodyProviderAvailable", () => {
   });
 });
 
-describe("isMarketsEnabled", () => {
-  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(false);
-  });
-
-  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(true);
-  });
-});
-
-describe("isEarnEnabled", () => {
-  it("is disabled when both flags are unset", () => {
-    expect(
-      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })
-    ).toBe(false);
-  });
-
-  it("is disabled when Markets is on but Earn is unset", () => {
-    expect(
-      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: "true", EARN_ENABLED: undefined })
-    ).toBe(false);
-  });
-
-  // The parent gate has to win: Earn is a Markets sub-module, so disabling
-  // Markets must dark-launch Earn even with its own flag still turned on.
-  it.each([undefined, "", "false", "0", "off"])(
-    "stays disabled when Earn is on but Markets is %s",
-    (markets) => {
-      expect(
-        isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: markets, EARN_ENABLED: "true" })
-      ).toBe(false);
-    }
-  );
-
-  it.each(["1", "true", " TRUE ", "yes", "on"])(
-    "honors the opt-in value %s on both flags",
-    (flag) => {
-      expect(isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(
-        true
-      );
+describe("module gates", () => {
+  it.each([
+    { gate: isPrivateChannelsEnabled, inChannel: "experimental", outOfChannel: "beta" },
+    { gate: isHeliusRingsEnabled, inChannel: "experimental", outOfChannel: "beta" },
+    { gate: isDvpEnabled, inChannel: "experimental", outOfChannel: "beta" },
+    { gate: isEarnEnabled, inChannel: "beta", outOfChannel: "stable" },
+    { gate: isMarketsEnabled, inChannel: "beta", outOfChannel: "stable" },
+  ] as const)(
+    "$gate.name is on in $inChannel and off in $outOfChannel, decided by the release channel alone",
+    ({ gate, inChannel, outOfChannel }) => {
+      expect(gate({ SDP_RELEASE_CHANNEL: inChannel })).toBe(true);
+      expect(gate({ SDP_RELEASE_CHANNEL: outOfChannel })).toBe(false);
     }
   );
 });
@@ -305,28 +262,13 @@ describe("release channels", () => {
     expect(isRampProviderInReleaseChannel("beta", "moonpay", bvnkInBeta)).toBe(false);
   });
 
-  it("keeps release-channel-excluded modules off in stable even with every flag on", () => {
+  it("keeps Asset Profiles off where the issuance module is out of the channel, whatever its opt-in", () => {
     const env = {
-      SDP_RELEASE_CHANNEL: " stable ",
-      MARKETS_ENABLED: "true",
-      EARN_ENABLED: "true",
-      PRIVATE_CHANNELS_ENABLED: "true",
-      HELIUS_RINGS_ENABLED: "true",
+      ENVIRONMENT: "production",
+      SDP_RELEASE_CHANNEL: "beta",
       SDP_FLAG_ASSET_PROFILES: "true",
-    } as Env;
-
-    expect(isMarketsEnabled(env)).toBe(false);
-    expect(isEarnEnabled(env)).toBe(false);
-    expect(isDvpEnabled(env)).toBe(false);
-    expect(isPrivateChannelsEnabled(env)).toBe(false);
-    expect(isHeliusRingsEnabled(env)).toBe(false);
+    } as const;
     expect(isAssetProfilesEnabled({ ...env, SDP_DEPLOYMENT_MODE: "managed" })).toBe(false);
     expect(isAssetProfilesEnabled({ ...env, SDP_DEPLOYMENT_MODE: "self_hosted" })).toBe(false);
-  });
-
-  it("leaves release-channel-included features to their flags", () => {
-    const env = { SDP_RELEASE_CHANNEL: "experimental", MARKETS_ENABLED: "true" } as Env;
-    expect(isDvpEnabled(env)).toBe(true);
-    expect(isDvpEnabled({ ...env, MARKETS_ENABLED: undefined })).toBe(false);
   });
 });

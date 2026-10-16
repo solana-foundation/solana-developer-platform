@@ -98,8 +98,6 @@ const UNSAFE_RECIPIENTS = [
   ["withdraw program", WITHDRAW_PROGRAM_ID],
   ["escrow instance", ESCROW_INSTANCE_ADDRESS],
 ] as const;
-
-let originalPrivateChannelsEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 async function useConnectionSource() {
@@ -509,8 +507,6 @@ describe("Private Channels — transfer access and routes", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-    originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
-    env.PRIVATE_CHANNELS_ENABLED = "true";
     env.PRIVY_APP_ID = "pc-transfer-app";
     env.PRIVY_APP_SECRET = "pc-transfer-secret";
     await seedTestDatabase(env);
@@ -538,7 +534,6 @@ describe("Private Channels — transfer access and routes", () => {
   afterEach(async () => {
     vi.unstubAllGlobals();
     env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
-    env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
     await clearKVStores(env);
   });
 

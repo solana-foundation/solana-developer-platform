@@ -5,19 +5,13 @@ import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
 
-const {
-  mockAuth,
-  mockFetchProjectProviderAvailability,
-  mockIssuanceFlag,
-  mockLoadWalletActivity,
-  mockRequest,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockFetchProjectProviderAvailability: vi.fn(),
-  mockIssuanceFlag: vi.fn(),
-  mockLoadWalletActivity: vi.fn(),
-  mockRequest: vi.fn(),
-}));
+const { mockAuth, mockFetchProjectProviderAvailability, mockLoadWalletActivity, mockRequest } =
+  vi.hoisted(() => ({
+    mockAuth: vi.fn(),
+    mockFetchProjectProviderAvailability: vi.fn(),
+    mockLoadWalletActivity: vi.fn(),
+    mockRequest: vi.fn(),
+  }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
@@ -35,8 +29,8 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
-vi.mock("@/flags", () => ({
-  issuance: mockIssuanceFlag,
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: () => true,
 }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
@@ -92,14 +86,12 @@ function walletMetadataResponse(): Response {
 beforeEach(() => {
   walletOverrides = {};
   mockAuth.mockReset();
-  mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
   mockFetchProjectProviderAvailability.mockReset();
   mockRequest.mockReset();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
-  mockIssuanceFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,
     data: {

@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -7,11 +8,10 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
-const flagMocks = vi.hoisted(() => ({
-  earn: vi.fn(async () => true),
-  dvp: vi.fn(async () => true),
+const channelMocks = vi.hoisted(() => ({
+  isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(() => true),
 }));
-vi.mock("@/flags", () => flagMocks);
+vi.mock("@/flags/release-channel", () => channelMocks);
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,
@@ -56,8 +56,9 @@ describe("MarketsLanding", () => {
   });
 
   it("leaves out DvP where the release channel runs Earn without it", async () => {
-    // Stage: Earn is `beta`, DvP `experimental`, so the DvP card linked to a 404.
-    flagMocks.dvp.mockResolvedValueOnce(false);
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "dvp"
+    );
     const html = renderToStaticMarkup(await MarketsLanding());
     expect(html).toContain("markets-earn-heading");
     expect(html).not.toContain("markets-settlement-heading");
@@ -65,7 +66,9 @@ describe("MarketsLanding", () => {
   });
 
   it("leaves out the Earn paths where only DvP runs", async () => {
-    flagMocks.earn.mockResolvedValueOnce(false);
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "earn"
+    );
     const html = renderToStaticMarkup(await MarketsLanding());
     expect(html).not.toContain("markets-earn-heading");
     expect(html).toContain("markets-settlement-heading");

@@ -39,8 +39,6 @@ const CUSTODY_WALLET_ID = "cwlt_earn_prod_entitlement";
 
 let tenant: EarnAuthzTenant;
 let apiKeyRaw: string;
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 type Actor = "api_key" | "clerk";
@@ -170,11 +168,7 @@ function movementRow(positionId: string, requestId: string): EarnMovementRow {
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -199,8 +193,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vi.restoreAllMocks();
 });

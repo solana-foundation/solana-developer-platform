@@ -98,7 +98,6 @@ describe("pollRingsIndexing", () => {
     await seedTestDatabase(env);
     jobEnv = {
       ...env,
-      HELIUS_RINGS_ENABLED: "true",
       CUSTODY_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     };
     const db = getDb(env);
@@ -187,7 +186,7 @@ describe("pollRingsIndexing", () => {
     });
   });
 
-  it("stays dormant unless the feature flag is set", async () => {
+  it("stays dormant in a release channel without Helius Rings", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 0 });
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
@@ -199,7 +198,7 @@ describe("pollRingsIndexing", () => {
     gateway.recordSubmission(OUTER_TX.signature);
 
     await pollRingsIndexing(
-      { ...env, HELIUS_RINGS_ENABLED: undefined },
+      { ...env, SDP_RELEASE_CHANNEL: "beta" },
       { createService: () => serviceWith(gateway), readBlockHeight: NO_HEIGHT }
     );
 

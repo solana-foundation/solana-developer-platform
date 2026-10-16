@@ -122,9 +122,6 @@ const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const CUSTODY_WALLET_ID = "cwlt_earn_vw";
 const CONNECTION_ID = "cconn_earn_vw";
-
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 async function seedAuth(): Promise<void> {
@@ -384,11 +381,7 @@ function getWithdrawal(pathSuffix: string, apiKey = TEST_API_KEY.raw) {
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
   custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
@@ -402,8 +395,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vaultWithdrawClientOverride.current = null;
   vi.restoreAllMocks();

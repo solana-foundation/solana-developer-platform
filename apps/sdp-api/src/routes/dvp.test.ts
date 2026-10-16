@@ -72,8 +72,6 @@ const PARTY_CACHED_API_KEY: CachedApiKey = {
 const FUNDING_TRANSFER_SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 
-let originalMarkets: string | undefined;
-
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -519,21 +517,12 @@ describe("deriveDvpTradeKind", () => {
 describe("DvP routes", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
-    originalMarkets = env.MARKETS_ENABLED;
-    env.MARKETS_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
   });
 
   afterEach(async () => {
-    env.MARKETS_ENABLED = originalMarkets;
     await clearKVStores(env);
-  });
-
-  it("returns 403 when Markets is off", async () => {
-    env.MARKETS_ENABLED = undefined;
-    const res = await app.request("/v1/dvp/trades", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
   });
 
   it("requires authentication", async () => {

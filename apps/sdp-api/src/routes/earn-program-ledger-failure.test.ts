@@ -97,18 +97,11 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
   destinationAddress: SOLANA_DESTINATION,
   createdAt: "2026-08-11T00:00:00.000Z",
 };
-
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalUpshiftSandboxApiKey: string | undefined;
 let program: EarnProviderWalletRow;
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalUpshiftSandboxApiKey = env.UPSHIFT_SANDBOX_API_KEY;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   env.UPSHIFT_SANDBOX_API_KEY = "upshift-sandbox-test-api-key";
   await seedTestDatabase(env);
 
@@ -172,8 +165,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.UPSHIFT_SANDBOX_API_KEY = originalUpshiftSandboxApiKey;
   await clearKVStores(env);
 });

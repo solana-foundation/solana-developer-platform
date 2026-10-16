@@ -13,7 +13,6 @@ import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-k
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
-import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import {
   archiveProject,
@@ -286,7 +285,7 @@ const PROJECT_NOT_FOUND_BODY = {
 let otherProjects: SeededDefaultProjects;
 
 function deploymentEnv(overrides: Partial<Env>): Env {
-  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...EARN_ENABLED_FLAGS, ...overrides };
+  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...overrides };
 }
 
 function apiKeyHeaders(key: TestApiKeyMaterial): Record<string, string> {
@@ -484,28 +483,6 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(availability.providers.filter((entry) => entry.family === "ramps")).toEqual([]);
     expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
-
-  it.for(EARN_FLAG_OFF_CASES)(
-    "reports every Earn provider as outside the release channel while $flag is off",
-    async ({ flags }) => {
-      const availability = await readAvailability("sandbox", deploymentEnv(flags));
-
-      expect(availability).toEqual({
-        ...SANDBOX_AVAILABILITY,
-        providers: SANDBOX_AVAILABILITY.providers.map(
-          (entry): ProjectProviderAvailabilityEntry =>
-            entry.family === "earn"
-              ? {
-                  family: "earn",
-                  provider: entry.provider,
-                  available: false,
-                  reason: "provider_not_in_release_channel",
-                }
-              : entry
-        ),
-      });
-    }
-  );
 
   it("reports providers the organization is not entitled to as unavailable", async () => {
     await setProviderOverrides({

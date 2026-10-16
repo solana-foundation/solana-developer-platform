@@ -153,9 +153,6 @@ const WITHDRAWAL: EarnPortfolioWithdrawal = {
   destinationAddress: SOLANA_DESTINATION,
   createdAt: "2026-08-03T00:00:00.000Z",
 };
-
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
 let originalUpshiftSandboxApiKey: string | undefined;
 let originalUpshiftApiKey: string | undefined;
 
@@ -387,13 +384,8 @@ async function countProviderWallets(): Promise<number> {
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
   originalUpshiftSandboxApiKey = env.UPSHIFT_SANDBOX_API_KEY;
   originalUpshiftApiKey = env.UPSHIFT_API_KEY;
-
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
 
   env.UPSHIFT_SANDBOX_API_KEY = UPSHIFT_SANDBOX_KEY;
   env.UPSHIFT_API_KEY = undefined;
@@ -403,8 +395,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   env.UPSHIFT_SANDBOX_API_KEY = originalUpshiftSandboxApiKey;
   env.UPSHIFT_API_KEY = originalUpshiftApiKey;
   await clearKVStores(env);

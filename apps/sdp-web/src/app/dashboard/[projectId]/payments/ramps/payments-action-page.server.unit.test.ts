@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -7,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
   fetchProviderAvailability: vi.fn(),
   getEnabledRampProviders: vi.fn(),
-  privateChannels: vi.fn(),
+  isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(),
   loadInstance: vi.fn(),
 }));
 
@@ -32,7 +33,9 @@ vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
 vi.mock("@/flags/ramps", () => ({
   getEnabledRampProviders: mocks.getEnabledRampProviders,
 }));
-vi.mock("@/flags", () => ({ privateChannels: mocks.privateChannels }));
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: mocks.isModuleInDeploymentReleaseChannel,
+}));
 vi.mock(
   "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data",
   () => ({
@@ -108,7 +111,7 @@ describe("loadPaymentsActionPageData", () => {
     });
   });
 
-  it("reports private send status only when asked, and only with the flag on", async () => {
+  it("reports private send status only when asked, and only where the release channel includes Private Channels", async () => {
     mocks.createOrgSdpApiClient.mockResolvedValue({
       request: vi.fn(),
       fetch: vi.fn().mockResolvedValue({ linked: false, organization: null }),
@@ -119,13 +122,15 @@ describe("loadPaymentsActionPageData", () => {
     mocks.getEnabledRampProviders.mockResolvedValue([]);
     mocks.loadInstance.mockResolvedValue({ ok: true, data: { isActive: true } });
 
-    mocks.privateChannels.mockResolvedValue(true);
+    mocks.isModuleInDeploymentReleaseChannel.mockReturnValue(true);
     expect((await loadPaymentsActionPageData()).privateSend).toBeNull();
     expect(
       (await loadPaymentsActionPageData({ includePrivateSendStatus: true })).privateSend
     ).toEqual({ enabled: true, connected: true });
 
-    mocks.privateChannels.mockResolvedValue(false);
+    mocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "private_channels"
+    );
     expect(
       (await loadPaymentsActionPageData({ includePrivateSendStatus: true })).privateSend
     ).toBeNull();

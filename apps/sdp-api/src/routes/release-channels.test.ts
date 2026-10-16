@@ -44,14 +44,7 @@ const MODULE_PROBES = {
   ],
 } as const satisfies Record<SdpModule, readonly (readonly [string, string])[]>;
 
-// Every module flag on, so only the release channel can refuse a request.
-const ALL_FLAGS_ON = {
-  MARKETS_ENABLED: "true",
-  EARN_ENABLED: "true",
-  PRIVATE_CHANNELS_ENABLED: "true",
-  HELIUS_RINGS_ENABLED: "true",
-  SDP_FLAG_ASSET_PROFILES: "true",
-};
+const ASSET_PROFILES_OPT_IN = { SDP_FLAG_ASSET_PROFILES: "true" } as const;
 
 // Each probe is a distinct client, so the per-address anonymous rate limit
 // never answers in place of the route under test.
@@ -68,7 +61,7 @@ async function probe(releaseChannel: SdpReleaseChannel, module: SdpModule) {
   });
   const env = {
     ...baseEnv,
-    ...ALL_FLAGS_ON,
+    ...ASSET_PROFILES_OPT_IN,
     SDP_RELEASE_CHANNEL: releaseChannel,
     TRUST_PROXY_HEADERS: "true",
   };
@@ -104,16 +97,13 @@ describe("release channels at the API", () => {
     expect([403, 429]).not.toContain(response.status);
   });
 
-  it.each(SDP_MODULES)(
-    "experimental: does not refuse %s routes once its flags are on",
-    async (module) => {
-      for (const response of await probe("experimental", module)) {
-        // Past every gate: auth, validation or the provider answers instead. A
-        // 429 would mean the rate limiter answered first and the probe proved nothing.
-        expect([403, 429]).not.toContain(response.status);
-      }
+  it.each(SDP_MODULES)("experimental: does not refuse %s routes", async (module) => {
+    for (const response of await probe("experimental", module)) {
+      // Past every gate: auth, validation or the provider answers instead. A
+      // 429 would mean the rate limiter answered first and the probe proved nothing.
+      expect([403, 429]).not.toContain(response.status);
     }
-  );
+  });
 });
 
 // Background jobs assert their own release channel gates against seeded rows:

@@ -45,8 +45,6 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-let originalPrivateChannelsEnabled: string | undefined;
-
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -116,8 +114,6 @@ function successProbe() {
 
 describe("Private Channels routes", () => {
   beforeEach(async () => {
-    originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
-    env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
     spcRegisterMock.mockReset();
     spcRegisterMock.mockResolvedValue({
@@ -131,14 +127,7 @@ describe("Private Channels routes", () => {
   });
 
   afterEach(async () => {
-    env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
     await clearKVStores(env);
-  });
-
-  it("returns 403 when the feature flag is off", async () => {
-    env.PRIVATE_CHANNELS_ENABLED = undefined;
-    const res = await app.request("/v1/private-channels/instance", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
   });
 
   it("GET /instance returns { instance: null } when no row exists", async () => {

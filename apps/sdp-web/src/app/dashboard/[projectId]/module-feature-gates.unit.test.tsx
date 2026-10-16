@@ -1,16 +1,10 @@
 import type { SdpModule } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 
-const flagMocks = vi.hoisted(() => ({
-  earn: vi.fn(),
-  issuance: vi.fn(),
-}));
-// Custody has no flag of its own: the release channel alone decides (HOO-1956).
 const channelMocks = vi.hoisted(() => ({
   isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(),
 }));
 
-vi.mock("@/flags", () => flagMocks);
 vi.mock("@/flags/release-channel", () => channelMocks);
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -46,24 +40,30 @@ describe("dashboard module feature gates", () => {
     await expect(TokensLayout({ children: <div>Tokens</div> })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
-  it("404s every Issuance route when Issuance is disabled", async () => {
-    flagMocks.issuance.mockResolvedValue(false);
+  it("404s every Issuance route when the release channel leaves Issuance out", async () => {
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "issuance"
+    );
 
     await expect(IssuanceLayout({ children: <div>Issuance</div> })).rejects.toThrow(
       "NEXT_NOT_FOUND"
     );
   });
 
-  it("404s every Embedded Yield route when Earn is disabled", async () => {
-    flagMocks.earn.mockResolvedValue(false);
+  it("404s every Embedded Yield route when the release channel leaves Earn out", async () => {
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "earn"
+    );
 
     await expect(EmbeddedYieldLayout({ children: <div>Earn</div> })).rejects.toThrow(
       "NEXT_NOT_FOUND"
     );
   });
 
-  it("404s the Earn alias route when Earn is disabled", async () => {
-    flagMocks.earn.mockResolvedValue(false);
+  it("404s the Earn alias route when the release channel leaves Earn out", async () => {
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "earn"
+    );
 
     await expect(EarnAliasLayout({ children: <div>Earn</div> })).rejects.toThrow("NEXT_NOT_FOUND");
   });

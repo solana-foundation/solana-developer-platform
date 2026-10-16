@@ -156,7 +156,6 @@ async function statusOf(id: string): Promise<Record<string, unknown> | null> {
 describe("reconcileDvpTrades", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    env.MARKETS_ENABLED = "true";
     getBlockHeight.mockResolvedValue(1_000n);
     // Default: broadcast claims check out on chain as landed, so existing
     // receipt rows survive. Tests that exercise a dead broadcast override.
@@ -214,14 +213,13 @@ describe("reconcileDvpTrades", () => {
     });
   });
 
-  it("does nothing when Markets is off", async () => {
-    env.MARKETS_ENABLED = undefined;
-    await seedTrade("markets_off", "created");
+  it("does nothing in a release channel without DvP", async () => {
+    await seedTrade("dvp_out_of_channel", "created");
 
-    await reconcileDvpTrades(env);
+    await reconcileDvpTrades({ ...env, SDP_RELEASE_CHANNEL: "beta" });
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
-    await expect(statusOf("markets_off")).resolves.toMatchObject({ observed_at: null });
+    await expect(statusOf("dvp_out_of_channel")).resolves.toMatchObject({ observed_at: null });
   });
 
   it("records the observed balances and advances the status", async () => {

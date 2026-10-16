@@ -5,7 +5,9 @@ import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "./dvp-trades";
+import * as earnCatalogueSyncCron from "./earn-catalogue-sync";
 import { EARN_CATALOGUE_SYNC_CRON, runEarnCatalogueSyncIfDue } from "./earn-catalogue-sync";
+import * as earnMetricsRefreshCron from "./earn-metrics-refresh";
 import { EARN_METRICS_REFRESH_CRON, EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_CRON } from "./earn-split-swaps";
 import {
@@ -104,7 +106,7 @@ vi.mock("./recurring-payments", () => {
 });
 
 // The private-channels reconcilers pull in heavy Solana modules; mock the wrappers so
-// runner.ts loads without them (they're feature-flag gated, off in most tests).
+// runner.ts loads without them (they're release-channel gated).
 // Unmocked they fail to resolve (@solana/mosaic-sdk ships a directory import Node ESM
 // rejects), which also poisons the module graph for any test file sharing the pool.
 vi.mock("./pending-deposits", () => ({
@@ -128,7 +130,7 @@ vi.mock("./revoked-api-key-cache", () => ({
 
 // The rings poll pulls the rings service and through it the Solana signer stack;
 // mocked like the other wrappers. Registered unconditionally (the job itself
-// early-returns unless the rings flag and the http adapter are set), so it is
+// early-returns outside a release channel with Helius Rings), so it is
 // part of every schedule count below.
 vi.mock("./rings-indexing", () => ({
   RINGS_INDEXING_CRON: "* * * * *",
@@ -144,6 +146,8 @@ vi.mock("./secret-retirements", () => ({
 
 // A work function, so it is swapped on the shared module rather than mocked.
 vi.spyOn(idempotencyKeysCron, "runIdempotencyKeyPrune").mockImplementation(() => undefined);
+vi.spyOn(earnCatalogueSyncCron, "runEarnCatalogueSync").mockImplementation(() => undefined);
+vi.spyOn(earnMetricsRefreshCron, "runEarnMetricsRefresh").mockImplementation(() => undefined);
 
 vi.mock("./provider-credential-secret-cleanup", () => ({
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON: "*/5 * * * *",
@@ -189,9 +193,9 @@ describe("startCron", () => {
   // The secret-retirement sweep is registered behind no flag at all, so it is
   // in every count below too — including the ones where asset profiles is off.
   //
-  // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
-  // flag changes is whether the tick does real work, asserted by firing it.
+  // Ticks of modules outside the release channel are still scheduled as sdp_cron_run
+  // proof-of-life no-ops, so every configuration schedules all 15 tasks. What the
+  // channel changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { ...CHANNEL, SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
   const ALL_TASKS = 15;
 
@@ -385,9 +389,9 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
-  it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
+  it("schedules deposit + withdrawal reconcilers where the release channel includes Private Channels", () => {
     const bg = makeBg();
-    const env = { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env;
+    const env = { ...CHANNEL } as Env;
     startCron({ env, bg });
 
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
@@ -409,11 +413,11 @@ describe("startCron", () => {
   });
 
   // The proof-of-life staleness alert counts distinct sdp_cron_run monitors per
-  // window, so a tick whose feature flag is off must still emit its event (as
+  // window, so a tick whose module is out of the channel must still emit its event (as
   // the managed job does) — silence is reserved for a dead scheduler.
-  it("emits proof-of-life without running the reconciler when private channels is off", async () => {
+  it("emits proof-of-life without running the reconciler in a release channel without Private Channels", async () => {
     const bg = makeBg();
-    startCron({ env: { ...CHANNEL } as Env, bg });
+    startCron({ env: { SDP_RELEASE_CHANNEL: "stable" } as Env, bg });
 
     (scheduleMock.mock.calls[3][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
@@ -430,9 +434,9 @@ describe("startCron", () => {
     );
   });
 
-  it("emits proof-of-life without refreshing metrics when earn is off", async () => {
+  it("emits proof-of-life without refreshing metrics in a release channel without Earn", async () => {
     const bg = makeBg();
-    startCron({ env: { ...CHANNEL } as Env, bg });
+    startCron({ env: { SDP_RELEASE_CHANNEL: "stable" } as Env, bg });
 
     (scheduleMock.mock.calls[7][1] as () => void)();
     expect(bg.run).toHaveBeenCalledTimes(1);
@@ -450,7 +454,7 @@ describe("startCron", () => {
 
   it("does not run the catalogue sync from startCron itself", () => {
     const bg = makeBg();
-    startCron({ env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
+    startCron({ env: { ...CHANNEL } as Env, bg });
     expect(bg.run).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
@@ -518,7 +522,7 @@ describe("startCron", () => {
 
   it("returned handle.stop() stops every scheduled task", async () => {
     const handle = startCron({
-      env: { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env,
+      env: { ...CHANNEL } as Env,
       bg: makeBg(),
     });
     expect(handle).not.toBeNull();
@@ -546,10 +550,10 @@ describe("startEarnCatalogueBootSync", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
   });
 
-  it("runs one slotted sync at boot when earn is enabled", async () => {
+  it("runs one slotted sync at boot where the release channel includes Earn", async () => {
     const bg = makeBg();
     startEarnCatalogueBootSync({
-      env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      env: { ...CHANNEL } as Env,
       bg,
     });
     // Handed to the background runner, never awaited by the caller.
@@ -560,8 +564,8 @@ describe("startEarnCatalogueBootSync", () => {
 
   it("runs even where in-process cron is disabled (managed Cloud Run, DISABLE_CRON)", async () => {
     for (const env of [
-      { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true", K_SERVICE: "sdp-api" },
-      { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true", DISABLE_CRON: "true" },
+      { ...CHANNEL, K_SERVICE: "sdp-api" },
+      { ...CHANNEL, DISABLE_CRON: "true" },
     ]) {
       const bg = makeBg();
       expect(startCron({ env: env as Env, bg })).toBeNull();
@@ -576,7 +580,7 @@ describe("startEarnCatalogueBootSync", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValueOnce(new Error("redis unavailable"));
     const bg = makeBg();
     startEarnCatalogueBootSync({
-      env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      env: { ...CHANNEL } as Env,
       bg,
     });
     // The tracked promise settles cleanly: the failure is reported, not rethrown.
@@ -590,9 +594,9 @@ describe("startEarnCatalogueBootSync", () => {
     );
   });
 
-  it("does nothing when earn is off", () => {
+  it("does nothing in a release channel without Earn", () => {
     const bg = makeBg();
-    startEarnCatalogueBootSync({ env: { ...CHANNEL } as Env, bg });
+    startEarnCatalogueBootSync({ env: { SDP_RELEASE_CHANNEL: "stable" } as Env, bg });
     expect(bg.run).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });

@@ -23,14 +23,12 @@ import { setPageRequest } from "@/test/request-project";
 const {
   mockAuth,
   mockFetchProjectProviderAvailability,
-  mockIssuanceFlag,
   mockLoadWalletActivity,
   mockPoliciesFlag,
   mockRequest,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFetchProjectProviderAvailability: vi.fn(),
-  mockIssuanceFlag: vi.fn(),
   mockLoadWalletActivity: vi.fn(),
   mockPoliciesFlag: vi.fn(),
   mockRequest: vi.fn(),
@@ -53,8 +51,10 @@ vi.mock("@/i18n/server", () => ({
 }));
 
 vi.mock("@/flags", () => ({
-  issuance: mockIssuanceFlag,
   policies: mockPoliciesFlag,
+}));
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: () => true,
 }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
@@ -156,13 +156,11 @@ beforeEach(() => {
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
   mockAuth.mockReset();
   mockFetchProjectProviderAvailability.mockReset();
-  mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
   mockPoliciesFlag.mockReset();
   mockRequest.mockReset();
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
-  mockIssuanceFlag.mockResolvedValue(true);
   mockPoliciesFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,

@@ -79,8 +79,6 @@ const FUND_SIGNATURE =
 const CLOSE_SIGNATURE =
   "5dRjDnZKcJfMe9vGkJCFbvuLPU4cJfKSMswkaTTd4oQGgtNDdk3vhkfaeKBCWa4sJGnNFdGCVAaKyYdPqvXNwYNG";
 
-let originalMarkets: string | undefined;
-
 function authHeaders() {
   return {
     Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -233,8 +231,6 @@ async function postAction(tradeId: string, action: string, body?: unknown) {
 
 describe("DvP audit-ledger parity (PRO-1992)", () => {
   beforeEach(async () => {
-    originalMarkets = env.MARKETS_ENABLED;
-    env.MARKETS_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
     await seedCustody();
@@ -249,7 +245,6 @@ describe("DvP audit-ledger parity (PRO-1992)", () => {
   });
 
   afterEach(async () => {
-    env.MARKETS_ENABLED = originalMarkets;
     await clearKVStores(env);
     vi.restoreAllMocks();
   });

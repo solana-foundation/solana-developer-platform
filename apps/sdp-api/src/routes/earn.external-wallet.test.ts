@@ -129,9 +129,6 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
-let originalMarketsEnabled: string | undefined;
-let originalEarnEnabled: string | undefined;
-
 async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   const entitled = options.entitled ?? true;
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -363,10 +360,6 @@ function post(
 }
 
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
   rateLimitStoreDown.value = false;
   await seedTestDatabase(env);
@@ -393,8 +386,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
   vi.restoreAllMocks();
 });
 

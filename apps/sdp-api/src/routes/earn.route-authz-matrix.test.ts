@@ -199,15 +199,7 @@ let tenant: EarnAuthzTenant;
 
 const rawKeyBySet = new Map<string, string>();
 
-let originalMarketsEnabled: string | undefined;
-
-let originalEarnEnabled: string | undefined;
-
 beforeEach(async () => {
-  originalMarketsEnabled = env.MARKETS_ENABLED;
-  originalEarnEnabled = env.EARN_ENABLED;
-  env.MARKETS_ENABLED = "true";
-  env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
   await clearKVStores(env);
   tenant = await seedEarnAuthzTenant(env, "matrix", { environment: "sandbox" });
@@ -222,10 +214,7 @@ beforeEach(async () => {
   }
 });
 
-afterEach(() => {
-  env.MARKETS_ENABLED = originalMarketsEnabled;
-  env.EARN_ENABLED = originalEarnEnabled;
-});
+afterEach(() => {});
 
 describe("earn route inventory", () => {
   it("declares every live route in the scope table (a new route fails until added)", () => {
@@ -322,18 +311,6 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
         body.error.message,
         `${route} answered the membership 403 for a project the user belongs to`
       ).not.toContain("not accessible");
-    }
-  });
-});
-
-describe("feature gate", () => {
-  it("EARN_ENABLED off darkens every route with 403", async () => {
-    env.EARN_ENABLED = "false";
-    const raw = rawKeyBySet.get(permissionSetId(ALL_EARN_SCOPES));
-    assert(raw, "Expected seeded API key");
-    for (const route of ROUTES) {
-      const res = await requestAsKey(route, raw, {});
-      expect(res.status, route).toBe(403);
     }
   });
 });

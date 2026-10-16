@@ -1,7 +1,8 @@
+import type { SdpModule } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  issuance: vi.fn(),
+  isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(),
   buildHomeActivityRows: vi.fn((): unknown[] => []),
   fetchOrgIssuanceActivity: vi.fn(),
   fetchDashboardPaymentTransfers: vi.fn(),
@@ -9,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
 }));
 
-vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: mocks.isModuleInDeploymentReleaseChannel,
+}));
 vi.mock("@/app/dashboard/[projectId]/home-page.data", () => ({
   buildHomeActivityRows: mocks.buildHomeActivityRows,
   fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
@@ -37,7 +40,7 @@ import { GET } from "./route";
 describe("GET /api/dashboard/home/activity feature gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.issuance.mockResolvedValue(false);
+    mocks.isModuleInDeploymentReleaseChannel.mockImplementation((module) => module !== "issuance");
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
       ok: true,
@@ -46,7 +49,7 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
     });
   });
 
-  it("does not request or return issuance data while Issuance is disabled", async () => {
+  it("does not request or return issuance data while the release channel leaves Issuance out", async () => {
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
@@ -55,8 +58,8 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
     expect(mocks.buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
   });
 
-  it("includes issuance activity and token metadata while Issuance is enabled", async () => {
-    mocks.issuance.mockResolvedValue(true);
+  it("includes issuance activity and token metadata where the release channel includes Issuance", async () => {
+    mocks.isModuleInDeploymentReleaseChannel.mockReturnValue(true);
     mocks.fetchOrgIssuanceActivity.mockResolvedValue({ ok: true, data: [{ transaction: {} }] });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({
       ok: true,
@@ -78,7 +81,7 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
   });
 
   it("reports unavailable activity sources without fabricating rows", async () => {
-    mocks.issuance.mockResolvedValue(true);
+    mocks.isModuleInDeploymentReleaseChannel.mockReturnValue(true);
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: false, data: null });
     mocks.fetchOrgIssuanceActivity.mockResolvedValue({ ok: false, data: null });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({ ok: false, data: null });

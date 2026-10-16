@@ -55,8 +55,6 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-let originalEnabled: string | undefined;
-
 function successProbe() {
   return {
     ok: true as const,
@@ -144,8 +142,6 @@ async function defaultChannelId(): Promise<string> {
 
 describe("Private Channels — event routes", () => {
   beforeEach(async () => {
-    originalEnabled = env.PRIVATE_CHANNELS_ENABLED;
-    env.PRIVATE_CHANNELS_ENABLED = "true";
     probeConnectionMock.mockReset();
     spcRegisterMock.mockReset();
     spcRegisterMock.mockResolvedValue({
@@ -160,7 +156,6 @@ describe("Private Channels — event routes", () => {
   });
 
   afterEach(async () => {
-    env.PRIVATE_CHANNELS_ENABLED = originalEnabled;
     await clearKVStores(env);
   });
 

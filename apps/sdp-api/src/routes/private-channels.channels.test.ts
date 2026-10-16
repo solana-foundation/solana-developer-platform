@@ -28,8 +28,6 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-let originalEnabled: string | undefined;
-
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -92,21 +90,12 @@ function authHeaders() {
 
 describe("Private Channels — channel routes", () => {
   beforeEach(async () => {
-    originalEnabled = env.PRIVATE_CHANNELS_ENABLED;
-    env.PRIVATE_CHANNELS_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
   });
 
   afterEach(async () => {
-    env.PRIVATE_CHANNELS_ENABLED = originalEnabled;
     await clearKVStores(env);
-  });
-
-  it("returns 403 when the feature is disabled", async () => {
-    env.PRIVATE_CHANNELS_ENABLED = undefined;
-    const res = await app.request("/v1/private-channels/channels", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
   });
 
   it("returns 503 when no active instance is connected", async () => {

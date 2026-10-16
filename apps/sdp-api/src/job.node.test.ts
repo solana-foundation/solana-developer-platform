@@ -41,7 +41,7 @@ vi.mock("@/cron/earn-catalogue-sync", () => ({
 
 // MUST be mocked, like its sibling above: the real implementation walks
 // EARN_PROVIDER_CLIENTS and Kamino's client reaches api.kamino.finance with no
-// credential to stop it. Unmocked, the flags-on cases below fetched the live
+// credential to stop it. Unmocked, the cases below that run Earn fetched the live
 // mainnet shelf and then attempted an UPDATE per vault against the fake
 // `postgres://unit` — a unit test whose runtime depended on a third party's
 // uptime, silent because both the job's `.catch` and the refresh's per-row
@@ -173,7 +173,7 @@ vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
   reconcileDvpTrades: vi.fn(async () => {}),
 }));
 
-function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
+function makeEnv(overrides: Partial<Record<keyof Env, string>>): Env {
   return {
     DATABASE_URL: "postgres://unit",
     REDIS_URL: "redis://unit",
@@ -205,7 +205,7 @@ describe("runCronJob", () => {
         throw new Error("No RPC endpoint");
       });
     vi.mocked(waitForEgress).mockReset();
-    vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv());
+    vi.mocked(getProcessEnv).mockReset().mockReturnValue(makeEnv({}));
     vi.mocked(trackPendingTransfers)
       .mockReset()
       .mockResolvedValue(undefined as never);
@@ -374,8 +374,8 @@ describe("runCronJob", () => {
     expect(trackPendingTransfers).not.toHaveBeenCalled();
   });
 
-  it("runs the ungated ticks — recurring collection included — when every flag is off", async () => {
-    const env = makeEnv();
+  it("runs the ungated ticks — recurring collection included — in a release channel without any gated module", async () => {
+    const env = makeEnv({ SDP_RELEASE_CHANNEL: "stable" });
     vi.mocked(getProcessEnv).mockReturnValue(env);
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockImplementationOnce(async () => {
       expect(currentDatabaseIdentity()).toEqual({
@@ -412,8 +412,6 @@ describe("runCronJob", () => {
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
     expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env, expect.any(Date));
-    // The rings poll gates itself on the flag plus the http adapter, so the job
-    // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     // The split-swap detector is ungated and runs AFTER the vault sweep, so the
@@ -461,9 +459,6 @@ describe("runCronJob", () => {
   });
 
   it("runs every reconciler while credential cleanup is pending and reports its failure last", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(
-      makeEnv({ PRIVATE_CHANNELS_ENABLED: "true", MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
-    );
     const cleanup = deferred<{ cleaned: number; skipped: number; failed: number }>();
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReturnValue(cleanup.promise);
 
@@ -545,8 +540,8 @@ describe("runCronJob", () => {
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
-  it("runs both private-channel reconcilers behind the flag", async () => {
-    const env = makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" });
+  it("runs both private-channel reconcilers where the release channel includes Private Channels", async () => {
+    const env = makeEnv({ SDP_RELEASE_CHANNEL: "experimental" });
     vi.mocked(getProcessEnv).mockReturnValue(env);
 
     await runCronJob();
@@ -558,7 +553,6 @@ describe("runCronJob", () => {
   // The reconcilers are siblings: a failing deposits leg must never skip the
   // withdrawals leg (or vice versa), only fail the job after both settle.
   it("still reconciles withdrawals when deposit tracking fails", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
     vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
 
     await expect(runCronJob()).rejects.toThrow("deposits down");
@@ -567,14 +561,9 @@ describe("runCronJob", () => {
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
-  it("completes feature-disabled monitors as successful no-ops", async () => {
+  it("checks in the monitors of modules outside the release channel as successful no-ops", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
-      makeEnv({
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-        PRIVATE_CHANNELS_ENABLED: "false",
-        MARKETS_ENABLED: "false",
-        EARN_ENABLED: "false",
-      })
+      makeEnv({ SDP_DEPLOYMENT_MODE: "self_hosted", SDP_RELEASE_CHANNEL: "stable" })
     );
     await runCronJob();
 
@@ -599,8 +588,6 @@ describe("runCronJob", () => {
   });
 
   it("emits one sdp_cron_run event per managed tick", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
-
     await runCronJob();
 
     const runs = vi
@@ -650,7 +637,7 @@ describe("runCronJob", () => {
   // default backend, so it is exactly where retirements are queued. Omitting the sweep
   // here left every queued version orphaned in managed production, readable forever.
   it("sweeps secret retirements, and does so behind no flag", async () => {
-    const env = makeEnv();
+    const env = makeEnv({});
     vi.mocked(getProcessEnv).mockReturnValue(env);
 
     await runCronJob();
@@ -682,7 +669,7 @@ describe("runCronJob", () => {
   // Behind no flag (every module's keys expire) and non-fatal: a claim already
   // ignores an expired key, so a failed sweep only costs disk.
   it("prunes expired idempotency keys without failing the job when the prune throws", async () => {
-    const env = makeEnv();
+    const env = makeEnv({});
     vi.mocked(getProcessEnv).mockReturnValue(env);
     vi.mocked(pruneIdempotencyKeysModule.pruneIdempotencyKeys).mockRejectedValueOnce(
       new Error("database busy")
@@ -715,27 +702,8 @@ describe("runCronJob", () => {
     );
   });
 
-  it("requires both flags — the parent flag alone never runs the earn tick", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ MARKETS_ENABLED: "true" }));
-    await runCronJob();
-    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledExactlyOnceWith(
-      expect.any(Object),
-      undefined,
-      {
-        workEnabled: false,
-      }
-    );
-    expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
-
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ EARN_ENABLED: "true" }));
-    await runCronJob();
-    expect(runEarnCatalogueSyncIfDue).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(runEarnCatalogueSyncIfDue).mock.calls[1][2]).toEqual({ workEnabled: false });
-    expect(runEarnMetricsRefreshTick).not.toHaveBeenCalled();
-  });
-
-  it("runs the earn tick after the ungated pair when both flags are on", async () => {
-    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+  it("runs the earn tick after the ungated pair", async () => {
+    const env = makeEnv({});
     vi.mocked(getProcessEnv).mockReturnValue(env);
 
     await runCronJob();
@@ -751,7 +719,7 @@ describe("runCronJob", () => {
     // Cadence IS its cadence — and ordered first so an unusually slow catalogue pass
     // cannot eat the tick and leave rates stale. Both halves of that are
     // asserted here because neither is visible from the sync's own test.
-    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+    const env = makeEnv({});
     vi.mocked(getProcessEnv).mockReturnValue(env);
 
     await runCronJob();
@@ -765,7 +733,7 @@ describe("runCronJob", () => {
   it("keeps running the catalogue sync when the metrics refresh throws", async () => {
     // Rates going one tick stale must never stop the catalogue sync, which
     // owns admission and the delist pass.
-    const env = makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" });
+    const env = makeEnv({});
     vi.mocked(getProcessEnv).mockReturnValue(env);
     vi.mocked(runEarnMetricsRefreshTick).mockRejectedValue(new Error("kamino unreachable"));
 
@@ -775,9 +743,6 @@ describe("runCronJob", () => {
   });
 
   it("fails the job on an earn error but still releases pools and clients", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(
-      makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
-    );
     vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValue(new Error("sync exploded"));
 
     await expect(runCronJob()).rejects.toThrow("sync exploded");
@@ -791,9 +756,6 @@ describe("runCronJob", () => {
   // One persistently broken reconciler must never starve the rest: a failing
   // tick is collected, every later tick still runs, and the job fails at the end.
   it("still runs every later tick when reconciliation itself fails", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(
-      makeEnv({ MARKETS_ENABLED: "true", EARN_ENABLED: "true" })
-    );
     vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
 
     await expect(runCronJob()).rejects.toThrow("sponsorship down");
@@ -805,7 +767,6 @@ describe("runCronJob", () => {
   });
 
   it("aggregates failures from more than one tick without dropping either", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ PRIVATE_CHANNELS_ENABLED: "true" }));
     vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
     vi.mocked(trackPendingDeposits).mockRejectedValue(new Error("deposits down"));
     vi.mocked(detectOrphanedEarnSplitSwaps).mockRejectedValue(new Error("split swaps down"));

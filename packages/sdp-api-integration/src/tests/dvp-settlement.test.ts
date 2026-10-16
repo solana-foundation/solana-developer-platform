@@ -84,12 +84,10 @@ async function tokenBalance(address: string): Promise<bigint> {
 }
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and funding", () => {
-  const originalMarketsEnabled = env.MARKETS_ENABLED;
   let localPartyWallet: ApiTestCustodyWallet | undefined;
   let custodyWallet: IntegrationCustodyWallet;
 
   beforeAll(async () => {
-    env.MARKETS_ENABLED = "true";
     const state = await initIntegrationSuite();
     custodyWallet = state.custodyWallet;
     if (INTEGRATION_CUSTODY_PROVIDER === "local") {
@@ -126,7 +124,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
   });
 
   afterAll(async () => {
-    env.MARKETS_ENABLED = originalMarketsEnabled;
     await cleanupIntegrationSuite();
   });
 

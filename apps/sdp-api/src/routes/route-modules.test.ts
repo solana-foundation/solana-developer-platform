@@ -70,10 +70,6 @@ describe("API route ownership", () => {
         ...baseEnv,
         SDP_RELEASE_CHANNEL: releaseChannel,
         TRUST_PROXY_HEADERS: "true",
-        MARKETS_ENABLED: "true",
-        EARN_ENABLED: "true",
-        PRIVATE_CHANNELS_ENABLED: "true",
-        HELIUS_RINGS_ENABLED: "true",
       };
       const served: string[] = [];
       for (const { method, path } of cut) {

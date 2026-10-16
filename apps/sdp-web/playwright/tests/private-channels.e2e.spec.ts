@@ -1,25 +1,26 @@
 import { expect, test } from "@playwright/test";
+import { resolveSdpReleaseChannel } from "@sdp/types";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
+import { isModuleServed } from "../support/release-channel";
 
-// The dashboard gates on the `private-channels` Vercel flag, whose default falls
-// back to PRIVATE_CHANNELS_ENABLED. Local Playwright runs have no Vercel provider,
-// so the env var alone decides. Mirror the flagDefault() truthiness vocabulary
-// from src/flags.ts so "1"/"yes"/"on" behave the same as "true".
-const privateChannelsEnabled = ["1", "true", "yes", "on"].includes(
-  process.env.PRIVATE_CHANNELS_ENABLED?.trim().toLowerCase() ?? ""
+const privateChannelsEnabled = isModuleServed(
+  resolveSdpReleaseChannel(process.env.SDP_RELEASE_CHANNEL),
+  "private_channels"
 );
 
 test.describe
-  .serial("dashboard private channels feature flag", () => {
+  .serial("dashboard private channels release channel gate", () => {
     let bootstrapProjectId = "";
 
     test.beforeAll(async ({ browser }) => {
       bootstrapProjectId = (await provisionLinkedOrgProjects(browser)).sandbox;
     });
 
-    test("hides private channels when the dashboard feature flag is disabled", async ({ page }) => {
-      test.skip(privateChannelsEnabled, "Covered by the feature-enabled private channels test");
+    test("hides private channels in a release channel without Private Channels", async ({
+      page,
+    }) => {
+      test.skip(privateChannelsEnabled, "Covered by the in-channel private channels test");
 
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
       await expect(page.getByRole("link", { name: "Private Channels" })).toHaveCount(0);
@@ -31,8 +32,10 @@ test.describe
       await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
     });
 
-    test("shows private channels when the dashboard feature flag is enabled", async ({ page }) => {
-      test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
+    test("shows private channels where the release channel includes Private Channels", async ({
+      page,
+    }) => {
+      test.skip(!privateChannelsEnabled, "Requires a release channel with Private Channels");
 
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/integrations"));
       await expect(page.getByRole("link", { name: "Private Channels" })).toBeVisible();
@@ -79,7 +82,7 @@ test.describe
     });
 
     test("renders the API Playground tab without a connected instance", async ({ page }) => {
-      test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
+      test.skip(!privateChannelsEnabled, "Requires a release channel with Private Channels");
 
       // API Playground is `requiresActive: false` — reachable before any instance
       // is connected because the /instance endpoints are what the operator needs

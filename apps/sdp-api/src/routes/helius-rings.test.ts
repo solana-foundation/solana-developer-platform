@@ -61,8 +61,6 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   status: "active",
   expiresAt: null,
 };
-
-let originalFlag: string | undefined;
 let ringsWalletId: string;
 
 async function seedAuth(): Promise<void> {
@@ -205,22 +203,13 @@ async function post(path: string, body: unknown) {
 
 describe("Helius Rings routes", () => {
   beforeEach(async () => {
-    originalFlag = env.HELIUS_RINGS_ENABLED;
-    env.HELIUS_RINGS_ENABLED = "true";
     await seedTestDatabase(env);
     await seedAuth();
   });
 
   afterEach(async () => {
-    env.HELIUS_RINGS_ENABLED = originalFlag;
     gatewayOverride.current = null;
     await clearKVStores(env);
-  });
-
-  it("returns 403 when the feature flag is off", async () => {
-    env.HELIUS_RINGS_ENABLED = undefined;
-    const res = await app.request("/v1/helius-rings/wallets", { headers: authHeaders() }, env);
-    expect(res.status).toBe(403);
   });
 
   it("GET /health reports every upstream red when the gateway is unconfigured", async () => {

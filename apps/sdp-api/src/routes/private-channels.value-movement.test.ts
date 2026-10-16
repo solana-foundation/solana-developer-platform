@@ -105,8 +105,6 @@ const UNSAFE_ADDRESSES = [
   ["withdraw program", WITHDRAW_PROGRAM_ID],
   ["escrow instance", ESCROW_INSTANCE_ADDRESS],
 ] as const;
-
-let originalPrivateChannelsEnabled: string | undefined;
 let originalEncryptionKey: string | undefined;
 
 async function useConnectionSource() {
@@ -489,9 +487,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
-    originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
-    env.PRIVATE_CHANNELS_ENABLED = "true";
     env.PRIVY_APP_ID = "pc-value-app";
     env.PRIVY_APP_SECRET = "pc-value-secret";
     providerSignerMock.mockReset().mockImplementation(createProviderSigner);
@@ -525,7 +521,6 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals();
-    env.PRIVATE_CHANNELS_ENABLED = originalPrivateChannelsEnabled;
     env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
     await clearKVStores(env);
   });
