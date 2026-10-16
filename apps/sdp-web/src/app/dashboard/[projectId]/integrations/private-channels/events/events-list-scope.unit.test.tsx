@@ -256,6 +256,10 @@ describe("stale project events feed (SOLA9-230)", () => {
       const { rerender } = renderFeed(feed("project_a"));
       const filter = screen.getByRole("combobox", { name: "Event category" });
       await user.selectOptions(filter, PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER);
+      await waitFor(() => {
+        expect(eventTable().getByText(/10\.00 USDC/)).toBeTruthy();
+        expect(screen.getByRole("table").closest('[aria-busy="true"]')).toBeNull();
+      });
       await user.selectOptions(filter, "all");
       expect(mocks.loadProjectEventsAction).toHaveBeenCalledTimes(2);
 

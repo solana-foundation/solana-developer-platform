@@ -16,13 +16,27 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
+const { readVaultPositions, resolveVaultDirectClient, summaryScopeReads } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
   return {
     readVaultPositions,
+    summaryScopeReads: vi.fn(),
     resolveVaultDirectClient: vi.fn((_env: unknown, _provider: string, _deadline: unknown) => ({
       readVaultPositions,
     })),
+  };
+});
+
+vi.mock("@/lib/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth")>();
+  return {
+    ...actual,
+    requireProjectId: (c: Parameters<typeof actual.requireProjectId>[0]) => {
+      if (c.req.path === "/v1/earn/external-wallet/positions/summary") {
+        summaryScopeReads();
+      }
+      return actual.requireProjectId(c);
+    },
   };
 });
 
@@ -438,19 +452,9 @@ describe("external-wallet position reads", () => {
       tokenMint: USDC,
       label: "Coalesced vault",
     });
-    let release: ((value: unknown[]) => void) | undefined;
-    readVaultPositions.mockImplementation(
-      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
-        new Promise((resolve) => {
-          release = resolve;
-          expect(input.owner).toBe(OWNER_A);
-        })
-    );
-
-    const first = get("/v1/earn/external-wallet/positions/summary");
-    const second = get("/v1/earn/external-wallet/positions/summary");
-    await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
-    release?.([
+    const releases: Array<(value: unknown[]) => void> = [];
+    let released = false;
+    const snapshot = [
       {
         providerReference: "vault-coalesced",
         owner: OWNER_A,
@@ -461,7 +465,25 @@ describe("external-wallet position reads", () => {
         tokenMint: USDC,
         shareMint: SHARE,
       },
-    ]);
+    ];
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        new Promise((resolve) => {
+          expect(input.owner).toBe(OWNER_A);
+          if (released) resolve(snapshot);
+          else releases.push(resolve);
+        })
+    );
+
+    const first = get("/v1/earn/external-wallet/positions/summary");
+    const second = get("/v1/earn/external-wallet/positions/summary");
+    try {
+      await vi.waitFor(() => expect(summaryScopeReads).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
+    } finally {
+      released = true;
+      for (const release of releases) release(snapshot);
+    }
 
     const responses = await Promise.all([first, second]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
