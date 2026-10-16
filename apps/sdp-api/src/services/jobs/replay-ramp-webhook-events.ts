@@ -1,6 +1,6 @@
 import type {
-  RampWebhookBusinessOutcome,
   RampWebhookFailureOutcome,
+  RampWebhookProcessResult,
   SdpRampProviderStages,
 } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
@@ -76,8 +76,8 @@ function failureOutcome(kind: RampWebhookFailureKind): RampWebhookFailureOutcome
   }
 }
 
-function businessFailureReason(outcome: RampWebhookBusinessOutcome, reason?: string): string {
-  return reason ?? `provider event ${outcome}`;
+function businessFailureReason(result: RampWebhookProcessResult): string {
+  return result.outcome === "refused" ? result.reason : `provider event ${result.outcome}`;
 }
 
 /**
@@ -147,10 +147,11 @@ export async function applyStoredRampWebhookEvent(
       throw error;
     }
 
-    const { outcome, reason } = await processor.process(env, row.environment, parsed);
+    const result = await processor.process(env, row.environment, parsed);
+    const { outcome, reason } = result;
     if (outcome === "unmatched" || outcome === "refused") {
       if (row.environment === "sandbox") {
-        await events.dischargeEvent(row.id, "discarded", businessFailureReason(outcome, reason));
+        await events.dischargeEvent(row.id, "discarded", businessFailureReason(result));
         logEvent("warn", {
           event: RAMP_WEBHOOK_EVENT_DISCARDED_EVENT,
           flow: "ramp-settlement",
@@ -166,7 +167,7 @@ export async function applyStoredRampWebhookEvent(
       const spentAttempts = terminal ? RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS : attempts;
       await events.recordFailure({
         id: row.id,
-        error: businessFailureReason(outcome, reason),
+        error: businessFailureReason(result),
         attempts: spentAttempts,
         maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
         appRevision: currentAppRevision(env),

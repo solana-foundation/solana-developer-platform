@@ -144,10 +144,9 @@ types (HOO-2033).
 ## Ramps: webhook environment boundary
 
 The verified webhook endpoint supplies the environment for settlement. Stripe
-and MoonPay provider-reference lookups join `payment_transfers.project_id` to
-`projects.environment`; MoonPay's first reference claim checks that environment
-inside its UPDATE (HOO-2039 PR A). An unscoped reference lookup only classifies
-a missing scoped match as `environment_mismatch`; it must never apply the event.
+and MoonPay match the globally unique provider reference, then compare the
+transfer's project environment before applying an event. MoonPay's first
+reference claim checks that environment inside its UPDATE (HOO-2039 PR A).
 Cross-environment events and settlement after cancellation are `refused` with
 specific inbox reasons. Production parks them for review; sandbox discards
 them. Stale and final events remain `ignored`.

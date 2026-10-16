@@ -194,7 +194,6 @@ export interface ListTransfersResult {
 export type GetTransferByProviderReferenceInput = {
   provider: RampProviderId;
   providerReference: string;
-  environment?: SdpEnvironment;
 } & (
   | {
       organizationId: string;

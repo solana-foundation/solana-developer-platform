@@ -5,7 +5,7 @@ import {
   isTerminalRampTransferStatus,
   RAMP_TRANSFER_TRANSITIONS,
   type RampTransferTransitionId,
-  type RampWebhookBusinessOutcome,
+  type RampWebhookProcessResult,
   type SdpEnvironment,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
@@ -126,11 +126,7 @@ export async function applyRampSettlementEvent(
   env: Env,
   environment: SdpEnvironment,
   event: RampSettlementEvent
-): Promise<{
-  applied: boolean;
-  outcome: RampWebhookBusinessOutcome;
-  reason?: "environment_mismatch" | "settled_after_cancel";
-}> {
+): Promise<RampWebhookProcessResult & { applied: boolean }> {
   if (event.kind === "ignore") {
     return { applied: false, outcome: "ignored" };
   }
@@ -143,24 +139,8 @@ export async function applyRampSettlementEvent(
   const transfer = await repo.getTransferByProviderReference({
     provider: event.provider,
     providerReference: event.reference,
-    environment,
   });
   if (!transfer) {
-    const otherEnvironment = await repo.getTransferByProviderReference({
-      provider: event.provider,
-      providerReference: event.reference,
-    });
-    if (otherEnvironment) {
-      logEvent("error", {
-        event: "sdp_api_ramp_settlement_environment_mismatch",
-        flow: "ramp-settlement",
-        provider: event.provider,
-        provider_reference: event.reference,
-        project_id: otherEnvironment.project_id,
-        environment,
-      });
-      return { applied: false, outcome: "refused", reason: "environment_mismatch" };
-    }
     logEvent("info", {
       event: "sdp_api_ramp_settlement_unmatched",
       flow: "ramp-settlement",
@@ -169,11 +149,27 @@ export async function applyRampSettlementEvent(
     });
     return { applied: false, outcome: "unmatched" };
   }
+  const transferEnvironment = await repo.getTransferProjectEnvironment({
+    transferId: transfer.id,
+    provider: event.provider,
+  });
+  if (transferEnvironment !== environment) {
+    logEvent("error", {
+      event: "sdp_api_ramp_settlement_environment_mismatch",
+      flow: "ramp-settlement",
+      provider: event.provider,
+      provider_reference: event.reference,
+      project_id: transfer.project_id,
+      environment,
+      transfer_environment: transferEnvironment,
+    });
+    return { applied: false, outcome: "refused", reason: "environment_mismatch" };
+  }
   if (transfer.provider !== event.provider) {
-    return { applied: false, outcome: "refused" };
+    return { applied: false, outcome: "refused", reason: "provider_mismatch" };
   }
   if (!isRampTransferType(transfer.type)) {
-    return { applied: false, outcome: "refused" };
+    return { applied: false, outcome: "refused", reason: "transfer_type_mismatch" };
   }
   if (event.kind === "settled" && transfer.status === "canceled") {
     return { applied: false, outcome: "refused", reason: "settled_after_cancel" };
@@ -196,7 +192,7 @@ export async function applyRampSettlementEvent(
       delivered_asset_rail: event.deliveredAssetRail,
       transfer_token: transfer.token,
     });
-    return { applied: false, outcome: "refused" };
+    return { applied: false, outcome: "refused", reason: "asset_mismatch" };
   }
   // Out-of-order or redelivered events must not regress a settled transfer
   // (e.g. a retried PENDING arriving after COMPLETED).

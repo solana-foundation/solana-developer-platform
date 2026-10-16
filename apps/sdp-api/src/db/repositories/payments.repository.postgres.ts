@@ -795,29 +795,24 @@ export function createPostgresPaymentsRepository(
       }
       const effectiveOrganizationId = tenantScope?.organizationId ?? params.organizationId;
       const effectiveProjectId = tenantScope?.projectId ?? params.projectId;
-      const environmentClause = params.environment === undefined ? [] : ["p.environment = ?"];
-      const environmentValue = params.environment === undefined ? [] : [params.environment];
       const scope = effectiveOrganizationId
         ? buildTransferScopeWhere({
             organizationId: effectiveOrganizationId,
             projectId: effectiveProjectId ?? null,
             includeAllOrganizationProjects: canAccessAllOrganizationProjects,
             tableAlias: "pt",
-            extraClauses: ["pt.provider = ?", "pt.provider_reference = ?", ...environmentClause],
-            extraValues: [params.provider, params.providerReference, ...environmentValue],
+            extraClauses: ["pt.provider = ?", "pt.provider_reference = ?"],
+            extraValues: [params.provider, params.providerReference],
           })
         : {
-            where: ["pt.provider = ?", "pt.provider_reference = ?", ...environmentClause].join(
-              " AND "
-            ),
-            values: [params.provider, params.providerReference, ...environmentValue],
+            where: "pt.provider = ? AND pt.provider_reference = ?",
+            values: [params.provider, params.providerReference],
           };
 
       const row = await db
         .prepare(
           `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
            FROM payment_transfers pt
-           ${params.environment === undefined ? "" : "JOIN projects p ON p.id = pt.project_id"}
            WHERE ${scope.where}`
         )
         .bind(...scope.values)

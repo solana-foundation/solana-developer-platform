@@ -100,7 +100,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: "sol.solana",
     });
 
-    expect(result).toEqual({ applied: false, outcome: "refused" });
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
     expect(await readRow("xfr_asset_mismatch")).toEqual({ status: "settling", amount: null });
     expect(logEvent).toHaveBeenCalledWith(
       "error",
@@ -124,7 +124,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: null,
     });
 
-    expect(result).toEqual({ applied: false, outcome: "refused" });
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
     expect(await readRow("xfr_asset_unknown")).toEqual({ status: "settling", amount: null });
   });
 
@@ -143,7 +143,7 @@ describe("applyRampSettlementEvent delivered asset", () => {
       deliveredAssetRail: "sol.solana",
     });
 
-    expect(result).toEqual({ applied: false, outcome: "refused" });
+    expect(result).toEqual({ applied: false, outcome: "refused", reason: "asset_mismatch" });
     expect(await readRow("xfr_asset_final")).toEqual({ status: "completed", amount: null });
   });
 });

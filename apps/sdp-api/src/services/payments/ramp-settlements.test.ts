@@ -187,6 +187,7 @@ describe("applyRampSettlementEvent", () => {
       kind: "settled",
       reference: "order_canceled",
       receivedAmount: "12",
+      deliveredAssetRail: "sol.solana",
     });
 
     expect(result).toEqual({

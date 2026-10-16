@@ -663,14 +663,19 @@ describe("Ramp webhook event inbox", () => {
     });
     const processSpy = vi
       .spyOn(RAMP_PROVIDER_WEBHOOK_PROCESSOR.moonpay, "process")
-      .mockResolvedValue({ outcome: "refused" });
+      .mockResolvedValue({ outcome: "refused", reason: "asset_mismatch" });
     try {
       expect(await applyStoredRampWebhookEvent(env, stored, 1)).toBe(false);
     } finally {
       processSpy.mockRestore();
     }
     expect(await readInboxRows()).toMatchObject([
-      { status: "failed", apply_outcome: "refused", attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS },
+      {
+        status: "failed",
+        apply_outcome: "refused",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+        last_error: "asset_mismatch",
+      },
     ]);
   });
 
