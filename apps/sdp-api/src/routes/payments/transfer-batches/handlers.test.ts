@@ -2062,6 +2062,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
