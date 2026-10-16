@@ -4,7 +4,8 @@ import {
   getRecurringPaymentOperationStaleBefore,
   nextRecurringPaymentCollectionDueAt,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -478,7 +479,6 @@ async function fetchConfirmedActivationPlan(input: {
 }) {
   if (input.createdPlanThisRun) {
     await confirmSubscriptionSignature(
-      input.env,
       input.planCreationSignature,
       "Recurring payment activation failed on-chain"
     );
@@ -495,7 +495,6 @@ async function fetchConfirmedActivationPlan(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     input.planCreationSignature,
     "Recurring payment activation failed on-chain"
   );
@@ -513,7 +512,6 @@ async function fetchConfirmedSubscriptionDelegation(input: {
 }) {
   if (input.authorizedThisRun) {
     await confirmSubscriptionSignature(
-      input.env,
       input.authorizationSignature,
       "Recurring payment activation failed on-chain"
     );
@@ -532,7 +530,6 @@ async function fetchConfirmedSubscriptionDelegation(input: {
   }
 
   await confirmSubscriptionSignature(
-    input.env,
     input.authorizationSignature,
     "Recurring payment activation failed on-chain"
   );
@@ -603,11 +600,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     metadata: { authorizationSetupSignature: initSignature },
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  await confirmSubscriptionSignature(initSignature, "Recurring payment activation failed on-chain");
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -649,7 +642,7 @@ export async function activateRecurringPayment(input: {
     input.env,
     createTenantScope(input)
   );
-  const rpc = solanaRpc.createRpc(input.env);
+  const rpc = createClusterRpc();
   const nowIso = new Date().toISOString();
 
   assertActivationPreconditions({ ...input, nowIso });

@@ -1,6 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -1002,9 +1001,7 @@ export async function listTransfers(c: AppContext) {
   const transferTypeSet = transferTypes ? new Set<TransferType>(transferTypes) : undefined;
   // Rows store mints, so a symbol or native-SOL filter must be normalized to
   // the same canonical mint before either the in-memory or SQL comparison.
-  const tokenFilter = token
-    ? normalizePaymentToken(token, currentClusterScope().cluster)
-    : undefined;
+  const tokenFilter = token ? normalizePaymentToken(token) : undefined;
   const hasProvider = provider !== undefined;
   const hasProviderReference = providerReference !== undefined;
   const hasExactProviderReference = hasProvider && hasProviderReference;

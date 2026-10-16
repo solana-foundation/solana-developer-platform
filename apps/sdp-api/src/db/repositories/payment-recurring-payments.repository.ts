@@ -7,6 +7,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
+  SdpEnvironment,
 } from "@sdp/types";
 
 export type {
@@ -456,18 +457,22 @@ export interface StalePaymentRecurringPaymentUpdateRow {
 
 export interface PaymentRecurringPaymentsRepository {
   listStaleLifecyclePayments(params: {
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<PaymentRecurringPaymentRow[]>;
   listStaleUpdatePayments(params: {
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<StalePaymentRecurringPaymentUpdateRow[]>;
   listRecoverableCollectionPayments(params: {
+    environment: SdpEnvironment;
     staleBefore: string;
     limit: number;
   }): Promise<RecoverableCollectionRecurringPaymentRow[]>;
   listDueCollectionPayments(params: {
+    environment: SdpEnvironment;
     dueBefore: string;
     retryBefore: string;
     limit: number;

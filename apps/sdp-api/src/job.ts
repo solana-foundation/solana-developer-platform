@@ -215,7 +215,9 @@ export async function runCronJob(): Promise<void> {
         await collect(monitored(RAMP_TRANSFERS_MONITOR, () => reconcileRampTransfers(env)));
         await collect(
           monitored(RECURRING_PAYMENTS_COLLECTION_MONITOR, () =>
-            collectDueRecurringPayments(env, new Date())
+            runInEachClusterScope(async () => {
+              await collectDueRecurringPayments(env, new Date());
+            })
           )
         );
         if (privateChannelsEnabled) {

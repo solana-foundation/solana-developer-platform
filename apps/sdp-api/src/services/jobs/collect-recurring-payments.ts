@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   isActivatingRecurringPaymentStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
@@ -332,6 +333,15 @@ async function processRowsConcurrently<T extends PaymentRecurringPaymentRow>(
   }
 }
 
+/**
+ * Recover stale lifecycle operations and collections, then collect due recurring payments, for
+ * the open cluster scope's environment only. Runners start it once per environment through
+ * `runInEachClusterScope`, so every row is built, sent and confirmed on its project's cluster.
+ *
+ * @param env - Runtime environment for repository and signer construction.
+ * @param now - Tick time anchoring the due, stale and retry windows.
+ * @returns Per-outcome row counts for this environment's run.
+ */
 export async function collectDueRecurringPayments(
   env: Env,
   now: Date
@@ -346,8 +356,10 @@ export async function collectDueRecurringPayments(
     now.getTime() - RECURRING_PAYMENT_COLLECTION_CONFIG.retryAfterMinutes * 60 * 1000
   ).toISOString();
   const recurringPaymentsRepo = createPostgresPaymentRecurringPaymentsRepository(getDb(env));
+  const { environment } = currentClusterScope();
 
   const staleLifecyclePayments = await recurringPaymentsRepo.listStaleLifecyclePayments({
+    environment,
     staleBefore,
     limit,
   });
@@ -356,6 +368,7 @@ export async function collectDueRecurringPayments(
   );
 
   const staleUpdatePayments = await recurringPaymentsRepo.listStaleUpdatePayments({
+    environment,
     staleBefore,
     limit,
   });
@@ -379,6 +392,7 @@ export async function collectDueRecurringPayments(
   }
 
   const staleCollectionPayments = await recurringPaymentsRepo.listRecoverableCollectionPayments({
+    environment,
     staleBefore,
     limit,
   });
@@ -387,6 +401,7 @@ export async function collectDueRecurringPayments(
   );
 
   const duePayments = await recurringPaymentsRepo.listDueCollectionPayments({
+    environment,
     dueBefore,
     retryBefore,
     limit,
