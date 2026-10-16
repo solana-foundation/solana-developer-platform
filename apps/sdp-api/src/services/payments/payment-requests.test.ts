@@ -12,6 +12,7 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import * as solanaPay from "@solana/pay";
 import { FindReferenceError, ValidateTransferError } from "@solana/pay";
@@ -40,7 +41,6 @@ import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { testSignature } from "@/test/helpers/recurring-payments";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { reconcilePaymentRequest } from "./payment-requests";
 
@@ -48,7 +48,7 @@ const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_CONFIG_ID = "cust_cfg_preq_handler_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
-const SIGNATURE = testSignature(5);
+const SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).fill(5)));
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 let findReferenceSpy: MockInstance<typeof solanaPay.findReference>;
