@@ -1,12 +1,24 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { type RampProviderId, SOL_MINT, SUCCESSFUL_PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import type { Signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import {
+  parsedMintTo,
+  parsedSystemTransfer,
+  parsedTokenBalance,
+  parsedTransactionResult,
+  parsedTransferChecked,
+  syntheticAddress,
+  syntheticSignature,
+} from "@/test/helpers/parsed-transactions";
 import {
   DEVNET_USDC_MINT,
   getSignaturesForAddressMock,
@@ -14,6 +26,7 @@ import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
   seedCounterparty,
+  seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
   TEST_KORA_FEE_PAYER,
@@ -24,8 +37,57 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedRateLimit } from "@/test/mocks/kv";
 
+const observedTransfersResponseSchema = z.object({
+  data: z.array(z.object({ signature: z.string().nullable(), amount: z.string() })),
+});
+
 describe("Payments routes — list transfers", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  function answerObservedSolDeposit(walletAddress: string): Signature {
+    const observedSig = syntheticSignature(30);
+    getSignaturesForAddressMock.mockReset();
+    rpc.answer("getSignaturesForAddress", [
+      {
+        signature: observedSig,
+        slot: 104,
+        err: null,
+        memo: null,
+        blockTime: 1700000400,
+        confirmationStatus: "confirmed",
+      },
+    ]);
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: observedSig,
+        slot: 104,
+        blockTime: 1700000400,
+        accountKeys: [TEST_SOLANA_ADDRESSES.wallet2, walletAddress],
+        instructions: [
+          parsedSystemTransfer({
+            source: TEST_SOLANA_ADDRESSES.wallet2,
+            destination: walletAddress,
+            lamports: 2_000_000,
+          }),
+        ],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      })
+    );
+    return observedSig;
+  }
+
+  async function listObservedTransfers(custodyWalletId: string) {
+    const res = await app.request(
+      `/v1/payments/transfers?custodyWalletId=${custodyWalletId}&includeObserved=true`,
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(res.status).toBe(200);
+    return observedTransfersResponseSchema.parse(await res.json());
+  }
 
   beforeEach(async () => {
     await seedProjectApiKey(getDb(env), env, {
@@ -233,407 +295,294 @@ describe("Payments routes — list transfers", () => {
     });
 
     it("surfaces observed inbound transfers for wallet history even without a DB record", async () => {
-      const observedSig =
-        "3o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3v";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000100,
-              slot: 101,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "10000000",
-                      decimals: 6,
-                      uiAmountString: "10",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                ],
-                postTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: DEVNET_USDC_MINT,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "10000000",
-                      decimals: 6,
-                      uiAmountString: "10",
-                    },
-                  },
-                ],
-              },
-              transaction: {
-                message: {
-                  accountKeys: [
-                    "SrcTokenAcct111111111111111111111111111111",
-                    "DstTokenAcct111111111111111111111111111111",
-                  ],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "transferChecked",
-                        info: {
-                          source: "SrcTokenAcct111111111111111111111111111111",
-                          destination: "DstTokenAcct111111111111111111111111111111",
-                          mint: DEVNET_USDC_MINT,
-                          tokenAmount: {
-                            amount: "10000000",
-                            decimals: 6,
-                            uiAmountString: "10",
-                          },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
+      const observedSig = syntheticSignature(21);
+      const sourceTokenAccount = syntheticAddress(21);
+      const destinationTokenAccount = syntheticAddress(22);
+      const usdcBalance = (accountIndex: number, owner: string, amount: string) =>
+        parsedTokenBalance({
+          accountIndex,
+          mint: DEVNET_USDC_MINT,
+          owner,
+          tokenAmount: {
+            amount,
+            decimals: 6,
+            uiAmountString: formatDecimalAmount(BigInt(amount), 6),
+          },
+        });
+      rpc.answer(
+        "getTransaction",
+        parsedTransactionResult({
+          signature: observedSig,
+          slot: 101,
+          blockTime: 1700000100,
+          accountKeys: [sourceTokenAccount, destinationTokenAccount],
+          instructions: [
+            parsedTransferChecked({
+              source: sourceTokenAccount,
+              destination: destinationTokenAccount,
+              mint: DEVNET_USDC_MINT,
+              authority: TEST_SOLANA_ADDRESSES.wallet2,
+              tokenAmount: { amount: "10000000", decimals: 6, uiAmountString: "10" },
+            }),
+          ],
+          preTokenBalances: [
+            usdcBalance(0, TEST_SOLANA_ADDRESSES.wallet2, "10000000"),
+            usdcBalance(1, TEST_SOLANA_ADDRESSES.wallet1, "0"),
+          ],
+          postTokenBalances: [
+            usdcBalance(0, TEST_SOLANA_ADDRESSES.wallet2, "0"),
+            usdcBalance(1, TEST_SOLANA_ADDRESSES.wallet1, "10000000"),
+          ],
+        })
       );
 
       getSignaturesForAddressMock.mockResolvedValueOnce([
         {
-          signature: observedSig as unknown as Signature,
+          signature: observedSig,
           slot: 101n,
           blockTime: 1700000100n,
           err: null,
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: Array<{
-            id: string;
-            amount: string;
-            direction: string;
-            signature: string | null;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "10",
-          direction: "inbound",
-          signature: observedSig,
-          status: "confirmed",
-          token: DEVNET_USDC_MINT,
-        });
-        expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          id: string;
+          amount: string;
+          direction: string;
+          signature: string | null;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "10",
+        direction: "inbound",
+        signature: observedSig,
+        status: "confirmed",
+        token: DEVNET_USDC_MINT,
+      });
+      expect(body.data[0]?.id).toMatch(/^xfr_observed_/);
     });
 
     it("discovers observed custom token deposits from owned token account history", async () => {
-      const observedSig =
-        "5o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3w";
-      const customMint = "CustomMint1111111111111111111111111111111";
-      const destinationTokenAccount = "DstTokenAcct111111111111111111111111111111";
-      const sourceTokenAccount = "SrcTokenAcct111111111111111111111111111111";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000200,
-              slot: 102,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "25000000",
-                      decimals: 6,
-                      uiAmountString: "25",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                ],
-                postTokenBalances: [
-                  {
-                    accountIndex: 0,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet2,
-                    uiTokenAmount: {
-                      amount: "0",
-                      decimals: 6,
-                      uiAmountString: "0",
-                    },
-                  },
-                  {
-                    accountIndex: 1,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "25000000",
-                      decimals: 6,
-                      uiAmountString: "25",
-                    },
-                  },
-                ],
-              },
-              transaction: {
-                message: {
-                  accountKeys: [sourceTokenAccount, destinationTokenAccount],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "transferChecked",
-                        info: {
-                          source: sourceTokenAccount,
-                          destination: destinationTokenAccount,
-                          mint: customMint,
-                          tokenAmount: {
-                            amount: "25000000",
-                            decimals: 6,
-                            uiAmountString: "25",
-                          },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
+      const observedSig = syntheticSignature(23);
+      const customMint = syntheticAddress(23);
+      const destinationTokenAccount = syntheticAddress(24);
+      const sourceTokenAccount = syntheticAddress(25);
+      const customBalance = (accountIndex: number, owner: string, amount: string) =>
+        parsedTokenBalance({
+          accountIndex,
+          mint: customMint,
+          owner,
+          tokenAmount: {
+            amount,
+            decimals: 6,
+            uiAmountString: formatDecimalAmount(BigInt(amount), 6),
+          },
+        });
+      rpc.answer(
+        "getTransaction",
+        parsedTransactionResult({
+          signature: observedSig,
+          slot: 102,
+          blockTime: 1700000200,
+          accountKeys: [sourceTokenAccount, destinationTokenAccount],
+          instructions: [
+            parsedTransferChecked({
+              source: sourceTokenAccount,
+              destination: destinationTokenAccount,
+              mint: customMint,
+              authority: TEST_SOLANA_ADDRESSES.wallet2,
+              tokenAmount: { amount: "25000000", decimals: 6, uiAmountString: "25" },
+            }),
+          ],
+          preTokenBalances: [
+            customBalance(0, TEST_SOLANA_ADDRESSES.wallet2, "25000000"),
+            customBalance(1, TEST_SOLANA_ADDRESSES.wallet1, "0"),
+          ],
+          postTokenBalances: [
+            customBalance(0, TEST_SOLANA_ADDRESSES.wallet2, "0"),
+            customBalance(1, TEST_SOLANA_ADDRESSES.wallet1, "25000000"),
+          ],
+        })
       );
 
-      getSplTokenAccountAddressesMock.mockResolvedValueOnce([
-        destinationTokenAccount as unknown as Address,
-      ]);
+      getSplTokenAccountAddressesMock.mockResolvedValueOnce([destinationTokenAccount]);
       getSignaturesForAddressMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
         {
-          signature: observedSig as unknown as Signature,
+          signature: observedSig,
           slot: 102n,
           blockTime: 1700000200n,
           err: null,
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
-          1,
-          expect.anything(),
-          TEST_SOLANA_ADDRESSES.wallet1,
-          expect.objectContaining({ commitment: "confirmed" })
-        );
-        expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
-          2,
-          expect.anything(),
-          destinationTokenAccount,
-          expect.objectContaining({ commitment: "confirmed" })
-        );
+      expect(res.status).toBe(200);
+      expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        TEST_SOLANA_ADDRESSES.wallet1,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
+      expect(getSignaturesForAddressMock).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        destinationTokenAccount,
+        expect.objectContaining({ commitment: "confirmed" })
+      );
 
-        const body = (await res.json()) as {
-          data: Array<{
-            amount: string;
-            direction: string;
-            signature: string | null;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "25",
-          direction: "inbound",
-          signature: observedSig,
-          status: "confirmed",
-          token: customMint,
-        });
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      const body = (await res.json()) as {
+        data: Array<{
+          amount: string;
+          direction: string;
+          signature: string | null;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "25",
+        direction: "inbound",
+        signature: observedSig,
+        status: "confirmed",
+        token: customMint,
+      });
     });
 
     it("surfaces observed token mints into owned token accounts", async () => {
-      const observedSig =
-        "4o9XWnJ7CyD6be8xXh8hFXRrM9rPzGQhE1mQ4Z8VjYkU7LZtP4R3WnV5uA2sD1fG6hJ7kL8mN9pQ1rS2tU3m";
-      const customMint = "MintedToken111111111111111111111111111111";
-      const destinationTokenAccount = "MintDstTokenAcct11111111111111111111111111";
-      const mintAuthority = "MintAuthority11111111111111111111111111111";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              blockTime: 1700000300,
-              slot: 103,
-              meta: {
-                err: null,
-                fee: 5000,
-                preTokenBalances: [],
-                postTokenBalances: [
-                  {
-                    accountIndex: 2,
-                    mint: customMint,
-                    owner: TEST_SOLANA_ADDRESSES.wallet1,
-                    uiTokenAmount: {
-                      amount: "500000000",
-                      decimals: 6,
-                      uiAmountString: "500",
-                    },
-                  },
-                ],
-              },
-              transaction: {
-                message: {
-                  accountKeys: [mintAuthority, customMint, destinationTokenAccount],
-                  instructions: [
-                    {
-                      program: "spl-token",
-                      parsed: {
-                        type: "mintTo",
-                        info: {
-                          account: destinationTokenAccount,
-                          amount: "500000000",
-                          mint: customMint,
-                          mintAuthority,
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
-        )
+      const observedSig = syntheticSignature(26);
+      const customMint = syntheticAddress(26);
+      const destinationTokenAccount = syntheticAddress(27);
+      const mintAuthority = syntheticAddress(28);
+      rpc.answer(
+        "getTransaction",
+        parsedTransactionResult({
+          signature: observedSig,
+          slot: 103,
+          blockTime: 1700000300,
+          accountKeys: [mintAuthority, customMint, destinationTokenAccount],
+          instructions: [
+            parsedMintTo({
+              mint: customMint,
+              account: destinationTokenAccount,
+              mintAuthority,
+              amount: "500000000",
+            }),
+          ],
+          preTokenBalances: [],
+          postTokenBalances: [
+            parsedTokenBalance({
+              accountIndex: 2,
+              mint: customMint,
+              owner: TEST_SOLANA_ADDRESSES.wallet1,
+              tokenAmount: { amount: "500000000", decimals: 6, uiAmountString: "500" },
+            }),
+          ],
+        })
       );
 
-      getSplTokenAccountAddressesMock.mockResolvedValueOnce([
-        destinationTokenAccount as unknown as Address,
-      ]);
+      getSplTokenAccountAddressesMock.mockResolvedValueOnce([destinationTokenAccount]);
       getSignaturesForAddressMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
         {
-          signature: observedSig as unknown as Signature,
+          signature: observedSig,
           slot: 103n,
           blockTime: 1700000300n,
           err: null,
         },
       ]);
 
-      try {
-        const res = await app.request(
-          `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-          },
-          env
-        );
+      const res = await app.request(
+        `/v1/payments/transfers?custodyWalletId=${TEST_CUSTODY_WALLET_ID}&includeObserved=true`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        },
+        env
+      );
 
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          data: Array<{
-            amount: string;
-            destination: string;
-            direction: string;
-            signature: string | null;
-            source: string;
-            status: string;
-            token: string;
-          }>;
-          meta: { total: number };
-        };
-        expect(body.meta.total).toBe(1);
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0]).toMatchObject({
-          amount: "500",
-          destination: TEST_SOLANA_ADDRESSES.wallet1,
-          direction: "inbound",
-          signature: observedSig,
-          source: mintAuthority,
-          status: "confirmed",
-          token: customMint,
-        });
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          amount: string;
+          destination: string;
+          direction: string;
+          signature: string | null;
+          source: string;
+          status: string;
+          token: string;
+        }>;
+        meta: { total: number };
+      };
+      expect(body.meta.total).toBe(1);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]).toMatchObject({
+        amount: "500",
+        destination: TEST_SOLANA_ADDRESSES.wallet1,
+        direction: "inbound",
+        signature: observedSig,
+        source: mintAuthority,
+        status: "confirmed",
+        token: customMint,
+      });
+    });
+
+    it("reads a Sandbox wallet's observed history on devnet only", async () => {
+      const observedSig = answerObservedSolDeposit(TEST_SOLANA_ADDRESSES.wallet1);
+
+      const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
+
+      expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
+        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+      ]);
+      expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getSignaturesForAddress" });
+      expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getTransaction" });
+      expect(rpc.calls.filter((call) => call.cluster === "mainnet-beta")).toEqual([]);
+    });
+
+    it("reads a Production wallet's observed history on mainnet-beta only", async () => {
+      await seedProductionPrivyWallet({
+        custodyWalletId: "cwlt_observed_production",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const observedSig = answerObservedSolDeposit(TEST_SOLANA_ADDRESSES.wallet3);
+
+      const body = await listObservedTransfers("cwlt_observed_production");
+
+      expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
+        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+      ]);
+      expect(rpc.calls).toContainEqual({
+        cluster: "mainnet-beta",
+        method: "getSignaturesForAddress",
+      });
+      expect(rpc.calls).toContainEqual({ cluster: "mainnet-beta", method: "getTransaction" });
+      expect(rpc.calls.filter((call) => call.cluster === "devnet")).toEqual([]);
     });
 
     it("returns all transfers via DB-only path when no wallet filter is provided", async () => {
