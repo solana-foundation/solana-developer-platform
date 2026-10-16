@@ -4,6 +4,7 @@ import {
   isBvnkCustomerVerified,
   normalizeBvnkCurrencyAndNetwork,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getCryptoRailAssetLabel, type PaymentRampQuote } from "@sdp/types";
 import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -115,7 +116,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail, currentClusterScope().cluster),
         amount: null,
         memo: null,
         type: "onramp",
@@ -193,7 +194,7 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: null,
         destinationAddress: destinationWalletAddress,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail, currentClusterScope().cluster),
         amount: null,
         memo: null,
         type: "onramp",

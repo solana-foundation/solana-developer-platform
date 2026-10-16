@@ -34,6 +34,7 @@ import { readStoredBvnkSettlement } from "@sdp/payments/ramps/providers/bvnk/set
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { toNumberAmount } from "@sdp/solana/amount";
 import {
   BVNK_FUNDING_WALLET_STATUS,
@@ -119,7 +120,7 @@ export async function createPendingBvnkOfframpTransfer(
     counterpartyId: input.counterpartyId,
     sourceAddress: input.walletAddress,
     destinationAddress: null,
-    token: rampTransferTokenMint(input.assetRail, c.env),
+    token: rampTransferTokenMint(input.assetRail, currentClusterScope().cluster),
     amount: input.cryptoAmount,
     memo: null,
     type: "offramp",

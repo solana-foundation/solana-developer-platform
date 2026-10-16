@@ -1,4 +1,3 @@
-import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
@@ -133,12 +132,12 @@ export function normalizePaymentToken(token: string, cluster: SolanaCluster): st
  * this boundary; unavailable cluster mints fail loudly.
  *
  * @param assetRail - The canonical quoted crypto rail, e.g. "usdc.solana".
- * @param env - Worker env used to resolve the active cluster.
- * @returns The mint address for the active cluster.
+ * @param cluster - The project's cluster, the same one `/transfers` resolves funding tokens on.
+ * @returns The mint address on `cluster`.
+ * @throws AppError (400) when the rail's asset has no mint on `cluster`.
  */
-export function rampTransferTokenMint(assetRail: CryptoRailId, env: RpcEnv): string {
+export function rampTransferTokenMint(assetRail: CryptoRailId, cluster: SolanaCluster): string {
   const symbol = getCryptoRailAssetLabel(assetRail);
-  const cluster = getSolanaConfig(env).network;
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {
     throw badRequest(`${symbol} is not available on ${cluster}`);

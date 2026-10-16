@@ -2,6 +2,7 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   isStagedProviderRefusalReason,
   type PaymentRampEstimate,
@@ -240,7 +241,7 @@ export async function persistRampQuoteTransfer(
     walletId: input.wallet.walletId,
     counterpartyId: input.counterparty.id,
     direction: input.direction,
-    token: rampTransferTokenMint(input.assetRail, c.env),
+    token: rampTransferTokenMint(input.assetRail, currentClusterScope().cluster),
     sourceAddress: isOnramp ? null : input.walletAddress,
     destinationAddress: isOnramp ? input.walletAddress : null,
     amount: input.cryptoAmount,
