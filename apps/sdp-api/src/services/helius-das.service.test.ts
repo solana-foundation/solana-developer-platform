@@ -1,5 +1,10 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment, SolanaCluster } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SdpEnvironment,
+  type SolanaCluster,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -106,6 +111,36 @@ describe("helius-das service", () => {
 
     expect(productionBalances).toEqual([balance]);
     expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("prices the built-in USDC when the issued stablecoin lookup fails", async () => {
+    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints[CLUSTER_BY_SDP_ENVIRONMENT.sandbox];
+    const usdcBalance = {
+      token: WELL_KNOWN_TOKENS.USDC.symbol,
+      mint: usdcMint.address,
+      amount: "3000000",
+      uiAmount: "3",
+      decimals: usdcMint.decimals,
+    };
+    const issuedBalance = {
+      token: "TEST",
+      mint: TEST_STABLE_MINT,
+      amount: "12500000",
+      uiAmount: "12.5",
+      decimals: 6,
+    };
+    const db = getDb(env);
+    const statement = db.prepare("SELECT 1");
+    vi.spyOn(statement, "bind").mockReturnValue(statement);
+    vi.spyOn(statement, "all").mockRejectedValue(new Error("database unavailable"));
+    vi.spyOn(db, "prepare").mockReturnValue(statement);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({}));
+
+    const balances = await inScope("sandbox", () =>
+      attachUsdValuesToBalances(env, [usdcBalance, issuedBalance])
+    );
+
+    expect(balances).toEqual([{ ...usdcBalance, usdPrice: 1, usdValue: 3 }, issuedBalance]);
   });
 
   it("attaches DAS symbols to unlabeled token balances", async () => {
