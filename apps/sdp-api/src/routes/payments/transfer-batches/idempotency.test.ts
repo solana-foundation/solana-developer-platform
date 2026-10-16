@@ -32,6 +32,30 @@ describe("canonicalizeTransferBatchBody", () => {
     });
   });
 
+  it("treats options sent at their default as omitted (APE-665)", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      token: "SOL",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    };
+
+    expect(
+      canonicalizeTransferBatchBody({
+        ...body,
+        options: { maxRecipientsPerTransaction: 20, preflight: true },
+      })
+    ).toEqual(canonicalizeTransferBatchBody(body));
+    expect(
+      canonicalizeTransferBatchBody({
+        ...body,
+        options: { maxRecipientsPerTransaction: 20, preflight: false },
+      })
+    ).toEqual({ ...body, options: { preflight: false } });
+    expect(
+      canonicalizeTransferBatchBody({ ...body, options: { maxRecipientsPerTransaction: 8 } })
+    ).toEqual({ ...body, options: { maxRecipientsPerTransaction: 8 } });
+  });
+
   it("leaves a body without a recipients array untouched for validation to refuse", () => {
     expect(canonicalizeTransferBatchBody({ recipients: "nope" })).toEqual({ recipients: "nope" });
     expect(canonicalizeTransferBatchBody(["unparsed", "{"])).toEqual(["unparsed", "{"]);
