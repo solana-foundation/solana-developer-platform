@@ -14,6 +14,7 @@ import { createSystemPaymentsRepository } from "@/db/repositories";
 import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { RampWebhookProcessResult, WebhookProcessor } from "./processor";
@@ -219,6 +220,15 @@ export const moonpayWebhook = {
         provider: event.provider,
       });
       if (transferEnvironment !== null && transferEnvironment !== environment) {
+        logEvent("error", {
+          event: "sdp_api_ramp_settlement_environment_mismatch",
+          flow: "ramp-settlement",
+          provider: event.provider,
+          provider_reference: event.reference,
+          transfer_id: event.transferId,
+          environment,
+          transfer_environment: transferEnvironment,
+        });
         return { outcome: "refused", reason: "environment_mismatch" };
       }
       getLogger().warn(
