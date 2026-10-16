@@ -22,7 +22,7 @@ import {
 export const COMPLIANCE_PROVIDERS = ["range", "elliptic", "trm", "chainalysis"] as const;
 export type ComplianceProviderId = (typeof COMPLIANCE_PROVIDERS)[number];
 
-export const RAMP_PROVIDERS = ["moonpay", "bvnk", "coinbase", "stripe"] as const;
+export const RAMP_PROVIDERS = ["moonpay", "bvnk", "stripe"] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 
 /**
@@ -30,7 +30,13 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
  * accounts and webhook events stay readable, but nothing writes or dispatches
  * to them. A removed provider moves here, and an id is never reused.
  */
-export const RETIRED_RAMP_PROVIDERS = ["hercle", "mural", "moneygram", "lightspark"] as const;
+export const RETIRED_RAMP_PROVIDERS = [
+  "hercle",
+  "mural",
+  "moneygram",
+  "lightspark",
+  "coinbase",
+] as const;
 export type RetiredRampProviderId = (typeof RETIRED_RAMP_PROVIDERS)[number];
 
 /** Every provider id a stored ramp row can carry: a live provider or a retired one. */
@@ -554,7 +560,6 @@ export type RampProviderSurfacing = boolean | "sandbox";
 export const RAMP_PROVIDER_SURFACING: Readonly<Record<RampProviderId, RampProviderSurfacing>> = {
   moonpay: true,
   bvnk: true,
-  coinbase: true,
   stripe: true,
 };
 

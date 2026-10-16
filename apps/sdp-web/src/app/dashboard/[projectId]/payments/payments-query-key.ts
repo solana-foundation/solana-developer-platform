@@ -2,6 +2,7 @@ import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RampDirection } from "@sdp/types/ramp-requirements";
+import type { Arguments } from "swr";
 
 export interface CounterpartyRequirementsParams {
   counterpartyId: string;
@@ -27,6 +28,13 @@ export const paymentsQueryKeys = {
     ["offramp-transfer-status", transferId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
+  /** The counterparty lists a new counterparty or account appears in. */
+  isCounterpartyListKey: (key: Arguments) =>
+    key === paymentsQueryKeys.actionCounterparties() ||
+    (Array.isArray(key) &&
+      (key[0] === "counterparty-accounts" ||
+        key[0] === "counterparty-provider-accounts" ||
+        key[0] === "payment-request-counterparty-accounts")),
   isCounterpartyRequirementsKey: (key: unknown) =>
     Array.isArray(key) && key[0] === "counterparty-requirements",
   counterpartyRequirements: ({

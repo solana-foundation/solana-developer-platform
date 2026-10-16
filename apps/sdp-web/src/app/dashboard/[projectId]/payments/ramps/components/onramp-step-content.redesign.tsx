@@ -8,8 +8,6 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard.redesign";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent.redesign";
-import { CoinbaseQuoteSummary } from "./coinbase/quote-summary.redesign";
-import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { DepositTimeline } from "./deposit-timeline";
@@ -182,23 +180,14 @@ function ManualInstructionsStep({
   );
 }
 
-/** A provider's hosted checkout: Coinbase's order summary above its frame, or MoonPay's frame. */
+/** A provider's hosted checkout. */
 function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
   const t = useTranslations();
   return (
-    <div className="space-y-6">
-      {quote.provider === "coinbase" ? (
-        <>
-          <CoinbaseQuoteSummary quote={quote} />
-          <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
-        </>
-      ) : (
-        <MoonpayRampFrame
-          title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
-          src={quote.hostedUrl}
-        />
-      )}
-    </div>
+    <MoonpayRampFrame
+      title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
+      src={quote.hostedUrl}
+    />
   );
 }
 
@@ -221,7 +210,6 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
   if (demo && quote.deliveryMode !== "manual_instructions") {
     return (
       <div className="space-y-6">
-        {quote.provider === "coinbase" ? <CoinbaseQuoteSummary quote={quote} /> : null}
         <DemoProviderCheckout
           direction="onramp"
           provider={quote.provider}

@@ -6,8 +6,13 @@
  */
 
 import { Token2022Service } from "@sdp/solana/token-2022";
+import type { MovementId } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
-import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  isKoraSponsorshipConfigured,
+  type SponsorshipScope,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -15,19 +20,22 @@ import type { Env } from "@/types/env";
  *
  * @param env - Environment bindings
  * @param signer - Transaction signer (from SigningService.getTransactionSigner)
+ * @param sponsorship - Who is sponsored and the movement the sponsor serves.
+ * @param sponsorship.scope - Who is sponsored.
+ * @param sponsorship.movement - The movement the sponsor serves.
+ * @returns The Token-2022 service.
  *
- * When KORA_RPC_URL is set in the environment, the service will use Kora
- * to pay transaction fees (gasless for the custody wallet). Otherwise,
- * the custody wallet pays fees directly.
+ * When a Kora is configured for the scope's cluster (`KORA_<CLUSTER>_URL`),
+ * the service uses it to pay transaction fees (gasless for the custody
+ * wallet). Otherwise, the custody wallet pays fees directly.
  */
 export function createToken2022Service(
   env: Env,
   signer: TransactionSigner,
-  sponsorshipScope: SponsorshipScope
+  sponsorship: { scope: SponsorshipScope; movement: MovementId }
 ): Token2022Service {
-  // Only create fee payment adapter if Kora is configured
-  const feePayment = env.KORA_RPC_URL
-    ? createSponsorshipFeePayment(env, sponsorshipScope)
+  const feePayment = isKoraSponsorshipConfigured(env, sponsorship.scope)
+    ? createSponsorshipFeePayment(env, sponsorship.scope, sponsorship.movement)
     : undefined;
 
   return new Token2022Service(env, signer, feePayment);

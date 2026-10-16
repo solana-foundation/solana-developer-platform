@@ -24,6 +24,7 @@ import app from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { transferBatchListResponse } from "@/openapi/paths/responses";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { SigningService } from "@/services/domain/signing.service";
@@ -31,9 +32,13 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
+  enableMainnetSponsorship,
+  MAINNET_USDC_MINT,
+  seedProjectPrivyWallet,
   sendTransactionMock,
   sendTransactionPreflightError,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
@@ -127,41 +132,6 @@ function ownedSubmissionAdapter(
       );
     },
   };
-}
-
-function mockSourceTokenAccountRpc(params: {
-  mint: string;
-  tokenAccount: string;
-  decimals: number;
-}) {
-  createRpcMock.mockReturnValue({
-    getTokenAccountsByOwner: () => ({
-      send: async () => ({
-        value: [
-          {
-            pubkey: params.tokenAccount,
-            account: {
-              data: {
-                parsed: {
-                  info: {
-                    mint: params.mint,
-                    tokenAmount: {
-                      amount: "1000000000",
-                      decimals: params.decimals,
-                      uiAmountString: "1000",
-                    },
-                  },
-                },
-              },
-            },
-          },
-        ],
-      }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
 async function seedAuthAndWallet(): Promise<void> {
@@ -348,6 +318,10 @@ async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise
 }
 
 async function seedCounterparty(externalId: string): Promise<string> {
+  return seedProjectCounterparty(TEST_PROJECT.id, externalId);
+}
+
+async function seedProjectCounterparty(projectId: string, externalId: string): Promise<string> {
   const id = `cpty_${crypto.randomUUID()}`;
   await getDb(env)
     .prepare(
@@ -366,7 +340,7 @@ async function seedCounterparty(externalId: string): Promise<string> {
     .bind(
       id,
       TEST_ORG.id,
-      TEST_PROJECT.id,
+      projectId,
       externalId,
       "individual",
       "Batch Test Counterparty",
@@ -382,13 +356,25 @@ async function seedCryptoWalletCounterpartyAccounts(
   counterpartyId: string,
   walletAddresses: string[]
 ): Promise<string[]> {
+  return seedProjectCryptoWalletCounterpartyAccounts(
+    TEST_PROJECT.id,
+    counterpartyId,
+    walletAddresses
+  );
+}
+
+async function seedProjectCryptoWalletCounterpartyAccounts(
+  projectId: string,
+  counterpartyId: string,
+  walletAddresses: string[]
+): Promise<string[]> {
   const now = new Date().toISOString();
   const ids = walletAddresses.map(() => `counterparty_account_${crypto.randomUUID()}`);
   const placeholders = walletAddresses.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
   const values = walletAddresses.flatMap((walletAddress, index) => [
     ids[index],
     TEST_ORG.id,
-    TEST_PROJECT.id,
+    projectId,
     counterpartyId,
     "crypto_wallet",
     "Batch payment wallet",
@@ -457,6 +443,23 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
+  const rpc = installClusterRpcStub();
+
+  function answerSourceTokenAccount(mint: string) {
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_TOKEN_ACCOUNT,
+          mint,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
@@ -503,12 +506,7 @@ describe("payment transfer batches", () => {
   });
 
   it("estimates a SOL transfer batch", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_estimate_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -573,16 +571,11 @@ describe("payment transfer batches", () => {
         sponsored: true,
       },
     });
-    expect(getFeeForMessageMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getFeeForMessage")).toHaveLength(1);
   });
 
   it("estimates a batch when counterpartyId is omitted (derived from account)", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_derive_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -638,6 +631,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -762,7 +756,7 @@ describe("payment transfer batches", () => {
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
 
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -828,6 +822,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -895,6 +890,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -992,7 +988,9 @@ describe("payment transfer batches", () => {
       "/v1/payments/transfer-batches",
       {
         method: "GET",
-        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
       },
       env
     );
@@ -1129,6 +1127,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -1178,6 +1177,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -1260,6 +1260,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -1329,6 +1330,7 @@ describe("payment transfer batches", () => {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
           },
           body,
         },
@@ -1428,6 +1430,233 @@ describe("payment transfer batches", () => {
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
+  // HOO-1918: once the shared key record is gone (24h, or a 5xx freed it), the
+  // batch row is the backstop, and it too ignores recipient order.
+  it("replays a reordered same-key retry from the batch row once the shared record is gone", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_reordered_backstop_counterparty");
+    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": "batch-reordered-backstop-key",
+    };
+    const first = { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" };
+    const second = { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" };
+    const post = (recipients: (typeof first)[]) =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+    const original = await post([first, second]);
+    expect(original.status).toBe(200);
+    const sends = signAndSendMock.mock.calls.length;
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const reordered = await post([second, first]);
+
+    expect(reordered.status).toBe(200);
+    const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
+    const replayedBatch = ((await reordered.json()) as { data: { batch: { id: string } } }).data;
+    expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
+  // Keegan (#2334): a request that died after the batch and its recipients
+  // committed, before any chunk transfer row, left the batch processing; its
+  // same-key retry replayed it forever and nothing settled it.
+  it("fails never-sent recipients of a batch whose request died, and settles it on the same-key retry", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_stranded_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const post = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "batch-stranded-key",
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+    const original = await post();
+    expect(original.status).toBe(200);
+    const batchId = ((await original.json()) as { data: { batch: { id: string } } }).data.batch.id;
+    // The state a crash right after the batch commit leaves: recipients pending
+    // and unlinked, no chunk transfer row, the batch processing, no key outcome.
+    await getDb(env)
+      .prepare(
+        `WITH unlinked AS (
+           UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL
+            WHERE batch_id = ? RETURNING id
+         )
+         UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?`
+      )
+      .bind(batchId, batchId)
+      .run();
+    await getDb(env)
+      .prepare(
+        "DELETE FROM payment_transfers WHERE type = 'transfer_batch' AND provider_data->'recipientIds' IS NOT NULL AND id NOT IN (SELECT transfer_id FROM payment_transfer_recipients WHERE transfer_id IS NOT NULL)"
+      )
+      .run();
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const sends = signAndSendMock.mock.calls.length;
+
+    const retry = await post();
+
+    expect(retry.status).toBe(200);
+    const body = (await retry.json()) as {
+      data: { batch: { id: string; status: string }; recipients: { status: string }[] };
+    };
+    expect(body.data.batch).toMatchObject({ id: batchId, status: "failed" });
+    expect(body.data.recipients.map((recipient) => recipient.status)).toEqual(["failed"]);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
+  it("settles a stranded batch with no client retry from the pending-transfers job", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    createFeePaymentAdapterMock.mockReturnValue(
+      ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+    );
+    const counterpartyId = await seedCounterparty("batch_stranded_sweep_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const original = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "batch-stranded-sweep-key",
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId: accountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(original.status).toBe(200);
+    const batchId = ((await original.json()) as { data: { batch: { id: string } } }).data.batch.id;
+    // Stranded two hours ago: recipients unlinked, no chunk transfer, still processing.
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL WHERE batch_id = ?"
+      )
+      .bind(batchId)
+      .run();
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_batches SET status = 'processing', created_at = ? WHERE id = ?"
+      )
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), batchId)
+      .run();
+
+    await runInEachClusterScope(() => trackPendingTransfers(env));
+
+    const batch = await getDb(env)
+      .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+      .bind(batchId)
+      .first<{ status: string }>();
+    expect(batch?.status).toBe("failed");
+  });
+
+  // Gap analysis (HOO-1918): the row replay works from the request's own
+  // identifiers, so an account archived since never refuses a request that ran.
+  it("answers a retry from the batch row after a recipient's account is archived", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_archived_backstop_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const request = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "batch-archived-backstop-key",
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+    const original = await request();
+    expect(original.status).toBe(200);
+    const sends = signAndSendMock.mock.calls.length;
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    await getDb(env).execute("UPDATE counterparty_accounts SET status = 'archived' WHERE id = ?", [
+      counterpartyAccountId,
+    ]);
+
+    const retry = await request();
+    expect(retry.status).toBe(200);
+    const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
+    const replayedBatch = ((await retry.json()) as { data: { batch: { id: string } } }).data;
+    expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -1483,11 +1712,13 @@ describe("payment transfer batches", () => {
       }>();
     expect(required(stored).source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     assert(stored);
-    assert(stored.idempotency_fingerprint);
-    expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
-      "sourceCustodyWalletId",
-      TEST_CUSTODY_WALLET_ID
-    );
+    // The row records the key layer's fingerprint, which replayFromRecord compares.
+    const keyRecord = await getDb(env)
+      .prepare(
+        "SELECT fingerprint FROM idempotency_keys WHERE operation LIKE 'POST %transfer-batches'"
+      )
+      .first<{ fingerprint: string }>();
+    expect(stored.idempotency_fingerprint).toBe(required(keyRecord).fingerprint);
 
     const count = await getDb(env)
       .prepare(
@@ -1549,16 +1780,20 @@ describe("payment transfer batches", () => {
     );
 
     expect(first.status).toBe(200);
-    expect(conflict.status).toBe(409);
+    expect(conflict.status).toBe(422);
     const conflictBody = (await conflict.json()) as { error: { code: string } };
-    expect(conflictBody.error.code).toBe("CONFLICT");
+    expect(conflictBody.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the original batch when a concurrent insert loses the idempotency race", async () => {
+  it("answers a concurrent duplicate 409 while the first batch holds its key", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
+    let markSigning!: () => void;
+    const signing = new Promise<void>((resolve) => {
+      markSigning = resolve;
+    });
     let releaseSignerGate!: () => void;
     const signerGate = new Promise<void>((resolve) => {
       releaseSignerGate = resolve;
@@ -1566,9 +1801,7 @@ describe("payment transfer batches", () => {
     let signerCallCount = 0;
     createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
       signerCallCount += 1;
-      if (signerCallCount === 2) {
-        releaseSignerGate();
-      }
+      markSigning();
       await signerGate;
       return sourceSigner;
     });
@@ -1593,34 +1826,28 @@ describe("payment transfer batches", () => {
       options: { preflight: false },
     });
 
-    const responses = await Promise.all([
-      app.request(
-        "/v1/payments/transfer-batches",
-        { method: "POST", headers, body: requestBody },
-        env
-      ),
-      app.request(
-        "/v1/payments/transfer-batches",
-        { method: "POST", headers, body: requestBody },
-        env
-      ),
-    ]);
-
-    expect(responses.map((response) => response.status)).toEqual([200, 200]);
-    const bodies = await Promise.all(
-      responses.map(
-        async (response) =>
-          (await response.json()) as {
-            data: { batch: { id: string }; recipients: unknown[]; transfers: unknown[] };
-          }
-      )
+    const first = app.request(
+      "/v1/payments/transfer-batches",
+      { method: "POST", headers, body: requestBody },
+      env
     );
-    expect(bodies[1].data.batch.id).toBe(bodies[0].data.batch.id);
-    expect(bodies[0].data.recipients).toHaveLength(1);
-    expect(bodies[1].data.recipients).toHaveLength(1);
-    expect(Array.isArray(bodies[0].data.transfers)).toBe(true);
-    expect(Array.isArray(bodies[1].data.transfers)).toBe(true);
-    expect(signerCallCount).toBe(2);
+    await signing;
+    // The shared Idempotency-Key step (HOO-1918) holds the key for the first
+    // request, so the duplicate never reaches the batch row's own race.
+    const duplicate = await app.request(
+      "/v1/payments/transfer-batches",
+      { method: "POST", headers, body: requestBody },
+      env
+    );
+    releaseSignerGate();
+
+    expect(duplicate.status).toBe(409);
+    expect(((await duplicate.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_IN_FLIGHT"
+    );
+    expect(duplicate.headers.get("Retry-After")).toBeTruthy();
+    expect((await first).status).toBe(200);
+    expect(signerCallCount).toBe(1);
     expect(signAndSendMock).toHaveBeenCalledTimes(1);
 
     const count = await getDb(env)
@@ -1634,7 +1861,36 @@ describe("payment transfer batches", () => {
     expect(count).toEqual({ count: 1 });
   });
 
-  it("creates two transfer batches when no idempotency key is supplied", async () => {
+  it("refuses a transfer batch without an Idempotency-Key", async () => {
+    // A valid, authorized request: validation and access run before the key check.
+    const counterpartyId = await seedCounterparty("batch_no_key_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+  });
+
+  it("creates two transfer batches under two different idempotency keys", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
@@ -1676,12 +1932,20 @@ describe("payment transfer batches", () => {
 
     const first = await app.request(
       "/v1/payments/transfer-batches",
-      { method: "POST", headers, body: requestBody },
+      {
+        method: "POST",
+        headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+        body: requestBody,
+      },
       env
     );
     const second = await app.request(
       "/v1/payments/transfer-batches",
-      { method: "POST", headers, body: requestBody },
+      {
+        method: "POST",
+        headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+        body: requestBody,
+      },
       env
     );
 
@@ -1708,14 +1972,14 @@ describe("payment transfer batches", () => {
     {
       label: "legacy SPL Token",
       tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
-      requestToken: TEST_SOLANA_ADDRESSES.mint,
-      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+      requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
     {
       label: "Token-2022",
       tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
-      requestToken: TEST_SOLANA_ADDRESSES.mint,
-      expectedMint: TEST_SOLANA_ADDRESSES.mint,
+      requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
     {
       label: "well-known symbol USDC",
@@ -1733,11 +1997,7 @@ describe("payment transfer batches", () => {
         lamports: 4200000000n,
         owner: tokenProgram,
       } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-      mockSourceTokenAccountRpc({
-        mint: expectedMint,
-        tokenAccount: TEST_TOKEN_ACCOUNT,
-        decimals: 6,
-      });
+      answerSourceTokenAccount(expectedMint);
 
       const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
       createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
@@ -1753,6 +2013,7 @@ describe("payment transfer batches", () => {
         {
           method: "POST",
           headers: {
+            "Idempotency-Key": crypto.randomUUID(),
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
@@ -1809,7 +2070,7 @@ describe("payment transfer batches", () => {
           err: null,
         },
       ]);
-      await trackPendingTransfers(env);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
       const settledBatch = await getDb(env)
         .prepare(
           `SELECT status
@@ -1821,6 +2082,86 @@ describe("payment transfer batches", () => {
       expect(required(settledBatch).status).toBe("confirmed");
     }
   );
+
+  it("builds a Production project's USDC batch on mainnet-beta with the mainnet mint", async () => {
+    const productionProjectId = `${TEST_PROJECT.id}_production`;
+    const sourceSigner = await generateKeyPairSigner();
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    await seedProjectPrivyWallet({
+      organizationId: TEST_ORG.id,
+      projectId: productionProjectId,
+      createdBy: TEST_USER.id,
+      custodyWalletId: "cwlt_batch_production",
+      publicKey: sourceSigner.address,
+    });
+    await getDb(env)
+      .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+      .bind(productionProjectId, TEST_API_KEY.id)
+      .run();
+    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_CACHED_API_KEY,
+      projectId: productionProjectId,
+      environment: "production",
+    });
+    await enableMainnetSponsorship();
+    answerSourceTokenAccount(MAINNET_USDC_MINT);
+    const counterpartyId = await seedProjectCounterparty(
+      productionProjectId,
+      "batch_production_counterparty"
+    );
+    const counterpartyAccountIds = await seedProjectCryptoWalletCounterpartyAccounts(
+      productionProjectId,
+      counterpartyId,
+      [TEST_SOLANA_ADDRESSES.wallet2]
+    );
+
+    const res = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: "cwlt_batch_production",
+          token: "USDC",
+          recipients: counterpartyAccountIds.map((counterpartyAccountId) => ({
+            counterpartyId,
+            counterpartyAccountId,
+            amount: "1.25",
+          })),
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(rpc.calls).toContainEqual({
+      cluster: "mainnet-beta",
+      method: "getTokenAccountsByOwner",
+    });
+    expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+    const stored = await getDb(env)
+      .prepare(
+        `SELECT b.project_id, b.token AS batch_token, t.token AS transfer_token
+           FROM payment_transfer_batches b
+           JOIN payment_transfer_recipients r ON r.batch_id = b.id
+           JOIN payment_transfers t ON t.id = r.transfer_id
+          WHERE b.organization_id = ?`
+      )
+      .bind(TEST_ORG.id)
+      .all<{ project_id: string; batch_token: string; transfer_token: string }>();
+    expect(stored.results).toEqual([
+      {
+        project_id: productionProjectId,
+        batch_token: MAINNET_USDC_MINT,
+        transfer_token: MAINNET_USDC_MINT,
+      },
+    ]);
+  });
 
   it("returns a submitted chunk as processing without confirming in-request", async () => {
     const sourceSigner = await generateKeyPairSigner();
@@ -1841,6 +2182,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -1890,6 +2232,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -1924,7 +2267,7 @@ describe("payment transfer batches", () => {
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
     const settledBatch = await getDb(env)
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
@@ -1954,6 +2297,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -2012,6 +2356,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -2051,7 +2396,7 @@ describe("payment transfer batches", () => {
               }
       )
     );
-    await trackPendingTransfers(env);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
 
     const batchRow = await getDb(env)
       .prepare("SELECT status, error FROM payment_transfer_batches WHERE id = ?")
@@ -2127,6 +2472,7 @@ describe("payment transfer batches", () => {
         {
           method: "POST",
           headers: {
+            "Idempotency-Key": crypto.randomUUID(),
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
@@ -2212,6 +2558,7 @@ describe("payment transfer batches", () => {
         {
           method: "POST",
           headers: {
+            "Idempotency-Key": crypto.randomUUID(),
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
@@ -2247,8 +2594,8 @@ describe("payment transfer batches", () => {
         .first<{ count: number | string }>();
       expect(Number(required(orphanRows).count)).toBe(0);
 
-      await trackPendingTransfers(env);
-      await trackPendingTransfers(env);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+      await runInEachClusterScope(() => trackPendingTransfers(env));
 
       const batchRow = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
@@ -2313,6 +2660,7 @@ describe("payment transfer batches", () => {
         {
           method: "POST",
           headers: {
+            "Idempotency-Key": crypto.randomUUID(),
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
@@ -2402,6 +2750,7 @@ describe("payment transfer batches", () => {
         {
           method: "POST",
           headers: {
+            "Idempotency-Key": crypto.randomUUID(),
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
@@ -2457,6 +2806,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -2527,6 +2877,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -2633,6 +2984,7 @@ describe("payment transfer batches", () => {
       {
         method: "POST",
         headers: {
+          "Idempotency-Key": crypto.randomUUID(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
@@ -2703,6 +3055,7 @@ describe("payment transfer batches", () => {
           {
             method: "POST",
             headers: {
+              "Idempotency-Key": crypto.randomUUID(),
               "Content-Type": "application/json",
               Authorization: `Bearer ${TEST_API_KEY.raw}`,
             },

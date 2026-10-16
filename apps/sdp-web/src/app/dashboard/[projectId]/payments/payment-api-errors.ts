@@ -1,11 +1,19 @@
-export type PaymentApiErrorBody = {
-  error?:
-    | string
-    | {
-        message?: string;
-      };
-  message?: string;
-};
+import { z } from "zod";
+
+/**
+ * The fields a payments API error envelope may carry, as `getPaymentApiError`
+ * reads them. Each field falls back to absent on its own, so a body with one
+ * unexpected field still yields the others, as reading it field by field did.
+ */
+export const paymentApiErrorBodySchema = z.object({
+  error: z
+    .union([z.string(), z.object({ message: z.string().optional().catch(undefined) })])
+    .optional()
+    .catch(undefined),
+  message: z.string().optional().catch(undefined),
+});
+
+export type PaymentApiErrorBody = z.infer<typeof paymentApiErrorBodySchema>;
 
 /** The message to show for a failed payments API call. */
 export function getPaymentApiError(body: unknown, fallback: string): string {

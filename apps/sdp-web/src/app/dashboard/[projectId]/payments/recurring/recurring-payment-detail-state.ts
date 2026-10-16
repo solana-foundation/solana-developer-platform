@@ -3,6 +3,7 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentsDashboardWallet,
 } from "@sdp/types";
+import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 
 export function getRecurringPaymentDetailState({
   sourceCustodyWalletId,
@@ -49,4 +50,13 @@ export function getRecurringPaymentDetailState({
     signingActionsDisabled: controlsDisabled || signingUnavailable,
     cancelDisabled: controlsDisabled || (status !== "pending_activation" && signingUnavailable),
   };
+}
+
+/**
+ * After a failed recurring action: an unknown outcome or a reused key (the
+ * action may have run) refreshes the page, so its status and controls show
+ * what happened.
+ */
+export function refreshIfOutcomeUnknown(cause: unknown, refresh: () => void): void {
+  if (cause instanceof IdempotencyOutcomeUnknownError) refresh();
 }

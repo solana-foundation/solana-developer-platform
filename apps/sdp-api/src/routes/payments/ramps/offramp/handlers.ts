@@ -122,7 +122,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
         destinationAddress: null,
-        token: rampTransferTokenMint(input.assetRail, c.env),
+        token: rampTransferTokenMint(input.assetRail),
         amount: input.cryptoAmount,
         memo: null,
         type: "offramp",
@@ -278,8 +278,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       precreatedTransferId = pendingTransfer.id;
       break;
     }
-    case "coinbase":
-      throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":
       throw badRequest("Stripe off-ramp is not supported.");
     default: {

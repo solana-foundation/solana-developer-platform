@@ -295,19 +295,22 @@ describe("useOnchainSendWizard", () => {
     expect(mocks.toastError).toHaveBeenCalledTimes(succeeds ? 0 : 1);
   });
 
-  it("keeps the key across a lost answer and retires it on a refusal", async () => {
-    transferStatus = 503;
+  // A refusal retires a fresh key; after a lost answer it settles nothing about
+  // the attempt that may have written, so the key stays (HOO-1918).
+  it("retires a fresh key on a refusal, and keeps a lost answer's key through one", async () => {
+    transferStatus = 422;
     const { result } = renderWizard();
     await prepareReview(result);
 
     await act(async () => result.current.handlePrimary());
+    transferStatus = 503;
+    await act(async () => result.current.handlePrimary());
     transferStatus = 422;
     await act(async () => result.current.handlePrimary());
-    await act(async () => result.current.handlePrimary());
 
-    const [lost, retried, afterRefusal] = sentIdempotencyKeys();
-    expect(retried).toBe(lost);
-    expect(afterRefusal).not.toBe(lost);
+    const [refused, lost, afterRefusal] = sentIdempotencyKeys();
+    expect(lost).not.toBe(refused);
+    expect(afterRefusal).toBe(lost);
     expect(mocks.toastError).toHaveBeenCalledTimes(3);
   });
 

@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { issuance } from "@/flags";
+import { withLegacyDesign } from "@/flags/new-design";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -13,8 +14,9 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "../payments/payments-page.data";
+import RedesignCurrentDashboardPage from "./page.redesign";
 
-export default async function DashboardPage() {
+async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -94,3 +96,5 @@ export default async function DashboardPage() {
     throw error;
   }
 }
+
+export default withLegacyDesign(RedesignCurrentDashboardPage, DashboardPage, "overview");

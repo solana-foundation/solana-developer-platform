@@ -13,13 +13,8 @@ KORA_FEE_PAYER_LAMPORTS="${KORA_FEE_PAYER_LAMPORTS:-10000000000}"
 KORA_IMAGE="${KORA_IMAGE:-ghcr.io/solana-foundation/kora:e9bc391}"
 KORA_PLATFORM="${KORA_PLATFORM:-linux/amd64}"
 KORA_REDIS_PORT="${KORA_REDIS_PORT:-0}"
-if [ -n "${KORA_SURFPOOL_KORA_RPC_URL:-}" ]; then
-  KORA_RPC_URL="${KORA_SURFPOOL_KORA_RPC_URL}"
-elif [ "${DOPPLER_RUN_ACTIVE:-}" = "1" ]; then
-  KORA_RPC_URL="http://127.0.0.1:18080"
-else
-  KORA_RPC_URL="${KORA_RPC_URL:-http://127.0.0.1:18080}"
-fi
+# shellcheck source=scripts/kora-surfpool/kora-url.sh
+. "${ROOT_DIR}/scripts/kora-surfpool/kora-url.sh"
 KORA_SURFPOOL_MODE="${KORA_SURFPOOL_MODE:-shim}"
 KORA_SURFPOOL_RUNTIME="${KORA_SURFPOOL_RUNTIME:-embedded}"
 KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS="${KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS:-180}"
@@ -170,15 +165,15 @@ wait_for_surfpool_info() {
 wait_for_kora() {
   local attempts="${1:-60}"
   for _ in $(seq 1 "${attempts}"); do
-    if curl -fsS "${KORA_RPC_URL}/health" >/dev/null 2>&1; then
+    if curl -fsS "${KORA_SURFPOOL_KORA_URL}/health" >/dev/null 2>&1; then
       return 0
     fi
-    if curl -fsS "${KORA_RPC_URL}/liveness" >/dev/null 2>&1; then
+    if curl -fsS "${KORA_SURFPOOL_KORA_URL}/liveness" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
-  echo "Kora did not become healthy at ${KORA_RPC_URL}." >&2
+  echo "Kora did not become healthy at ${KORA_SURFPOOL_KORA_URL}." >&2
   return 1
 }
 
@@ -255,6 +250,30 @@ start_cli_surfpool() {
   wait_for_json_rpc "Surfpool" "${SURFPOOL_RPC_URL}" 90
 }
 
+# The door reads only the per-cluster pool vars. Surfpool is the sole DEFAULT endpoint for the
+# lane's cluster (its SOLANA_NETWORK) and every other pool var is blanked, so no
+# test request can reach a real cluster through a provider URL inherited from Doppler.
+write_cluster_pool_env() {
+  local lane_suffix cluster_suffix provider
+  case "${SOLANA_NETWORK:-devnet}" in
+    devnet) lane_suffix="DEVNET" ;;
+    mainnet-beta) lane_suffix="MAINNET" ;;
+    *)
+      echo "SOLANA_NETWORK must be devnet or mainnet-beta, got ${SOLANA_NETWORK}" >&2
+      exit 1
+      ;;
+  esac
+  for cluster_suffix in DEVNET MAINNET; do
+    for provider in TRITON HELIUS ALCHEMY QUICKNODE VALIDATIONCLOUD NODIT DEFAULT; do
+      if [ "${cluster_suffix}" = "${lane_suffix}" ] && [ "${provider}" = "DEFAULT" ]; then
+        echo "SOLANA_RPC_${provider}_${cluster_suffix}_API_KEY_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      else
+        echo "SOLANA_RPC_${provider}_${cluster_suffix}_API_KEY_URL="
+      fi
+    done
+  done
+}
+
 write_runtime_env() {
   umask 077
   {
@@ -263,7 +282,17 @@ write_runtime_env() {
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
     echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
-    echo "KORA_RPC_URL=$(shell_quote "${KORA_RPC_URL}")"
+    write_cluster_pool_env
+    # Sponsorship prices and settles on the lane cluster's Kora upstream: point it at Surfpool,
+    # and blank the other cluster's so nothing inherits a real endpoint from Doppler.
+    if [ "${SOLANA_NETWORK:-devnet}" = "mainnet-beta" ]; then
+      echo "KORA_MAINNET_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      echo "KORA_DEVNET_RPC_URL="
+    else
+      echo "KORA_DEVNET_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      echo "KORA_MAINNET_RPC_URL="
+    fi
+    echo "${KORA_SURFPOOL_ENV_PREFIX}_URL=$(shell_quote "${KORA_SURFPOOL_KORA_URL}")"
     echo "KORA_SHIM_RPC_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_RPC_TIMEOUT_MS}")"
     echo "KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS}")"
     echo "KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS=$(shell_quote "${KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS}")"
@@ -312,7 +341,7 @@ if [ -z "${SIGNER_PRIVATE_KEY:-}" ]; then
 fi
 
 KORA_DOCKER_RPC_URL="${KORA_DOCKER_RPC_URL:-http://host.docker.internal:$(url_port "${SURFPOOL_RPC_URL}")}"
-KORA_PORT="$(url_port "${KORA_RPC_URL}")"
+KORA_PORT="$(url_port "${KORA_SURFPOOL_KORA_URL}")"
 
 umask 077
 cat >"${ENV_FILE}" <<EOF
@@ -327,13 +356,13 @@ EOF
 case "${KORA_SURFPOOL_MODE}" in
   shim)
     KORA_SHIM_HOST="$(
-      node - "${KORA_RPC_URL}" <<'NODE'
+      node - "${KORA_SURFPOOL_KORA_URL}" <<'NODE'
 const parsed = new URL(process.argv[2]);
 process.stdout.write(parsed.hostname || "127.0.0.1");
 NODE
     )"
     KORA_SHIM_PORT="$(
-      node - "${KORA_RPC_URL}" <<'NODE'
+      node - "${KORA_SURFPOOL_KORA_URL}" <<'NODE'
 const parsed = new URL(process.argv[2]);
 process.stdout.write(parsed.port || (parsed.protocol === "https:" ? "443" : "80"));
 NODE
@@ -383,7 +412,7 @@ NODE
 esac
 wait_for_kora 90
 
-FEE_PAYER="$(node - "${KORA_RPC_URL}" <<'NODE'
+FEE_PAYER="$(node - "${KORA_SURFPOOL_KORA_URL}" <<'NODE'
 const url = process.argv[2];
 const response = await fetch(url, {
   method: "POST",
@@ -441,7 +470,7 @@ Use these environment overrides with Doppler-backed commands:
   export SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
   export SOLANA_RPC_CI_PREFERRED_PROVIDER=default
   export SOLANA_RPC_DEFAULT_PROVIDER=default
-  export KORA_RPC_URL=${KORA_RPC_URL}
+  export ${KORA_SURFPOOL_ENV_PREFIX}_URL=${KORA_SURFPOOL_KORA_URL}
   export FEE_PAYMENT_PROVIDER=kora
   export RUN_INTEGRATION_TESTS=true
 

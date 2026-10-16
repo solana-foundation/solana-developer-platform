@@ -100,3 +100,16 @@ describe("MoonpayWebhookProcessor.process", () => {
     });
   });
 });
+
+describe("MoonpayWebhookProcessor.verify", () => {
+  it("refuses the production endpoint, which has no managed key", async () => {
+    await expect(
+      new MoonpayWebhookProcessor().verify({
+        env: { MOONPAY_SANDBOX_WEBHOOK_KEY: "moonpay_sandbox_webhook_key" },
+        environment: "production",
+        headers: new Headers({ "moonpay-signature-v2": "t=1,s=deadbeef" }),
+        rawBody: "{}",
+      })
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
+  });
+});

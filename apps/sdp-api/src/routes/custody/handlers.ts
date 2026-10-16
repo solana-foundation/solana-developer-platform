@@ -4,6 +4,7 @@ export { signerCheck } from "./handlers/signer-check";
 export {
   createWallet,
   deleteWallet,
+  findCustodyWalletCreateReplay,
   getPublicKey,
   getWalletAggregate,
   getWalletById,

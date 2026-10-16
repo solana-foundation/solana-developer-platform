@@ -12,11 +12,7 @@ import {
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import {
-  assertPaymentWalletExactAccess,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
@@ -80,9 +76,10 @@ export async function createPaymentRequest(
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
+  // Access to the wallet and counterparty was checked by authorizePaymentRequest, before the
+  // key. Whether the wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, body.custodyWalletId);
-  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(
     c.env,

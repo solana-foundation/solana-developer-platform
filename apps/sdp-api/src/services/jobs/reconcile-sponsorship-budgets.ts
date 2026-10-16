@@ -16,7 +16,10 @@ import { logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import type { Env } from "@/types/env";
 import { getManagedSponsorshipProviderConfiguration } from "../sponsorship.service";
-import { sponsorshipProviderConfigFingerprint } from "../sponsorship-budget.service";
+import {
+  createKoraClusterRpc,
+  sponsorshipProviderConfigFingerprint,
+} from "../sponsorship-budget.service";
 
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
 const RECONCILIATION_BATCH_SIZE = 250;
@@ -119,7 +122,7 @@ async function reconcileSponsorshipNetwork(
   // finish its pass without needing an RPC endpoint at all.
   let rpc: solanaRpc.SolanaRpc | null = null;
   const clusterRpc = () => {
-    rpc ??= solanaRpc.createClusterRpc(env, cluster);
+    rpc ??= createKoraClusterRpc(env, cluster);
     return rpc;
   };
   const getTransaction =

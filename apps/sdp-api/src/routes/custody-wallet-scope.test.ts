@@ -11,6 +11,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -42,11 +43,6 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
-}));
-
-vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
-  resolveAuthenticatedSponsoredFeePayer: signerCheckMocks.createSponsorship,
 }));
 
 const SEEDED_PUBLIC_KEYS = {
@@ -282,6 +278,9 @@ describe("Custody wallet scope routes", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
+    vi.spyOn(sponsorshipService, "resolveSponsoredFeePayer").mockImplementation(
+      signerCheckMocks.createSponsorship
+    );
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
@@ -1515,6 +1514,33 @@ describe("Custody wallet scope routes", () => {
       .first<{ label: string | null }>();
 
     expect(required(updated).label).toBe("Operations");
+  });
+
+  it("refuses a PATCH naming a wallet outside the project before claiming the key", async () => {
+    const res = await app.request(
+      "/v1/wallets/wallet_of_no_project",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "wallet-patch-missing",
+        },
+        body: JSON.stringify({ label: "Operations" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+    });
+    // Refused before the claim: no 404 is stored under the key for 24 hours.
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("wallet-patch-missing")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
   });
 
   it("returns 404 when updating a wallet outside the API key bindings", async () => {

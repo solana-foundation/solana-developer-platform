@@ -59,9 +59,23 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
+- A new env key the API reads goes in `apps/sdp-api/src/types/env.d.ts`, `scripts/secret-keys.mjs` and
+  `turbo.json` `globalEnv`: turbo drops undeclared keys, so without the last two the local API never sees it.
+- **Migrations run while the previous revision still serves traffic.** `pnpm check:migration-compat`
+  rejects one the previous image cannot run against and common DDL that holds a blocking lock on an
+  existing table: build an index `CONCURRENTLY`, alone in a `-- sdp:migration-mode: non-transactional`
+  file, and add a foreign key `NOT VALID`, validated in a later migration. Rules and what it misses:
+  `docs/ops/release-operations.md`, "Schema compatibility".
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **Idempotency-Key goes through one step, after authorize (hard rule).** Mutating routes of
+  `stable` modules run `validate → authorize(fn) → idempotent()`; money routes use
+  `key: "required"` at any stage. `authorize` checks access to every resource the request names
+  and never state, so a replay passes the same checks as a new request. Wallet bindings come from
+  authentication (`getAuth(c)`, read fresh per request); `authorize` never re-reads them. No per-module key handling,
+  never on a route whose response carries a secret, and the domain row stays the recovery point.
+  See `docs/decisions/0009-idempotency-keys.md`.
 - **Money moves only through the signing waists (ADR 0007).** Get a custody signer from
   `createOrgSignerForCustodyWallet` and a sponsor from `createSponsorshipFeePayment` (or its
   wrappers), passing the movement from `MOVEMENTS` in `@sdp/types`; never build a signing adapter

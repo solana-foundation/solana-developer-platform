@@ -10,10 +10,13 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { fetchResultAnswer } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
 import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.data";
 import { defaultBasics } from "./counterparty-create-defaults.redesign";
@@ -63,6 +66,7 @@ export function CounterpartyCreateProvider({
   const router = useRouter();
   const href = useProjectHref();
   const t = useTranslations();
+  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
 
   const resolveValidationMessage = useMemo(
     () => (message: string) =>
@@ -106,6 +110,8 @@ export function CounterpartyCreateProvider({
         }
       );
       if (result.ok) return true;
+      // The address may be on the contact already: open the contact to check.
+      if (notice(fetchResultAnswer(result))) return true;
       setFlaggedAddress({
         counterparty: created,
         address,
@@ -117,7 +123,7 @@ export function CounterpartyCreateProvider({
       });
       return false;
     },
-    [t]
+    [notice, t]
   );
 
   /** Null when the address screens clean; otherwise why it needs the person's call. */
@@ -163,6 +169,7 @@ export function CounterpartyCreateProvider({
       );
 
       if (!result.ok) {
+        if (notice(fetchResultAnswer(result))) return;
         setSubmitError(result.error);
         return;
       }
@@ -190,7 +197,7 @@ export function CounterpartyCreateProvider({
     } finally {
       setSubmitting(false);
     }
-  }, [basics, t, complete, screen, attachAddress]);
+  }, [basics, notice, t, complete, screen, attachAddress]);
 
   const attachFlaggedAddress = useCallback(async () => {
     if (!flaggedAddress) return;

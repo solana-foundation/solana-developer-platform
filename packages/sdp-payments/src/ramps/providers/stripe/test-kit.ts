@@ -87,11 +87,15 @@ export function stripeSessionExchange(terms: typeof STRIPE_SESSION_TERMS): Recor
 }
 
 /**
- * Stripe's contract kit. Stripe runs onramp only, and one secret key serves
- * both modes: a `sk_test_` key is what makes a request sandbox.
+ * Stripe's contract kit. Stripe runs onramp only, and SDP holds sandbox keys
+ * only: production projects bring their own, so production fails closed.
  */
 export const STRIPE_TEST_KIT: RampProviderTestKit = {
-  env: { STRIPE_SECRET_KEY: SECRET_KEY, STRIPE_PUBLISHABLE_KEY: "pk_test_contract" },
+  env: {
+    STRIPE_SANDBOX_SECRET_KEY: SECRET_KEY,
+    STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_contract",
+  },
+  managedModes: ["sandbox"],
   onramp: {
     estimate: {
       input: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: FIAT_AMOUNT },

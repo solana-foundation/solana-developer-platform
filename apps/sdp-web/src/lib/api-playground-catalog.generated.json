@@ -729,10 +729,6 @@
                 "value": "bvnk"
               },
               {
-                "label": "coinbase",
-                "value": "coinbase"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3030,10 +3026,6 @@
                 "value": "bvnk"
               },
               {
-                "label": "coinbase",
-                "value": "coinbase"
-              },
-              {
                 "label": "stripe",
                 "value": "stripe"
               }
@@ -3272,10 +3264,6 @@
               {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "coinbase",
-                "value": "coinbase"
               },
               {
                 "label": "stripe",
@@ -4184,10 +4172,6 @@
               {
                 "label": "bvnk",
                 "value": "bvnk"
-              },
-              {
-                "label": "coinbase",
-                "value": "coinbase"
               },
               {
                 "label": "stripe",
@@ -7901,7 +7885,7 @@
       "owner": "compliance"
     },
     {
-      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
+      "pattern": "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground|internal\\/dashboard\\/network)(\\/|$)",
       "owner": "core"
     },
     {
@@ -8154,9 +8138,6 @@
     "bvnk": {
       "rampProvider": "bvnk"
     },
-    "coinbase": {
-      "rampProvider": "coinbase"
-    },
     "stripe": {
       "rampProvider": "stripe"
     },
@@ -8170,6 +8151,9 @@
       "module": "ramps"
     },
     "lightspark": {
+      "module": "ramps"
+    },
+    "coinbase": {
       "module": "ramps"
     }
   }

@@ -6,7 +6,7 @@ import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 
 /**
- * Demo mode's stand-in for a provider's own checkout (MoonPay's and Coinbase's pages, Stripe's
+ * Demo mode's stand-in for a provider's own checkout (MoonPay's page, Stripe's
  * widget), which can't open on sample data. A deposit is paid with the footer's
  * Simulate deposit; a payout's crypto is sent with its Send button, as for a bank payout. Either
  * way the transfer then settles and the flow finishes on its own completion screen.

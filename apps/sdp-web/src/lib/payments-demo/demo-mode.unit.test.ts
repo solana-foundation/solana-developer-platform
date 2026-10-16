@@ -374,9 +374,9 @@ describe("ramps and the release channel", () => {
     });
 
   it("refuses a quote from a provider the channel leaves out, as the API would", async () => {
-    browser.rampProviders = ["coinbase"];
+    browser.rampProviders = ["moonpay"];
     expect((await quote("stripe")).status).toBe(400);
-    expect((await quote("coinbase")).status).toBe(201);
+    expect((await quote("moonpay")).status).toBe(201);
   });
 
   it("leaves a sample ramp transfer of a hidden provider out of the lists", async () => {
@@ -384,9 +384,9 @@ describe("ramps and the release channel", () => {
       (await data<{ id: string }[]>("/v1/payments/transfers?pageSize=100")).map(
         (transfer) => transfer.id
       );
-    expect(await ids()).toContain("demo_xfr_onramp_coinbase");
-    browser.rampProviders = RAMP_PROVIDERS.filter((provider) => provider !== "coinbase");
-    expect(await ids()).not.toContain("demo_xfr_onramp_coinbase");
+    expect(await ids()).toContain("demo_xfr_onramp_moonpay");
+    browser.rampProviders = RAMP_PROVIDERS.filter((provider) => provider !== "moonpay");
+    expect(await ids()).not.toContain("demo_xfr_onramp_moonpay");
   });
 });
 
@@ -404,7 +404,7 @@ describe("ramps", () => {
 
   it("runs a deposit from quote to a completed transfer, then credits the wallet", async () => {
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=coinbase&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
     const estimate = await call("POST", "/v1/payments/ramps/onramp/estimate", {
@@ -415,7 +415,7 @@ describe("ramps", () => {
     expect(estimate.body.data.estimates[0].status).toBe("ok");
 
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "coinbase",
+      provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",
       assetRail: "usdc.solana",
@@ -480,7 +480,7 @@ describe("ramps", () => {
 
   it("cancels a deposit before it is paid", async () => {
     const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
-      provider: "coinbase",
+      provider: "moonpay",
       counterpartyId: "demo_cpty_kai",
       destinationCustodyWalletId: "demo_cwlt_payroll",
       assetRail: "usdc.solana",
@@ -524,13 +524,8 @@ describe("every ramp provider", () => {
       provider: string;
       estimate: { cryptoAmount: string; fees: { total: string } };
     }[] = estimate.body.data.estimates;
-    expect(results.map((result) => result.provider).sort()).toEqual([
-      "bvnk",
-      "coinbase",
-      "moonpay",
-      "stripe",
-    ]);
-    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(4);
+    expect(results.map((result) => result.provider).sort()).toEqual(["bvnk", "moonpay", "stripe"]);
+    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(3);
     // 250 USD less MoonPay's 3.5%, at 148.20 USD a SOL.
     expect(results.find((result) => result.provider === "moonpay")?.estimate.cryptoAmount).toBe(
       "1.6279"
@@ -539,7 +534,6 @@ describe("every ramp provider", () => {
 
   it.each([
     ["moonpay", "hosted"],
-    ["coinbase", "hosted"],
     ["stripe", "session_widget"],
   ])(
     "runs a %s deposit from its stand-in checkout to a credited wallet",

@@ -80,7 +80,7 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   to derive environment from the selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:local:up`, which
-  hands the API `KORA_RPC_URL_DEVNET` via `.secrets/kora-local/api.env`. `infra/kora/kora.toml` already carries the Kamino program
+  hands the API `KORA_DEVNET_URL` via `.secrets/kora-local/api.env`. `infra/kora/kora.toml` already carries the Kamino program
   ids, every devnet Earn deposit mint in `allowed_tokens` (wSOL first) and
   `allow_create_account = true`, so the harness needs no edit (deployed devnet
   Kora carries the same allowlist and token set since sdp-infra#64 and
@@ -231,11 +231,15 @@ Percent-to-fraction conversion preserves the API number's decimal digits,
 including exponent notation, and truncates to six places using integer
 arithmetic. Do not round with `toFixed` before truncating the rate.
 The row's `riskMetadata` carries the eligibility constraints an
-integrator asks about (Reg S non-US-person restriction, issuer freeze
-authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
+integrator asks about (Ondo's prohibited and qualified-investor-only
+jurisdictions, issuer freeze authority), with the longer record in
+`docs/earn/ondo-catalogue-inventory.md`. The `eligibility` string names the US
+and Canada and links Ondo's eligibility page for the rest; re-read that page
+before changing the string or the inventory doc, and never shrink it back to
+"non-US persons only".
 Execution lives in `@sdp/ondo`; see that package's CLAUDE.md for why the
-primary mint/redeem facility is deliberately unused (Reg S lockup) and how the
-Jupiter trust boundary stays single-owner in the API.
+primary mint/redeem facility is deliberately unused (Ondo onboarding, no Solana
+entry point) and how the Jupiter trust boundary stays single-owner in the API.
 
 ## Two provider shapes — read this before assuming either model
 

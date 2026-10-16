@@ -6,6 +6,7 @@ const {
   createSdpApiClientMock,
   custodyMock,
   issuanceMock,
+  newDesignMock,
   fetchPaymentsAggregateMock,
   fetchPaymentsIssuedTokenSymbolsMock,
   fetchPaymentsWalletsMock,
@@ -14,13 +15,23 @@ const {
   createSdpApiClientMock: vi.fn(),
   custodyMock: vi.fn(),
   issuanceMock: vi.fn(),
+  newDesignMock: vi.fn(),
   fetchPaymentsAggregateMock: vi.fn(),
   fetchPaymentsIssuedTokenSymbolsMock: vi.fn(),
   fetchPaymentsWalletsMock: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: authMock }));
-vi.mock("@/flags", () => ({ issuance: issuanceMock }));
+vi.mock("@/flags", () => ({
+  issuance: issuanceMock,
+  newDesign: newDesignMock,
+  // Each design module's own flag; the Overview's follows NEW DESIGN here.
+  newDesignActivity: async () => true,
+  newDesignContacts: async () => true,
+  newDesignOverview: async () => true,
+  newDesignPayDeposit: async () => true,
+  newDesignWallets: async () => true,
+}));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({
   isModuleInDeploymentReleaseChannel: (module: SdpModule) => module !== "custody" || custodyMock(),
@@ -35,27 +46,38 @@ vi.mock("./payments/payments-page.data", () => ({
 
 import DashboardPage from "./(home)/page";
 
-describe("dashboard home module flags", () => {
+async function renderPage() {
+  // SAFETY: the page is an async server component; its element is read only for the props it passes on.
+  const page = (await DashboardPage({})) as { props: Record<string, unknown> } | null;
+  if (!page) throw new Error("Expected the home workspace");
+  return page;
+}
+
+// The Overview (NEW DESIGN) and the previous design's Home read their data the same way.
+describe.each([
+  ["the Overview", true],
+  ["the previous Home", false],
+])("dashboard home module flags, %s", (_design, newDesign) => {
   beforeEach(() => {
     authMock.mockReset();
     createSdpApiClientMock.mockReset();
     custodyMock.mockReset();
     issuanceMock.mockReset();
+    newDesignMock.mockReset();
     fetchPaymentsAggregateMock.mockReset();
     fetchPaymentsIssuedTokenSymbolsMock.mockReset();
     fetchPaymentsWalletsMock.mockReset();
     authMock.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
     issuanceMock.mockResolvedValue(false);
+    newDesignMock.mockResolvedValue(newDesign);
   });
 
   it("does not load wallet or issuance data when the release channel leaves Custody out", async () => {
     custodyMock.mockReturnValue(false);
 
-    const page = await DashboardPage();
+    const page = await renderPage();
 
     expect(createSdpApiClientMock).not.toHaveBeenCalled();
-    expect(page).not.toBeNull();
-    if (!page) throw new Error("Expected the feature-gated home workspace");
     expect(page.props).toMatchObject({
       wallets: [],
       balances: [],
@@ -70,11 +92,9 @@ describe("dashboard home module flags", () => {
     fetchPaymentsAggregateMock.mockResolvedValue({ ok: true, data: { balances: [] } });
     fetchPaymentsWalletsMock.mockResolvedValue({ ok: true, data: [] });
 
-    const page = await DashboardPage();
+    const page = await renderPage();
 
     expect(fetchPaymentsIssuedTokenSymbolsMock).not.toHaveBeenCalled();
-    expect(page).not.toBeNull();
-    if (!page) throw new Error("Expected the Home workspace");
     expect(page.props.issuedTokens).toEqual([]);
   });
 });

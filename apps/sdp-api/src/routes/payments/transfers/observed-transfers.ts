@@ -83,7 +83,7 @@ interface ParsedTransactionResponse {
 
 interface ObservedTransferContext {
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   walletIdsByAddress: Map<string, string>;
 }
 

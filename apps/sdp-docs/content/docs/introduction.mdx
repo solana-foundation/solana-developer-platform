@@ -90,6 +90,7 @@ SDP exposes unified endpoints for onchain transfers, built on official Solana pr
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/recurring-payments \
   -H "Authorization: Bearer sk_test_..." \
+  -H "Idempotency-Key: recurring-subscriber-42" \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCustodyWalletId": "cwlt_123",
@@ -119,6 +120,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sk_test_..." \
+  -H "Idempotency-Key: payroll-2026-06-30" \
   -H "Content-Type: application/json" \
   -d '{
     "externalId": "payroll_2026_06_30",

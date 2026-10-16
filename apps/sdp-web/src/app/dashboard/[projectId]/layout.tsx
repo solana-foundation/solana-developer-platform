@@ -10,8 +10,10 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
+import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
+import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
@@ -34,20 +36,14 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [
-    { projectId },
-    projects,
-    { orgRole, orgId, userId },
-    flags,
-    initialQuickStartStep,
-    cookieStore,
-  ] = await Promise.all([
-    params,
-    listSdpProjects(),
-    getSdpAuth(),
-    getDashboardFlags(),
-    loadQuickStartStep(),
-    cookies(),
+  const [{ projectId }, projects, { orgRole, orgId, userId }, flags, cookieStore] =
+    await Promise.all([params, listSdpProjects(), getSdpAuth(), getDashboardFlags(), cookies()]);
+  // Each design has its own quick start, the new one part of the Overview module; only the one
+  // on screen is read.
+  const overviewNewDesign = isDesignModuleOn(flags, "overview");
+  const [initialQuickStartStatus, initialQuickStartStep] = await Promise.all([
+    overviewNewDesign ? loadQuickStartStatus() : null,
+    overviewNewDesign ? null : loadQuickStartStep(),
   ]);
   if (projects.some((project) => project.id === projectId)) {
     if (!orgId || !userId) {
@@ -59,6 +55,7 @@ export default async function ProjectLayout({
         key={getDashboardCacheScopeKey(dashboardCacheScope)}
         scopeRefreshFallback={<DashboardScopeLoadingScreen />}
         dashboardAccess={resolveDashboardAccess(orgRole)}
+        initialQuickStartStatus={initialQuickStartStatus}
         initialQuickStartStep={initialQuickStartStep}
         flags={flags}
         serverDashboardCacheScope={dashboardCacheScope}
