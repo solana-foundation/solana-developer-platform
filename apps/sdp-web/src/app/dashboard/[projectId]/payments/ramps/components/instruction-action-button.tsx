@@ -13,6 +13,14 @@ export interface InstructionAction {
   doneLabel: string;
 }
 
+type InstructionActionState = "idle" | "busy" | "done";
+
+function instructionActionState(action: InstructionAction): InstructionActionState {
+  if (action.succeeded) return "done";
+  if (action.loading) return "busy";
+  return "idle";
+}
+
 export function InstructionActionButton({
   action,
   variant = "secondary",
@@ -22,6 +30,24 @@ export function InstructionActionButton({
   variant?: "default" | "secondary";
   size?: "default" | "xs";
 }) {
+  const state = instructionActionState(action);
+  let label: string;
+  switch (state) {
+    case "idle":
+      label = action.idleLabel;
+      break;
+    case "busy":
+      label = action.busyLabel;
+      break;
+    case "done":
+      label = action.doneLabel;
+      break;
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unknown instruction action state: ${exhaustive}`);
+    }
+  }
+
   return (
     <Button
       type="button"
@@ -31,7 +57,7 @@ export function InstructionActionButton({
       onClick={action.onClick}
       disabled={action.disabled || action.loading || action.succeeded}
     >
-      {action.succeeded ? action.doneLabel : action.loading ? action.busyLabel : action.idleLabel}
+      {label}
     </Button>
   );
 }
