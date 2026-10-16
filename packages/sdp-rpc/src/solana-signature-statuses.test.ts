@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Signature } from "@solana/kit";
+import { createSolanaRpcFromTransport, type Signature } from "@solana/kit";
 import { getSignatureStatuses, type SolanaRpc } from "./solana";
 
 const SIG = "sig111" as Signature;
@@ -60,4 +60,16 @@ test("does not retry a persistent error", async () => {
     /invalid param/
   );
   assert.equal(calls, 1);
+});
+
+test("returns an instruction error's index as a number JSON can serialize", async () => {
+  const rpc = createSolanaRpcFromTransport(async () =>
+    JSON.parse(
+      '{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":[{"slot":100,"confirmations":0,"confirmationStatus":"confirmed","err":{"InstructionError":[0,{"Custom":1}]}}]}}'
+    )
+  );
+  const [status] = await getSignatureStatuses(rpc, [SIG]);
+  assert.ok(status);
+  assert.deepEqual(status.err, { InstructionError: [0, { Custom: 1 }] });
+  assert.equal(JSON.stringify(status.err), '{"InstructionError":[0,{"Custom":1}]}');
 });

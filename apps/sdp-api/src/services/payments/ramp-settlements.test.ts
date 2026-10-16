@@ -29,7 +29,7 @@ async function seedTransfer(input: {
   status: string;
   type?: "onramp" | "offramp" | "transfer";
   counterpartyId?: string;
-  provider?: "coinbase" | "moonpay" | "bvnk";
+  provider?: "moonpay" | "bvnk";
   signature?: string;
 }) {
   const type = input.type ?? "onramp";
@@ -56,7 +56,7 @@ async function seedTransfer(input: {
       type,
       type === "onramp" ? "inbound" : "outbound",
       input.status,
-      input.provider === undefined ? "coinbase" : input.provider,
+      input.provider === undefined ? "moonpay" : input.provider,
       input.reference,
       "hosted",
       "USD",
@@ -177,7 +177,7 @@ describe("applyRampSettlementEvent", () => {
     await seedTransfer({ id: "xfr_canceled", reference: "order_canceled", status: "canceled" });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_canceled",
       receivedAmount: "12",
@@ -193,7 +193,7 @@ describe("applyRampSettlementEvent", () => {
     await seedTransfer({ id: "xfr_expired", reference: "order_expired", status: "expired" });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_expired",
       receivedAmount: "42",
@@ -214,7 +214,7 @@ describe("applyRampSettlementEvent", () => {
     });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_processing_deposit",
       receivedAmount: "42",
@@ -231,7 +231,7 @@ describe("applyRampSettlementEvent", () => {
     await seedTransfer({ id: "xfr_settling", reference: "order_settling", status: "settling" });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "awaiting_payment",
       reference: "order_settling",
     });
@@ -242,8 +242,8 @@ describe("applyRampSettlementEvent", () => {
   it("serializes concurrent terminal events", async () => {
     await seedTransfer({ id: "xfr_race", reference: "order_race", status: "settling" });
     const events: RampSettlementEvent[] = [
-      { provider: "coinbase", kind: "settled", reference: "order_race", receivedAmount: "9" },
-      { provider: "coinbase", kind: "failed", reference: "order_race", error: "declined" },
+      { provider: "moonpay", kind: "settled", reference: "order_race", receivedAmount: "9" },
+      { provider: "moonpay", kind: "failed", reference: "order_race", error: "declined" },
     ];
 
     await Promise.all(events.map((event) => applyRampSettlementEvent(env, event)));
@@ -268,13 +268,13 @@ describe("applyRampSettlementEvent", () => {
       counterpartyId: COUNTERPARTY_ID,
     });
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "awaiting_payment",
       reference: "order_first_wins",
       providerCustomerId: "cust_first",
     });
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_first_wins",
       receivedAmount: "9",
@@ -301,7 +301,7 @@ describe("applyRampSettlementEvent", () => {
       counterpartyId: COUNTERPARTY_ID,
     });
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "failed",
       reference: "order_refused_link",
       error: "declined",
@@ -309,7 +309,7 @@ describe("applyRampSettlementEvent", () => {
     });
 
     await applyRampSettlementEvent(env, {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_refused_link",
       receivedAmount: "9",
@@ -330,7 +330,7 @@ describe("applyRampSettlementEvent", () => {
   it("makes exact retries idempotent", async () => {
     await seedTransfer({ id: "xfr_retry", reference: "order_retry", status: "settling" });
     const event: RampSettlementEvent = {
-      provider: "coinbase",
+      provider: "moonpay",
       kind: "settled",
       reference: "order_retry",
       receivedAmount: "9",

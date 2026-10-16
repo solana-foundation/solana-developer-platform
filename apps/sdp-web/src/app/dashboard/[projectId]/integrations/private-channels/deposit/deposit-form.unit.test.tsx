@@ -118,4 +118,27 @@ describe("DepositForm", () => {
     expect(await screen.findByText("Select a wallet to deposit from.")).toBeTruthy();
     expect(mocks.createDepositAction).not.toHaveBeenCalled();
   });
+
+  // Jina (#2333): a deposit whose key the browser would not keep was sent, so a
+  // reload and retry could deposit twice under a fresh key.
+  it("sends nothing when the browser will not keep the deposit's retry key", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    mocks.fetchWalletBalancesAction.mockReturnValue(new Promise(() => undefined));
+    try {
+      const user = userEvent.setup();
+      render(<DepositForm tokens={eligibleTokens} wallets={wallets} />, { wrapper: I18nWrapper });
+      const [walletSelect] = screen.getAllByRole("combobox");
+      if (!walletSelect) throw new Error("No wallet select rendered");
+      await user.selectOptions(walletSelect, "wallet_treasury");
+      await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
+      await user.click(screen.getByRole("button", { name: "Deposit" }));
+
+      expect(await screen.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
+      expect(mocks.createDepositAction).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+    }
+  });
 });

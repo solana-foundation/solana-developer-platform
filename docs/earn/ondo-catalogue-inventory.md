@@ -25,21 +25,60 @@ the owner's USDY balance, and the exit is the reverse swap. Surfaced 2026-09-14
 
 Recorded here and on the row (`riskMetadata.eligibility`,
 `riskMetadata.issuerControls`) so an integrator's compliance review does not
-depend on finding this file.
+depend on finding this file. The jurisdiction rules are Ondo's, from its
+[USDY eligibility page](https://docs.ondo.finance/general-access-products/usdy/eligibility),
+fetched 2026-10-15. Ondo's page governs: re-check it before relying on these
+lists. The row names the US and Canada and links the page for the rest.
 
-- **Reg S, non-US persons only.** USDY is offered under Regulation S. The
-  restriction is NOT enforced on-chain: any wallet can hold the token, so the
-  party offering the strategy to end users screens them. SDP performs no
-  eligibility check of its own.
+- **Prohibited jurisdictions.** Individuals located or residing in, and
+  entities organized under the laws of or with a principal place of business
+  in, any of these are Ondo "Prohibited Persons", barred from "subscribing for,
+  acquiring or redeeming USDY tokens": Afghanistan; Belarus; Canada; Crimea,
+  the Donetsk and Luhansk People's Republics, the Kherson and Zaporizhzhia
+  regions and the city of Sevastopol (Ukraine); Cuba; North Korea (listed by
+  Ondo as "Democratic Republic of Korea"); Iran; Libya; Myanmar; Russia;
+  Somalia; South Sudan; Sudan; Syria; and the United States, including its
+  states, possessions, territories and federal districts. An entity 50% or more
+  owned or controlled, in aggregate, by Prohibited Persons may be barred too.
+- **US persons and US orders.** Also barred: buy orders placed from within the
+  US, and "US persons" under Rule 902 of Regulation S or anyone acting for
+  their account or benefit.
+- **Qualified or professional investors only.** Individuals residing in (in
+  some cases, citizens of) and entities organized or based in Brazil, the EEA,
+  Hong Kong, Malaysia, Singapore, Switzerland and the UK must meet that
+  jurisdiction's investor category (Ondo's page maps each) "in order to be
+  issued USDY tokens". The page's intro applies these restrictions to
+  "subscribing for, acquiring or redeeming"; the row takes that stricter
+  reading.
+- **Partner clause.** "By agreeing to a business relationship with Ondo, any
+  partners agree to not offer Ondo related products or services in connection
+  with any of the outlined prohibited jurisdictions."
+- **Not enforced on-chain or by SDP.** Any wallet can buy and hold USDY on the
+  secondary market, so the party offering the strategy to end users screens
+  them. SDP performs no eligibility check of its own.
 - **Issuer freeze authority.** Ondo holds both the mint and the freeze authority
   on the USDY mint, so any token account, including an SDP custody wallet's,
   can be frozen by the issuer. A frozen account cannot exit through the
   secondary market until unfrozen.
-- **Primary mint/redeem is unused.** Freshly minted USDY carries a 40 to 50 day
-  Reg S transfer lockup and sub-$100k primary redemptions wait out that
-  window, which is why SDP trades the secondary market instead (PRO-1834 tracks
-  the primary facility as a large-size backstop). Positions taken through SDP
-  are therefore never subject to that lockup.
+- **Primary mint/redeem is unused.** SDP buys and sells USDY on the secondary
+  market, so positions taken through SDP are never subject to any
+  primary-facility term (PRO-1834 tracks the primary facility as a large-size
+  backstop). Ondo's docs, fetched 2026-10-15, state no lockup duration for it.
+  They say "onboarding is necessary for minting or redeeming"
+  ([comparison to stablecoins](https://docs.ondo.finance/general-access-products/usdy/comparison-stablecoins)),
+  describe the on-chain `USDY_InstantManager` as minting and redeeming
+  "instantly", within rate limits and minimums
+  ([integration guide](https://docs.ondo.finance/developer-guides/usdy-instant-manager-integration)),
+  and list that contract on Ethereum, BNB Chain and Tempo, with only the token
+  on Solana ([addresses](https://docs.ondo.finance/addresses)). The Ethereum
+  `USDYc` ("Cooking USDY") row there covers "the period before their USDY
+  tokens are issued" but gives no duration. The 40 to 50 day figure SDP used to
+  cite came from Ondo's since-retired USDY FAQ page "Investing & Redeeming": a
+  "Restricted Period", usually 40 to 50 days from deposit, before tokens were
+  issued, with early redemption only above $100,000
+  ([last archived 2026-03-01](https://web.archive.org/web/20260301113727/https://docs.ondo.finance/general-access-products/usdy/faq/investing-and-redeeming);
+  the live page now returns 404). Treat any primary-facility timing as
+  unconfirmed until Ondo states it directly.
 
 ## Where it shows and where it executes
 

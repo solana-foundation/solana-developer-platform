@@ -1,4 +1,5 @@
 import { type ApiTestCustodyWallet, apiTestSupport } from "@sdp/api/test-support";
+import { resolveDefaultCluster } from "@sdp/rpc";
 import {
   confirmTransaction,
   createRpc,
@@ -230,8 +231,26 @@ type IntegrationRequestInit = RequestInit & {
   timeoutMs?: number;
 };
 
+const UNKEYED_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Gives every mutating request an Idempotency-Key unless the caller set one,
+ * because value-moving routes require it (HOO-1918). A test that exercises
+ * retries passes its own key so both attempts share it.
+ */
+function withIdempotencyKey(init: RequestInit): RequestInit {
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = new Headers(init.headers);
+  if (UNKEYED_METHODS.has(method) || headers.has("Idempotency-Key")) {
+    return init;
+  }
+  headers.set("Idempotency-Key", crypto.randomUUID());
+  return { ...init, headers };
+}
+
 export async function request(url: string, init: IntegrationRequestInit = {}) {
-  const { timeoutMs, ...requestInit } = init;
+  const { timeoutMs, ...unkeyedInit } = init;
+  const requestInit = withIdempotencyKey(unkeyedInit);
 
   if (!timeoutMs || timeoutMs <= 0) {
     return app.request(url, requestInit, env);
@@ -458,7 +477,11 @@ async function fundAddressViaKoraFeePayer(
     return false;
   }
 
-  const feePayment = createFeePaymentAdapter(env);
+  const feePayment = createFeePaymentAdapter(
+    env,
+    "sdp:v1:system:integration-funding",
+    resolveDefaultCluster(env)
+  );
   const feePayer = await feePayment.getFeePayer();
   const rpc = createRpc(env);
   const maxTransferLamports =

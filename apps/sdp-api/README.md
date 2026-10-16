@@ -10,7 +10,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
 - **Compliance** — AML/KYC screening via TRM, Chainalysis, Elliptic, or Range
-- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, Coinbase, or Stripe
+- **On/Off Ramps:** integrate fiat on/off-ramps via MoonPay, BVNK, or Stripe
 - **Earn:** discover yield strategies and build self-custodial deposit or withdrawal transactions
 - **Organizations & Projects** — multi-tenant project management with API key authentication
 

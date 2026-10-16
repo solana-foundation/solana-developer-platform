@@ -264,6 +264,32 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     ]);
   });
 
+  // Jina (#2333): an unknown outcome retired the key, so the next press sent
+  // the withdrawal request again under a new one.
+  it("keeps the key on an unknown outcome and tells the user to check the list", async () => {
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "outcome unknown",
+      code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN",
+      body: null,
+    });
+    renderModal();
+    await openReview();
+
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        "We couldn’t confirm whether this was created — check the list before trying again."
+      )
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
+    expect(mocks.createRequest.mock.calls.map((call) => call[1])).toEqual([FIRST_KEY, FIRST_KEY]);
+  });
+
   it("refuses a deadline above the provider maximum before previewing", () => {
     renderModal();
 

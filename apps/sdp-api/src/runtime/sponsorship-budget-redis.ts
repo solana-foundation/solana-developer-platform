@@ -256,7 +256,7 @@ const SCRIPT_SHA = {
 export interface BudgetAdmissionInput {
   network: SponsorshipNetwork;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   hourBucket: string;
   dayBucket: string;
   reservationId: string;
@@ -281,12 +281,16 @@ export class SponsorshipBudgetRedis {
     const client = await this.getClient();
     const keys = this.keys(input);
     const fields = this.fields(input.organizationId, input.projectId);
-    const hourUsage = [input.usage.hour.global, input.usage.hour.organization];
-    const dayUsage = [input.usage.day.global, input.usage.day.organization];
-    if (input.projectId) {
-      hourUsage.push(input.usage.hour.project);
-      dayUsage.push(input.usage.day.project);
-    }
+    const hourUsage = [
+      input.usage.hour.global,
+      input.usage.hour.organization,
+      input.usage.hour.project,
+    ];
+    const dayUsage = [
+      input.usage.day.global,
+      input.usage.day.organization,
+      input.usage.day.project,
+    ];
     const liveReservations = input.liveReservations ?? { hour: [], day: [] };
     const prefix = `sdp:sponsorship:{${input.network}}`;
     const reservationMarkerArgs = (reservations: SponsorshipLiveWindowReservation[]) =>
@@ -424,7 +428,7 @@ export class SponsorshipBudgetRedis {
   async settle(input: {
     network: SponsorshipNetwork;
     organizationId: string;
-    projectId: string | null;
+    projectId: string;
     hourBucket: string;
     dayBucket: string;
     reservationId: string;
@@ -457,10 +461,8 @@ export class SponsorshipBudgetRedis {
     return Number(result[1]);
   }
 
-  private fields(organizationId: string, projectId: string | null): string[] {
-    const fields = ["global", `organization:${organizationId}`];
-    if (projectId) fields.push(`project:${projectId}`);
-    return fields;
+  private fields(organizationId: string, projectId: string): string[] {
+    return ["global", `organization:${organizationId}`, `project:${projectId}`];
   }
 
   private getClient(): Promise<Redis> {

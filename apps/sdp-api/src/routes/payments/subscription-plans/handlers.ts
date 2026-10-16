@@ -1,4 +1,5 @@
 import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
+import { resolveDefaultCluster } from "@sdp/rpc";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   ListPaymentSubscriptionPlansResponse,
@@ -15,6 +16,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
@@ -24,10 +26,10 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
@@ -94,9 +96,9 @@ async function resolvePullerWalletAddress(
     return { pullerWalletId: null, pullerAddress: null };
   }
 
+  // The route's authorize step checked the credential's access to the puller wallet.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, pullerWalletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
   return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
 }
 
@@ -106,9 +108,9 @@ export const createSubscriptionPlan = async (
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
+  // The route's authorize step checked the credential's access to both wallets.
   const scope = await resolveScope(c);
   const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const now = new Date().toISOString();
@@ -122,7 +124,7 @@ export const createSubscriptionPlan = async (
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token, c.env),
+    token: normalizePaymentToken(body.token, resolveDefaultCluster(c.env)),
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),
@@ -269,7 +271,7 @@ export const prepareCreateSubscriptionPlan = async (
   const updatedPlan = await persistPlanPda(c, plan, planPda);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [owner]
   );
@@ -296,19 +298,11 @@ export const updateSubscriptionPlan = async (
   const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
-  const existingPlan = await repo.getPlanById({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!existingPlan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
+  // Loaded in the project, its wallets' access checked, by the route's authorize step.
+  const existingPlan = getAuthorized<PaymentSubscriptionPlanRow>(c);
 
   const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
+  resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const updated = await repo.updatePlan({

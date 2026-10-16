@@ -24,8 +24,8 @@ import { HTTPException } from "hono/http-exception";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
+import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -47,6 +47,7 @@ import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import internalHeliusRings from "@/routes/internal-helius-rings";
+import internalNetwork from "@/routes/internal-network";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -113,27 +114,6 @@ const KV_FREE_PATHS = [
 // smaller; the webhooks and rpc routers already enforce this same ceiling on
 // their subsets, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
-
-function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
-  switch (statusCode) {
-    case 202:
-    case 400:
-    case 401:
-    case 403:
-    case 404:
-    case 409:
-    case 413:
-    case 429:
-    case 500:
-    case 501:
-    case 502:
-    case 503:
-    case 504:
-      return statusCode;
-    default:
-      return 500;
-  }
-}
 
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
@@ -434,6 +414,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
+  app.route("/internal/dashboard/network", internalNetwork);
 
   // Admin routes (internal)
   app.route("/admin/allowlist", allowlist);
@@ -468,14 +449,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       err instanceof HTTPException && err.status === 400 ? badRequest(err.message) : err;
 
     if (normalizedError instanceof AppError) {
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: normalizedError.toResponse().error,
-          meta: { requestId },
-        },
-        mapErrorStatusCode(normalizedError.statusCode)
-      );
+      return appErrorResponse(c, normalizedError);
     }
 
     if (

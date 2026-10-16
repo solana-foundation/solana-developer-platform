@@ -190,8 +190,7 @@ export async function applyRampSettlementEvent(
     if (
       updated !== null &&
       event.providerCustomerId !== undefined &&
-      transfer.counterparty_id !== null &&
-      transfer.project_id !== null
+      transfer.counterparty_id !== null
     ) {
       const link = await createPostgresCounterpartyProviderAccountsRepository(
         client

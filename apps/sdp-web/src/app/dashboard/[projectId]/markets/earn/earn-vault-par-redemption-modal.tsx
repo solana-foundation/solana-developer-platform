@@ -11,6 +11,7 @@ import {
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useSWRConfig } from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
@@ -31,6 +33,7 @@ import {
   fetchEarnVaultParRedemptionPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
@@ -247,6 +250,7 @@ function useParRedemptionSubmission(options: {
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();
+  const { mutate } = useSWRConfig();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -267,22 +271,23 @@ function useParRedemptionSubmission(options: {
           : { intermediateAmount: input.intermediateAmount }),
         route: { kind: "operator_redemption" },
       });
-      const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-      if (!submission) {
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (!persisted) {
         options.setError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
       const result = await createEarnVaultWithdrawalRequest(input, key);
-      applyIdempotencyKeyOutcome(
-        vaultAsyncWithdrawalIdempotencyKeyStore,
-        fingerprint,
-        result,
-        submission.wasUncertain
-      );
+      // A withdrawal request moves money: an unknown outcome or a reused key
+      // keeps the key, so the next press is answered under it.
+      const answer = fetchResultAnswer(result);
+      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
       if (result.ok) {
         setOutcome(result.data);
         options.onRequested?.(result.data.withdrawalRequest);
+      } else if (uncertain !== null) {
+        options.setError(t(uncertain));
+        void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
       } else {
         options.setError(result.error);
       }
@@ -317,23 +322,22 @@ function useParRedemptionRequestView(
     setCancelling(true);
     setCancelError(null);
     const fingerprint = `cancel:${request.withdrawalRequestId}`;
-    const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
     try {
-      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
-      if (!submission) {
+      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (!persisted) {
         setCancelError(t("DashboardEarn.intentStorageUnavailable"));
         return;
       }
       const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
       if (result.ok) {
-        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint);
+        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
         setCancelResult(result.data);
       } else {
-        applyIdempotencyKeyOutcome(
+        settleIdempotencyKey(
           vaultAsyncWithdrawalIdempotencyKeyStore,
           fingerprint,
-          result,
-          submission.wasUncertain
+          key,
+          fetchResultAnswer(result)
         );
         setCancelError(result.error);
       }

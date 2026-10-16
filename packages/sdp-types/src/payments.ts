@@ -303,27 +303,6 @@ export interface MoonpayRampSettlement {
   failureReason?: string;
 }
 
-export interface CoinbaseRampFee {
-  feeAmount: string;
-  feeCurrency: string;
-  feeType: string;
-}
-
-/** Coinbase onramp order economics, captured verbatim from a terminal webhook. */
-export interface CoinbaseRampSettlement {
-  provider: "coinbase";
-  status: "completed" | "failed";
-  paymentCurrency: string;
-  paymentSubtotal: string;
-  paymentTotal: string;
-  purchaseCurrency: string;
-  purchaseAmount: string;
-  exchangeRate: string;
-  fees: CoinbaseRampFee[];
-  txHash?: string;
-  failureReason?: string;
-}
-
 /**
  * BVNK on-ramp settlement economics, from the payout CREATE response
  * (PROCESSING) until the COMPLETE crypto payout webhook or poll replaces it
@@ -405,7 +384,6 @@ export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSett
 
 export type RampTransferSettlement =
   | MoonpayRampSettlement
-  | CoinbaseRampSettlement
   | BvnkRampSettlement
   | BvnkOfframpChannelSettlement;
 
@@ -768,6 +746,13 @@ export const COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * The collection attempts that answer a keyed collect (HOO-1918): a live one,
+ * as migration 0135's unique index covers. A failed or skipped attempt answers
+ * nothing, so the same key runs again.
+ */
+export const COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY =
+  COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE;
 export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
   "processing",
   "confirmed",
@@ -784,6 +769,20 @@ export type PaymentSubscriptionCollectionAttemptInitialStatus =
 export const IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+/**
+ * The activation, lifecycle and update attempts that answer a keyed request
+ * (HOO-1918): every one but a failed attempt, as migration 0135's unique
+ * indexes cover. A failed attempt answers nothing, so the same key runs again.
+ */
+export const RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY = [
+  "processing",
+  "confirmed",
+] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+export function isInFlightRecurringPaymentAttemptStatus(
+  status: PaymentRecurringPaymentAttemptStatus
+): boolean {
+  return IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES.some((candidate) => candidate === status);
+}
 export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
   "canceling",
   "resuming",
@@ -1287,7 +1286,6 @@ export interface PaymentOnrampQuoteRequest {
   assetRail: CryptoRailId;
   fiatCurrency: RampFiatCurrency;
   fiatAmount: string;
-  domain?: string;
   rampsMemo?: Record<string, string>;
 }
 
@@ -1326,19 +1324,6 @@ export type PaymentRampQuote =
       hostedUrl: string;
     })
   | (BasePaymentRampQuote & {
-      provider: "coinbase";
-      deliveryMode: "hosted";
-      hostedUrl: string;
-      /** Order economics captured verbatim from the Coinbase create-order response. */
-      paymentCurrency: string;
-      paymentSubtotal: string;
-      paymentTotal: string;
-      purchaseCurrency: string;
-      purchaseAmount: string;
-      exchangeRate: string;
-      fees: CoinbaseRampFee[];
-    })
-  | (BasePaymentRampQuote & {
       provider: "stripe";
       deliveryMode: "session_widget";
       clientSecret: string;
@@ -1346,16 +1331,3 @@ export type PaymentRampQuote =
       publishableKey: string;
       redirectUrl?: string;
     });
-
-export const RAMP_EVENT_PROVIDERS = ["coinbase"] as const;
-export type RampEventProvider = (typeof RAMP_EVENT_PROVIDERS)[number];
-
-/**
- * Coinbase headless on-ramp events, forwarded from the payment-link iframe's
- * postMessage stream (`onramp_api.*`). `orderId` is the create-order id used as
- * the transfer's provider reference. Client events are advisory telemetry only;
- * the signature-verified server-side webhook is the sole settlement authority.
- */
-export type CoinbaseRampEvent =
-  | { kind: "committed"; orderId: string }
-  | { kind: "errored"; orderId: string; reason: string };

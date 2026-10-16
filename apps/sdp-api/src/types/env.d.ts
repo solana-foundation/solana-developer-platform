@@ -233,6 +233,10 @@ export interface Env extends ManagedRpcEnv {
   KORA_MAINNET_URL?: string;
   KORA_MAINNET_API_KEY?: string;
   KORA_MAINNET_CLOUD_RUN_AUDIENCE?: string;
+  /** The Solana RPC the devnet Kora reads and sends on; sponsorship prices and settles devnet against it. */
+  KORA_DEVNET_RPC_URL?: string;
+  /** The Solana RPC the mainnet Kora reads and sends on; sponsorship prices and settles mainnet against it. */
+  KORA_MAINNET_RPC_URL?: string;
   KORA_PER_TRANSACTION_BUDGET_LAMPORTS?: string;
   KORA_SURFPOOL_SHIM?: string;
   KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS?: string;
@@ -271,6 +275,9 @@ export interface Env extends ManagedRpcEnv {
   // Google address completion (Places API New + Maps Static API)
   GOOGLE_ADDRESS_COMPLETION_API_KEY?: string;
 
+  // data.solana.com, the API behind solana.com/data (the Overview's Solana network figures)
+  DATA_API_KEY?: string;
+
   // MoonPay ramps configuration
   // MoonPay sandbox only: production projects bring their own MoonPay account.
   MOONPAY_ONRAMP_URL?: string;
@@ -289,9 +296,6 @@ export interface Env extends ManagedRpcEnv {
   BVNK_SANDBOX_WALLET_ID?: string;
   BVNK_SANDBOX_WEBHOOK_SECRET?: string;
 
-  // Coinbase Onramp (headless v2) authenticates with the account-wide CDP Secret API Key
-  // (COINBASE_CDP_API_KEY_ID/_SECRET above). Only the webhook signing secret is ramps-specific.
-  COINBASE_CDP_RAMPS_WEBHOOK_SECRET?: string;
   // Stripe sandbox only: production projects bring their own Stripe account.
   STRIPE_SANDBOX_SECRET_KEY?: string;
   STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
@@ -344,6 +348,16 @@ declare module "hono" {
     organizationEntitlements: OrganizationEntitlements;
     // Set by requestGate middleware for gated routes
     requestGate?: RequestGateContext;
+    // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)
+    authorized?: { loaded: unknown };
+    // Set by idempotent() when this request holds its key: the request's fingerprint
+    idempotencyFingerprint?: string;
+    // Set by idempotent() with the fingerprint: the key this request claimed
+    idempotencyClaimedKey?: string;
+    // Set by markIdempotencyCommitted() once the handler wrote its domain row
+    idempotencyCommitted?: boolean;
+    // Set by replayFromRecord when the key's domain row records another request
+    idempotencyRecordMismatch?: boolean;
     apiKey?: {
       id: string;
       organizationId: string;

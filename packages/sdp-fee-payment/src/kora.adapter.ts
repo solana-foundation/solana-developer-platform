@@ -48,12 +48,8 @@ export type KoraAdapterConfig = KoraClientOptions & {
    */
   timeoutMs?: number;
 
-  /**
-   * Per-user id forwarded to Kora as `user_id`.
-   * Callers should provide an owned, server-derived scope. Missing values use
-   * one shared fail-closed quota bucket instead of bypassing usage tracking.
-   */
-  userId?: string;
+  /** Per-user id forwarded to Kora as `user_id`: an owned, server-derived scope, never caller input. */
+  userId: string;
 
   /**
    * Cloud Run audience used to fetch a service identity token from the metadata
@@ -106,7 +102,7 @@ export class KoraAdapter implements FeePaymentPort {
           })
         : new KoraClient({ rpcUrl, apiKey, getRecaptchaToken, hmacSecret }));
     this.client = withCallTimeouts(this.client, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    this.userId = userId?.trim() || "sdp:unscoped";
+    this.userId = userId;
   }
 
   /**

@@ -12,7 +12,7 @@ import { isPagePublished, type PublicSurface } from "../src/lib/release-channel"
 
 const ALL: Pick<PublicSurface, "allModules" | "allRampProviders"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],
-  allRampProviders: ["moonpay", "bvnk", "coinbase", "stripe"],
+  allRampProviders: ["moonpay", "bvnk", "stripe"],
 };
 
 const STABLE: PublicSurface = {

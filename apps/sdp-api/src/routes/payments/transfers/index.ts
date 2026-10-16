@@ -1,14 +1,17 @@
 import { Hono } from "hono";
+import { canonicalizeDecimalFields } from "@/lib/idempotency";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
-import { requestGate } from "@/middleware/request-gate";
+import { authorize } from "@/middleware/authorize";
+import { idempotent } from "@/middleware/idempotency";
+import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   admitTransferExecution,
+  authorizeTransfer,
   createTransfer,
-  extractTransferRequest,
-  findTransferIdempotentKeyReplay,
+  findTransferRecordReplay,
   getTransfer,
   listTransfers,
 } from "./handlers";
@@ -21,11 +24,18 @@ transfers.post(
   requirePermissions("payments:write", "wallets:read"),
   requireAllowedOperation("payment_transfer_execute"),
   validateBody(createTransferSchema),
-  requestGate({
-    extract: extractTransferRequest,
-    findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
-    admit: admitTransferExecution,
+  authorize(authorizeTransfer),
+  // The transfer row is written under its key before anything is signed, so a
+  // retry after a 5xx re-runs and is answered from that row (HOO-1918).
+  idempotent({
+    key: "required",
+    serverErrors: "rerun",
+    recovery: "record",
+    // "1.0" and "1" move the same amount, so they are one request.
+    canonicalize: (body) => canonicalizeDecimalFields(body, ["amount"]),
   }),
+  replayFromRecord(findTransferRecordReplay),
+  admit(admitTransferExecution),
   createTransfer
 );
 transfers.get("/", requirePermissions("payments:read"), listTransfers);

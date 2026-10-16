@@ -12,7 +12,6 @@ import { NativeAdapter } from "./native.adapter";
 import { type FeePaymentEnv, FeePaymentError, type FeePaymentPort } from "./port";
 
 export type {
-  ExtendedFeePaymentPort,
   FeePaymentEnv,
   FeePaymentErrorCode,
   FeePaymentPort,
@@ -65,7 +64,7 @@ export interface KoraEndpoint {
  */
 export function resolveKoraEndpoint(
   env: FeePaymentEnv,
-  cluster: SolanaCluster = defaultFeePaymentCluster(env)
+  cluster: SolanaCluster
 ): KoraEndpoint | null {
   const endpoint =
     cluster === "mainnet-beta"
@@ -104,8 +103,8 @@ export function isFeePaymentConfiguredForCluster(
 
 export function createFeePaymentAdapter(
   env: FeePaymentEnv,
-  userId?: string,
-  cluster: SolanaCluster = defaultFeePaymentCluster(env)
+  userId: string,
+  cluster: SolanaCluster
 ): FeePaymentPort {
   const provider = resolveFeePaymentProvider(env);
 
@@ -126,13 +125,12 @@ export function createFeePaymentAdapter(
 /**
  * Create a Kora adapter for `cluster` from environment configuration.
  * SDP application callers must pass the server-derived identity from their
- * owned sponsorship boundary. Missing identities share one conservative
- * fallback bucket rather than bypassing Kora usage tracking.
+ * owned sponsorship boundary.
  */
 export function createKoraAdapter(
   env: FeePaymentEnv,
-  userId?: string,
-  cluster: SolanaCluster = defaultFeePaymentCluster(env)
+  userId: string,
+  cluster: SolanaCluster
 ): KoraAdapter {
   const endpoint = resolveKoraEndpoint(env, cluster);
   if (!endpoint) {
@@ -149,13 +147,6 @@ export function createKoraAdapter(
   };
 
   return new KoraAdapter(config);
-}
-
-/**
- * Create a native fee payment adapter (for testing/fallback).
- */
-export function createNativeAdapter(env: FeePaymentEnv): NativeAdapter {
-  return new NativeAdapter(env);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

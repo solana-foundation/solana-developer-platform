@@ -31,7 +31,11 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions, SOL_MINT } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createSponsorshipFeePayment,
+  resolveProjectSponsorshipScope,
+  type SponsorshipFeePayment,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
@@ -97,15 +101,17 @@ export async function issuePaymentRequestTransaction(
     return signAndStore(claim.unsignedTransaction);
   };
 
-  let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
-    null;
+  let feePaymentInstance: SponsorshipFeePayment | null = null;
   const getFeePayment = async () => {
-    feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
-      movement: "payments.pay_request",
-      organizationId: request.organization_id,
-      projectId: request.project_id,
-      actor: { type: "wallet", id: request.wallet_id },
-    });
+    feePaymentInstance ??= createSponsorshipFeePayment(
+      c.env,
+      await resolveProjectSponsorshipScope(c.env, {
+        organizationId: request.organization_id,
+        projectId: request.project_id,
+        actor: { type: "wallet", id: request.wallet_id },
+      }),
+      "payments.pay_request"
+    );
     return feePaymentInstance;
   };
 

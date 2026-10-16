@@ -31,7 +31,10 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
-import { resolveAuthenticatedSponsoredFeePayer } from "@/services/sponsorship.service";
+import {
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -110,7 +113,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
         wallet.id,
         "custody.signer_check"
       ),
-      resolveAuthenticatedSponsoredFeePayer(c),
+      resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     ]);
 
     const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);

@@ -1326,13 +1326,71 @@ describe("slippage-floored providers", () => {
       // The retry is the SAME request under the SAME key, so it must carry the
       // floor that key was MINTED with — not a fresh floor off the moved rate.
       // A re-derived floor would conflict with the API's recorded fingerprint
-      // (a 409), retire the key, and let the next submit deposit a second time
+      // (a 422), retire the key, and let the next submit deposit a second time
       // while the first attempt may already have executed.
       expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
       expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
         minSharesOut: "0.999",
       });
       expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      );
+    });
+
+    it("retries a slippage refusal at the same tolerance with a fresh quote's floor and a fresh key", async () => {
+      mocks.fetchEarnVaultDepositPreview
+        .mockResolvedValueOnce(quoted("1"))
+        .mockResolvedValue(quoted("0.5"));
+      // The refusal comes from simulation, which Earn runs only after finding no
+      // movement under the key: nothing was recorded, so nothing is replayed.
+      mocks.createEarnVaultDeposit
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          error: "Vault deposit simulation failed",
+          body: {
+            error: {
+              code: "BAD_REQUEST",
+              message: "Vault deposit simulation failed",
+              details: { reason: "slippage_exceeded" },
+            },
+          },
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+        });
+
+      const first = render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+      first.unmount();
+
+      render(
+        <EarnVaultDepositModal
+          projectId={PROJECT_ID}
+          strategy={flooredStrategy}
+          onClose={vi.fn()}
+        />
+      );
+      await armFlooredDeposit();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deposit" }));
+      await flushSubmission();
+
+      expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
+      expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toMatchObject({
+        minSharesOut: "0.999",
+      });
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][0].minSharesOut).not.toBe("0.999");
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
         mocks.createEarnVaultDeposit.mock.calls[0][1]
       );
     });

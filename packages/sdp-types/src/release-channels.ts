@@ -94,7 +94,6 @@ export type SdpRampProviderStages = Record<RampProviderId, SdpReleaseChannel>;
 export const SDP_RAMP_PROVIDER_STAGES = {
   moonpay: "experimental",
   bvnk: "experimental",
-  coinbase: "experimental",
   stripe: "experimental",
 } as const satisfies SdpRampProviderStages;
 

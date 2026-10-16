@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,33 @@ function readMigration(migrationFile: string) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   return readFileSync(path.join(testDir, "../db/migrations/postgres", migrationFile), "utf8");
 }
+
+/**
+ * The last migration number that two files share. The runner records each file
+ * by its full name, so those historical pairs apply; a new duplicate means two
+ * branches picked the same number and their order is down to the suffix.
+ */
+const LAST_SHARED_MIGRATION_NUMBER = 125;
+
+describe("Postgres migration numbering", () => {
+  it("gives every migration after the historical pairs its own number", () => {
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const files = readdirSync(path.join(testDir, "../db/migrations/postgres")).filter((file) =>
+      file.endsWith(".sql")
+    );
+    const byNumber = new Map<number, string[]>();
+    for (const file of files) {
+      const prefix = /^(\d{4})/.exec(file)?.[1];
+      if (prefix === undefined) throw new Error(`Migration ${file} has no four-digit number`);
+      const number = Number(prefix);
+      byNumber.set(number, [...(byNumber.get(number) ?? []), file]);
+    }
+    const shared = [...byNumber]
+      .filter(([number, names]) => number > LAST_SHARED_MIGRATION_NUMBER && names.length > 1)
+      .map(([, names]) => names.sort());
+    expect(shared).toEqual([]);
+  });
+});
 
 describe("Postgres migration runner", () => {
   it("backfills historical confirmed burns before enabling replay bookkeeping", () => {

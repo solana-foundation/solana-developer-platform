@@ -16,9 +16,6 @@ export const MOONPAY_HOSTED_APPROVED_HOSTS = [
   "sell-sandbox.moonpay.com",
 ] as const;
 
-/** Coinbase headless-onramp payment-link host (sandbox uses the same host). */
-export const COINBASE_HOSTED_APPROVED_HOSTS = ["pay.coinbase.com"] as const;
-
 /**
  * BVNK-owned document hosts for the agreement and privacy-policy pages: the
  * help centre (help.bvnk.com) and the corporate site (www.bvnk.com). The

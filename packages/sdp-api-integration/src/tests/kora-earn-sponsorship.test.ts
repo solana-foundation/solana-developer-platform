@@ -71,6 +71,7 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
     const { rpcUrl, apiKey } = requireKoraEndpoint();
     const options = {
       rpcUrl,
+      userId: "sdp:v1:system:integration-earn-sponsorship",
       apiKey,
       timeoutMs: env.KORA_TIMEOUT_MS ? Number.parseInt(env.KORA_TIMEOUT_MS, 10) : 30_000,
     };

@@ -13,7 +13,7 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "20a3e8ab94d2b6795e6a07dcf60f93feb2710eba86918f4d5fa53acf06d7ca43" as const;
+  "74f57e4ce7f731b599329ffbc9ec2b14eabe354b266187933bb63721f04fbcbf" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -21,15 +21,12 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   bvnk: "74008f7fe8bf90e857222792b1f286e8349aced0e26efc842d349f14e0fc6ad8",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  coinbase: "5f01258d98e8d8402ea69e349823315744598c38a7e1ee075ea806983f3fe138",
-  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   stripe: "65c17177d0f4125644b82e65dcbe495380d891c220e171a5106654f4b17a35e6",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   moonpay: { onramp: 99, offramp: 48 },
   bvnk: { onramp: 8, offramp: 8 },
-  coinbase: { onramp: 3, offramp: 0 },
   stripe: { onramp: 2, offramp: 0 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
@@ -678,25 +675,6 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
       entityTypes: ["business", "individual"],
     },
   },
-  coinbase: {
-    onramp: {
-      currencies: {
-        USD: { min: "2", max: "7500" },
-      },
-      countrySupport: {
-        coverage: "by-country",
-        countries: {
-          US: ["USD"],
-        },
-      },
-      entityTypes: ["individual"],
-    },
-    offramp: {
-      currencies: {},
-      countrySupport: { coverage: "unreported" },
-      entityTypes: [],
-    },
-  },
   stripe: {
     onramp: {
       currencies: {
@@ -817,11 +795,11 @@ export const ONRAMP_SUPPORT = [
   { source: "TWD", dest: "sol.solana", providers: ["moonpay"] },
   { source: "TWD", dest: "usdc.solana", providers: ["moonpay"] },
   { source: "TWD", dest: "pyusd.solana", providers: ["moonpay"] },
-  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk", "coinbase", "stripe"] },
-  { source: "USD", dest: "usdc.solana", providers: ["moonpay", "bvnk", "coinbase", "stripe"] },
+  { source: "USD", dest: "sol.solana", providers: ["moonpay", "bvnk", "stripe"] },
+  { source: "USD", dest: "usdc.solana", providers: ["moonpay", "bvnk", "stripe"] },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },
-  { source: "USD", dest: "pyusd.solana", providers: ["moonpay", "coinbase"] },
+  { source: "USD", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "VND", dest: "sol.solana", providers: ["moonpay"] },
   { source: "VND", dest: "usdc.solana", providers: ["moonpay"] },
   { source: "VND", dest: "pyusd.solana", providers: ["moonpay"] },

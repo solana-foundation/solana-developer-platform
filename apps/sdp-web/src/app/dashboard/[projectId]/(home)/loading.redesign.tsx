@@ -1,8 +1,8 @@
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import { OverviewNetworkSkeleton } from "../overview-network";
 
 const BALANCE_ROW_IDS = ["overview-balance-1", "overview-balance-2", "overview-balance-3"];
 const TILE_IDS = ["overview-tile-1", "overview-tile-2", "overview-tile-3", "overview-tile-4"];
-const CHART_IDS = ["overview-chart-1", "overview-chart-2", "overview-chart-3", "overview-chart-4"];
 
 /**
  * Mirrors the Overview's settled layout: the balance column beside the action tiles, then the
@@ -42,21 +42,7 @@ export function CurrentDashboardLoading() {
           ))}
         </div>
       </div>
-      <div className="min-w-0" data-loading-home-network>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <SkeletonBlock className="h-6 w-44 rounded-sm" />
-          <SkeletonBlock className="h-control-sm w-80 max-w-full rounded-control" />
-        </div>
-        <div className="mt-5 grid min-w-0 gap-x-12 gap-y-10 md:grid-cols-2">
-          {CHART_IDS.map((id) => (
-            <div key={id} className="min-w-0">
-              <SkeletonBlock className="h-5 w-36 rounded-sm" />
-              <SkeletonBlock className="mt-1 h-7.5 w-32 rounded-sm" />
-              <SkeletonBlock className="mt-5 h-[11.375rem] w-full rounded-control" />
-            </div>
-          ))}
-        </div>
-      </div>
+      <OverviewNetworkSkeleton />
     </div>
   );
 }

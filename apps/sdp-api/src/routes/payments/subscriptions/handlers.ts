@@ -22,7 +22,7 @@ import {
   getTransferSubscriptionOverlayInstructionAsync,
 } from "@solana/subscriptions";
 import { z } from "zod";
-import { createCounterpartiesRepository } from "@/db/repositories";
+import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -31,7 +31,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
@@ -42,10 +42,10 @@ import {
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
-  type AppContext,
-  getPaymentSubscriptionsRepository,
-  getSponsoredFeePayer,
-} from "../context";
+  resolveRequestSponsorshipScope,
+  resolveSponsoredFeePayer,
+} from "@/services/sponsorship.service";
+import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
 import { resolveScope, resolveWallet } from "../wallets";
 import {
@@ -164,24 +164,6 @@ async function getSubscriptionWithPlan(
   return { plan, subscription };
 }
 
-async function requireActiveCounterparty(c: AppContext, counterpartyId: string): Promise<void> {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const repo = createCounterpartiesRepository(c.env, getRequestTenantScope(c));
-  const counterparty = await repo.getCounterpartyById({
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!counterparty) {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
-  }
-  if (counterparty.status !== "active") {
-    throw badRequest("Counterparty must be active before creating a subscription");
-  }
-}
-
 export const createSubscription = async (
   c: ValidatedBodyContext<typeof createSubscriptionSchema>
 ) => {
@@ -190,20 +172,18 @@ export const createSubscription = async (
   const body = c.req.valid("json");
 
   const repo = getPaymentSubscriptionsRepository(c);
-  const plan = await repo.getPlanById({
-    planId: body.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
+  // Both loaded in the project, whatever their status, by the route's authorize step.
+  const { plan, counterparty } = getAuthorized<{
+    plan: PaymentSubscriptionPlanRow;
+    counterparty: CounterpartyRow;
+  }>(c);
   if (plan.status === "archived") {
     throw badRequest("Cannot create a subscription for an archived plan");
   }
-
-  await requireActiveCounterparty(c, body.counterpartyId);
+  // An inactive counterparty reads as missing, as the active-only lookup answered.
+  if (counterparty.status !== "active") {
+    throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
@@ -287,7 +267,7 @@ export const prepareSubscriptionAuthorization = async (
     user: subscriber,
   });
   const [subscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
-  const feePayer = await getSponsoredFeePayer(c);
+  const feePayer = await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c));
   const payer = createNoopSigner(feePayer);
   const subscriberSigner = createNoopSigner(subscriber);
   const initAuthorityInstruction = await getInitSubscriptionAuthorityOverlayInstructionAsync({
@@ -420,7 +400,7 @@ async function prepareSubscriptionLifecycle(
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [subscriber]
   );
@@ -484,7 +464,7 @@ export const prepareSubscriptionCollection = async (
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
-    await getSponsoredFeePayer(c),
+    await resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     [instruction],
     [caller]
   );
