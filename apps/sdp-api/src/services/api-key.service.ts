@@ -41,6 +41,8 @@ export interface ApiKeyListItem {
   walletIds: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /** When a rotated key stops working; null unless it was rotated and is in its grace period. */
+  rotationDeadline: string | null;
   createdAt: string;
 }
 
@@ -48,7 +50,6 @@ export interface ApiKeyDetails extends ApiKeyListItem {
   projectId: string;
   allowedIps: string[] | null;
   rotatedFrom: string | null;
-  rotationDeadline: string | null;
 }
 
 export interface CreateApiKeyInput {
@@ -165,6 +166,7 @@ interface ApiKeyListRow {
   wallet_ids: unknown;
   last_used_at: string | null;
   expires_at: string | null;
+  rotation_deadline: string | null;
   created_at: string;
 }
 
@@ -172,7 +174,6 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
   project_id: string;
   allowed_ips: string | null;
   rotated_from: string | null;
-  rotation_deadline: string | null;
 }
 
 /** `api_keys.grants`, a `text[]` the driver returns as an array. */
@@ -271,7 +272,7 @@ export class ApiKeyService {
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_prefix, ak.grants, p.environment, ak.status,
                 ak.wallet_scope, ${WALLET_IDS_COLUMN},
-                ak.last_used_at, ak.expires_at, ak.created_at
+                ak.last_used_at, ak.expires_at, ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
@@ -313,7 +314,6 @@ export class ApiKeyService {
       projectId: row.project_id,
       allowedIps: parseOptionalPostgresJson<string[]>(row.allowed_ips),
       rotatedFrom: row.rotated_from,
-      rotationDeadline: row.rotation_deadline,
     };
   }
 
@@ -699,6 +699,7 @@ export class ApiKeyService {
       walletIds: walletIdsSchema.parse(row.wallet_ids),
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
+      rotationDeadline: row.rotation_deadline,
       createdAt: row.created_at,
     };
   }

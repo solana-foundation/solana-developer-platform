@@ -118,6 +118,8 @@ export interface ListApiKeysResponse {
     walletIds: string[];
     lastUsedAt: string | null;
     expiresAt: string | null;
+    /** When a rotated key stops working; null unless it is in its grace period. */
+    rotationDeadline: string | null;
     createdAt: string;
   }>;
 }

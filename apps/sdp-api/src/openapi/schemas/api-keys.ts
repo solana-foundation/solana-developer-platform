@@ -64,6 +64,11 @@ export const apiKeyListItemSchema = z
       description: "Expiration timestamp, if set.",
       example: "2025-12-31T00:00:00.000Z",
     }),
+    rotationDeadline: isoDateTimeSchema.nullable().openapi({
+      description:
+        "When this key stops working because it was rotated; null unless it is in its rotation grace period.",
+      example: null,
+    }),
     createdAt: isoDateTimeSchema.openapi({
       description: "Creation timestamp.",
       example: "2025-01-01T00:00:00.000Z",

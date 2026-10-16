@@ -68,6 +68,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
       walletIds: key.walletIds,
       lastUsedAt: key.lastUsedAt,
       expiresAt: key.expiresAt,
+      rotationDeadline: key.rotationDeadline,
       createdAt: key.createdAt,
     })),
   });

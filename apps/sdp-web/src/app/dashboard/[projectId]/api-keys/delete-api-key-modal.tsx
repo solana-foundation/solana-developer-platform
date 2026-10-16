@@ -30,6 +30,7 @@ export function DeleteApiKeyModal({
   const t = useTranslations();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
+  const [cancelRecurringPayments, setCancelRecurringPayments] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isControlled = isOpenProp !== undefined;
   const isOpen = isControlled ? isOpenProp : uncontrolledOpen;
@@ -37,6 +38,7 @@ export function DeleteApiKeyModal({
   useEffect(() => {
     if (!isOpen) {
       setConfirmation("");
+      setCancelRecurringPayments(false);
       setIsSubmitting(false);
     }
   }, [isOpen]);
@@ -76,6 +78,7 @@ export function DeleteApiKeyModal({
       keyId,
       keyName,
       confirmation,
+      cancelRecurringPayments,
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : t("DashboardCustody.deleteApiKey"),
@@ -143,6 +146,22 @@ export function DeleteApiKeyModal({
             autoComplete="off"
             disabled={isSubmitting}
           />
+
+          <label className="flex items-start gap-2 text-sm text-secondary">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={cancelRecurringPayments}
+              onChange={(event) => setCancelRecurringPayments(event.currentTarget.checked)}
+              disabled={isSubmitting}
+            />
+            <span>
+              <span className="block text-primary">
+                {t("DashboardCustody.apiKeyCancelRecurringPayments")}
+              </span>
+              {t("DashboardCustody.apiKeyCancelRecurringPaymentsHelp")}
+            </span>
+          </label>
 
           <DeleteApiKeyFormActions
             canSubmit={canSubmit}

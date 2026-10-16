@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { rotateApiKeyAction } from "./actions";
@@ -34,6 +35,7 @@ export function ApiKeyActionsMenu({
   const router = useRouter();
   const href = useProjectHref();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
   const rotateFormRef = useRef<HTMLFormElement | null>(null);
 
   return (
@@ -66,7 +68,7 @@ export function ApiKeyActionsMenu({
           <DropdownMenuItem
             onSelect={() => {
               if (canRotate) {
-                rotateFormRef.current?.requestSubmit();
+                setIsRotateModalOpen(true);
               }
             }}
             disabled={!canRotate}
@@ -81,6 +83,38 @@ export function ApiKeyActionsMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Modal
+        isOpen={isRotateModalOpen}
+        onClose={() => setIsRotateModalOpen(false)}
+        ariaLabel={t("DashboardCustody.rotateApiKeyTitle", { name: keyName })}
+        closeLabel={t("DashboardCustody.closeConfirmationModal")}
+        contentClassName="rounded-xl p-5 text-left"
+        size="sm"
+      >
+        <p className="pr-10 text-sm font-medium text-primary">
+          {t("DashboardCustody.rotateApiKeyTitle", { name: keyName })}
+        </p>
+        <p className="mt-2 text-sm text-secondary">
+          {t("DashboardCustody.rotateApiKeyDescription", {
+            hours: DEFAULT_ROTATION_GRACE_HOURS,
+          })}
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => setIsRotateModalOpen(false)}>
+            {t("DashboardCustody.cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              setIsRotateModalOpen(false);
+              rotateFormRef.current?.requestSubmit();
+            }}
+          >
+            {t("DashboardCustody.rotateApiKeyConfirm")}
+          </Button>
+        </div>
+      </Modal>
 
       <DeleteApiKeyModal
         keyId={keyId}

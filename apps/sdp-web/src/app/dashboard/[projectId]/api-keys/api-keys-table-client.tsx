@@ -44,7 +44,23 @@ export interface ApiKeyRecord {
   walletIds: string[];
   lastUsedAt: string | null;
   expiresAt: string | null;
+  /** When a rotated key stops working; null unless it is in its grace period. */
+  rotationDeadline: string | null;
   createdAt: string;
+}
+
+/** When the key stops working: its rotation deadline or expiry, whichever is first. */
+function effectiveExpiry(key: ApiKeyRecord): string | null {
+  if (key.rotationDeadline && key.expiresAt) {
+    return new Date(key.rotationDeadline) < new Date(key.expiresAt)
+      ? key.rotationDeadline
+      : key.expiresAt;
+  }
+  return key.rotationDeadline ?? key.expiresAt;
+}
+
+function statusLabel(key: ApiKeyRecord, t: ReturnType<typeof useTranslations>): string {
+  return key.rotationDeadline ? t("DashboardCustody.apiKeyRotatingStatus") : key.status;
 }
 
 function formatDate(
@@ -205,7 +221,7 @@ export function ApiKeysTableClient({
                 <span className="block truncate">{key.name}</span>
                 <span className="mt-1 block truncate text-[11px] font-normal text-tertiary">
                   {key.environment}
-                  <span className="@5xl/api-keys-table:hidden"> · {key.status}</span>
+                  <span className="@5xl/api-keys-table:hidden"> · {statusLabel(key, t)}</span>
                   <span className="@4xl/api-keys-table:hidden"> · {key.keyPrefix}</span>
                 </span>
               </TableCell>
@@ -216,13 +232,24 @@ export function ApiKeysTableClient({
                 <AccessSummary apiKey={key} walletLabelById={walletLabelById} />
               </TableCell>
               <TableCell className={`${STATUS_COLUMN_CLASS} text-xs`}>
-                <span className="block truncate">{key.status}</span>
+                <span
+                  className="block truncate"
+                  title={
+                    key.rotationDeadline
+                      ? t("DashboardCustody.apiKeyRotatingUntil", {
+                          date: new Date(key.rotationDeadline).toLocaleString(locale),
+                        })
+                      : undefined
+                  }
+                >
+                  {statusLabel(key, t)}
+                </span>
               </TableCell>
               <TableCell className={`${LAST_USED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.lastUsedAt, locale, t)}
               </TableCell>
               <TableCell className={`${EXPIRES_COLUMN_CLASS} text-xs text-secondary`}>
-                {formatDate(key.expiresAt, locale, t)}
+                {formatDate(effectiveExpiry(key), locale, t)}
               </TableCell>
               <TableCell className={`${CREATED_COLUMN_CLASS} text-xs text-secondary`}>
                 {formatDate(key.createdAt, locale, t)}
