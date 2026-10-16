@@ -11,6 +11,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  MOVEMENT_POLL_INTERVAL_MS,
+  MOVEMENT_READ_PATHS,
+  resetMovementWatchesForTests,
+} from "@/lib/dashboard-fetch";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import {
   privateChannelTransferIdempotencyKeyStore,
@@ -243,6 +248,7 @@ beforeEach(() => {
   // A transfer still `submitted` keeps its key (APE-593), so each spec starts clean.
   resetIdempotencyKeyStoresForTests();
   window.sessionStorage.clear();
+  resetMovementWatchesForTests();
   mocks.fetchWalletBalancesAction.mockResolvedValue({ channel: "10", onChain: "5" });
 });
 
@@ -466,6 +472,45 @@ describe("TransferForm", () => {
       expect(mocks.toastWarning).toHaveBeenCalledWith(expect.any(String), {
         description: expect.stringContaining("still processing"),
       });
+    }
+  });
+
+  // Keegan (#2385): a kept key was never checked again, so once the transfer
+  // confirmed, an identical new transfer replayed the old one.
+  it("retires a pending transfer's key once a read shows it confirmed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.createTransferAction.mockResolvedValue({
+        ok: true,
+        transfer: makeTransfer({ status: "pending" }),
+      });
+      const fetchMock = vi.fn(async () =>
+        Response.json({ data: makeTransfer({ status: "confirmed" }) })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const user = await renderReadyForm();
+
+      await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+      await screen.findByText("Progress: pending");
+      const sent = mocks.createTransferAction.mock.calls[0]?.[0];
+      const fingerprint = privateChannelTransferRequestFingerprint(sent);
+      expect(privateChannelTransferIdempotencyKeyStore.has(fingerprint)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        MOVEMENT_READ_PATHS.privateChannelTransfer("pct_test"),
+        expect.objectContaining({ method: "GET" })
+      );
+      expect(privateChannelTransferIdempotencyKeyStore.has(fingerprint)).toBe(false);
+      // An identical new transfer is a new payment under a fresh key.
+      expect(privateChannelTransferIdempotencyKeyStore.claim(fingerprint).key).not.toBe(
+        sent.idempotencyKey
+      );
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      resetMovementWatchesForTests();
     }
   });
 

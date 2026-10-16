@@ -1,4 +1,9 @@
-import { type IdempotencyRequiredRoute, isBodylessHttpStatus } from "@sdp/types";
+import {
+  type IdempotencyRequiredRoute,
+  isBodylessHttpStatus,
+  isMoneyMovementStatus,
+  type MoneyMovementStatus,
+} from "@sdp/types";
 import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
@@ -430,7 +435,24 @@ export const MOVEMENT_READ_PATHS = {
   batch: (id: string) => `/api/dashboard/payments/transfers/batch/${encodeURIComponent(id)}`,
   recurringPayment: (id: string) =>
     `/api/dashboard/payments/recurring-payments/${encodeURIComponent(id)}`,
+  privateChannelTransfer: (id: string) =>
+    `/api/dashboard/private-channels/transfers/${encodeURIComponent(id)}`,
 } as const;
+
+/** A private-channel transfer read answers with the transfer itself as `data`. */
+const privateChannelTransferReadSchema = z.object({ data: z.object({ status: z.string() }) });
+
+/**
+ * The status a private-channel transfer read shows, for
+ * {@link settleWhenMovementFinal}: that GET answers with the transfer as
+ * `data`, not under `data.transfer`.
+ */
+export function privateChannelTransferStatusOf(json: unknown): MoneyMovementStatus | null {
+  const parsed = privateChannelTransferReadSchema.safeParse(json);
+  return parsed.success && isMoneyMovementStatus(parsed.data.data.status)
+    ? parsed.data.data.status
+    : null;
+}
 
 export const MOVEMENT_POLL_INTERVAL_MS = 3_000;
 export const MOVEMENT_POLL_ATTEMPTS = 40;
@@ -452,8 +474,13 @@ export function resetMovementWatchesForTests(): void {
  *
  * @param readPath - The movement's GET path ({@link MOVEMENT_READ_PATHS}).
  * @param settle - Retires the kept key.
+ * @param statusOf - Reads the movement's status from the GET body.
  */
-export function settleWhenMovementFinal(readPath: string, settle: () => void): void {
+export function settleWhenMovementFinal(
+  readPath: string,
+  settle: () => void,
+  statusOf: (json: unknown) => MoneyMovementStatus | null = movementStatusOf
+): void {
   if (watchedMovements.has(readPath)) return;
   watchedMovements.add(readPath);
   let attempts = 0;
@@ -461,7 +488,7 @@ export function settleWhenMovementFinal(readPath: string, settle: () => void): v
     attempts += 1;
     try {
       const response = await dashboardRequest(readPath, { method: "GET", cache: "no-store" });
-      const status = response.ok ? movementStatusOf(await response.json()) : null;
+      const status = response.ok ? statusOf(await response.json()) : null;
       if (status !== null && !isMovementInFlight(status)) {
         watchedMovements.delete(readPath);
         settle();
