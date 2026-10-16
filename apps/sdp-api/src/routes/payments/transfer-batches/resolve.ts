@@ -1,6 +1,5 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types";
@@ -202,11 +201,10 @@ export async function authorizeBatchRequest(
  * reaches it.
  */
 export async function resolveBatchMovement(
-  c: AppContext,
   input: CreateTransferBatchInput,
   authorized: AuthorizedBatchRequest
 ): Promise<ResolvedBatchRequest> {
-  const token = normalizePaymentToken(input.token, currentClusterScope().cluster);
+  const token = normalizePaymentToken(input.token);
   const rpc = createClusterRpc();
   const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
   const recipients = resolveRecipients({
@@ -240,7 +238,6 @@ export async function resolveBatchRequest(
   requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2]
 ): Promise<ResolvedBatchRequest> {
   return resolveBatchMovement(
-    c,
     input,
     await authorizeBatchRequest(c, input, requiredWalletPermissions)
   );

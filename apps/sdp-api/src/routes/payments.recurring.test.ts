@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
@@ -5,6 +6,7 @@ import {
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
+  type SdpEnvironment,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
   type TokenStatus,
 } from "@sdp/types";
@@ -33,11 +35,13 @@ import * as organizationAccess from "@/lib/organization-access";
 import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/payments";
+import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
@@ -52,8 +56,7 @@ import {
   getRecentBlockhashMock,
   getTransactionMock,
   installPaymentsRouteTestHooks,
-  mockRecurringActivationRpc,
-  mockTokenSupplyDecimalsOnce,
+  MAINNET_USDC_MINT,
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
@@ -82,6 +85,7 @@ import {
   setRecurringCollectionDue,
   testSignature,
 } from "@/test/helpers/recurring-payments";
+import { required } from "@/test/helpers/required";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -270,6 +274,12 @@ async function recurringPaymentDueAt(recurringPaymentId: string) {
     .bind(recurringPaymentId)
     .first<{ status: string; next_collection_due_at: string | Date }>();
   return { status: row?.status, dueAt: new Date(row?.next_collection_due_at ?? 0).getTime() };
+}
+
+function collectDueRecurringPaymentsIn(environment: SdpEnvironment, now: Date) {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    collectDueRecurringPayments(env, now)
+  );
 }
 
 async function activateRecurringPaymentForTest(headers: Record<string, string>) {
@@ -1807,7 +1817,6 @@ describe("Payments routes — recurring", () => {
   });
 
   it("creates the source token account during recurring payment activation when it is missing", async () => {
-    mockRecurringActivationRpc({ tokenAccounts: [] });
     const sourceSigner = recurringExecution.sourceSigner();
     const signAndSendMock = recurringExecution.signAndSendMock();
     signAndSendMock.mockResolvedValue(
@@ -2869,7 +2878,6 @@ describe("Payments routes — recurring", () => {
       await mintLookupReleased;
       return getAccountInfo(...args);
     });
-    mockTokenSupplyDecimalsOnce();
 
     const preparePromise = app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
@@ -3504,7 +3512,7 @@ describe("Payments routes — recurring", () => {
       });
       await deleteTestOrganization();
 
-      expect(await collectDueRecurringPayments(env, now)).toEqual({
+      expect(await collectDueRecurringPaymentsIn("sandbox", now)).toEqual({
         recovered: 0,
         collected: 0,
         failed: 0,
@@ -3512,7 +3520,9 @@ describe("Payments routes — recurring", () => {
         refused: 1,
       });
       // The due date moved past now, so the next tick selects nothing.
-      expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      expect(
+        await collectDueRecurringPaymentsIn("sandbox", new Date(now.getTime() + 60 * 1000))
+      ).toEqual({
         recovered: 0,
         collected: 0,
         failed: 0,
@@ -3547,6 +3557,7 @@ describe("Payments routes — recurring", () => {
         ...DEFAULT_RECURRING_FIXTURE,
         projectId: TEST_PRODUCTION_PROJECT_ID,
         sourceCustodyWalletId: productionWalletId,
+        token: MAINNET_USDC_MINT,
       });
       const signaturesBefore = signAndSendMock.mock.calls.length;
       const now = new Date();
@@ -3564,7 +3575,7 @@ describe("Payments routes — recurring", () => {
         .bind(TEST_ORG.id)
         .run();
 
-      expect(await collectDueRecurringPayments(env, now)).toEqual({
+      expect(await collectDueRecurringPaymentsIn("production", now)).toEqual({
         recovered: 0,
         collected: 0,
         failed: 0,
@@ -3608,7 +3619,7 @@ describe("Payments routes — recurring", () => {
         .bind(TEST_ORG.id)
         .run();
 
-      expect(await collectDueRecurringPayments(env, now)).toMatchObject({
+      expect(await collectDueRecurringPaymentsIn("sandbox", now)).toMatchObject({
         collected: 1,
         refused: 0,
       });
@@ -3626,7 +3637,12 @@ describe("Payments routes — recurring", () => {
       });
       const [due] = await paymentRecurringPaymentsRepositoryPostgres
         .createPostgresPaymentRecurringPaymentsRepository(getDb(env))
-        .listDueCollectionPayments({ dueBefore: now.toISOString(), retryBefore: dueAt, limit: 10 });
+        .listDueCollectionPayments({
+          environment: "sandbox",
+          dueBefore: now.toISOString(),
+          retryBefore: dueAt,
+          limit: 10,
+        });
       if (due?.id !== recurringPayment.id) {
         throw new Error("Expected the recurring payment to be due");
       }
@@ -3685,8 +3701,8 @@ describe("Payments routes — recurring", () => {
       await deleteTestOrganization();
 
       const results = await Promise.all([
-        collectDueRecurringPayments(env, now),
-        collectDueRecurringPayments(env, now),
+        collectDueRecurringPaymentsIn("sandbox", now),
+        collectDueRecurringPaymentsIn("sandbox", now),
       ]);
 
       expect(results.reduce((total, result) => total + result.refused, 0)).toBe(1);
@@ -3831,7 +3847,7 @@ describe("Payments routes — recurring", () => {
           .run();
         await deleteTestOrganization();
 
-        expect(await collectDueRecurringPayments(env, new Date())).toMatchObject({
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
           recovered: 1,
           refused: 0,
         });
@@ -3839,6 +3855,113 @@ describe("Payments routes — recurring", () => {
         expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBefore);
       }
     );
+  });
+
+  describe("Production on mainnet-beta (HOO-1620)", () => {
+    const PRODUCTION_WALLET_ID = "cwlt_recurring_mainnet";
+
+    async function seedProductionSource(): Promise<void> {
+      await seedProductionPrivyWallet({
+        custodyWalletId: PRODUCTION_WALLET_ID,
+        publicKey: recurringExecution.sourceSigner().address,
+      });
+      await enableMainnetSponsorship();
+    }
+
+    function activateProductionUsdcSchedule() {
+      return activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        projectId: TEST_PRODUCTION_PROJECT_ID,
+        sourceCustodyWalletId: PRODUCTION_WALLET_ID,
+        token: "USDC",
+      });
+    }
+
+    async function automatedCollectionSignature(subscriptionId: string): Promise<string> {
+      const attempts = await collectionAttempts(subscriptionId);
+      expect(attempts).toEqual([
+        expect.objectContaining({
+          status: "confirmed",
+          metadata: expect.objectContaining({
+            source: "linked_transfer",
+            initialSource: "automated",
+          }),
+        }),
+      ]);
+      const [attempt] = attempts;
+      return required(attempt.signature);
+    }
+
+    it("stores a Production schedule's USDC as the mainnet mint and activates it on mainnet-beta only", async () => {
+      await seedProductionSource();
+
+      const activated = await activateProductionUsdcSchedule();
+
+      expect(activated.token).toBe(MAINNET_USDC_MINT);
+      expect(recurringExecution.rpc.calls).toContainEqual({
+        cluster: "mainnet-beta",
+        method: "getTokenSupply",
+      });
+      expect(new Set(recurringExecution.rpc.calls.map((call) => call.cluster))).toEqual(
+        new Set(["mainnet-beta"])
+      );
+      expect(
+        new Set(
+          [
+            ...getAccountInfoMock.mock.calls,
+            ...getRecentBlockhashMock.mock.calls,
+            ...confirmTransactionMock.mock.calls,
+          ].map(([client]) => clusterOfRpcClient(client))
+        )
+      ).toEqual(new Set(["mainnet-beta"]));
+    });
+
+    it("collects each environment's due schedule on its own cluster in one tick", async () => {
+      const sandboxSchedule = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+      await seedProductionSource();
+      recurringExecution
+        .signAndSendMock()
+        .mockResolvedValueOnce(testSignature(3))
+        .mockResolvedValueOnce(testSignature(4));
+      const productionSchedule = await activateProductionUsdcSchedule();
+      const now = new Date();
+      for (const schedule of [sandboxSchedule, productionSchedule]) {
+        await setRecurringCollectionDue({
+          recurringPaymentId: schedule.id,
+          subscriptionId: schedule.subscriptionId,
+          dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
+        });
+      }
+      const requestsBefore = recurringExecution.rpc.requests.length;
+
+      await runInEachClusterScope(async () => {
+        await collectDueRecurringPayments(env, now);
+      });
+
+      const tokenSupplyReads = recurringExecution.rpc.requests
+        .slice(requestsBefore)
+        .filter((request) => request.method === "getTokenSupply");
+      const clustersReadingMint = (mint: string) =>
+        new Set(
+          tokenSupplyReads
+            .filter((request) => request.params[0] === mint)
+            .map((request) => request.cluster)
+        );
+      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(new Set(["devnet"]));
+      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(new Set(["mainnet-beta"]));
+      const clustersConfirming = (collectionSignature: string) =>
+        new Set(
+          confirmTransactionMock.mock.calls
+            .filter(([, confirmedSignature]) => confirmedSignature === collectionSignature)
+            .map(([client]) => clusterOfRpcClient(client))
+        );
+      expect(
+        clustersConfirming(await automatedCollectionSignature(sandboxSchedule.subscriptionId))
+      ).toEqual(new Set(["devnet"]));
+      expect(
+        clustersConfirming(await automatedCollectionSignature(productionSchedule.subscriptionId))
+      ).toEqual(new Set(["mainnet-beta"]));
+    });
   });
 
   it("journals an unresolved automated collection once per cooldown", async () => {
@@ -3856,14 +3979,16 @@ describe("Payments routes — recurring", () => {
       .bind(recurringPayment.id)
       .run();
 
-    expect(await collectDueRecurringPayments(env, now)).toEqual({
+    expect(await collectDueRecurringPaymentsIn("sandbox", now)).toEqual({
       recovered: 0,
       collected: 0,
       failed: 1,
       skipped: 0,
       refused: 0,
     });
-    expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+    expect(
+      await collectDueRecurringPaymentsIn("sandbox", new Date(now.getTime() + 60 * 1000))
+    ).toEqual({
       recovered: 0,
       collected: 0,
       failed: 0,
@@ -3926,14 +4051,16 @@ describe("Payments routes — recurring", () => {
       });
     try {
       const runs = await Promise.all([
-        collectDueRecurringPayments(env, now),
-        collectDueRecurringPayments(env, now),
+        collectDueRecurringPaymentsIn("sandbox", now),
+        collectDueRecurringPaymentsIn("sandbox", now),
       ]);
       expect(runs).toEqual([
         { recovered: 0, collected: 0, failed: 0, skipped: 1, refused: 0 },
         { recovered: 0, collected: 0, failed: 0, skipped: 1, refused: 0 },
       ]);
-      expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      expect(
+        await collectDueRecurringPaymentsIn("sandbox", new Date(now.getTime() + 60 * 1000))
+      ).toEqual({
         recovered: 0,
         collected: 0,
         failed: 0,
@@ -4310,7 +4437,7 @@ describe("Payments routes — recurring", () => {
         });
       } else {
         await deleteTestOrganization();
-        expect(await collectDueRecurringPayments(env, new Date())).toMatchObject({
+        expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
           recovered: 1,
           refused: 0,
         });
@@ -5433,7 +5560,7 @@ describe("Payments routes — recurring", () => {
       expect(schedule).toEqual({ status: "activating", updated_at: staleAt });
       expect(send).toHaveBeenCalledTimes(sendsBefore);
 
-      const tick = await collectDueRecurringPayments(env, new Date());
+      const tick = await collectDueRecurringPaymentsIn("sandbox", new Date());
       expect(tick.recovered).toBe(1);
       expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
       const attempts = await getDb(env)

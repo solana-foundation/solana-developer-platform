@@ -1,5 +1,14 @@
 import type { ManagedRpcEnv } from "@sdp/rpc";
-import { GENESIS_HASH_BY_CLUSTER, SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  GENESIS_HASH_BY_CLUSTER,
+  SDP_ENVIRONMENTS,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+} from "@sdp/types";
 import { type Commitment, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND } from "@solana/kit";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
@@ -354,4 +363,36 @@ export function tokenAccountsByOwnerResult(
       },
     })),
   };
+}
+
+/**
+ * A `getTokenSupply` result for a mint with no supply yet, which is all a decimals read needs.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param decimals - The mint's decimals.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function tokenSupplyResult(slot: number, decimals: number): JsonRpcResult {
+  return {
+    context: { slot },
+    value: { amount: "0", decimals, uiAmount: 0, uiAmountString: "0" },
+  };
+}
+
+/**
+ * The cluster whose `createClusterRpc()` client `client` is, so a test can tell which cluster a
+ * spied chain helper was handed. The factory memoizes one client per cluster and pool, so the
+ * client work received under a scope is the one this resolves; call it while the stub is installed
+ * and outside any cluster scope.
+ *
+ * @param client - The RPC client a spied helper received.
+ * @returns The cluster it serves, or undefined when it is no cluster scope's client.
+ */
+export function clusterOfRpcClient(client: SolanaRpc): SolanaCluster | undefined {
+  const environment = SDP_ENVIRONMENTS.find(
+    (candidate) =>
+      runInClusterScope({ projectId: null, environment: candidate }, () => createClusterRpc()) ===
+      client
+  );
+  return environment === undefined ? undefined : CLUSTER_BY_SDP_ENVIRONMENT[environment];
 }

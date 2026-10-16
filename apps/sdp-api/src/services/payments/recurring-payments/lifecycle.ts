@@ -4,7 +4,7 @@ import {
   getRecurringPaymentOperationStaleBefore,
   type RecurringPaymentLifecycleOperation,
 } from "@sdp/payments/recurring-payment-lifecycle";
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { MovementId } from "@sdp/types";
 import {
@@ -56,7 +56,6 @@ function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperat
 }
 
 async function buildLifecycleInstruction(input: {
-  env: Env;
   operation: RecurringPaymentLifecycleOperation;
   planPda: Address;
   subscriber: TransactionSigner;
@@ -72,7 +71,7 @@ async function buildLifecycleInstruction(input: {
   }
 
   const onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
-    solanaRpc.createRpc(input.env),
+    createClusterRpc(),
     input.subscriptionPda,
     { commitment: "confirmed" }
   );
@@ -598,7 +597,6 @@ async function runRecurringPaymentLifecycle(
       });
 
       const instruction = await buildLifecycleInstruction({
-        env: input.env,
         operation: input.operation,
         planPda,
         subscriber: sourceSigner,
@@ -631,11 +629,7 @@ async function runRecurringPaymentLifecycle(
       attempt = updatedAttempt;
     }
 
-    await confirmSubscriptionSignature(
-      input.env,
-      signature,
-      lifecycleConfirmationMessage(input.operation)
-    );
+    await confirmSubscriptionSignature(signature, lifecycleConfirmationMessage(input.operation));
     confirmedOnChain = true;
 
     return finalizeRecurringPaymentLifecycle({

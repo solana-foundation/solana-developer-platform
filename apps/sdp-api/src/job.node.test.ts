@@ -278,7 +278,7 @@ describe("runCronJob", () => {
       { deadlineMs: -10_000 }
     );
     expect(trackPendingTransfers).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
-    expect(collectDueRecurringPayments).toHaveBeenCalledOnce();
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledOnce();
   });
 
@@ -411,7 +411,9 @@ describe("runCronJob", () => {
     });
     // Recurring payments are an always-on product surface: the collection tick
     // is deliberately behind no flag.
-    expect(collectDueRecurringPayments).toHaveBeenCalledExactlyOnceWith(env, expect.any(Date));
+    expect(vi.mocked(collectDueRecurringPayments).mock.calls).toEqual(
+      SDP_ENVIRONMENTS.map(() => [env, expect.any(Date)])
+    );
     // The rings poll gates itself on the flag plus the http adapter, so the job
     // hands it every tick — this is its only tick on a managed deployment.
     expect(pollRingsIndexing).toHaveBeenCalledExactlyOnceWith(env);
@@ -456,7 +458,7 @@ describe("runCronJob", () => {
 
     transfers.resolve(undefined);
     await expect(running).rejects.toThrow("credential cleanup down");
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
@@ -470,7 +472,7 @@ describe("runCronJob", () => {
     const completion = expect(runCronJob()).rejects.toThrow("credential cleanup down");
     try {
       await vi.waitFor(() => {
-        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+        expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
         expect(trackPendingDeposits).toHaveBeenCalledTimes(1);
         expect(trackPendingWithdrawals).toHaveBeenCalledTimes(1);
         expect(pollRingsIndexing).toHaveBeenCalledTimes(1);
@@ -518,7 +520,7 @@ describe("runCronJob", () => {
   });
 
   it("fails the job on a recurring-collection error but still releases pools", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 
@@ -531,7 +533,7 @@ describe("runCronJob", () => {
 
     await expect(runCronJob()).rejects.toThrow("ramp inbox down");
 
-    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(1);
+    expect(collectDueRecurringPayments).toHaveBeenCalledTimes(SDP_ENVIRONMENTS.length);
     expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
     expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
@@ -630,7 +632,7 @@ describe("runCronJob", () => {
   });
 
   it("emits an error-status sdp_cron_run event when a tick fails", async () => {
-    vi.mocked(collectDueRecurringPayments).mockRejectedValue(new Error("collection down"));
+    vi.mocked(collectDueRecurringPayments).mockRejectedValueOnce(new Error("collection down"));
 
     await expect(runCronJob()).rejects.toThrow("collection down");
 

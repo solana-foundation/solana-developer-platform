@@ -4,7 +4,6 @@ import {
   bvnkPayoutPartyDetailsFromCustomer,
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { BVNK_FUNDING_WALLET_STATUS, type PaymentRampQuote } from "@sdp/types";
 import { OFFRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { RampProviderId } from "@sdp/types/provider-access";
@@ -123,7 +122,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         counterpartyId: counterparty.id,
         sourceAddress: sourceWalletAddress,
         destinationAddress: null,
-        token: rampTransferTokenMint(input.assetRail, currentClusterScope().cluster),
+        token: rampTransferTokenMint(input.assetRail),
         amount: input.cryptoAmount,
         memo: null,
         type: "offramp",
