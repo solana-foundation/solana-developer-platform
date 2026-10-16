@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
-import { createClusterRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
-import { CLUSTER_BY_SDP_ENVIRONMENT, MEMO_PROGRAM_ADDRESS } from "@sdp/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
   AccountRole,
@@ -20,7 +21,6 @@ import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -116,7 +116,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     ]);
 
-    const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);
+    const rpc = createClusterRpc();
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
