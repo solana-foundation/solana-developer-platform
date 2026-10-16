@@ -6,6 +6,7 @@ import {
   getCryptoRailAssetLabel,
   isWellKnownTokenSymbol,
   SOL_MINT,
+  WELL_KNOWN_TOKEN_BY_MINT,
   wellKnownMint,
 } from "@sdp/types";
 import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
@@ -95,27 +96,33 @@ export function isNativePaymentToken(token: string): boolean {
 
 /**
  * Maps native SOL aliases and well-known token symbols (case-insensitive) to
- * the open scope's cluster mint; anything else passes through as a mint address,
- * byte-exact since base58 is case-sensitive. Native SOL canonicalizes to the
+ * the open scope's cluster mint. A well-known mint address must be deployed on
+ * that cluster; any other mint passes through byte-exact, since base58 is
+ * case-sensitive. Native SOL canonicalizes to the
  * wrapped SOL mint so `token` values compare uniformly — dispatch between
  * native and SPL paths goes through {@link isNativePaymentToken}, never string
  * equality against the mint.
  *
  * @param token - A native SOL alias, a well-known token symbol, or a mint address.
  * @returns The canonical mint address for `token` on the scope's cluster.
- * @throws AppError (400) when a well-known symbol has no mint on that cluster.
+ * @throws AppError (400) when a well-known symbol has no mint on that cluster, or a
+ * well-known mint address belongs only to the other cluster.
  */
 export function normalizePaymentToken(token: string): string {
   if (isNativePaymentToken(token)) {
     return SOL_MINT;
   }
 
+  const { cluster } = currentClusterScope();
   const symbol = token.trim().toUpperCase();
   if (!isWellKnownTokenSymbol(symbol)) {
+    const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(token);
+    if (wellKnown && !wellKnown.clusters.includes(cluster)) {
+      throw badRequest(`${wellKnown.symbol} mint ${token} is not available on ${cluster}`);
+    }
     return token;
   }
 
-  const { cluster } = currentClusterScope();
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {
     throw badRequest(`${symbol} is not available on ${cluster}`);

@@ -38,7 +38,10 @@ import type { Env } from "@/types/env";
 // Batches fan out per organization because policy velocity sums (spending
 // limits) are org-scoped and only count decided operations: same-org rows
 // evaluate serially so each check sees the earlier collections, keeping the
-// in-flight set per scope at one as in the serial job (ADR 0004).
+// in-flight set per scope at one as in the serial job (ADR 0004). That holds
+// within one environment's run only: the Sandbox and Production runs are
+// concurrent, so velocity scoped to an organization across environments
+// needs to become environment-bound before it relies on this (PRO-1933).
 const COLLECTION_ROW_CONCURRENCY = 8;
 
 type CollectionRowOutcome = "ok" | "failed" | "skipped" | "refused";

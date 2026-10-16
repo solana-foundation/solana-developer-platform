@@ -1,5 +1,4 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -77,11 +76,10 @@ export async function assertRecurringPaymentTokenMint(
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
   }
 
-  const { cluster } = currentClusterScope();
   const mint = assertValidAddress(normalizePaymentToken(token), "token");
   const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
   if (wellKnown) {
-    if (wellKnown.isUsdStable && wellKnown.clusters.includes(cluster)) {
+    if (wellKnown.isUsdStable) {
       return mint;
     }
     throw badRequest(RECURRING_PAYMENT_TOKEN_ERROR);
