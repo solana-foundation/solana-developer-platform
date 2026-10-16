@@ -23,11 +23,7 @@ import { runWithCronRunEvent } from "@/cron/run-event";
 import { SECRET_RETIREMENTS_MONITOR } from "@/cron/secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import {
-  assertSdpReleaseChannelConfigured,
-  isEarnEnabled,
-  isPrivateChannelsEnabled,
-} from "@/lib/feature-flags";
+import { assertSdpReleaseChannelConfigured, isEarnEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
@@ -39,7 +35,6 @@ import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
-import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { pruneIdempotencyKeys } from "@/services/jobs/prune-idempotency-keys";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -47,9 +42,7 @@ import { reconcileRampTransfers } from "@/services/jobs/reconcile-ramp-transfers
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
-import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { trackPendingWithdrawals } from "@/services/jobs/track-pending-withdrawals";
 import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
@@ -167,7 +160,6 @@ export async function runCronJob(): Promise<void> {
     }
   }
 
-  const privateChannelsEnabled = isPrivateChannelsEnabled(env);
   const earnEnabled = isEarnEnabled(env);
 
   try {
@@ -218,17 +210,11 @@ export async function runCronJob(): Promise<void> {
             collectDueRecurringPayments(env, new Date())
           )
         );
-        if (privateChannelsEnabled) {
-          const outcomes = await Promise.allSettled([
-            monitored(PENDING_DEPOSITS_MONITOR, () => trackPendingDeposits(env)),
-            monitored(PENDING_WITHDRAWALS_MONITOR, () => trackPendingWithdrawals(env)),
-          ]);
-          failures.push(...rejectionReasons(outcomes));
-        } else {
-          await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
-          await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
-        }
-        await collect(monitored(RINGS_INDEXING_MONITOR, () => pollRingsIndexing(env)));
+        // Paused until they read the chain on the project's cluster (HOO-1873); the
+        // monitors keep checking in so a paused job is not reported as missing.
+        await monitored(PENDING_DEPOSITS_MONITOR, async () => undefined);
+        await monitored(PENDING_WITHDRAWALS_MONITOR, async () => undefined);
+        await monitored(RINGS_INDEXING_MONITOR, async () => undefined);
         await collect(
           monitored(EARN_VAULT_MOVEMENTS_MONITOR, () => reconcileEarnVaultMovements(env))
         );

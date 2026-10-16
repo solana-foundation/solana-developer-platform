@@ -13,7 +13,7 @@ import { type ScheduledTask, schedule } from "node-cron";
 import { DVP_TRADES_CRON, runDvpTradeReconciliation } from "@/cron/dvp-trades";
 import { EARN_SPLIT_SWAPS_CRON, runEarnSplitSwapDetection } from "@/cron/earn-split-swaps";
 import { runWithSystemDatabaseIdentity } from "@/db";
-import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
@@ -34,17 +34,9 @@ import {
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
 import { IDEMPOTENCY_KEY_PRUNE_CRON, runIdempotencyKeyPrune } from "./idempotency-keys";
-import {
-  PENDING_DEPOSITS_CRON,
-  PENDING_DEPOSITS_MONITOR,
-  runPendingDepositsReconciliation,
-} from "./pending-deposits";
+import { PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR } from "./pending-deposits";
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
-import {
-  PENDING_WITHDRAWALS_CRON,
-  PENDING_WITHDRAWALS_MONITOR,
-  runPendingWithdrawalsReconciliation,
-} from "./pending-withdrawals";
+import { PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR } from "./pending-withdrawals";
 import {
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
   runProviderCredentialSecretCleanup,
@@ -58,7 +50,7 @@ import {
   REVOKED_API_KEY_CACHE_CRON,
   runRevokedApiKeyCacheReconciliation,
 } from "./revoked-api-key-cache";
-import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
+import { RINGS_INDEXING_CRON, RINGS_INDEXING_MONITOR } from "./rings-indexing";
 import { runWithCronRunEvent } from "./run-event";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
@@ -227,29 +219,11 @@ export function startCron(deps: CronDeps): CronHandle | null {
     )
   );
 
-  if (isPrivateChannelsEnabled(deps.env)) {
-    tasks.push(
-      scheduleSystemTask(
-        PENDING_DEPOSITS_CRON,
-        "cron:pending-deposits",
-        runPendingDepositsReconciliation
-      )
-    );
-    tasks.push(
-      scheduleSystemTask(
-        PENDING_WITHDRAWALS_CRON,
-        "cron:pending-withdrawals",
-        runPendingWithdrawalsReconciliation
-      )
-    );
-  } else {
-    scheduleDisabledTickProofOfLife(PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR);
-    scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
-  }
-
-  // Cheap to schedule unconditionally: the job early-returns unless the rings
-  // flag is on and the live gateway adapter is selected.
-  tasks.push(scheduleSystemTask(RINGS_INDEXING_CRON, "cron:rings-indexing", runRingsIndexingPoll));
+  // Paused until they read the chain on the project's cluster (HOO-1873); the
+  // monitors keep checking in so a paused job is not reported as missing.
+  scheduleDisabledTickProofOfLife(PENDING_DEPOSITS_CRON, PENDING_DEPOSITS_MONITOR);
+  scheduleDisabledTickProofOfLife(PENDING_WITHDRAWALS_CRON, PENDING_WITHDRAWALS_MONITOR);
+  scheduleDisabledTickProofOfLife(RINGS_INDEXING_CRON, RINGS_INDEXING_MONITOR);
 
   if (isEarnEnabled(deps.env)) {
     tasks.push(
