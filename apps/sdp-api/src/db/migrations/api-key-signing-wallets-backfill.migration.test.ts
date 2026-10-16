@@ -9,12 +9,12 @@ import { seedTestDatabase } from "@/test/mocks/db";
 const migration = readFileSync(
   path.join(
     path.dirname(fileURLToPath(import.meta.url)),
-    "postgres/0140_api_key_signing_wallets.sql"
+    "postgres/0143_api_key_signing_wallets.sql"
   ),
   "utf8"
 );
 
-/** The statements between the backfill markers, as 0140 runs them. */
+/** The statements between the backfill markers, as 0143 runs them. */
 function backfillStatements(): string[] {
   const body = migration.slice(
     migration.indexOf("-- backfill:start"),
@@ -69,7 +69,7 @@ const KEYS = [
   wallets: readonly string[];
 }>;
 
-describe("0140 wallet scope backfill", () => {
+describe("0143 wallet scope backfill", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
