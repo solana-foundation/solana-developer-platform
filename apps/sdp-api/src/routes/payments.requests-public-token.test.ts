@@ -1,5 +1,5 @@
 import type { Action } from "@sdp/types";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
@@ -8,6 +8,13 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+// Reads reconcile awaiting rows on chain; this suite is about what a read
+// discloses, not settlement, so the stored row comes back as is.
+vi.mock("@/services/payments/payment-requests", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/payments/payment-requests")>()),
+  reconcilePaymentRequest: async (_env: unknown, row: unknown) => row,
+}));
 
 /**
  * APE-849: a payment request's public token is the bearer credential of its

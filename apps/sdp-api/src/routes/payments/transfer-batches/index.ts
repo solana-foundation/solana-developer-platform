@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
-import { requestGate } from "@/middleware/request-gate";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
