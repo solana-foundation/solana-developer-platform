@@ -43,17 +43,17 @@ describe("IssuanceDraftFlow in demo mode", () => {
 
     for (let step = 0; step < 4; step += 1) {
       const next = screen.getByRole("button", { name: draftText.continue });
-      expect((next as HTMLButtonElement).disabled).toBe(false);
+      expect(next).toHaveProperty("disabled", false);
       fireEvent.click(next);
     }
     const create = screen.getByRole("button", { name: draftText.createDraft });
-    expect((create as HTMLButtonElement).disabled).toBe(false);
+    expect(create).toHaveProperty("disabled", false);
   });
 
   it("starts empty outside demo mode", () => {
     renderFlow(false);
     expect(screen.queryByDisplayValue("Harbor Dollar")).toBeNull();
     const next = screen.getByRole("button", { name: draftText.continue });
-    expect((next as HTMLButtonElement).disabled).toBe(true);
+    expect(next).toHaveProperty("disabled", true);
   });
 });

@@ -5,6 +5,7 @@ import {
   type TokenTransactionStatus,
 } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_ISSUANCE_LIST_QUERY } from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
 import { tokenLifecycle } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
 import {
   fetchIssuanceTokenFacets,
@@ -66,6 +67,7 @@ function read(path: string): Answer {
   if (parts?.segments[0] !== "issuance") throw new Error(`not an issuance path: ${path}`);
   const answer = issuanceRead(world().issuance, parts.segments.slice(1), parts.params);
   if (!answer) throw new Error(`no demo answer for ${path}`);
+  // SAFETY: the demo answers with the JSON envelope the API sends; Answer is the part tests read.
   return answer as Answer;
 }
 
@@ -75,6 +77,7 @@ function write(method: string, path: string, body: unknown = {}): Answer {
   const result = demoWrite(method, { segments: parts.segments, body, world: world(), ops, now });
   if (!result) throw new Error(`no demo stand-in for ${method} ${path}`);
   ops = [...ops, ...result.ops];
+  // SAFETY: as in read(), the answer is the API's JSON envelope.
   return result.answer(world()) as Answer;
 }
 
@@ -107,15 +110,7 @@ beforeEach(() => {
 
 describe("the token list", () => {
   it("shows a token in every state, newest first, through the list's own helper", async () => {
-    const page = await fetchIssuanceTokensPage(request, {
-      search: "",
-      status: "all",
-      template: "all",
-      date: "all",
-      sort: "newest",
-      page: 1,
-      pageSize: 24,
-    } as never);
+    const page = await fetchIssuanceTokensPage(request, DEFAULT_ISSUANCE_LIST_QUERY);
     expect(page.error).toBeNull();
     expect(page.total).toBe(7);
     expect(page.tokens[0]?.symbol).toBe("HDR");
@@ -211,7 +206,7 @@ describe("a draft to a live token", () => {
       },
     });
     expect(created.status).toBe(201);
-    const id = created.body.data.token.id as string;
+    const { id } = created.body.data.token;
     expect(created.body.data.assetProfile.tokenId).toBe(id);
     expect(lifecycle(id)).toBe("draft");
     expect(read("/v1/issuance/tokens?deploymentStatus=draft").body.meta.total).toBe(4);
@@ -294,7 +289,7 @@ describe("a live token's operations", () => {
 
   it("burns, seizes and force-burns only what the source holds", () => {
     // The issuer's treasury signs and holds the seeded supply; ADDRESS holds none of it.
-    const treasury = token("demo_tok_vusd").mintAuthority as string;
+    const treasury = token("demo_tok_vusd").mintAuthority ?? "";
     expect(
       refusal(write("POST", `${VUSD}/burn`, { burn: { source: treasury, amount: "1" } }))[0]
     ).toBe(400);
@@ -398,7 +393,7 @@ describe("a live token's operations", () => {
       refusal(write("POST", "/v1/issuance/tokens/demo_tok_mrdn/allowlist", { address: ADDRESS }))
     ).toEqual([409, "CONFLICT"]);
     expect(read("/v1/issuance/tokens/demo_tok_mrdn/allowlist").body.meta.total).toBe(4);
-    const entryId = added.body.data.entry.id as string;
+    const entryId = added.body.data.entry.id;
     expect(write("DELETE", `/v1/issuance/tokens/demo_tok_mrdn/allowlist/${entryId}`).status).toBe(
       204
     );
