@@ -14,15 +14,19 @@ export interface DashboardCapabilities {
   canUseWalletSignerCheck: boolean;
 }
 
+/** Plain data: the project layout hands it to a client provider, so it holds no functions. */
 export interface DashboardAccess {
   role: OrganizationRole;
-  /** Whether this member's organization role holds an action, as the API decides it. */
-  mayPerform: (action: Action) => boolean;
   capabilities: DashboardCapabilities;
 }
 
 export function mapClerkRoleToDashboardRole(role: string | null | undefined): OrganizationRole {
   return normalizeOrganizationRole(role);
+}
+
+/** Whether this member's organization role holds an action, as the API decides it. */
+export function dashboardRoleMayPerform(role: string | null | undefined, action: Action): boolean {
+  return organizationRoleMayPerform(mapClerkRoleToDashboardRole(role), action);
 }
 
 export function resolveDashboardAccess(role: string | null | undefined): DashboardAccess {
@@ -31,7 +35,6 @@ export function resolveDashboardAccess(role: string | null | undefined): Dashboa
 
   return {
     role: resolvedRole,
-    mayPerform,
     capabilities: {
       canManageApiKeys: mayPerform("api_keys.manage"),
       canManageCustody: mayPerform("wallets.configure"),
