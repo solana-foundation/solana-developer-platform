@@ -1341,17 +1341,34 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     async listActiveRecurringPaymentsActivatedByApiKey(params) {
       const rows = await db
         .prepare(
-          `SELECT *
-             FROM payment_recurring_payments
-            WHERE organization_id = ?
-              AND project_id = ?
-              AND activated_by_api_key_id = ?
-              AND status = ANY(?::text[])
-            ORDER BY created_at ASC`
+          // The key and every predecessor it was rotated from, in this project.
+          `WITH RECURSIVE lineage(id, rotated_from) AS (
+             SELECT id, rotated_from FROM api_keys
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+             UNION
+             SELECT ak.id, ak.rotated_from
+               FROM api_keys ak
+               JOIN lineage ON ak.id = lineage.rotated_from
+              WHERE ak.organization_id = ? AND ak.project_id = ?
+           )
+           SELECT rp.*
+             FROM payment_recurring_payments rp
+            WHERE rp.organization_id = ?
+              AND rp.project_id = ?
+              AND rp.activated_by_api_key_id IN (SELECT id FROM lineage)
+              AND rp.status = ANY(?::text[])
+            ORDER BY rp.created_at ASC`
         )
-        .bind(params.organizationId, params.projectId, params.apiKeyId, [
-          ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
-        ])
+        .bind(
+          params.apiKeyId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId,
+          [...COLLECTABLE_RECURRING_PAYMENT_STATUSES]
+        )
         .all<Record<string, unknown>>();
       return rows.results.map(mapRecurringPaymentRow);
     },

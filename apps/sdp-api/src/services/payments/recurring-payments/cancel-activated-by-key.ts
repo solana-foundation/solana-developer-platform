@@ -12,10 +12,11 @@ export interface CancelActivatedByKeyResult {
 
 /**
  * The compromised-key path (APE-343): cancel every active recurring payment a
- * key activated or last resumed. Revoking a key never does this on its own,
- * because a mandate outlives the key that set it up; a person asks for it on
- * revoke. Each cancel is an exit, so it is never refused, and runs on its own:
- * one that fails is reported and leaves the others canceled.
+ * key activated or last resumed, under its own id or one it was rotated from.
+ * Revoking a key never does this on its own, because a mandate outlives the
+ * key that set it up; a person asks for it on revoke, and each cancel signs as
+ * that person. Each runs on its own: one that fails is reported and leaves the
+ * others canceled.
  */
 export async function cancelRecurringPaymentsActivatedByKey(
   env: Env,

@@ -505,7 +505,11 @@ export interface PaymentRecurringPaymentsRepository {
     staleBefore?: string;
     activatedBy: RecurringPaymentActivator | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
-  /** Active recurring payments a key activated or last resumed, for revoke-and-cancel. */
+  /**
+   * Active recurring payments a key activated or last resumed, for
+   * revoke-and-cancel: under this key's id or any id it was rotated from, since
+   * rotation mints a new row for the same credential.
+   */
   listActiveRecurringPaymentsActivatedByApiKey(params: {
     organizationId: string;
     projectId: string;

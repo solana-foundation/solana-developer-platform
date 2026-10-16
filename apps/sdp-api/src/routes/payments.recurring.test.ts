@@ -39,7 +39,10 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
-import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
+import {
+  cancelRecurringPaymentsActivatedByKey,
+  skipRefusedRecurringCollectionPeriod,
+} from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { clusterOfRpcClient } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -4516,6 +4519,78 @@ describe("Payments routes — recurring", () => {
       expect(recurringExecutionCallCounts()).toEqual(executionCalls);
     }
   );
+
+  // The compromised-key path (APE-343): revoke-and-cancel finds what the key
+  // activated under its own id or one it was rotated from.
+  describe("cancel what a revoked key activated", () => {
+    async function seedKeyRow(id: string, rotatedFrom: string | null) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+              grants, status, rotated_from)
+           VALUES (?, ?, ?, ?, ?, 'sk_test_x', ?, '{}', 'active', ?)`
+        )
+        .bind(id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, id, `hash_${id}`, rotatedFrom)
+        .run();
+    }
+    const cancelFor = (apiKeyId: string) =>
+      cancelRecurringPaymentsActivatedByKey(env, {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        apiKeyId,
+      });
+    beforeEach(() => {
+      recurringExecution
+        .signAndSendMock()
+        .mockResolvedValue(
+          signature(
+            "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+          )
+        );
+    });
+    const statusOf = async (id: string) =>
+      (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+          .bind(id)
+          .first<{ status: string }>()
+      )?.status;
+
+    it("cancels a payment the key activated", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+
+      expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
+      expect(await statusOf(activated.id)).toBe("canceled");
+    });
+
+    it("cancels a payment a key's rotated-from predecessor activated", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_rotated_successor", TEST_API_KEY.id);
+
+      expect(await cancelFor("key_recurring_rotated_successor")).toEqual({
+        canceled: [activated.id],
+        failed: [],
+      });
+    });
+
+    it("cancels nothing for an unrelated key", async () => {
+      const activated = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      await seedKeyRow("key_recurring_unrelated", null);
+
+      expect(await cancelFor("key_recurring_unrelated")).toEqual({ canceled: [], failed: [] });
+      expect(await statusOf(activated.id)).toBe("active");
+    });
+  });
 
   it("refuses moving an active mandate to a wallet outside the key's scope, before claiming it", async () => {
     await seedUnboundWallet();
