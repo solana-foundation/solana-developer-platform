@@ -6,7 +6,7 @@ import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
  * The DvP sub-module gate. Markets is gated one level up.
  *
  * Worth knowing when enabling this: the swap program is deployed on devnet
- * only, so the API answers 403 on every other cluster whatever this flag says.
+ * only, so the API answers 403 on every other cluster whatever the release channel says.
  */
 export default async function DvpLayout({ children }: { children: ReactNode }) {
   if (!isModuleInDeploymentReleaseChannel("dvp")) {

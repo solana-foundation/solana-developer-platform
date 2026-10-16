@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 export default async function PrivateChannelsLayout({ children }: { children: ReactNode }) {
-  // Every leaf page checks the flag too, but gating the shared layout avoids
+  // Every leaf page checks the release channel too, but gating the shared layout avoids
   // rendering Private Channels chrome around a hand-typed disabled route.
   if (!isModuleInDeploymentReleaseChannel("private_channels")) {
     notFound();

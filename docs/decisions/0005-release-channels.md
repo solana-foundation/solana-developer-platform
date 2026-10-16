@@ -77,9 +77,18 @@ already names the Private Channels module.
 - Compliance integrations in the dashboard show whenever the channel runs the
   Compliance module (ADR 0006). The screening API is available in every
   channel.
-- The Transactions tabs follow each module's dashboard flag, but `GET
-  /v1/transactions` filters only by permission and release channel. So a module
-  inside the channel with its flag off has no tab, yet its rows still appear
-  under "All" (HOO-1951).
-- The dashboard hides excluded modules, but a Vercel Toolbar flag override can
-  still show their UI to team members. The API refuses their routes either way.
+- The Transactions tabs follow the release channel, the same filter
+  `GET /v1/transactions` applies, so a module's tab and its rows under "All"
+  agree.
+- The dashboard's release channel must match the API's. A mismatch is logged
+  (`sdp_release_channel_mismatch`), not fatal: the dashboard would show modules
+  the API refuses, or hide ones it serves.
+
+## Update (2026-10-16)
+
+The per-module enable flags are removed (`PRIVATE_CHANNELS_ENABLED`,
+`HELIUS_RINGS_ENABLED`, `MARKETS_ENABLED`, `EARN_ENABLED`, `ISSUANCE_ENABLED`,
+`DVP_ENABLED`, and the dashboard's Vercel module flags). The release channel is
+the only module gate on the API, background jobs and dashboard; "module flags
+apply as before" above no longer holds. `SDP_FLAG_ASSET_PROFILES` remains, as a
+feature inside Issuance rather than a module.

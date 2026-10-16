@@ -39,7 +39,7 @@ export function deploymentReleaseChannel(): SdpReleaseChannel {
 
 /**
  * Whether this deployment runs `module` at all, the same check the API makes.
- * Unlike a module's dashboard flag it ignores per-user Vercel targeting.
+ * Modules have no dashboard flags: this is the only module gate.
  */
 export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
   return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_STAGES);

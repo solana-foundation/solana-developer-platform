@@ -71,8 +71,8 @@ function MarketsPathCard({
 /**
  * The Markets entry chooser: routes a visitor to the surface built for them
  * before either workspace loads. Markets runs when Earn or DvP does, so each
- * section shows only when its sub-module's flag (capped at the release channel)
- * is on: the same check its segment layout 404s on.
+ * section shows only when the release channel includes its sub-module: the same
+ * check its segment layout 404s on.
  */
 export async function MarketsLanding() {
   const [t, earnEnabled, dvpEnabled] = await Promise.all([
