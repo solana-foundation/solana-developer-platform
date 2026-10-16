@@ -22,7 +22,6 @@ import {
 import { PENDING_TRANSFERS_CRON, runPendingTransfersReconciliation } from "./pending-transfers";
 import {
   PENDING_WITHDRAWALS_CRON,
-  PENDING_WITHDRAWALS_MONITOR,
   runPendingWithdrawalsReconciliation,
 } from "./pending-withdrawals";
 import {
@@ -38,11 +37,7 @@ import {
   REVOKED_API_KEY_CACHE_CRON,
   runRevokedApiKeyCacheReconciliation,
 } from "./revoked-api-key-cache";
-import {
-  RINGS_INDEXING_CRON,
-  RINGS_INDEXING_MONITOR,
-  runRingsIndexingPoll,
-} from "./rings-indexing";
+import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { assertCronConfig, startCron, startEarnCatalogueBootSync } from "./runner";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
@@ -109,7 +104,7 @@ vi.mock("./recurring-payments", () => {
 });
 
 // The private-channels reconcilers pull in heavy Solana modules; mock the wrappers so
-// runner.ts loads without them.
+// runner.ts loads without them (they're feature-flag gated, off in most tests).
 // Unmocked they fail to resolve (@solana/mosaic-sdk ships a directory import Node ESM
 // rejects), which also poisons the module graph for any test file sharing the pool.
 vi.mock("./pending-deposits", () => ({
@@ -131,9 +126,12 @@ vi.mock("./revoked-api-key-cache", () => ({
   runRevokedApiKeyCacheReconciliation: vi.fn(),
 }));
 
+// The rings poll pulls the rings service and through it the Solana signer stack;
+// mocked like the other wrappers. Registered unconditionally (the job itself
+// early-returns unless the rings flag and the http adapter are set), so it is
+// part of every schedule count below.
 vi.mock("./rings-indexing", () => ({
   RINGS_INDEXING_CRON: "* * * * *",
-  RINGS_INDEXING_MONITOR: "sdp-api-poll-rings-indexing",
   runRingsIndexingPoll: vi.fn(),
 }));
 
@@ -186,7 +184,6 @@ describe("startCron", () => {
     vi.mocked(runProviderCredentialSecretCleanup).mockReset();
     vi.mocked(runRampTransfersReconciliation).mockReset();
     vi.mocked(runEarnCatalogueSyncIfDue).mockClear();
-    vi.mocked(logEvent).mockClear();
   });
 
   // The secret-retirement sweep is registered behind no flag at all, so it is
@@ -388,31 +385,49 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[2][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
   });
 
-  it("checks the paused deposit, withdrawal and rings monitors in without running their jobs", async () => {
+  it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
     const bg = makeBg();
-    startCron({
-      env: { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true", HELIUS_RINGS_ENABLED: "true" } as Env,
+    const env = { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env;
+    startCron({ env, bg });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
+
+    // Fire every scheduled tick; the two private-channels reconcilers must run.
+    for (const call of scheduleMock.mock.calls) {
+      (call[1] as () => void)();
+    }
+    expect(runPendingDepositsReconciliation).toHaveBeenCalledWith({
+      env,
       bg,
+      observability: expect.anything(),
     });
+    expect(runPendingWithdrawalsReconciliation).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
+  });
 
-    for (const [, tick] of scheduleMock.mock.calls) {
-      tick();
-    }
-    await Promise.all(vi.mocked(bg.run).mock.calls.map(([work]) => work));
+  // The proof-of-life staleness alert counts distinct sdp_cron_run monitors per
+  // window, so a tick whose feature flag is off must still emit its event (as
+  // the managed job does) — silence is reserved for a dead scheduler.
+  it("emits proof-of-life without running the reconciler when private channels is off", async () => {
+    const bg = makeBg();
+    startCron({ env: { ...CHANNEL } as Env, bg });
 
-    for (const monitor of [
-      PENDING_DEPOSITS_MONITOR,
-      PENDING_WITHDRAWALS_MONITOR,
-      RINGS_INDEXING_MONITOR,
-    ]) {
-      expect(logEvent).toHaveBeenCalledWith(
-        "info",
-        expect.objectContaining({ event: "sdp_cron_run", monitor, status: "ok" })
-      );
-    }
+    (scheduleMock.mock.calls[3][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
-    expect(runPendingWithdrawalsReconciliation).not.toHaveBeenCalled();
-    expect(runRingsIndexingPoll).not.toHaveBeenCalled();
+    expect(bg.run).toHaveBeenCalledTimes(1);
+    await vi.mocked(bg.run).mock.calls[0][0];
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_cron_run",
+        monitor: PENDING_DEPOSITS_MONITOR,
+        status: "ok",
+      })
+    );
   });
 
   it("emits proof-of-life without refreshing metrics when earn is off", async () => {
@@ -499,6 +514,30 @@ describe("startCron", () => {
     expect(handle).not.toBeNull();
     await handle?.stop();
     expect(stopMock).toHaveBeenCalledTimes(ALL_TASKS);
+  });
+
+  it("returned handle.stop() stops every scheduled task", async () => {
+    const handle = startCron({
+      env: { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env,
+      bg: makeBg(),
+    });
+    expect(handle).not.toBeNull();
+    await handle?.stop();
+    expect(stopMock).toHaveBeenCalledTimes(ALL_TASKS);
+  });
+
+  it("tick invokes the rings indexing poll with the supplied deps", () => {
+    const bg = makeBg();
+    const env = { ...CHANNEL } as Env;
+    const observability = makeObservability();
+    startCron({ env, bg, observability });
+    const tick = scheduleMock.mock.calls[5][1] as () => void;
+    tick();
+    expect(runRingsIndexingPoll).toHaveBeenCalledWith({
+      env,
+      bg,
+      observability: expect.anything(),
+    });
   });
 });
 
