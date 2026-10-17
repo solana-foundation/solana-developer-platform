@@ -1,4 +1,4 @@
-import type { PaymentRequest } from "@sdp/types";
+import { type PaymentRequest, wellKnownMint } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,
@@ -12,8 +12,35 @@ import {
   paymentRequestsListHref,
 } from "./payment-requests-page.data";
 
-function requestRow(id: string): PaymentRequest {
-  return { id } as PaymentRequest;
+function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): PaymentRequest {
+  return {
+    id,
+    organizationId: "org_1",
+    projectId: "prj_1",
+    counterpartyId: null,
+    walletId: "wal_1",
+    destinationAddress: "11111111111111111111111111111111",
+    token: MAINNET_USDC,
+    amount: "1",
+    reference: "ref_1",
+    status: "awaiting_payment",
+    expiresAt: null,
+    fulfilledByTransferId: null,
+    canceledBy: null,
+    lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
+    createdBy: null,
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+const MAINNET_USDC = mainnetUsdc();
+
+function mainnetUsdc(): string {
+  const mint = wellKnownMint("USDC", "mainnet-beta");
+  if (!mint) throw new Error("USDC has no mainnet mint");
+  return mint;
 }
 
 describe("parsePaymentRequestsListParams", () => {
@@ -39,14 +66,12 @@ describe("parsePaymentRequestsListParams", () => {
 });
 
 describe("paymentRequestMatchesSearch", () => {
-  const request = {
-    id: "preq_1",
+  const request = requestRow("preq_1", {
     amount: "12.5",
-    token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     counterpartyId: "cp_1",
     destinationAddress: "Dest1111111111111111111111111111111111111111",
     reference: "INV-42",
-  } as PaymentRequest;
+  });
   const names = new Map([["cp_1", "Jane Doe"]]);
 
   it("matches the amount, token symbol, payer, destination or reference, ignoring case", () => {
@@ -66,11 +91,11 @@ describe("paymentRequestMatchesSearch", () => {
 describe("fetchPaymentRequestDetail", () => {
   function detailApi(response: Response) {
     const paths: string[] = [];
-    const request = async (path: string) => {
+    const request: Parameters<typeof fetchPaymentRequestDetail>[0] = async (path) => {
       paths.push(path);
       return response;
     };
-    return { request: request as Parameters<typeof fetchPaymentRequestDetail>[0], paths };
+    return { request, paths };
   }
 
   it("reads the request by id", async () => {
@@ -92,11 +117,11 @@ describe("fetchPaymentRequestDetail", () => {
 describe("fetchPaymentRequestLinkToken", () => {
   function linkApi(response: Response) {
     const paths: string[] = [];
-    const request = async (path: string) => {
+    const request: Parameters<typeof fetchPaymentRequestLinkToken>[0] = async (path) => {
       paths.push(path);
       return response;
     };
-    return { request: request as Parameters<typeof fetchPaymentRequestLinkToken>[0], paths };
+    return { request, paths };
   }
 
   it("reads the token from the link endpoint", async () => {

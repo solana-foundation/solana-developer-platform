@@ -1,20 +1,15 @@
-import type { Action } from "@sdp/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type Action, wellKnownMint } from "@sdp/types";
+import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-
-// Reads reconcile awaiting rows on chain; this suite is about what a read
-// discloses, not settlement, so the stored row comes back as is.
-vi.mock("@/services/payments/payment-requests", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/payments/payment-requests")>()),
-  reconcilePaymentRequest: async (_env: unknown, row: unknown) => row,
-}));
 
 /**
  * APE-849: a payment request's public token is the bearer credential of its
@@ -25,6 +20,13 @@ const ORGANIZATION_ID = "org_payment_request_token";
 const PROJECT_ID = "prj_payment_request_token";
 const USER_ID = "usr_payment_request_token";
 const WALLET_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+const DEVNET_USDC = devnetUsdc();
+
+function devnetUsdc(): string {
+  const mint = wellKnownMint("USDC", "devnet");
+  if (!mint) throw new Error("USDC has no devnet mint");
+  return mint;
+}
 
 const READ_KEY = { id: "key_request_reader", raw: "sk_test_request_reader", prefix: "sk_test_rqr" };
 const MANAGE_KEY = {
@@ -48,10 +50,14 @@ async function get(path: string, key: typeof READ_KEY): Promise<Response> {
 }
 
 describe("payment request public tokens", () => {
+  // Reads reconcile an awaiting request on chain; nothing has paid it, so
+  // every read returns the stored row.
+  const rpc = installClusterRpcStub();
   let requestId: string;
   let publicToken: string;
 
   beforeEach(async () => {
+    rpc.answer("getSignaturesForAddress", []);
     await seedTestDatabase(env);
     const db = getDb(env);
     await db
@@ -97,7 +103,7 @@ describe("payment request public tokens", () => {
       custodyWalletId: "cwlt_request_token",
       walletId: "wlt_request_token",
       destinationAddress: WALLET_ADDRESS,
-      token: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      token: DEVNET_USDC,
       amount: "25.00",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       createdBy: USER_ID,
@@ -113,7 +119,9 @@ describe("payment request public tokens", () => {
     const res = await get("/v1/payments/requests?status=awaiting_payment", key);
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { paymentRequests: Record<string, unknown>[] } };
+    const body = z
+      .object({ data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }) })
+      .parse(await res.json());
     expect(body.data.paymentRequests).toHaveLength(1);
     expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
     expect(JSON.stringify(body)).not.toContain(publicToken);
@@ -123,7 +131,7 @@ describe("payment request public tokens", () => {
     const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: Record<string, unknown> };
+    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
     expect(body.data.id).toBe(requestId);
     expect(body.data).not.toHaveProperty("publicToken");
   });
@@ -155,7 +163,7 @@ describe("payment request public tokens", () => {
         headers: { Authorization: `Bearer ${READ_KEY.raw}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           walletId: "wlt_request_token",
-          token: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+          token: DEVNET_USDC,
           amount: "1.00",
         }),
       },

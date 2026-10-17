@@ -76,9 +76,12 @@ export interface CreateApiKeyInput {
  * The ids are checked to be the project's custody wallets before they reach
  * here ({@link resolveSigningWalletsInProject}).
  */
-export type ApiKeySigningWalletScope =
-  | { scope: "all" }
-  | { scope: "selected"; custodyWalletIds: readonly string[] };
+export const apiKeySigningWalletScopeSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("all") }),
+  z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
+]);
+
+export type ApiKeySigningWalletScope = z.infer<typeof apiKeySigningWalletScopeSchema>;
 
 export interface UpdateApiKeyInput {
   keyId: string;
@@ -179,14 +182,14 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
 /** `api_keys.grants`, a `text[]` the driver returns as an array. */
 const storedGrantsSchema = z.array(z.string());
 
-/** A key's `api_key_signing_wallets`, aggregated to a `text[]`. */
+/** A key's active `api_key_signing_wallets`, aggregated to a `text[]`. */
 const walletIdsSchema = z.array(z.string());
 
 /** The custody wallet ids a key lists, as a SELECT column (`wallet_ids`). */
 const WALLET_IDS_COLUMN = `ARRAY(
                   SELECT s.custody_wallet_id
                     FROM api_key_signing_wallets s
-                   WHERE s.api_key_id = ak.id
+                   WHERE s.api_key_id = ak.id AND s.status = 'active'
                    ORDER BY s.custody_wallet_id
                 ) AS wallet_ids`;
 
@@ -482,12 +485,24 @@ export class ApiKeyService {
    * transaction, right after the key row it belongs to.
    */
   private async writeSigningWallets(keyId: string, walletScope: ApiKeySigningWalletScope) {
-    await this.db.execute("DELETE FROM api_key_signing_wallets WHERE api_key_id = ?", [keyId]);
-    if (walletScope.scope === "selected" && walletScope.custodyWalletIds.length > 0) {
+    const listed =
+      walletScope.scope === "selected" ? [...new Set(walletScope.custodyWalletIds)] : [];
+    // Off the list: archived, never deleted.
+    await this.db.execute(
+      `UPDATE api_key_signing_wallets
+          SET status = 'archived', archived_at = sdp_iso_now()
+        WHERE api_key_id = ? AND status = 'active' AND NOT (custody_wallet_id = ANY(?::text[]))`,
+      [keyId, listed]
+    );
+    if (listed.length > 0) {
+      // On the list: a new row, or an archived one active again.
       await this.db.execute(
         `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
-         SELECT ?, unnest(?::text[])`,
-        [keyId, [...new Set(walletScope.custodyWalletIds)]]
+         SELECT ?, unnest(?::text[])
+         ON CONFLICT (api_key_id, custody_wallet_id) DO UPDATE
+           SET status = 'active', archived_at = NULL
+         WHERE api_key_signing_wallets.status = 'archived'`,
+        [keyId, listed]
       );
     }
   }
@@ -621,7 +636,8 @@ export class ApiKeyService {
 
     await this.db.execute(
       `INSERT INTO api_key_signing_wallets (api_key_id, custody_wallet_id)
-       SELECT ?, custody_wallet_id FROM api_key_signing_wallets WHERE api_key_id = ?`,
+       SELECT ?, custody_wallet_id FROM api_key_signing_wallets
+        WHERE api_key_id = ? AND status = 'active'`,
       [newKeyId, keyId]
     );
 

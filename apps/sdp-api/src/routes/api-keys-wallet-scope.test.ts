@@ -309,7 +309,7 @@ describe("API key wallet scope routes", () => {
     expect(await readKey(keyId)).toMatchObject({ walletScope: "all", walletIds: [] });
   });
 
-  it("replaces the list, and clears it when the key goes back to all wallets", async () => {
+  it("replaces the list, archiving what it drops and reviving what it lists again", async () => {
     const keyId = await createKey({ walletScope: "selected", walletIds: ["cwlt_scope_a"] });
 
     expect(
@@ -322,11 +322,25 @@ describe("API key wallet scope routes", () => {
 
     expect((await patchKey(keyId, { walletScope: "all" })).status).toBe(200);
     expect(await readKey(keyId)).toMatchObject({ walletScope: "all", walletIds: [] });
+    // Taken off the list, not deleted: the row stays, archived.
     expect(
-      await getDb(env).queryMany("SELECT * FROM api_key_signing_wallets WHERE api_key_id = ?", [
-        keyId,
-      ])
-    ).toEqual([]);
+      await getDb(env).queryMany(
+        `SELECT custody_wallet_id, status FROM api_key_signing_wallets
+          WHERE api_key_id = ? ORDER BY custody_wallet_id`,
+        [keyId]
+      )
+    ).toEqual([
+      { custody_wallet_id: "cwlt_scope_a", status: "archived" },
+      { custody_wallet_id: "cwlt_scope_b", status: "archived" },
+    ]);
+
+    expect(
+      (await patchKey(keyId, { walletScope: "selected", walletIds: ["cwlt_scope_b"] })).status
+    ).toBe(200);
+    expect(await readKey(keyId)).toMatchObject({
+      walletScope: "selected",
+      walletIds: ["cwlt_scope_b"],
+    });
   });
 
   it("keeps the key unchanged when its new wallet list cannot be written", async () => {

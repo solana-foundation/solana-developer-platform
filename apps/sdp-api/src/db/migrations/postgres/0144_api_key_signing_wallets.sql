@@ -13,9 +13,9 @@
 -- it; custody wallets are retired by status, and the signing waist refuses an
 -- inactive row anyway.
 --
--- The rows are a key's current list, replaced with the key row in one audited
--- transaction, so the table has no status column of its own: its history is
--- the audit log.
+-- A key's list is its 'active' rows, replaced with the key row in one audited
+-- transaction. A wallet taken off the list is archived, never deleted, and
+-- listing it again reactivates its row.
 --
 -- api_key_wallet_permissions and api_keys.signing_wallet_id are no longer read
 -- or written; a later migration drops them.
@@ -26,13 +26,12 @@ ALTER TABLE api_keys
 CREATE TABLE api_key_signing_wallets (
   api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
   custody_wallet_id TEXT NOT NULL REFERENCES custody_wallets(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
   created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+  archived_at TEXT,
+  CHECK ((status = 'archived') = (archived_at IS NOT NULL)),
   PRIMARY KEY (api_key_id, custody_wallet_id)
 );
-
--- The foreign-key check on a custody wallet's deletion looks rows up by wallet.
-CREATE INDEX idx_api_key_signing_wallets_custody_wallet
-  ON api_key_signing_wallets(custody_wallet_id);
 
 -- backfill:start
 -- A key that was wallet-bound stays bound: without this every bound key would

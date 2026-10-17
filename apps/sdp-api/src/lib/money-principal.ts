@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { z } from "zod";
 import { AppError } from "@/lib/errors";
 
 /**
@@ -21,11 +22,14 @@ import { AppError } from "@/lib/errors";
  *   source wallet), never by whoever created or activated it.
  * - `payment_request`: a `/pay` link, admitted by its own open request.
  */
-export type MoneyPrincipal =
-  | { readonly kind: "api_key"; readonly apiKeyId: string }
-  | { readonly kind: "member"; readonly userId: string }
-  | { readonly kind: "mandate"; readonly recurringPaymentId: string }
-  | { readonly kind: "payment_request"; readonly paymentRequestId: string };
+export const moneyPrincipalSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("api_key"), apiKeyId: z.string() }),
+  z.object({ kind: z.literal("member"), userId: z.string() }),
+  z.object({ kind: z.literal("mandate"), recurringPaymentId: z.string() }),
+  z.object({ kind: z.literal("payment_request"), paymentRequestId: z.string() }),
+]);
+
+export type MoneyPrincipal = Readonly<z.infer<typeof moneyPrincipalSchema>>;
 
 export type MoneyPrincipalKind = MoneyPrincipal["kind"];
 

@@ -34,7 +34,8 @@ describe("admittedSigner", () => {
     const exit = admittedSigner(signer, decide, {
       ...CONTEXT,
       movement: "recurring.cancel",
-    }) as PartialSigner;
+    });
+    if (!isTransactionPartialSigner(exit)) throw new Error("a key pair signer signs partially");
 
     await expect(exit.signTransactions([])).resolves.toEqual([]);
     await expect(exit.signTransactions([])).rejects.toMatchObject({

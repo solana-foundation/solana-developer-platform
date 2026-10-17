@@ -102,12 +102,8 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
     const refusedRes = await transferFrom(scopedRequest, walletB.id);
     expect(refusedRes.status).toBe(403);
-    const refusedBody = (await refusedRes.json()) as {
-      error: { code: string; details: { reason: string } };
-    };
-    expect(refusedBody.error).toMatchObject({
-      code: "FORBIDDEN",
-      details: { reason: "wallet_out_of_scope" },
+    expect(await refusedRes.json()).toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "wallet_out_of_scope" } },
     });
 
     const transferBRes = await transferFrom(adminRequest, walletB.id);
@@ -116,11 +112,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
     const listRes = await scopedRequest("/v1/payments/transfers?page=1&pageSize=20");
     expect(listRes.status).toBe(200);
-    const listed = (await listRes.json()) as { data: Array<{ id: string; status: string }> };
-    const listedIds = listed.data.map((transfer) => transfer.id);
-    expect(listedIds).toEqual(
-      expect.arrayContaining([transferA.data.transfer.id, transferB.data.transfer.id])
-    );
+    expect(await listRes.json()).toMatchObject({
+      data: expect.arrayContaining([
+        expect.objectContaining({ id: transferA.data.transfer.id }),
+        expect.objectContaining({ id: transferB.data.transfer.id }),
+      ]),
+    });
 
     const transferBGetRes = await scopedRequest(
       `/v1/payments/transfers/${transferB.data.transfer.id}`
@@ -129,7 +126,6 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
 
     const walletsRes = await scopedRequest("/v1/wallets?view=summary");
     expect(walletsRes.status).toBe(200);
-    const wallets = (await walletsRes.json()) as { data: { wallets: Array<{ id: string }> } };
-    expect(wallets.data.wallets.map((wallet) => wallet.id)).toEqual([walletA.id]);
+    expect(await walletsRes.json()).toMatchObject({ data: { wallets: [{ id: walletA.id }] } });
   });
 });

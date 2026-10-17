@@ -12,6 +12,7 @@ import {
   organizationRoleMayPerform,
 } from "@sdp/types";
 import type { Context } from "hono";
+import { z } from "zod";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
@@ -23,9 +24,12 @@ export type AuthType = "api_key" | "clerk";
  * lists. Signing enforces it at the custody signer; only the wallet list and
  * wallet detail reads filter by it. Every other read is project-scoped.
  */
-export type WalletAccess =
-  | { readonly scope: "all" }
-  | { readonly scope: "selected"; readonly custodyWalletIds: readonly string[] };
+export const walletAccessSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("all") }),
+  z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
+]);
+
+export type WalletAccess = Readonly<z.infer<typeof walletAccessSchema>>;
 
 interface AuthContextBase {
   id: string;

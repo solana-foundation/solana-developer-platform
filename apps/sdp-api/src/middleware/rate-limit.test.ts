@@ -340,6 +340,7 @@ describe("Rate limiting", () => {
       const mini = new Hono<{ Bindings: Env }>();
       mini.onError((err, c) => {
         if (err instanceof AppError) {
+          // SAFETY: AppError status codes are the API's own error statuses.
           return c.json(err.toResponse(), err.statusCode as 429 | 401);
         }
         throw err;
@@ -441,6 +442,7 @@ describe("Rate limiting", () => {
       const mini = new Hono<{ Bindings: Env }>();
       mini.onError((err, c) => {
         if (err instanceof AppError) {
+          // SAFETY: AppError status codes are the API's own error statuses.
           return c.json(err.toResponse(), err.statusCode as 429 | 503);
         }
         throw err;
@@ -535,7 +537,8 @@ describe("Rate limiting", () => {
       const app = new Hono<{ Bindings: Env }>();
       app.onError((err, c) =>
         err instanceof AppError
-          ? c.json(err.toResponse(), err.statusCode as 401 | 429)
+          ? // SAFETY: AppError status codes are the API's own error statuses.
+            c.json(err.toResponse(), err.statusCode as 401 | 429)
           : c.text("error", 500)
       );
       app.use("*", async (c, next) => {
@@ -575,7 +578,8 @@ describe("Rate limiting", () => {
       const app = new Hono<{ Bindings: Env }>();
       app.onError((err, c) =>
         err instanceof AppError
-          ? c.json(err.toResponse(), err.statusCode as 401 | 429)
+          ? // SAFETY: AppError status codes are the API's own error statuses.
+            c.json(err.toResponse(), err.statusCode as 401 | 429)
           : c.text("error", 500)
       );
       app.use("*", async (c, next) => {

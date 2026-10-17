@@ -664,6 +664,17 @@ export function isEditableRecurringPaymentStatus(status: PaymentRecurringPayment
 export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/**
+ * A recurring payment that collects, or will once its activation, update or
+ * resume in flight finishes: revoke-and-cancel must see both, or one mid-way
+ * would become active after the revoke that was meant to stop it.
+ */
+export const LIVE_RECURRING_PAYMENT_STATUSES = [
+  ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "activating",
+  "updating",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(
   status: PaymentRecurringPaymentStatus
 ): boolean {
@@ -942,7 +953,13 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;

@@ -12,6 +12,10 @@ export type ApiKeyEnvironment = SdpEnvironment;
 
 export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
 
+/** A row of a key's signing-wallet list: listed, or taken off it (soft deleted). */
+export const API_KEY_SIGNING_WALLET_STATUSES = ["active", "archived"] as const;
+export type ApiKeySigningWalletStatus = (typeof API_KEY_SIGNING_WALLET_STATUSES)[number];
+
 export type RateLimitTier = "standard" | "elevated" | "unlimited";
 
 export const API_KEY_WALLET_SCOPES = ["all", "selected"] as const;

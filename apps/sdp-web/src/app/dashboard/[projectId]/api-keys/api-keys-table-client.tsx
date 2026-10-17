@@ -73,9 +73,13 @@ function statusLabel(key: ApiKeyRecord, t: ReturnType<typeof useTranslations>): 
  * server too, so a viewer-local time zone would not hydrate.
  */
 function formatRotationDeadline(value: string, locale: string): string {
+  // Component fields, not dateStyle/timeStyle: those refuse timeZoneName.
   return new Date(value).toLocaleString(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
     timeZone: "UTC",
     timeZoneName: "short",
   });
