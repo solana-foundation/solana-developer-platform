@@ -631,6 +631,30 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("REVOKED_API_KEY");
     });
 
+    // A key from before grants (0142) is refused by name, and is usable again
+    // as soon as a person gives it grants.
+    it("refuses a key that predates grants until it is given some", async () => {
+      await getDb(env)
+        .prepare("UPDATE api_keys SET grants_assigned = false WHERE id = ?")
+        .bind(TEST_API_KEY.id)
+        .run();
+
+      const refused = await keyed("/context");
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).toMatchObject({
+        error: {
+          code: "REVOKED_API_KEY",
+          message: expect.stringContaining("predates action grants"),
+        },
+      });
+
+      await getDb(env)
+        .prepare("UPDATE api_keys SET grants_assigned = true WHERE id = ?")
+        .bind(TEST_API_KEY.id)
+        .run();
+      expect((await keyed("/context")).status).toBe(200);
+    });
+
     it("refuses a key whose rotation deadline passed after its last request", async () => {
       expect((await keyed("/context")).status).toBe(200);
 

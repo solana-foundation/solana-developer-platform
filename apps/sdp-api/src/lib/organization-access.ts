@@ -120,6 +120,7 @@ type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
   organization_id: string;
   project_id: string;
   grants: unknown;
+  grants_assigned: boolean;
   allowed_ips: string | null;
   rate_limit_tier: RateLimitTier;
   wallet_scope: string;
@@ -155,7 +156,8 @@ export interface ApiKeyAuthorization {
  *
  * Refuses, in order: an unknown key (INVALID_API_KEY); an inactive
  * organization or project (REVOKED_API_KEY); a revoked, expired or
- * past-its-rotation-deadline key (REVOKED_API_KEY / EXPIRED_API_KEY); an
+ * past-its-rotation-deadline key (REVOKED_API_KEY / EXPIRED_API_KEY); a key
+ * that predates grants (REVOKED_API_KEY); an
  * origin outside the key's `allowed_ips`, then the organization's allowlist
  * (FORBIDDEN). The filters stay out of SQL so each refusal keeps its code.
  */
@@ -165,7 +167,7 @@ export async function authorizeApiKey(
 ): Promise<ApiKeyAuthorization> {
   const row = await getDb(c.env)
     .prepare(
-      `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants,
+      `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants, ak.grants_assigned,
               ak.allowed_ips, ak.rate_limit_tier,
               ak.status, ak.expires_at, ak.rotation_deadline, ak.wallet_scope,
               ARRAY(
@@ -204,6 +206,15 @@ export async function authorizeApiKey(
   }
   if (refusal === "expired") {
     throw refuseTerminally(keyHash, "EXPIRED_API_KEY");
+  }
+  // A key from before grants holds none until a person gives it some; it is
+  // refused by name rather than failing every route. Not remembered: setting
+  // its grants makes it usable on the next request.
+  if (!row.grants_assigned) {
+    throw new AppError(
+      "REVOKED_API_KEY",
+      "This API key predates action grants. Give it grants on the API keys page, or create a new key."
+    );
   }
   if (!isClientIpAllowed(getClientIp(c), parseOptionalPostgresJson<unknown>(row.allowed_ips))) {
     throw new AppError("FORBIDDEN", "Request origin is not allowed for this API key");

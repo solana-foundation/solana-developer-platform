@@ -758,6 +758,75 @@ describe("payment transfer batches", () => {
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
   });
 
+  // HOO-2099: the custody signer refuses a wallet outside a selected key's
+  // scope; authorize refuses it first, so a refused batch writes nothing and
+  // its Idempotency-Key works again once the scope allows the wallet.
+  it("refuses a batch from a wallet outside the key's scope before writing anything", async () => {
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletScope: "selected",
+      walletIds: [],
+    });
+    const counterpartyId = await seedCounterparty("batch_scope_counterparty");
+    const accountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const idempotencyKey = crypto.randomUUID();
+    const postBatch = () =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: "batch-scope-001",
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              {
+                externalId: "batch-scope-recipient-001",
+                counterpartyId,
+                counterpartyAccountId: accountId,
+                amount: "0.1",
+              },
+            ],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+    const count = async (sql: string) =>
+      required(await getDb(env).prepare(sql).bind(idempotencyKey).first<{ count: number }>()).count;
+
+    const refused = await postBatch();
+
+    expect(refused.status).toBe(403);
+    await expect(refused.json()).resolves.toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(
+      await count(
+        "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE idempotency_key = ?"
+      )
+    ).toBe(0);
+    expect(
+      await count("SELECT COUNT(*)::int AS count FROM idempotency_keys WHERE idempotency_key = ?")
+    ).toBe(0);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      walletIds: [TEST_CUSTODY_WALLET_ID],
+    });
+    expect((await postBatch()).status).toBe(200);
+  });
+
   it("executes the exact Config-owned wallet when a Connection duplicates its Provider ID", async () => {
     await seedConnectionOwnedDuplicateProviderWallet();
     const counterpartyId = await seedCounterparty("batch_exact_duplicate_counterparty");

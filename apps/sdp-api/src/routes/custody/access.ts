@@ -1,6 +1,7 @@
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
+import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import type { AppContext } from "./context";
 
@@ -31,7 +32,7 @@ async function assertCustodyWalletInProject(
   walletId: string,
   allowRecordIdAlias: boolean,
   notFound: () => AppError
-): Promise<void> {
+): Promise<string> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const row = await getDb(c.env)
@@ -58,6 +59,7 @@ async function assertCustodyWalletInProject(
   if (!row) {
     throw notFound();
   }
+  return row.id;
 }
 
 /** Wallet create: any named connection belongs to the project. */
@@ -85,7 +87,7 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
     throw badRequest("Invalid wallet ID");
   }
   // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
-  return assertCustodyWalletInProject(
+  await assertCustodyWalletInProject(
     c,
     walletId,
     true,
@@ -95,7 +97,7 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
 
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
-  return assertCustodyWalletInProject(
+  await assertCustodyWalletInProject(
     c,
     body<{ walletId: string }>(input).walletId,
     false,
@@ -109,7 +111,13 @@ export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput
  * caller may sign with it is the custody signer's decision (HOO-2099).
  */
 export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): Promise<void> {
-  await assertCustodyWalletInProject(c, body<{ walletId: string }>(input).walletId, false, () =>
-    badRequest("Custody wallet not found")
+  const custodyWalletId = await assertCustodyWalletInProject(
+    c,
+    body<{ walletId: string }>(input).walletId,
+    false,
+    () => badRequest("Custody wallet not found")
   );
+  // The custody signer refuses it too; refusing here keeps the refused check
+  // out of the Idempotency-Key store, so a retry after a scope fix runs.
+  assertCallerWalletInScope(getAuth(c).walletAccess, custodyWalletId);
 }
