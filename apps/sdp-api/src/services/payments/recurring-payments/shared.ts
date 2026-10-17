@@ -25,12 +25,14 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda } from "@solana/subscriptions";
+import type { DatabaseExecutor } from "@/db";
 import type {
   PaymentRecurringPaymentRow,
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { createTokenRepository } from "@/db/repositories";
+import { type ApiKeyLifecycleColumns, apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import {
   AppError,
   badRequest,
@@ -39,6 +41,8 @@ import {
   PUBLIC_INTERNAL_ERROR_MESSAGE,
   transactionFailed,
 } from "@/lib/errors";
+import { assertMovementAdmitted } from "@/lib/money-admission";
+import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import {
@@ -293,4 +297,51 @@ export async function confirmSubscriptionSignature(
 
 export function recurringPaymentErrorMessage(error: Error): string {
   return error instanceof AppError ? error.message : PUBLIC_INTERNAL_ERROR_MESSAGE;
+}
+
+/**
+ * Inside a claim the job can later finish as the mandate, re-reads the key
+ * that is starting it under a share lock and refuses a key no longer live
+ * (HOO-2099). Revocation locks the key row FOR UPDATE and lists what the key
+ * activated only after it commits, so the two are ordered: a revocation that
+ * lands first makes this refuse and the claim roll back, and a claim that
+ * commits first is in the revocation's list. A member or no activator (the
+ * job itself) is not revoked this way and reads nothing.
+ *
+ * @throws MoneyMovementRefusedError `principal_not_live` (403).
+ */
+export async function lockLiveActivatingKey(
+  tx: DatabaseExecutor,
+  input: {
+    activator: ReturnType<typeof currentMandateActivator>;
+    organizationId: string;
+    projectId: string;
+    movement: MovementId;
+    recurringPaymentId: string;
+  }
+): Promise<void> {
+  const apiKeyId = input.activator?.apiKeyId;
+  if (!apiKeyId) {
+    return;
+  }
+  const key = await tx.queryOne<ApiKeyLifecycleColumns>(
+    `SELECT status, expires_at, rotation_deadline
+       FROM api_keys
+      WHERE id = ? AND organization_id = ? AND project_id = ?
+      FOR SHARE`,
+    [apiKeyId, input.organizationId, input.projectId]
+  );
+  if (key && apiKeyRowRefusal(key, Date.now()) === null) {
+    return;
+  }
+  assertMovementAdmitted(
+    { admitted: false, reason: "principal_not_live" },
+    {
+      surface: "http",
+      movement: input.movement,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subjectId: input.recurringPaymentId,
+    }
+  );
 }

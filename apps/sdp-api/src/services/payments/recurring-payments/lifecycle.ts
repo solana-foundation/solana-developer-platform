@@ -39,6 +39,7 @@ import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
+  lockLiveActivatingKey,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
@@ -499,7 +500,16 @@ async function runRecurringPaymentLifecycle(
     await input.admitStart();
   }
 
+  // A resume starts the mandate again; a cancel records nobody.
+  const activatedBy = input.operation === "resume" ? currentMandateActivator() : null;
   const claimResult = await getDb(input.env).transaction(async (tx) => {
+    await lockLiveActivatingKey(tx, {
+      activator: activatedBy,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      movement: "recurring.resume",
+      recurringPaymentId: collectionState.recurringPayment.id,
+    });
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
       recurringPaymentId: collectionState.recurringPayment.id,
@@ -508,8 +518,7 @@ async function runRecurringPaymentLifecycle(
       operation: input.operation,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
-      // A resume starts the mandate again; a cancel records nobody.
-      activatedBy: input.operation === "resume" ? currentMandateActivator() : null,
+      activatedBy,
     });
     if (!claimed) return null;
     const attempt = await getOrCreateLifecycleAttempt({
