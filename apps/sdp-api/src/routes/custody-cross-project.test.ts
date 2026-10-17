@@ -189,7 +189,7 @@ async function requestAsAdmin(path: string, init: { method: string; body?: unkno
     {
       method: init.method,
       headers: headers(REQUESTER_PROJECT_ID),
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
     },
     env
   );

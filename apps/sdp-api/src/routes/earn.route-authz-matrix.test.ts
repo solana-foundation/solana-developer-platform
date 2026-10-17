@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { type Action, actionsInModule, grantsCoverAction } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import app from "@/index";
 import earnRoutes from "@/routes/earn";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
@@ -74,12 +75,9 @@ const EARN_ROUTE_ACTIONS: Record<string, EarnRouteDeclaration> = {
 
 const EARN_ACTIONS = actionsInModule("earn");
 
-interface ErrorBody {
-  error: {
-    code: string;
-    message: string;
-  };
-}
+const errorBodySchema = z.object({
+  error: z.object({ code: z.string(), message: z.string() }),
+});
 
 let ipCounter = 0;
 
@@ -244,7 +242,7 @@ describe("route tier conformance", () => {
     async ({ route }) => {
       const res = await requestAsKey(route, "sk_test_unknown_key", {});
       expect(res.status, route).toBe(401);
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code, route).toBe("INVALID_API_KEY");
     }
   );
@@ -253,7 +251,7 @@ describe("route tier conformance", () => {
     async ({ route }) => {
       const res = await requestAsKey(route, "invalid", {});
       expect(res.status, route).toBe(401);
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code, route).toBe("UNAUTHORIZED");
       expect(body.error.message, route).toBe("Invalid Clerk token");
     }
@@ -263,7 +261,7 @@ describe("route tier conformance", () => {
     async ({ route }) => {
       const res = await requestAnonymously(route);
       expect(res.status, route).toBe(401);
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code, route).toBe("UNAUTHORIZED");
       expect(body.error.message.toLowerCase(), route).toContain("api key");
     }
@@ -278,7 +276,7 @@ describe("action conformance: each route needs exactly its declared action", () 
       assert(raw);
       const res = await requestAsKey(route, raw, {});
       expect(res.status).toBe(403);
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
       expect(body.error.message).toBe(`Missing action: ${action}`);
     }
@@ -300,7 +298,7 @@ describe("action conformance: each route needs exactly its declared action", () 
     for (const route of moneyRoutes) {
       const res = await requestAsKey(route, raw, {});
       expect(res.status, route).toBe(403);
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code, route).toBe("INSUFFICIENT_PERMISSIONS");
     }
   });
@@ -311,7 +309,7 @@ describe("Clerk callers are membership-checked, per route (EARN-027)", () => {
     for (const route of ROUTES) {
       const res = await requestAsClerk(route, tenant.token, tenant.project.id);
       if (res.status !== 403) continue;
-      const body = (await res.json()) as ErrorBody;
+      const body = errorBodySchema.parse(await res.json());
       expect(
         body.error.message,
         `${route} answered the membership 403 for a project the user belongs to`

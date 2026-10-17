@@ -942,7 +942,13 @@ export interface PaymentRecurringPayment {
   updatedAt: string;
 }
 
-export type PaymentRequestStatus = "awaiting_payment" | "paid" | "canceled" | "expired";
+export const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const;
+export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;

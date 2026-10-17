@@ -1,5 +1,6 @@
 import {
   type ListPaymentRequestsResponse,
+  PAYMENT_REQUEST_STATUSES,
   type PaginatedResponse,
   type PaymentRequest,
   type PaymentRequestLink,
@@ -12,6 +13,29 @@ import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
+
+/** The detail read's envelope, parsed at the API boundary. */
+const paymentRequestDetailResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    organizationId: z.string(),
+    projectId: z.string().nullable(),
+    counterpartyId: z.string().nullable(),
+    walletId: z.string(),
+    destinationAddress: z.string(),
+    token: z.string(),
+    amount: z.string(),
+    reference: z.string(),
+    status: z.enum(PAYMENT_REQUEST_STATUSES),
+    expiresAt: z.string().nullable(),
+    fulfilledByTransferId: z.string().nullable(),
+    canceledBy: z.string().nullable(),
+    lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
+    createdBy: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }) satisfies z.ZodType<PaymentRequest>,
+});
 
 /** The link read's envelope, parsed: its token is a bearer credential (APE-849). */
 const paymentRequestLinkResponseSchema = z.object({
@@ -85,13 +109,6 @@ export async function fetchPaymentRequests(
 
 /** Rows a page of the Requests list shows until the user picks another size. */
 export const PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE = 25;
-
-const PAYMENT_REQUEST_STATUSES = [
-  "awaiting_payment",
-  "paid",
-  "canceled",
-  "expired",
-] as const satisfies readonly PaymentRequest["status"][];
 
 /** Longest search the Requests list carries in its URL. */
 const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
@@ -272,7 +289,7 @@ export async function fetchPaymentRequestDetail(
     const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}`);
     if (response.status === 404) return { status: "not_found" };
     if (!response.ok) return { status: "error", error: await response.text() };
-    const json = (await response.json()) as { data: PaymentRequest };
+    const json = paymentRequestDetailResponseSchema.parse(await response.json());
     return { status: "found", request: json.data };
   } catch (error) {
     return { status: "error", error: error instanceof Error ? error.message : undefined };
