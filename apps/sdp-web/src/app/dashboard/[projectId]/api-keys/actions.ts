@@ -213,7 +213,8 @@ export async function saveApiKeyAuthoringAction(
           name: input.draft.name.trim(),
           grants: input.draft.grants,
           ...walletPayload,
-          ...(expiresAt ? { expiresAt } : {}),
+          // JSON drops an undefined field: no expiry is sent as none.
+          expiresAt: expiresAt ?? undefined,
         }),
       });
 
@@ -244,7 +245,8 @@ export async function saveApiKeyAuthoringAction(
         // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
         // next to any wallet field, null included.
         ...walletPayload,
-        ...(input.grantsTouched ? { grants: input.draft.grants } : {}),
+        // Untouched grants are left out (JSON drops undefined), so the key keeps them.
+        grants: input.grantsTouched ? input.draft.grants : undefined,
       }),
     });
 
