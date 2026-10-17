@@ -127,9 +127,20 @@ Neither resumes or re-sends: a recipient with a transfer row is settled from tha
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
-its attempt recorded; it does not fail the row. A replay of activate, cancel, resume or collect
-finds the attempt its key claimed and returns the schedule as it stands now, which may still be
-mid-transition (the cron finishes it); clients poll GET. The cron does not recover an `updating`
+its attempt recorded; it does not fail the row. Collection saves its signed transaction before
+broadcast. Activation, lifecycle and update save a step's signature only after its send returns,
+so a run that dies in between leaves a step with no signature that may have landed. An attempt
+from an earlier run (an activation whose plan or subscription address is recorded, a lifecycle
+attempt at `submit`, an update attempt past `claim`) reads such a step's account at `finalized`
+before sending it again, and records the step done when the chain shows its effect: the plan or
+subscription exists, or `expiresAtTs` is set (canceled) or cleared (resumed). A resumed attempt is
+at least 15 minutes old, far past the lifetime of the blockhash that send used, so the chain
+already holds the final answer; sending the step again would fail on chain and fail an operation
+that succeeded (HOO-2044). Fresh attempts read nothing extra.
+
+A replay of activate, cancel, resume or collect finds the attempt its key claimed and returns the
+schedule as it stands now, which may still be mid-transition (the cron finishes it); clients poll
+GET. The cron does not recover an `updating`
 schedule, so an in-flight update attempt is never an answer: stored, it would hold the key on
 `updating` for 24 hours. A same-key PATCH retry that finds its attempt in flight gets 409
 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After` (unstored) until the schedule goes stale, then runs
@@ -289,9 +300,6 @@ lives in `@sdp/types`.
 
 ## Follow-ups
 
-- HOO-2044: recurring activation, lifecycle and update sends save their signature, signed
-  transaction and blockhash window on the attempt before broadcast, so recovery confirms the saved
-  signature instead of signing again.
 - HOO-2045: split `requestGate` into `authorize`, `replayFromRecord` and admission on Earn,
   issuance and ramps.
 - HOO-2046: stable routes validate path and query params at the route (the param sweep).

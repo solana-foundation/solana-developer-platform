@@ -54,7 +54,9 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  findUnsavedStepOnChain,
   parseNullableStoredSignature,
+  RESUMED_STEP_COMMITMENT,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
@@ -470,6 +472,14 @@ async function settleActiveActivationAttempt(input: {
   }
 }
 
+/** A step that is not yet on chain has a signature: saved by an earlier run, or sent by this one. */
+function requireStepSignature(signature: Signature | null): Signature {
+  if (signature === null) {
+    throw internalError("Recurring payment activation step has no signature");
+  }
+  return signature;
+}
+
 async function fetchConfirmedActivationPlan(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   planPda: Address;
@@ -773,7 +783,18 @@ export async function activateRecurringPayment(input: {
       updatedAt: new Date().toISOString(),
     });
     let createdPlanThisRun = false;
-    if (!planCreationSignature) {
+    // An earlier run records the plan's address before it sends the plan and
+    // the signature only after, so an address with no signature may be a plan
+    // that landed (HOO-2044), whether that run died or its save failed and the
+    // activation was reset. The chain answers.
+    let onChainPlan = await findUnsavedStepOnChain({
+      resumed: claimed.plan_pda !== null,
+      signature: planCreationSignature,
+      read: () =>
+        subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment: RESUMED_STEP_COMMITMENT }),
+      logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id, step: "create_plan" },
+    });
+    if (!onChainPlan && !planCreationSignature) {
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {
           amount: amountBaseUnits,
@@ -823,12 +844,14 @@ export async function activateRecurringPayment(input: {
       createdPlanThisRun = true;
     }
 
-    const onChainPlan = await fetchConfirmedActivationPlan({
-      rpc,
-      planPda,
-      planCreationSignature,
-      createdPlanThisRun,
-    });
+    if (!onChainPlan) {
+      onChainPlan = await fetchConfirmedActivationPlan({
+        rpc,
+        planPda,
+        planCreationSignature: requireStepSignature(planCreationSignature),
+        createdPlanThisRun,
+      });
+    }
     if (!onChainPlan.exists) {
       throw transactionFailed("Subscription plan was not found on-chain");
     }
@@ -898,7 +921,21 @@ export async function activateRecurringPayment(input: {
     });
 
     let authorizedThisRun = false;
-    if (!authorizationSignature) {
+    // The subscription's address is recorded before its send, as the plan's is.
+    let onChainSubscription = await findUnsavedStepOnChain({
+      resumed: claimed.subscription_pda !== null,
+      signature: authorizationSignature,
+      read: () =>
+        subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, {
+          commitment: RESUMED_STEP_COMMITMENT,
+        }),
+      logContext: {
+        recurring_payment_id: claimed.id,
+        attempt_id: attempt.id,
+        step: "authorize_subscription",
+      },
+    });
+    if (!onChainSubscription && !authorizationSignature) {
       let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
         rpc,
         subscriptionAuthorityAddress,
@@ -985,12 +1022,14 @@ export async function activateRecurringPayment(input: {
     }
 
     currentStage = "finalize";
-    const onChainSubscription = await fetchConfirmedSubscriptionDelegation({
-      rpc,
-      subscriptionPda,
-      authorizationSignature,
-      authorizedThisRun,
-    });
+    if (!onChainSubscription) {
+      onChainSubscription = await fetchConfirmedSubscriptionDelegation({
+        rpc,
+        subscriptionPda,
+        authorizationSignature: requireStepSignature(authorizationSignature),
+        authorizedThisRun,
+      });
+    }
     if (!onChainSubscription.exists) {
       throw transactionFailed("Subscription authorization was not found on-chain");
     }

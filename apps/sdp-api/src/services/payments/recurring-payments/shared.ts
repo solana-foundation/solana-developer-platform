@@ -24,7 +24,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { findPlanPda } from "@solana/subscriptions";
+import { type fetchMaybeSubscriptionDelegation, findPlanPda } from "@solana/subscriptions";
 import type {
   PaymentRecurringPaymentRow,
   PaymentSubscriptionPlanRow,
@@ -41,6 +41,7 @@ import {
 } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -275,6 +276,59 @@ export async function sendSubscriptionInstructions(input: {
         store: input.submissionStore,
       })
     : feePayment.signAndSend(txBytes);
+}
+
+/**
+ * The commitment a resumed attempt reads the chain at before it sends a step
+ * again (HOO-2044). A step's signature is saved only after its send returns, so
+ * a run that dies in between leaves no trace of the send on the attempt. A
+ * resumed attempt is at least the operation's stale window (15 minutes) old,
+ * far past the lifetime of the blockhash that send used, so the finalized chain
+ * already holds the final answer: a step whose account shows its effect is done
+ * and is not sent again. Sending it again would fail on chain (the account
+ * exists, or the subscription is already canceled) and fail an operation that
+ * succeeded.
+ */
+export const RESUMED_STEP_COMMITMENT = "finalized" as const;
+
+/**
+ * Whether a subscription delegation is canceled on chain: `cancelSubscription`
+ * sets `expiresAtTs` to the end of the current period and `resumeSubscription`
+ * clears it to 0.
+ */
+export function isSubscriptionDelegationCanceled(
+  delegation: Awaited<ReturnType<typeof fetchMaybeSubscriptionDelegation>>
+): boolean {
+  return delegation.exists && delegation.data.expiresAtTs !== 0n;
+}
+
+/**
+ * The account a step left on chain, when an attempt an earlier run started has
+ * no signature for that step and the chain shows the step landed; null when the
+ * step still has to be sent (or confirmed from its saved signature). A fresh
+ * attempt reads nothing.
+ */
+export async function findUnsavedStepOnChain<T extends { exists: boolean }>(input: {
+  resumed: boolean;
+  signature: Signature | null;
+  /** Reads the step's account at RESUMED_STEP_COMMITMENT. */
+  read: () => Promise<T>;
+  /** Whether the account shows the step's effect; defaults to the account existing. */
+  landed?: (account: T) => boolean;
+  logContext: Record<string, string>;
+}): Promise<T | null> {
+  if (!input.resumed || input.signature !== null) {
+    return null;
+  }
+  const account = await input.read();
+  if (!(input.landed ?? ((found: T) => found.exists))(account)) {
+    return null;
+  }
+  getLogger().warn(
+    input.logContext,
+    "Recurring payment step found on chain without its saved signature"
+  );
+  return account;
 }
 
 export async function confirmSubscriptionSignature(
