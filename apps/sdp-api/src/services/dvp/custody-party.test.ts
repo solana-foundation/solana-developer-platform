@@ -14,6 +14,8 @@ import {
 import { seedTestDatabase } from "@/test/mocks/db";
 import { custodyWalletForParty } from "./custody-party";
 
+const ALL_WALLETS = { scope: "all" } as const;
+
 const PROJECT_ID = "prj_custody_party_test";
 const OTHER_ORG_ID = "org_custody_party_other";
 const OTHER_ORG_PROJECT_ID = "prj_other_org";
@@ -99,7 +101,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      ALL_WALLETS
     );
 
     expect(result).toBe("cwlt_party");
@@ -109,7 +112,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(UNKNOWN_ADDRESS)
+      address(UNKNOWN_ADDRESS),
+      ALL_WALLETS
     );
 
     expect(result).toBeNull();
@@ -119,7 +123,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: OTHER_ORG_ID, projectId: OTHER_ORG_PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      ALL_WALLETS
     );
 
     expect(result).toBeNull();
@@ -131,7 +136,8 @@ describe("custodyWalletForParty", () => {
         custodyWalletForParty(
           env,
           { organizationId: TEST_ORG.id, projectId },
-          address(PARTY_ADDRESS)
+          address(PARTY_ADDRESS),
+          ALL_WALLETS
         ),
       { own: projects.sandbox, other: projects.production },
       (row) => row === null
@@ -153,10 +159,27 @@ describe("custodyWalletForParty", () => {
       const result = await custodyWalletForParty(
         env,
         { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-        address(PARTY_ADDRESS)
+        address(PARTY_ADDRESS),
+        ALL_WALLETS
       );
 
       expect(result).toBe("cwlt_party");
+    });
+
+    // HOO-2099: a selected key that lists only the newer record funds with
+    // it; one that lists neither gets the oldest, for the scope check to refuse.
+    it("prefers the record a selected caller lists, else the oldest", async () => {
+      const pick = (custodyWalletIds: string[]) =>
+        custodyWalletForParty(
+          env,
+          { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
+          address(PARTY_ADDRESS),
+          { scope: "selected", custodyWalletIds }
+        );
+
+      expect(await pick(["cwlt_party_dup"])).toBe("cwlt_party_dup");
+      expect(await pick(["cwlt_party", "cwlt_party_dup"])).toBe("cwlt_party");
+      expect(await pick([])).toBe("cwlt_party");
     });
 
     it("breaks equal creation timestamps by wallet id, regardless of insertion order", async () => {
@@ -174,7 +197,8 @@ describe("custodyWalletForParty", () => {
         await custodyWalletForParty(
           env,
           { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-          address(PARTY_ADDRESS)
+          address(PARTY_ADDRESS),
+          ALL_WALLETS
         )
       ).toBe("cwlt_a_tied");
     });
@@ -189,7 +213,8 @@ describe("custodyWalletForParty", () => {
     const result = await custodyWalletForParty(
       env,
       { organizationId: TEST_ORG.id, projectId: PROJECT_ID },
-      address(PARTY_ADDRESS)
+      address(PARTY_ADDRESS),
+      ALL_WALLETS
     );
 
     expect(result).toBeNull();
