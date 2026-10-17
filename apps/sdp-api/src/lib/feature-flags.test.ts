@@ -105,11 +105,32 @@ describe("isCustodyProviderAvailable", () => {
   const nonByokCustodyProviders = CUSTODY_PROVIDERS.filter(
     (provider) => !isByokCustodyProvider(provider)
   );
+  const nonPrivyCustodyProviders = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy");
+  const releaseChannelsBelowStable = SDP_RELEASE_CHANNEL_NAMES.filter(
+    (releaseChannel) => releaseChannel !== "stable"
+  );
 
-  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
-    it.each(CUSTODY_PROVIDERS)("offers Managed %s", (provider) => {
+  describe.each(releaseChannelsBelowStable)("on the %s release channel", (releaseChannel) => {
+    it.each(nonPrivyCustodyProviders)("offers Managed %s", (provider) => {
       expect(
         isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "managed")
+      ).toBe(true);
+    });
+  });
+
+  it.each(nonPrivyCustodyProviders)(
+    "refuses Managed %s on the stable release channel",
+    (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider, "managed")
+      ).toBe(false);
+    }
+  );
+
+  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
+    it("offers Managed privy", () => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, "privy", "managed")
       ).toBe(true);
     });
 
