@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev-local.mjs",
+    "dev": "node scripts/dev-api.mjs",
+    "dev:worker": "node scripts/dev-worker.mjs",
     "dev:db": "pnpm -w db:postgres:up && pnpm -w db:postgres:logs",
     "dev:webhook": "bash scripts/dev-webhook.sh",
     "build": "node scripts/build-node.mjs",

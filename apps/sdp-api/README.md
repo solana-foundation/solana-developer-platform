@@ -100,12 +100,18 @@ authenticated.
    # (FEE_PAYMENT_PROVIDER=kora) to .secrets/kora-local/api.env
    pnpm kora:local:up
 
-   # API with team/Doppler configuration (keep this process running)
+   # API and cron worker with team/Doppler configuration (keep this process running)
    pnpm dev:api
    ```
 
+   The API (`scripts/dev-api.mjs`) migrates and serves with cron off; the cron
+   worker (`scripts/dev-worker.mjs`, port 8789) waits for it and runs the
+   reconcilers, like the deployed API and worker services. Turbo prefixes their
+   logs `@sdp/api:dev` and `@sdp/api:dev:worker`.
+
    External contributors using only `.env.local` can replace the final command
-   with `pnpm -C apps/sdp-api dev` so no Doppler session is required.
+   with `pnpm -C apps/sdp-api dev` and `pnpm -C apps/sdp-api dev:worker` so no
+   Doppler session is required.
 
    The API development process waits for Postgres and Redis and applies local
    migrations before starting the server.
@@ -131,10 +137,12 @@ FEE_PAYMENT_PROVIDER=native
 FEE_PAYER_PRIVATE_KEY=<base58-encoded keypair>
 ```
 
-Kora is a fee-payment provider, not a signing provider. `pnpm dev:kora` starts
+Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
 the stack with a devnet Kora (`127.0.0.1:18081`, real devnet RPC) and a mainnet
 Kora on a Surfpool mainnet fork (`127.0.0.1:18080`, upstream `SOLANA_MAINNET_RPC_URL`), and points the API at both
-via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. To
+via `.secrets/kora-local/api.env`; `pnpm kora:local:down` tears them down. Without
+`SOLANA_MAINNET_RPC_URL` (Doppler dev has it) the mainnet Kora is skipped and
+only the devnet one runs. To
 use a single Kora by hand, set `FEE_PAYMENT_PROVIDER=kora` and that cluster's
 `KORA_<CLUSTER>_URL` (`KORA_DEVNET_URL` / `KORA_MAINNET_URL`) instead. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
