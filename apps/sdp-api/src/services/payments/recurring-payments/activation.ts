@@ -472,14 +472,6 @@ async function settleActiveActivationAttempt(input: {
   }
 }
 
-/** A step that is not yet on chain has a signature: saved by an earlier run, or sent by this one. */
-function requireStepSignature(signature: Signature | null): Signature {
-  if (signature === null) {
-    throw internalError("Recurring payment activation step has no signature");
-  }
-  return signature;
-}
-
 async function fetchConfirmedActivationPlan(input: {
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   planPda: Address;
@@ -794,61 +786,59 @@ export async function activateRecurringPayment(input: {
         subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment: RESUMED_STEP_COMMITMENT }),
       logContext: { recurring_payment_id: claimed.id, attempt_id: attempt.id, step: "create_plan" },
     });
-    if (!onChainPlan && !planCreationSignature) {
-      const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
-        {
-          amount: amountBaseUnits,
-          destinations: [destination],
-          endTs: 0n,
-          metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
-          mint,
-          owner: sourceSigner,
-          periodHours: BigInt(claimed.period_hours),
-          planId: programPlanId,
-          pullers: [owner],
-          tokenProgram,
-        }
-      );
-      planCreationSignature = await sendSubscriptionInstructions({
-        movement: "recurring.activate",
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [createPlanInstruction],
-      });
-      const signatureUpdatedAt = new Date().toISOString();
-      await getDb(input.env).transaction(async (tx) => {
-        const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-        const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
-          recurringPaymentId: claimed.id,
+    if (!onChainPlan) {
+      if (!planCreationSignature) {
+        const createPlanInstruction =
+          await subscriptionsProgram.getCreatePlanOverlayInstructionAsync({
+            amount: amountBaseUnits,
+            destinations: [destination],
+            endTs: 0n,
+            metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
+            mint,
+            owner: sourceSigner,
+            periodHours: BigInt(claimed.period_hours),
+            planId: programPlanId,
+            pullers: [owner],
+            tokenProgram,
+          });
+        planCreationSignature = await sendSubscriptionInstructions({
+          movement: "recurring.activate",
+          env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          planCreationSignature,
-          updatedAt: signatureUpdatedAt,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [createPlanInstruction],
         });
-        if (updatedRecurringPayment === null) {
-          throw conflict("Recurring payment activation changed concurrently");
-        }
-        requireUpdatedAttempt(
-          await txRecurringRepo.updateActivationAttempt({
-            attemptId: attempt.id,
+        const signatureUpdatedAt = new Date().toISOString();
+        await getDb(input.env).transaction(async (tx) => {
+          const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+          const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+            recurringPaymentId: claimed.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             planCreationSignature,
             updatedAt: signatureUpdatedAt,
-          })
-        );
-      });
-      createdPlanThisRun = true;
-    }
-
-    if (!onChainPlan) {
+          });
+          if (updatedRecurringPayment === null) {
+            throw conflict("Recurring payment activation changed concurrently");
+          }
+          requireUpdatedAttempt(
+            await txRecurringRepo.updateActivationAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              planCreationSignature,
+              updatedAt: signatureUpdatedAt,
+            })
+          );
+        });
+        createdPlanThisRun = true;
+      }
       onChainPlan = await fetchConfirmedActivationPlan({
         rpc,
         planPda,
-        planCreationSignature: requireStepSignature(planCreationSignature),
+        planCreationSignature: planCreationSignature,
         createdPlanThisRun,
       });
     }
@@ -935,101 +925,103 @@ export async function activateRecurringPayment(input: {
         step: "authorize_subscription",
       },
     });
-    if (!onChainSubscription && !authorizationSignature) {
-      let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-        rpc,
-        subscriptionAuthorityAddress,
-        { commitment: "confirmed" }
-      );
-      const feePayment = createSponsorshipFeePayment(
-        input.env,
-        await resolveProjectSponsorshipScope(input.env, {
+    if (!onChainSubscription) {
+      if (!authorizationSignature) {
+        let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+          rpc,
+          subscriptionAuthorityAddress,
+          { commitment: "confirmed" }
+        );
+        const feePayment = createSponsorshipFeePayment(
+          input.env,
+          await resolveProjectSponsorshipScope(input.env, {
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            actor: { type: "wallet", id: input.sourceWallet.walletId },
+          }),
+          "recurring.activate"
+        );
+        const feePayer = await feePayment.getFeePayer();
+        const payer = createNoopSigner(feePayer);
+
+        subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
+          env: input.env,
+          recurringRepo,
+          attempt,
           organizationId: input.organizationId,
           projectId: input.projectId,
-          actor: { type: "wallet", id: input.sourceWallet.walletId },
-        }),
-        "recurring.activate"
-      );
-      const feePayer = await feePayment.getFeePayer();
-      const payer = createNoopSigner(feePayer);
-
-      subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
-        env: input.env,
-        recurringRepo,
-        attempt,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        rpc,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        sourceTokenAccount,
-        subscriptionAuthority,
-        subscriptionAuthorityAddress,
-        owner,
-        mint,
-        tokenProgram,
-        feePayer,
-      });
-      if (!subscriptionAuthority.exists) {
-        throw transactionFailed("Subscription authority was not found on-chain");
-      }
-
-      const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
-        expectedAmount: amountBaseUnits,
-        expectedCreatedAt: BigInt(planCreatedAt),
-        expectedPeriodHours: BigInt(claimed.period_hours),
-        expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
-        merchant: owner,
-        payer,
-        planId: programPlanId,
-        subscriber: sourceSigner,
-        tokenMint: mint,
-      });
-      authorizationSignature = await sendSubscriptionInstructions({
-        movement: "recurring.activate",
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [subscribeInstruction],
-        feePayer,
-      });
-      const signatureUpdatedAt = new Date().toISOString();
-      await getDb(input.env).transaction(async (tx) => {
-        const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-        const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
-          recurringPaymentId: claimed.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          authorizationSignature,
-          updatedAt: signatureUpdatedAt,
+          rpc,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          sourceTokenAccount,
+          subscriptionAuthority,
+          subscriptionAuthorityAddress,
+          owner,
+          mint,
+          tokenProgram,
+          feePayer,
         });
-        if (updatedRecurringPayment === null) {
-          throw conflict("Recurring payment activation changed concurrently");
+        if (!subscriptionAuthority.exists) {
+          throw transactionFailed("Subscription authority was not found on-chain");
         }
-        requireUpdatedAttempt(
-          await txRecurringRepo.updateActivationAttempt({
-            attemptId: attempt.id,
+
+        const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync(
+          {
+            expectedAmount: amountBaseUnits,
+            expectedCreatedAt: BigInt(planCreatedAt),
+            expectedPeriodHours: BigInt(claimed.period_hours),
+            expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
+            merchant: owner,
+            payer,
+            planId: programPlanId,
+            subscriber: sourceSigner,
+            tokenMint: mint,
+          }
+        );
+        authorizationSignature = await sendSubscriptionInstructions({
+          movement: "recurring.activate",
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [subscribeInstruction],
+          feePayer,
+        });
+        const signatureUpdatedAt = new Date().toISOString();
+        await getDb(input.env).transaction(async (tx) => {
+          const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+          const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+            recurringPaymentId: claimed.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             authorizationSignature,
             updatedAt: signatureUpdatedAt,
-          })
-        );
-      });
-      authorizedThisRun = true;
-    }
-
-    currentStage = "finalize";
-    if (!onChainSubscription) {
+          });
+          if (updatedRecurringPayment === null) {
+            throw conflict("Recurring payment activation changed concurrently");
+          }
+          requireUpdatedAttempt(
+            await txRecurringRepo.updateActivationAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              authorizationSignature,
+              updatedAt: signatureUpdatedAt,
+            })
+          );
+        });
+        authorizedThisRun = true;
+      }
+      currentStage = "finalize";
       onChainSubscription = await fetchConfirmedSubscriptionDelegation({
         rpc,
         subscriptionPda,
-        authorizationSignature: requireStepSignature(authorizationSignature),
+        authorizationSignature: authorizationSignature,
         authorizedThisRun,
       });
     }
+    currentStage = "finalize";
     if (!onChainSubscription.exists) {
       throw transactionFailed("Subscription authorization was not found on-chain");
     }

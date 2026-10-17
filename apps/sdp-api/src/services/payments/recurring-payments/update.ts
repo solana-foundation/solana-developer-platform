@@ -84,6 +84,7 @@ import {
   requireUpdatedSubscription,
   sendSubscriptionInstructions,
   subscriptionProgramMetadataUri,
+  type UnsavedStepLogContext,
 } from "./shared";
 
 /** An update request's Idempotency-Key and the fingerprint of its validated body. */
@@ -1151,18 +1152,10 @@ async function getOrCreateReplacementSubscription(input: {
   return subscription;
 }
 
-/** A step that is not yet on chain has a signature: saved by an earlier run, or sent by this one. */
-function requireReplacementStepSignature(signature: Signature | null): Signature {
-  if (signature === null) {
-    throw internalError("Recurring payment update step has no signature");
-  }
-  return signature;
-}
-
 function stepLogContext(
   attempt: PaymentRecurringPaymentUpdateAttemptRow,
-  step: "create_plan" | "authorize_subscription" | "cancel_old_subscription"
-): Record<string, string> {
+  step: UnsavedStepLogContext["step"]
+): UnsavedStepLogContext {
   return { recurring_payment_id: attempt.recurring_payment_id, attempt_id: attempt.id, step };
 }
 
@@ -1456,51 +1449,52 @@ async function runReplacementUpdate(input: {
       subscriptionsProgram.fetchMaybePlan(rpc, planPda, { commitment: RESUMED_STEP_COMMITMENT }),
     logContext: stepLogContext(attempt, "create_plan"),
   });
-  if (!onChainPlan && !planCreationSignature) {
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: "create_plan",
-        updatedAt: new Date().toISOString(),
-      })
-    );
-    const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync({
-      amount: amountBaseUnits,
-      destinations: [destination],
-      endTs: 0n,
-      metadataUri: subscriptionProgramMetadataUri(input.resolved.metadataUri),
-      mint,
-      owner: sourceSigner,
-      periodHours: BigInt(input.resolved.periodHours),
-      planId: programPlanId,
-      pullers: [owner],
-      tokenProgram,
-    });
-    planCreationSignature = await sendSubscriptionInstructions({
-      movement: "recurring.update",
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.resolved.sourceWallet,
-      sourceSigner,
-      instructions: [createPlanInstruction],
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        planCreationSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
-  }
-
   if (!onChainPlan) {
+    if (!planCreationSignature) {
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          stage: "create_plan",
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
+        {
+          amount: amountBaseUnits,
+          destinations: [destination],
+          endTs: 0n,
+          metadataUri: subscriptionProgramMetadataUri(input.resolved.metadataUri),
+          mint,
+          owner: sourceSigner,
+          periodHours: BigInt(input.resolved.periodHours),
+          planId: programPlanId,
+          pullers: [owner],
+          tokenProgram,
+        }
+      );
+      planCreationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.update",
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.resolved.sourceWallet,
+        sourceSigner,
+        instructions: [createPlanInstruction],
+      });
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          planCreationSignature,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    }
     await confirmSubscriptionSignature(
-      requireReplacementStepSignature(planCreationSignature),
+      planCreationSignature,
       "Recurring payment replacement plan creation failed on-chain"
     );
     onChainPlan = await subscriptionsProgram.fetchMaybePlan(rpc, planPda, {
@@ -1563,88 +1557,87 @@ async function runReplacementUpdate(input: {
         }),
       logContext: stepLogContext(attempt, "authorize_subscription"),
     })) !== null;
-  if (!subscribedOnChain && !authorizationSignature) {
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: "authorize_subscription",
-        updatedAt: new Date().toISOString(),
-      })
-    );
-    let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-      rpc,
-      subscriptionAuthorityAddress,
-      { commitment: "confirmed" }
-    );
-    const feePayment = createSponsorshipFeePayment(
-      input.env,
-      await resolveProjectSponsorshipScope(input.env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
-      }),
-      "recurring.update"
-    );
-    const feePayer = await feePayment.getFeePayer();
-    const payer = createNoopSigner(feePayer);
-    subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
-      env: input.env,
-      recurringRepo,
-      attempt,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      rpc,
-      sourceWallet: input.resolved.sourceWallet,
-      sourceSigner,
-      sourceTokenAccount,
-      subscriptionAuthority,
-      subscriptionAuthorityAddress,
-      owner,
-      mint,
-      tokenProgram,
-      feePayer,
-    });
-    if (!subscriptionAuthority.exists) {
-      throw transactionFailed("Subscription authority was not found on-chain");
-    }
-
-    const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
-      expectedAmount: amountBaseUnits,
-      expectedCreatedAt: BigInt(planCreatedAt),
-      expectedPeriodHours: BigInt(input.resolved.periodHours),
-      expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
-      merchant: owner,
-      payer,
-      planId: programPlanId,
-      subscriber: sourceSigner,
-      tokenMint: mint,
-    });
-    authorizationSignature = await sendSubscriptionInstructions({
-      movement: "recurring.update",
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.resolved.sourceWallet,
-      sourceSigner,
-      instructions: [subscribeInstruction],
-      feePayer,
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        authorizationSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
-  }
-
   if (!subscribedOnChain) {
+    if (!authorizationSignature) {
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          stage: "authorize_subscription",
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+        rpc,
+        subscriptionAuthorityAddress,
+        { commitment: "confirmed" }
+      );
+      const feePayment = createSponsorshipFeePayment(
+        input.env,
+        await resolveProjectSponsorshipScope(input.env, {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+        }),
+        "recurring.update"
+      );
+      const feePayer = await feePayment.getFeePayer();
+      const payer = createNoopSigner(feePayer);
+      subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
+        env: input.env,
+        recurringRepo,
+        attempt,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        rpc,
+        sourceWallet: input.resolved.sourceWallet,
+        sourceSigner,
+        sourceTokenAccount,
+        subscriptionAuthority,
+        subscriptionAuthorityAddress,
+        owner,
+        mint,
+        tokenProgram,
+        feePayer,
+      });
+      if (!subscriptionAuthority.exists) {
+        throw transactionFailed("Subscription authority was not found on-chain");
+      }
+
+      const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
+        expectedAmount: amountBaseUnits,
+        expectedCreatedAt: BigInt(planCreatedAt),
+        expectedPeriodHours: BigInt(input.resolved.periodHours),
+        expectedSubscriptionAuthorityInitId: subscriptionAuthority.data.initId,
+        merchant: owner,
+        payer,
+        planId: programPlanId,
+        subscriber: sourceSigner,
+        tokenMint: mint,
+      });
+      authorizationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.update",
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.resolved.sourceWallet,
+        sourceSigner,
+        instructions: [subscribeInstruction],
+        feePayer,
+      });
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          authorizationSignature,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    }
     await confirmSubscriptionSignature(
-      requireReplacementStepSignature(authorizationSignature),
+      authorizationSignature,
       "Recurring payment replacement authorization failed on-chain"
     );
   }
@@ -1662,55 +1655,54 @@ async function runReplacementUpdate(input: {
       landed: isSubscriptionDelegationCanceled,
       logContext: stepLogContext(attempt, "cancel_old_subscription"),
     })) !== null;
-  if (!oldCanceledOnChain && !oldCancelSignature) {
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: "cancel_old_subscription",
-        updatedAt: new Date().toISOString(),
-      })
-    );
-    const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
-      input.env,
-      input.organizationId,
-      input.projectId,
-      input.oldSourceWallet.id,
-      "recurring.update_cancel_old"
-    );
-    if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match source wallet");
-    }
-    const cancelInstruction =
-      await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
-        planPda: oldPlanPda,
-        subscriber: oldSourceSigner,
-        subscriptionPda: oldSubscriptionPda,
-      });
-    oldCancelSignature = await sendSubscriptionInstructions({
-      movement: "recurring.update_cancel_old",
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.oldSourceWallet,
-      sourceSigner: oldSourceSigner,
-      instructions: [cancelInstruction],
-    });
-    attempt = requireUpdatedAttempt(
-      await recurringRepo.updateUpdateAttempt({
-        attemptId: attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        oldCancelSignature,
-        updatedAt: new Date().toISOString(),
-      })
-    );
-  }
-
   if (!oldCanceledOnChain) {
+    if (!oldCancelSignature) {
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          stage: "cancel_old_subscription",
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+        input.env,
+        input.organizationId,
+        input.projectId,
+        input.oldSourceWallet.id,
+        "recurring.update_cancel_old"
+      );
+      if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
+        throw badRequest("Resolved signing wallet does not match source wallet");
+      }
+      const cancelInstruction =
+        await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+          planPda: oldPlanPda,
+          subscriber: oldSourceSigner,
+          subscriptionPda: oldSubscriptionPda,
+        });
+      oldCancelSignature = await sendSubscriptionInstructions({
+        movement: "recurring.update_cancel_old",
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.oldSourceWallet,
+        sourceSigner: oldSourceSigner,
+        instructions: [cancelInstruction],
+      });
+      attempt = requireUpdatedAttempt(
+        await recurringRepo.updateUpdateAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          oldCancelSignature,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    }
     await confirmSubscriptionSignature(
-      requireReplacementStepSignature(oldCancelSignature),
+      oldCancelSignature,
       "Recurring payment old subscription cancellation failed on-chain"
     );
   }

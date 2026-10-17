@@ -302,6 +302,13 @@ export function isSubscriptionDelegationCanceled(
   return delegation.exists && delegation.data.expiresAtTs !== 0n;
 }
 
+/** What the warning names when a step is found on chain without its saved signature. */
+export interface UnsavedStepLogContext {
+  recurring_payment_id: string;
+  attempt_id: string;
+  step: "create_plan" | "authorize_subscription" | "cancel_old_subscription";
+}
+
 /**
  * The account a step left on chain, when an attempt an earlier run started has
  * no signature for that step and the chain shows the step landed; null when the
@@ -315,7 +322,7 @@ export async function findUnsavedStepOnChain<T extends { exists: boolean }>(inpu
   read: () => Promise<T>;
   /** Whether the account shows the step's effect; defaults to the account existing. */
   landed?: (account: T) => boolean;
-  logContext: Record<string, string>;
+  logContext: UnsavedStepLogContext;
 }): Promise<T | null> {
   if (!input.resumed || input.signature !== null) {
     return null;

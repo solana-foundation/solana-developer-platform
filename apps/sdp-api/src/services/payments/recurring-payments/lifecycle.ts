@@ -534,6 +534,8 @@ async function runRecurringPaymentLifecycle(
   // An attempt an earlier run left at `submit` with no signature may have sent
   // (HOO-2044); the chain answers whether it landed.
   const resumedUnsavedSend = signature === null && attempt.stage === "submit";
+  // While that read is outstanding, a failure leaves the attempt to recover, not fail it.
+  let chainUnread = false;
 
   try {
     if (!claimed.plan_pda || !claimed.subscription_id || !claimed.subscription_pda) {
@@ -584,11 +586,13 @@ async function runRecurringPaymentLifecycle(
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
     let onChainSubscription: MaybeSubscriptionDelegation | null = null;
     if (resumedUnsavedSend) {
+      chainUnread = true;
       onChainSubscription = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
         createClusterRpc(),
         subscriptionPda,
         { commitment: RESUMED_STEP_COMMITMENT }
       );
+      chainUnread = false;
       if (
         onChainSubscription.exists &&
         isSubscriptionDelegationCanceled(onChainSubscription) === (input.operation === "cancel")
@@ -705,8 +709,8 @@ async function runRecurringPaymentLifecycle(
     const failedAt = new Date().toISOString();
     const transactionFailed = error instanceof AppError && error.code === "TRANSACTION_FAILED";
 
-    // Once the operation is on chain, a failure only leaves the attempt to finish.
-    if ((signature || confirmedOnChain) && !transactionFailed) {
+    // Once the operation is on chain, or may be, a failure only leaves the attempt to finish.
+    if ((signature || confirmedOnChain || chainUnread) && !transactionFailed) {
       await preserveRecoverableLifecycleAttempt({
         recurringRepo,
         attempt,
