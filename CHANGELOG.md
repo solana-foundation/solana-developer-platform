@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.86.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.86.0...v0.86.1) (2026-10-17)
+
+### Bug Fixes
+
+* **wallets:** move every managed custody provider but Privy back to beta ([#2391](https://github.com/solana-foundation/solana-developer-platform/pull/2391)) ([efa2e7b](https://github.com/solana-foundation/solana-developer-platform/commit/efa2e7b832b2632065741ddec61a176e8a1db387))
+* **ramps:** guard settlement environment (HOO-2039 PR A) ([#2387](https://github.com/solana-foundation/solana-developer-platform/pull/2387)) ([4d9779f](https://github.com/solana-foundation/solana-developer-platform/commit/4d9779f0039768bf241c6a2244f9026c577a7e5b))
+* **payments:** keep money keys while processing, canonical batch options, bounded audit Redis (HOO-1918 follow-ups) ([#2385](https://github.com/solana-foundation/solana-developer-platform/pull/2385)) ([690ed99](https://github.com/solana-foundation/solana-developer-platform/commit/690ed994acf8d727a1db427427ca8e154b85753b))
+* **payments:** enable mainnet fee sponsorship ([#2390](https://github.com/solana-foundation/solana-developer-platform/pull/2390)) ([dae1356](https://github.com/solana-foundation/solana-developer-platform/commit/dae1356a35a936bf19efa35fcae120454fd3b2aa))
+
+### Maintenance
+
+* **web:** stop the cross-tab theme e2e signing both tabs out ([#2401](https://github.com/solana-foundation/solana-developer-platform/pull/2401)) ([b21297e](https://github.com/solana-foundation/solana-developer-platform/commit/b21297eb0ac6a825aafdbd5f45dd6fac12658732))
+
 ## [0.86.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.85.0...v0.86.0) (2026-10-16)
 
 ### ⚠ BREAKING CHANGES
