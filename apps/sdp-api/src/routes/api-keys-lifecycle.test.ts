@@ -461,7 +461,9 @@ describe("API key lifecycle", () => {
       );
 
       expect(response.status).toBe(400);
-      const body = (await response.json()) as { error: { message: string } };
+      const body = z
+        .object({ error: z.object({ message: z.string() }) })
+        .parse(await response.json());
       expect(body.error.message).toContain(`${field} is no longer accepted: send grants`);
       expect((await readKey(TARGET_KEY_ID))?.grants).toEqual(["transfers.execute"]);
     }
