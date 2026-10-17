@@ -3,6 +3,10 @@ import type * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
+  type PaymentRecurringPaymentAttemptStatus,
+  type PaymentRecurringPaymentLifecycleAttemptStage,
+  type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -5926,7 +5930,7 @@ describe("Payments routes — recurring", () => {
        */
       async function leaveUnsavedSend(input: {
         recurringPaymentId: string;
-        operation: "cancel" | "resume";
+        operation: PaymentRecurringPaymentLifecycleOperation;
         key: string;
       }) {
         const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
@@ -5950,7 +5954,10 @@ describe("Payments routes — recurring", () => {
         expect(updated).toBe(1);
       }
 
-      const lifecycleAttempts = (recurringPaymentId: string, operation: string) =>
+      const lifecycleAttempts = (
+        recurringPaymentId: string,
+        operation: PaymentRecurringPaymentLifecycleOperation
+      ) =>
         getDb(env)
           .prepare(
             `SELECT status, stage, signature
@@ -5958,7 +5965,11 @@ describe("Payments routes — recurring", () => {
               WHERE recurring_payment_id = ? AND operation = ?`
           )
           .bind(recurringPaymentId, operation)
-          .all<{ status: string; stage: string; signature: string | null }>();
+          .all<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentLifecycleAttemptStage;
+            signature: string | null;
+          }>();
 
       it("finishes a cancel whose send landed without sending it again", async () => {
         recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
@@ -6216,7 +6227,11 @@ describe("Payments routes — recurring", () => {
                FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?`
           )
           .bind(activated.id)
-          .first<{ status: string; stage: string; old_cancel_signature: string | null }>();
+          .first<{
+            status: PaymentRecurringPaymentAttemptStatus;
+            stage: PaymentRecurringPaymentUpdateAttemptStage;
+            old_cancel_signature: string | null;
+          }>();
         expect(attempt).toEqual({
           status: "confirmed",
           stage: "finalize",
