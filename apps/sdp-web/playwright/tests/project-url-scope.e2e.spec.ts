@@ -25,6 +25,8 @@ test.describe
       await page.getByRole("link", { name: "Create new API key" }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();
+      // A read-only grant leaves the key on all wallets, so Access needs no pick.
+      await page.getByRole("checkbox", { name: "Read on Transfers" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Create key" }).click();
