@@ -77,9 +77,8 @@ function trackClerkTraffic(page: Page) {
   page.on("requestfailed", settle);
 
   return async () => {
-    await page.waitForFunction(
-      () => (window as unknown as { Clerk?: { loaded?: boolean } }).Clerk?.loaded === true
-    );
+    // A string predicate runs in the page untyped, so `window.Clerk` needs no assertion here.
+    await page.waitForFunction("window.Clerk?.loaded === true");
     await expect
       .poll(() => inFlight === 0 && Date.now() - lastSettledAt >= 500, { intervals: [100] })
       .toBe(true);
