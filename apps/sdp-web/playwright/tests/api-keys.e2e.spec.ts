@@ -34,7 +34,7 @@ test.describe
       await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
       await page.getByRole("checkbox", { name: "Execute on Transfers" }).check();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByLabel("Selected wallets").check();
+      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
@@ -112,7 +112,7 @@ test.describe
       await page.getByRole("menuitem", { name: "Edit API key" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByLabel("Selected wallets").check();
+      await page.getByRole("radio", { name: /^Selected wallets/ }).check();
       await page
         .getByRole("checkbox", { name: /^Select / })
         .first()
